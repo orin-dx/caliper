@@ -1,0 +1,53 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M7A02P09M3DK1AXPH8D6MJTZ",
+  "strategy": "manual-commit",
+  "branch": "feat/delete-process-route",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/cli/src/commands/extract.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/on_demand.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md",
+    "justfile"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 20630,
+    "cache_read_tokens": 7461546,
+    "output_tokens": 10177,
+    "api_call_count": 13,
+    "subagent_tokens": {
+      "input_tokens": 72,
+      "cache_creation_tokens": 553734,
+      "cache_read_tokens": 7836066,
+      "output_tokens": 16408,
+      "api_call_count": 36
+    }
+  },
+  "redaction": {
+    "replacements": 34,
+    "layers": {
+      "betterleaks": 20,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

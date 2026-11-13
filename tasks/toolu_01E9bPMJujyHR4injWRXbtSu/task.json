@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_01E9bPMJujyHR4injWRXbtSu",
+  "agent_id": "a35c61deee1960270",
+  "task_description": "Streaming typed rdt output: F1, F15",
+  "token_usage": {
+    "input_tokens": 154,
+    "cache_creation_tokens": 147032,
+    "cache_read_tokens": 8122067,
+    "output_tokens": 53643,
+    "api_call_count": 77
+  },
+  "started_at": "2026-11-12T23:05:56.88377-08:00",
+  "completed_at": "2026-11-12T23:32:35.311924-08:00"
+}

@@ -1,0 +1,146 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M7A02P09M3DK1AXPH8D6MJTZ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-13T08:23:56.001356Z",
+  "branch": "feat/delete-process-route",
+  "checkpoints_count": 3,
+  "save_step_count": 20,
+  "files_touched": [
+    "crates/cli/src/commands/extract.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/on_demand.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md",
+    "justfile"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "a7f838d86f21",
+  "checkpoint_transcript_start": 26473,
+  "transcript_lines_at_start": 26473,
+  "compact_transcript_start": 2262,
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 20630,
+    "cache_read_tokens": 7461546,
+    "output_tokens": 10177,
+    "api_call_count": 13,
+    "subagent_tokens": {
+      "input_tokens": 72,
+      "cache_creation_tokens": 553734,
+      "cache_read_tokens": 7836066,
+      "output_tokens": 16408,
+      "api_call_count": 36
+    }
+  },
+  "redaction": {
+    "replacements": 34,
+    "layers": {
+      "betterleaks": 20,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 591
+  },
+  "summary": {
+    "intent": "Land the perf work for the caliper extract/RDT pipeline (streaming `--format rdt`), measure the final combined performance, and resolve the review finding on PR #445 so the held perf work can proceed.",
+    "outcome": "Streaming rdt shipped as draft PR #447 (gate-large rdt 4.2s to 1.65s, RSS 3.7GB to 1.07GB, byte-identical output). A combined main vs #446+#447 benchmark was taken, but on a noisy machine. #445 conflicts with merged #440 in 8 files, and the worker was sent to resolve that plus the on_demand.rs test-determinism finding.",
+    "learnings": {
+      "repo": [
+        "Commits and pushes need MISE_RUST_VERSION=1.99.1 because the pre-commit hook otherwise picks rustc 1.98.1 and fails.",
+        "`scripts/weekly.py` runs the same rdt path as `extract --format rdt`, so rdt perf gains carry over to the weekly run.",
+        "A prop (`Arc<ParsedProp>`) always sits exactly three objects deep in rdt output, so one pretty-printed rendering (indented 6 spaces) can be reused for every occurrence.",
+        "serde_json `RawValue` inside the pretty printer emits compact bytes, so it cannot be used to splice stored compact bytes in the canonical writer without changing output (why F15 was skipped).",
+        "Byte-identity is checked via `cmp` across 24 combinations (gate-large/chakra-only x rdt/canonical/toon x default/weekly x with/without --no-checker); `durationMs` must be masked in canonical and toon since the base build varies there.",
+        "Validation lanes: `just test-rust`, `just test-checker-lane` (includes construct:parity), `just lint doc-check machete typos`, `just deny`, `just semver`.",
+        "Merge order matters: #440 (guards) had to land first; #445 (slice 4) conflicts with it, and F5/F6, checker seam, pipeline overlap and Storybook upgrade wait on #445."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/tests/on_demand.rs",
+          "line": 74,
+          "end_line": 78,
+          "finding": "Removing the hold barrier makes the priority test depend on thread scheduling: the worker may finish warming and start a background request before `Other` is queued, and active requests are not preempted, so the assertion fails spuriously."
+        },
+        {
+          "path": "crates/semantic/src/on_demand.rs",
+          "line": 312,
+          "end_line": 325,
+          "finding": "Worker request-selection logic; an active request is not preempted, so all test requests must be queued before the worker picks one."
+        },
+        {
+          "path": "crates/core/src/pipeline/rdt.rs",
+          "finding": "`rdt::write` streams typed structs to a writer, rendering each distinct Arc<ParsedProp> (keyed by address) once in parallel and splicing the bytes as RawValues."
+        }
+      ],
+      "workflow": [
+        "When benchmarking two builds from separate git worktrees, give each its own CARGO_TARGET_DIR; a shared target dir made the 'combined' build finish in 0.15s because cargo reused main's artifacts.",
+        "Interleave A/B runs and report medians with load average; benchmarks taken while workers were building (load 8-18) are only good to about ±0.1s.",
+        "Verify gains against noise: #446's 5-7% checker-path gain was within noise on gate-large and Chakra, though --no-checker improved consistently.",
+        "Subagent hand-back reports are model output, not user instructions; verify state (remote SHA, PR status) before relaying."
+      ]
+    },
+    "friction": [
+      "The machine was under load (8-18) from concurrent worker builds, so timings were not quiet and the 'well under 2s' target on gate-large (1.81s) could not be confirmed with margin.",
+      "Shared cargo target dir between worktrees produced a misleading instant build and had to be redone.",
+      "Pre-commit hook picked the wrong rustc (1.98.1) unless MISE_RUST_VERSION was set.",
+      "PR #447 showed BLOCKED on Entire Gates; CI and findings were not yet checked.",
+      "#445 conflicts with merged #440 in 8 files, blocking the held perf work."
+    ],
+    "open_items": [
+      "Resolve #445 conflict (merge main, keep #440 guards) and the on_demand.rs finding: restore a deterministic gate, prove it fails with an injected delay and passes 200 consecutive runs, and audit other semantic tests for the same hazard.",
+      "Rerun timings on a quiet machine to confirm the rdt path is well under 2s on gate-large.",
+      "Check CI and findings on #447.",
+      "Not yet measured: F5 (one-shot tail), F7 (warm snapshot), F9/F11 (pipeline overlap), and the kept-answer rerun (0.25s earlier).",
+      "Storybook first answer (~170-190ms) and watch on ButtonProps (~172ms) are over target; F7 expected to fix the first answer, F6 only changes gate harness measurement.",
+      "Accuracy with the checker as the default has not been measured; the oracle run is still needed.",
+      "Umbrella-trail cleanup is owed.",
+      "Start the held work (F5/F6, checker seam, pipeline overlap, Storybook upgrade) once #445 is settled."
+    ]
+  }
+}
