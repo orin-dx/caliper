@@ -1788,6 +1788,10 @@ pub struct ComponentMapping {
     /// (`Parent.Sub = (props: P) => …`) and an anonymous default export (named after its file) have no binding: nothing
     /// finds them by name, and another component of the file can have the name.
     pub bound: bool,
+    /// The module's binding for the component when it is not `component_name`: the extractor names a component its
+    /// module exports under one other name by that export, and the binding is what the module's own code, and a
+    /// `typeof` in another module reached through the export, find it by. Read it with [`Self::binding_name`].
+    pub local_name: Option<std::string::String>,
 }
 
 impl ComponentMapping {
@@ -1815,7 +1819,13 @@ impl ComponentMapping {
             wrapper_callee: None,
             type_params: Vec::new(),
             bound: rule != DetectionRule::AttachedSubComponent,
+            local_name: None,
         }
+    }
+
+    /// The name the module's code gives the component: what a lookup of the declaration by name asks for.
+    pub fn binding_name(&self) -> &str {
+        self.local_name.as_deref().unwrap_or(&self.component_name)
     }
 
     /// Whether this is the component the module's binding `name` declares. An inline sub-component

@@ -51,7 +51,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 ///     extractor skipped before can be a component candidate; `SourceData` is unchanged.
 /// 36: `ComponentMapping::exports` replaces `exported`: how the module exports each component (ADR 0027).
 /// 37: `ComponentMapping::bound`: an anonymous default export is no binding of the name it takes from its file.
-const CACHE_SCHEMA_VERSION: u32 = 37;
+/// 38: `ComponentMapping::local_name`: a component its module exports under another name is named by the export.
+const CACHE_SCHEMA_VERSION: u32 = 38;
 
 const DATA_FILE: &str = "dts.msgpack";
 
