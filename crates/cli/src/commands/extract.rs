@@ -71,15 +71,23 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
             print_diagnostics(&output.diagnostics);
         }
 
-        let json = match args.format {
-            crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
-            crate::OutputFormat::Rdt => serialize_rdt(&output, args.include_unexported).into_diagnostic()?,
-            crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
-        };
+        if matches!(args.format, crate::OutputFormat::Rdt) && args.out.is_none() {
+            // The document is written as it is rendered, not built whole first.
+            let mut stdout = std::io::BufWriter::with_capacity(1 << 16, std::io::stdout().lock());
+            caliper_docgen_core::pipeline::rdt::write(&output, args.include_unexported, &mut stdout)
+                .into_diagnostic()?;
+            writeln!(stdout).and_then(|()| stdout.flush()).into_diagnostic()?;
+        } else {
+            let json = match args.format {
+                crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
+                crate::OutputFormat::Rdt => serialize_rdt(&output, args.include_unexported).into_diagnostic()?,
+                crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
+            };
 
-        match args.out {
-            Some(ref path) => write_atomic(path, &json).into_diagnostic().wrap_err(format!("Writing to {path}"))?,
-            None => println!("{json}"),
+            match args.out {
+                Some(ref path) => write_atomic(path, &json).into_diagnostic().wrap_err(format!("Writing to {path}"))?,
+                None => println!("{json}"),
+            }
         }
     }
 
