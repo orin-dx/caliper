@@ -15,10 +15,9 @@ use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use caliper_docgen_tsc_client::{MalformedFrameReason, Supervisor, SupervisorConfig, TscClientError};
+use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig, TscClientError};
 use camino::Utf8Path;
 use serde_json::Value;
-use serde_json::value::RawValue;
 use tokio::sync::oneshot;
 use tsrs_api::{Handler, Response, Session, SessionOptions};
 use tsrs_vfs::{FS, bundled, osvfs};
@@ -132,15 +131,16 @@ impl Client {
     }
 
     /// One request, its answer the `result` as the JSON text it arrived as. The wait is bounded by `deadline`; an
-    /// error is the one the process route would give for the same failure.
+    /// error is the one the process route would give for the same failure. The linked checker's text is handed on as
+    /// it was written, not read through first: the caller parses it once, into the shape it expects.
     pub(crate) async fn request_raw(
         &self,
         method: &str,
         params: Value,
         deadline: Duration,
-    ) -> Result<Box<RawValue>, TscClientError> {
+    ) -> Result<Box<str>, TscClientError> {
         match self {
-            Client::Process(client) => Ok(client.request_raw(method, params, deadline).await?.result),
+            Client::Process(client) => Ok(client.request_raw(method, params, deadline).await?.result.into()),
             Client::InProcess(linked) => linked.request(method, params, deadline).await,
         }
     }
@@ -192,7 +192,7 @@ impl InProcess {
 }
 
 impl Linked {
-    async fn request(&self, method: &str, params: Value, deadline: Duration) -> Result<Box<RawValue>, TscClientError> {
+    async fn request(&self, method: &str, params: Value, deadline: Duration) -> Result<Box<str>, TscClientError> {
         let params = serde_json::to_vec(&params).map_err(|error| TscClientError::Serialize(Arc::new(error)))?;
         let (reply, answer) = oneshot::channel();
         let asked = Asked { method: method.to_string(), params, reply };
@@ -209,8 +209,7 @@ impl Linked {
             Err(_elapsed) => return Err(TscClientError::Timeout { method: method.to_string(), after: deadline }),
         };
         match answered {
-            Ok(text) => RawValue::from_string(text)
-                .map_err(|_invalid| TscClientError::MalformedFrame { reason: MalformedFrameReason::InvalidJson }),
+            Ok(text) => Ok(text.into_boxed_str()),
             Err(message) => Err(TscClientError::RpcError { code: INTERNAL_ERROR, message, data: None }),
         }
     }
@@ -287,7 +286,7 @@ mod tests {
 
     async fn ask(client: &Client, method: &str, params: Value) -> Result<Value, TscClientError> {
         let answer = client.request_raw(method, params, Duration::from_secs(120)).await?;
-        Ok(serde_json::from_str(answer.get()).unwrap())
+        Ok(serde_json::from_str(&answer).unwrap())
     }
 
     /// A program of `file` holding `text`, held in the checker's memory: its snapshot and project.

@@ -31,7 +31,7 @@ use rustc_hash::FxHashMap;
 
 use crate::component;
 use crate::convert::Converter;
-use crate::rpc::{CallError, FileDiagnostic, Rpc, SignatureInfo, SignatureKind};
+use crate::rpc::{CallError, FileDiagnostic, Rpc, SignatureInfo, SignatureKind, SymbolRef};
 use crate::{Target, fallback_of};
 
 /// The file the instantiations are declared in, in the project's root directory. It exists only in the checker's memory.
@@ -63,7 +63,7 @@ pub(crate) async fn default_arguments(rpc: &Rpc, signature: &SignatureInfo) -> R
 /// default of that parameter, in the checker that holds the probe file: the same type, not one of the same name.
 async fn arguments_keep_their_meaning(
     layered: &Rpc,
-    probes: &FxHashMap<String, serde_json::Value>,
+    probes: &FxHashMap<String, SymbolRef>,
     index: usize,
     instantiation: &Instantiation,
 ) -> Result<bool, CallError> {
@@ -168,7 +168,7 @@ async fn answer_layered(
         outcome.fallbacks.extend(pending.iter().map(|(target, _)| fallback_of(target, reason)));
         return Ok(outcome);
     };
-    let probes: FxHashMap<String, serde_json::Value> = layered
+    let probes: FxHashMap<String, SymbolRef> = layered
         .exports_of_module(&module.reference)
         .await?
         .into_iter()
@@ -221,7 +221,7 @@ async fn read_probe(
     layered: &Rpc,
     converter: &Converter,
     interner: &PropInterner,
-    symbol: &serde_json::Value,
+    symbol: &SymbolRef,
     target: &Target,
 ) -> Result<Result<component::Props, String>, CallError> {
     let props_type = layered.declared_type_of_symbol(symbol).await?;

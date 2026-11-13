@@ -37,11 +37,62 @@ fn classify(error: TscClientError) -> CallError {
     }
 }
 
+/// The full reference the checker wants back to name a symbol, kept as the text it answered: opaque to us, sent back as
+/// it came, and compared and hashed as that text. The checker writes one symbol's reference the same way each time, so
+/// equal text is the same symbol; one symbol written two ways would only be asked about twice.
+#[derive(Clone)]
+pub(crate) struct SymbolRef(Arc<RawValue>);
+
+impl SymbolRef {
+    /// The reference's JSON text.
+    pub(crate) fn text(&self) -> &str {
+        self.0.get()
+    }
+
+    /// A reference written as `text`, for a test.
+    #[cfg(test)]
+    pub(crate) fn of(text: &str) -> Self {
+        serde_json::from_str(text).expect("a test writes valid JSON")
+    }
+}
+
+impl std::fmt::Debug for SymbolRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.text())
+    }
+}
+
+impl PartialEq for SymbolRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.text() == other.text()
+    }
+}
+
+impl Eq for SymbolRef {}
+
+impl std::hash::Hash for SymbolRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.text().hash(state);
+    }
+}
+
+impl<'de> Deserialize<'de> for SymbolRef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Box::<RawValue>::deserialize(deserializer).map(|raw| SymbolRef(Arc::from(raw)))
+    }
+}
+
+impl serde::Serialize for SymbolRef {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SymbolInfo {
     /// The full reference the checker wants back to name this symbol; opaque to us.
-    pub reference: Value,
+    pub reference: SymbolRef,
     /// The name the source writes: the checker's escaped name with the escaping removed (see
     /// [`unescape_leading_underscores`]).
     #[serde(deserialize_with = "unescaped_name")]
@@ -502,7 +553,7 @@ impl Rpc {
 
     /// One request, its answer as the JSON text it arrived as: [`decode`] parses it once, into the shape the caller
     /// expects.
-    async fn call(&self, method: &str, params: Value) -> Result<Box<RawValue>, CallError> {
+    async fn call(&self, method: &str, params: Value) -> Result<Box<str>, CallError> {
         if let Ok(mut calls) = self.calls.lock() {
             *calls.entry(method.to_string()).or_default() += 1;
         }
@@ -523,7 +574,7 @@ impl Rpc {
     }
 
     /// A request about this snapshot and project, its answer left as text.
-    async fn scoped_text(&self, method: &str, extra: Value) -> Result<Box<RawValue>, CallError> {
+    async fn scoped_text(&self, method: &str, extra: Value) -> Result<Box<str>, CallError> {
         let mut params = json!({ "snapshot": self.snapshot, "project": self.project });
         if let (Some(base), Value::Object(extra)) = (params.as_object_mut(), extra) {
             base.extend(extra);
@@ -535,20 +586,20 @@ impl Rpc {
         self.scoped("getSymbolOfSourceFile", json!({ "file": file })).await
     }
 
-    pub(crate) async fn exports_of_module(&self, module: &Value) -> Result<Vec<SymbolInfo>, CallError> {
+    pub(crate) async fn exports_of_module(&self, module: &SymbolRef) -> Result<Vec<SymbolInfo>, CallError> {
         self.scoped("getExportsOfModule", json!({ "symbol": module })).await
     }
 
     /// Only for symbols flagged `Alias`: the beta panics on a plain `default` export.
-    pub(crate) async fn aliased_symbol(&self, symbol: &Value) -> Result<SymbolInfo, CallError> {
+    pub(crate) async fn aliased_symbol(&self, symbol: &SymbolRef) -> Result<SymbolInfo, CallError> {
         self.scoped("getAliasedSymbol", json!({ "symbol": symbol })).await
     }
 
-    pub(crate) async fn type_of_symbol(&self, symbol: &Value) -> Result<TypeInfo, CallError> {
+    pub(crate) async fn type_of_symbol(&self, symbol: &SymbolRef) -> Result<TypeInfo, CallError> {
         self.scoped("getTypeOfSymbol", json!({ "symbol": symbol })).await
     }
 
-    pub(crate) async fn types_of_symbols(&self, symbols: &[&Value]) -> Result<Vec<TypeInfo>, CallError> {
+    pub(crate) async fn types_of_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<TypeInfo>, CallError> {
         self.scoped("getTypesOfSymbols", json!({ "symbols": symbols })).await
     }
 
@@ -567,7 +618,7 @@ impl Rpc {
     }
 
     /// The type a type alias or interface declares, `T` in `type A = T`.
-    pub(crate) async fn declared_type_of_symbol(&self, symbol: &Value) -> Result<TypeInfo, CallError> {
+    pub(crate) async fn declared_type_of_symbol(&self, symbol: &SymbolRef) -> Result<TypeInfo, CallError> {
         self.scoped("getDeclaredTypeOfSymbol", json!({ "symbol": symbol })).await
     }
 
@@ -597,19 +648,19 @@ impl Rpc {
         self.scoped("getTargetOfType", json!({ "objectId": type_id })).await
     }
 
-    pub(crate) async fn parent_of_symbol(&self, symbol: &Value) -> Result<Option<SymbolInfo>, CallError> {
+    pub(crate) async fn parent_of_symbol(&self, symbol: &SymbolRef) -> Result<Option<SymbolInfo>, CallError> {
         self.scoped("getParentOfSymbolForChecker", json!({ "symbol": symbol })).await
     }
 
     /// Whether each property is declared `readonly`, in one round trip.
-    pub(crate) async fn readonly_symbols(&self, symbols: &[&Value]) -> Result<Vec<bool>, CallError> {
+    pub(crate) async fn readonly_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<bool>, CallError> {
         let requests = symbols.iter().map(|symbol| ("isReadonlySymbol", json!({ "symbol": symbol }))).collect();
         self.batch(requests).await?.iter().map(|answer| decode(answer)).collect()
     }
 
     /// Several requests in one round trip. A request the checker rejects fails the batch: nothing here asks for one
     /// that may legitimately fail.
-    pub(crate) async fn batch(&self, requests: Vec<(&str, Value)>) -> Result<Vec<Box<RawValue>>, CallError> {
+    pub(crate) async fn batch(&self, requests: Vec<(&str, Value)>) -> Result<Vec<Box<str>>, CallError> {
         let wanted = requests.len();
         let scoped: Vec<Value> = requests
             .into_iter()
@@ -633,7 +684,7 @@ impl Rpc {
                 if let Some(error) = response.error {
                     return Err(CallError::Rejected(error));
                 }
-                answers.push(response.result.unwrap_or_else(|| RawValue::NULL.to_owned()));
+                answers.push(response.result.map_or_else(|| Box::from("null"), Box::from));
             }
             match page.continuation_token {
                 Some(next) => token = Some(next),
@@ -659,12 +710,12 @@ impl Rpc {
     }
 
     /// The members of a union, intersection or template literal, as the text the checker answered (a list of types).
-    pub(crate) async fn members_text(&self, type_id: u64) -> Result<Box<RawValue>, CallError> {
+    pub(crate) async fn members_text(&self, type_id: u64) -> Result<Box<str>, CallError> {
         self.scoped_text("getTypesOfType", json!({ "objectId": type_id })).await
     }
 
     /// The type arguments of a reference, as the text the checker answered (a list of types).
-    pub(crate) async fn type_arguments_text(&self, type_id: u64) -> Result<Box<RawValue>, CallError> {
+    pub(crate) async fn type_arguments_text(&self, type_id: u64) -> Result<Box<str>, CallError> {
         self.scoped_text("getTypeArguments", json!({ "type": type_id })).await
     }
 
@@ -707,8 +758,8 @@ fn default_options() -> Value {
 }
 
 /// An answer parsed from its text straight into `T`, in one pass.
-pub(crate) fn decode<T: DeserializeOwned>(answer: &RawValue) -> Result<T, CallError> {
-    serde_json::from_str(answer.get())
+pub(crate) fn decode<T: DeserializeOwned>(answer: &str) -> Result<T, CallError> {
+    serde_json::from_str(answer)
         .map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
 }
 
@@ -733,7 +784,7 @@ mod tests {
     #[test]
     fn a_symbol_arrives_with_the_name_the_source_writes() {
         let symbol: SymbolInfo =
-            serde_json::from_value(json!({ "reference": {}, "name": "___size", "flags": 0 })).unwrap();
+            serde_json::from_str(r#"{ "reference": {}, "name": "___size", "flags": 0 }"#).unwrap();
 
         assert_eq!(symbol.name, "__size");
     }

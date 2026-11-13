@@ -43,7 +43,6 @@ use crate::rpc::{
     CallError, CompactSymbol, IndexInfo, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo,
     decode, flag,
 };
-use serde_json::value::RawValue;
 
 /// Nesting past which an object, union or intersection is cut with [`TruncationLimit::Depth`].
 const MAX_DEPTH: u8 = 5;
@@ -360,7 +359,7 @@ type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 
 /// The parts of each type asked about so far, by (type handle, which parts), as the text the checker answered: read
 /// again on each use, which costs a fraction of the round trip, and is several times smaller than the read lists.
-type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<RawValue>>>;
+type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<str>>>;
 
 /// The props answered so far, by the hash of their [`PropKey`] and then the key itself.
 type KeptProps = Mutex<FxHashMap<u64, Vec<(PropKey, Arc<SemanticProp>)>>>;
@@ -390,7 +389,7 @@ impl PropKey {
     pub(crate) fn of(property: &SymbolInfo, prop_type: &TypeInfo, description: bool, tags: bool) -> Self {
         use std::hash::{Hash, Hasher};
         let optional = property.flags & flag::SYMBOL_OPTIONAL != 0;
-        let symbol = property.declarations.is_empty().then(|| property.reference.to_string());
+        let symbol = property.declarations.is_empty().then(|| property.reference.text().to_string());
         let mut hasher = rustc_hash::FxHasher::default();
         (&property.name, optional, prop_type.id, &property.declarations, &property.parent, &symbol, description, tags)
             .hash(&mut hasher);
@@ -725,7 +724,7 @@ impl Converter {
         let text = match known {
             Some(text) => text,
             None => {
-                let fetched: Arc<RawValue> = match kind {
+                let fetched: Arc<str> = match kind {
                     Parts::Members => self.rpc.members_text(id).await?,
                     Parts::Arguments => self.rpc.type_arguments_text(id).await?,
                 }
