@@ -1,12 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
-//! What asking `tsc` for one component at a time costs, against asking for the whole project once (ADR 0022).
+//! What asking the checker for one component at a time costs, against asking for the whole project once (ADR 0022).
 //!
-//!   ondemand_bench --src DIR --tsc PATH [--tsconfig FILE] [--mode on-demand|project] [--count N] [--seed S] [--batch K]
+//!   ondemand_bench --src DIR [--tsconfig FILE] [--mode on-demand|project] [--count N] [--seed S] [--batch K]
 //!
-//! One scenario per process, so `/usr/bin/time -l` reports the checker's peak RSS (the largest descendant). Prints one
-//! JSON line: `structuralMs`, then for `project` the single `projectMs`, or for `on-demand` `startMs` (spawn and
-//! handshake), `firstMs` (the first component, with a cold program) and `eachMs` (the rest, sorted), plus how many
-//! components the checker answered and the props it found against the structural pass.
+//! One scenario per process, so `/usr/bin/time -l` reports its peak RSS, the checker's included. Prints one JSON line:
+//! `structuralMs`, then for `project` the single `projectMs`, or for `on-demand` `firstMs` (the first component, with a
+//! cold program) and the percentiles of the rest, plus how many components the checker answered and the props it found
+//! against the structural pass.
 use std::time::{Duration, Instant};
 
 use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
@@ -32,7 +32,6 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let src = Utf8PathBuf::from(arg(&args, "--src").expect("--src"));
-    let tsc = Utf8PathBuf::from(arg(&args, "--tsc").expect("--tsc"));
     let tsconfig = arg(&args, "--tsconfig").map(Utf8PathBuf::from);
     let mode = arg(&args, "--mode").unwrap_or_else(|| "on-demand".to_string());
     let count: usize = arg(&args, "--count").map_or(50, |n| n.parse().expect("--count"));
@@ -55,7 +54,6 @@ fn main() {
     if mode == "project" {
         let mut request = SemanticRequest::new(root, all.clone());
         request.tsconfig = tsconfig;
-        request.tsc_path = Some(tsc);
         let started = Instant::now();
         let outcome = resolve(request);
         println!(
@@ -70,11 +68,10 @@ fn main() {
 
     let mut config = OnDemandConfig::new(root);
     config.tsconfig = tsconfig;
-    config.tsc_path = Some(tsc);
     let started = Instant::now();
     let checker = OnDemand::new(config);
     checker.warm_up();
-    // A request queued behind the warm-up returns when the process is up and the first program is built.
+    // A request queued behind the warm-up returns when the checker is up and the first program is built.
     let mut picks: Vec<_> = Vec::new();
     let exported: Vec<_> = all.iter().filter(|t| !t.exports.is_empty()).cloned().collect();
     for _ in 0..count.min(exported.len()) {

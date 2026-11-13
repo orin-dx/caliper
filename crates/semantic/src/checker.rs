@@ -1,6 +1,5 @@
-//! The checker a run asks, and the one place that picks which: the `tsrs` crates linked into this process, or a
-//! `tsc --api` process when an explicit `tsc_path` names one (the Go `typescript@7.1` the tests and the parity gate
-//! run, or a `tsrs` binary). Both answer the same methods with the same JSON, so [`crate::rpc`] does not know which.
+//! The checker a run asks: the `tsrs` crates linked into this process, asked through `tsrs_api::Session` with the
+//! methods and JSON of `tsc --api` ([`crate::rpc`]).
 //!
 //! The linked checker answers on threads of its own with a 512 MiB stack, the stack the `tsrs` binary serves on. A
 //! query runs on the thread that calls it, and a type nested 2,000 deep overflows a default 2 MiB thread: a stack
@@ -32,15 +31,12 @@ use std::sync::{Arc, Mutex, RwLock, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use caliper_docgen_tsc_client::{MalformedFrameReason, Supervisor, SupervisorConfig, TscClientError};
 use camino::Utf8Path;
 use serde_json::Value;
 use serde_json::value::RawValue;
 use tokio::sync::oneshot;
 use tsrs_api::{ErrorKind, Handler, Response, Session, SessionOptions};
 use tsrs_vfs::{FS, bundled, osvfs, wrapvfs};
-
-use crate::locate;
 
 /// The stack of the thread the linked checker answers on: what the `tsrs` binary gives each of its threads.
 const CHECKER_STACK_BYTES: usize = 512 << 20;
@@ -50,139 +46,106 @@ const CHECKER_STACK_BYTES: usize = 512 << 20;
 /// threads (300,000 overflows them, which aborts the process).
 pub(crate) const MAX_NESTING: usize = 20_000;
 
-/// The JSON-RPC code the `tsrs` and `tsc` processes answer a failed request with (`jsonrpc.CodeInternalError`); the
-/// message is the error's text, as here.
-const INTERNAL_ERROR: i64 = -32603;
-
-/// How to start a checker: an explicit binary runs as a process, none links the bundled one.
-pub(crate) struct Start<'a> {
-    pub(crate) project_root: &'a Utf8Path,
-    pub(crate) tsc_path: Option<&'a Utf8Path>,
-    pub(crate) expected_versions: &'static [&'static str],
-    pub(crate) timeout: Duration,
-    pub(crate) extra_env: &'a [(String, String)],
-    /// How many threads the linked checker answers on: requests about different programs of its session run at once.
-    /// A process answers on its own terms.
-    pub(crate) threads: usize,
+/// Why the checker did not answer a request.
+#[derive(Debug)]
+pub(crate) enum RequestError {
+    /// The checker answered with an error (a panic inside it among them): this request failed.
+    Rejected(String),
+    /// No answer came within the deadline.
+    Timeout { method: String, after: Duration },
+    /// The checker was stopped, or its session could not be created.
+    Closed,
+    /// The request could not be written as JSON, or the answer is not JSON.
+    Malformed(String),
 }
 
-/// A running checker.
-pub(crate) enum Backend {
-    /// A `tsc --api` process for an explicit binary.
-    Process(Box<Supervisor>),
-    /// The checker linked into this process, on its own thread.
-    InProcess(InProcess),
+impl std::fmt::Display for RequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RequestError::Rejected(message) | RequestError::Malformed(message) => f.write_str(message),
+            RequestError::Timeout { method, after } => write!(f, "request {method:?} timed out after {after:?}"),
+            RequestError::Closed => f.write_str("session shut down"),
+        }
+    }
+}
+
+/// The linked checker: the first of the threads that share its session, and the way to them.
+pub(crate) struct Backend {
+    client: Client,
+    thread: JoinHandle<()>,
+    threads: usize,
+    /// Set by a thread, before it answers, when no thread will answer anything more: a panic unwound through the
+    /// session.
+    ended: Arc<AtomicBool>,
+    /// Disconnected once every thread has left and the last has closed the session.
+    closed: mpsc::Receiver<()>,
 }
 
 impl Backend {
-    /// The checker `start` asks for. An explicit path that does not exist, a binary that does not start or is not a
-    /// supported version, or a checker thread that cannot be spawned, is an error that says so.
-    pub(crate) async fn start(start: Start<'_>) -> Result<Backend, String> {
-        let Some(tsc_path) = start.tsc_path else {
-            return InProcess::start(start.project_root, start.threads).map(Backend::InProcess);
-        };
-        let tsc_path = locate::explicit_tsc(tsc_path)?;
-        let mut config = SupervisorConfig::new(tsc_path, start.project_root.to_owned(), start.expected_versions);
-        config.handshake_timeout = start.timeout;
-        config.extra_env = start.extra_env.to_vec();
-        Supervisor::spawn(config)
-            .await
-            .map(|supervisor| Backend::Process(Box::new(supervisor)))
-            .map_err(|error| error.to_string())
+    /// Spawns the checker thread, which creates its session there: the session's work, from the first request on,
+    /// runs on that thread's stack. With `threads` above one it starts as many more, each answering a queue of its own
+    /// (a lane, [`Client::lane`]) on the same session: requests about one program wait for each other (each program
+    /// has one checker, which `tsrs_api` locks for the length of a request), so a run that sends the requests about
+    /// each of its programs down a lane of its own has them answered at once. A thread that cannot be spawned is an
+    /// error that says so.
+    pub(crate) fn start(project_root: &Utf8Path, threads: usize) -> Result<Backend, String> {
+        let cwd = project_root.to_string();
+        Backend::spawn(threads, move || TsrsSession::open(cwd))
     }
 
-    /// How many programs a run asks at once: one per thread of the linked checker, one for a process (whose requests
-    /// this client sends one at a time).
+    /// Spawns the checker threads over the session `open` makes on the first.
+    pub(crate) fn spawn<S: Served + Send + Sync + 'static>(
+        threads: usize,
+        open: impl FnOnce() -> S + Send + 'static,
+    ) -> Result<Backend, String> {
+        let (lanes, queues): (Vec<_>, Vec<_>) = (0..threads.max(1)).map(|_| mpsc::channel()).unzip();
+        let threads = lanes.len();
+        let ended = Arc::new(AtomicBool::new(false));
+        let thread_ended = Arc::clone(&ended);
+        let (closing, closed) = mpsc::channel::<()>();
+        let thread = std::thread::Builder::new()
+            .name("caliper-checker".to_string())
+            .stack_size(CHECKER_STACK_BYTES)
+            .spawn(move || serve(open, queues, thread_ended, closing))
+            .map_err(|error| format!("could not start the checker thread: {error}"))?;
+        Ok(Backend { client: Client { lanes: lanes.into(), lane: 0 }, thread, threads, ended, closed })
+    }
+
+    /// How many programs a run asks at once: one per thread.
     pub(crate) fn parallel_programs(&self) -> usize {
-        match self {
-            Backend::Process(_) => 1,
-            Backend::InProcess(checker) => checker.threads,
-        }
+        self.threads
     }
 
     pub(crate) fn client(&self) -> Client {
-        match self {
-            Backend::Process(supervisor) => Client::Process(supervisor.client()),
-            Backend::InProcess(checker) => Client::InProcess(checker.client.clone()),
-        }
+        self.client.clone()
     }
 
-    /// Whether the checker still answers. The linked checker stops once a panic has unwound through its session,
-    /// before its thread has finished closing it.
+    /// Whether the checker still answers. It stops once a panic has unwound through its session, before its thread
+    /// has finished closing it.
     pub(crate) fn is_alive(&self) -> bool {
-        match self {
-            Backend::Process(supervisor) => supervisor.is_alive(),
-            Backend::InProcess(checker) => !checker.ended.load(Ordering::Acquire) && !checker.thread.is_finished(),
-        }
+        !self.ended.load(Ordering::Acquire) && !self.thread.is_finished()
     }
 
-    /// Whether this is the checker linked into this process.
-    pub(crate) fn is_linked(&self) -> bool {
-        matches!(self, Backend::InProcess(_))
-    }
-
-    /// The operating system's id of the checker process; `None` for the linked checker, which is this process.
-    pub(crate) fn process_id(&self) -> Option<u32> {
-        match self {
-            Backend::Process(supervisor) => supervisor.process_id(),
-            Backend::InProcess(_) => None,
-        }
-    }
-
-    /// What the checker holds, in MiB: a process's resident memory, or, for the linked checker, the resident part of
-    /// the address range the `tsrs` crates allocate their arenas from. That range is theirs alone, so the host's memory
-    /// is not counted, and a closed session gives its programs' part of it back. `None` when it cannot be read.
+    /// What the checker holds, in MiB: the resident part of the address range the `tsrs` crates allocate their arenas
+    /// from. That range is theirs alone, so the host's memory is not counted, and a closed session gives its programs'
+    /// part of it back. `None` when it cannot be read.
     pub(crate) fn memory_mib(&self) -> Option<u64> {
-        match self {
-            Backend::Process(supervisor) => supervisor.process_id().and_then(resident_mib),
-            Backend::InProcess(_) => arena_mib(),
-        }
+        arena_mib()
     }
 
-    /// Stops the checker. A process is reaped. The linked checker's thread finishes the request it is in, closes its
-    /// session and exits on its own: it is not waited for, so a hung request cannot hold the caller.
+    /// Stops the checker. Its threads finish the request they are in, close the session and exit on their own: they
+    /// are not waited for, so a hung request cannot hold the caller.
     pub(crate) async fn shutdown(self) {
-        match self {
-            Backend::Process(supervisor) => {
-                if let Err(error) = (*supervisor).shutdown().await {
-                    tracing::debug!(%error, "the checker process did not shut down cleanly");
-                }
-            }
-            Backend::InProcess(checker) => checker.client.stop(),
-        }
+        self.client.stop();
     }
 
-    /// Stops the checker and, for the linked one, waits up to `wait` for its thread to close the session, so what the
-    /// session held is given back before a fresh one is read. For a replacement between requests, when nothing is in
-    /// progress.
+    /// Stops the checker and waits up to `wait` for its threads to close the session, so what the session held is
+    /// given back before a fresh one is read. For a replacement between requests, when nothing is in progress.
     pub(crate) async fn shutdown_within(self, wait: Duration) {
-        match self {
-            Backend::Process(_) => self.shutdown().await,
-            Backend::InProcess(checker) => {
-                checker.client.stop();
-                // The thread drops its end once the session is closed.
-                checker.closed.recv_timeout(wait).ok();
-            }
-        }
+        self.client.stop();
+        // The threads drop their ends once the session is closed.
+        self.closed.recv_timeout(wait).ok();
     }
-}
-
-/// The resident memory of a process in MiB: `/proc` where it exists, else `ps`. `None` when neither answers.
-pub(crate) fn resident_mib(pid: u32) -> Option<u64> {
-    let kib = match std::fs::read_to_string(format!("/proc/{pid}/status")) {
-        Ok(status) => status
-            .lines()
-            .find_map(|line| line.strip_prefix("VmRSS:"))?
-            .split_whitespace()
-            .next()?
-            .parse::<u64>()
-            .ok()?,
-        Err(_) => {
-            let output = std::process::Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().ok()?;
-            String::from_utf8_lossy(&output.stdout).trim().parse::<u64>().ok()?
-        }
-    };
-    Some(kib / 1024)
 }
 
 /// The resident MiB of the address range every `tsrs` arena is carved from (`tsrs_core::reserve`, one range per
@@ -224,50 +187,6 @@ pub(crate) fn nesting(text: &str) -> usize {
     deepest
 }
 
-/// A handle that sends requests to a running checker. Cheap to clone.
-#[derive(Clone)]
-pub(crate) enum Client {
-    Process(caliper_docgen_tsc_client::Client),
-    InProcess(Linked),
-}
-
-impl Client {
-    /// The client whose requests the `lane`th thread of the linked checker answers ([`InProcess::start`]); a process
-    /// has one lane, so its client is itself.
-    pub(crate) fn lane(&self, lane: usize) -> Client {
-        match self {
-            Client::Process(client) => Client::Process(client.clone()),
-            Client::InProcess(linked) => Client::InProcess(Linked { lanes: linked.lanes.clone(), lane }),
-        }
-    }
-
-    /// One request, its answer the `result` as the JSON text it arrived as. The wait is bounded by `deadline`; an
-    /// error is the one the process route would give for the same failure.
-    pub(crate) async fn request_raw(
-        &self,
-        method: &str,
-        params: Value,
-        deadline: Duration,
-    ) -> Result<Box<RawValue>, TscClientError> {
-        match self {
-            Client::Process(client) => Ok(client.request_raw(method, params, deadline).await?.result),
-            Client::InProcess(linked) => linked.request(method, params, deadline).await,
-        }
-    }
-}
-
-/// The linked checker: the first of the threads that share its session, and the way to them.
-pub(crate) struct InProcess {
-    client: Linked,
-    thread: JoinHandle<()>,
-    threads: usize,
-    /// Set by a thread, before it answers, when no thread will answer anything more: a panic unwound through the
-    /// session.
-    ended: Arc<AtomicBool>,
-    /// Disconnected once every thread has left and the last has closed the session.
-    closed: mpsc::Receiver<()>,
-}
-
 enum Job {
     Request(Asked),
     /// Close the session and end the thread; requests sent after it fail as from a stopped checker.
@@ -280,64 +199,47 @@ struct Asked {
     reply: oneshot::Sender<Result<String, String>>,
 }
 
-/// The sending ends of the linked checker's queues, one per thread, and the one this client sends to.
+/// A handle that sends requests to a running checker: the sending ends of its queues, one per thread, and the one this
+/// client sends to. Cheap to clone.
 #[derive(Clone)]
-pub(crate) struct Linked {
+pub(crate) struct Client {
     lanes: Arc<[mpsc::Sender<Job>]>,
     lane: usize,
 }
 
-impl InProcess {
-    /// Spawns the checker thread, which creates its session there: the session's work, from the first request on,
-    /// runs on that thread's stack. With `threads` above one it starts as many more, each answering a queue of its own
-    /// (a lane, [`Client::lane`]) on the same session: requests about one program wait for each other (each program
-    /// has one checker, which `tsrs_api` locks for the length of a request), so a run that sends the requests about
-    /// each of its programs down a lane of its own has them answered at once.
-    pub(crate) fn start(project_root: &Utf8Path, threads: usize) -> Result<InProcess, String> {
-        let cwd = project_root.to_string();
-        InProcess::spawn(threads, move || TsrsSession::open(cwd))
+impl Client {
+    /// The client whose requests the `lane`th thread of the checker answers ([`Backend::start`]).
+    pub(crate) fn lane(&self, lane: usize) -> Client {
+        Client { lanes: self.lanes.clone(), lane }
     }
 
-    /// Spawns the checker threads over the session `open` makes on the first.
-    pub(crate) fn spawn<S: Served + Send + Sync + 'static>(
-        threads: usize,
-        open: impl FnOnce() -> S + Send + 'static,
-    ) -> Result<InProcess, String> {
-        let (lanes, queues): (Vec<_>, Vec<_>) = (0..threads.max(1)).map(|_| mpsc::channel()).unzip();
-        let threads = lanes.len();
-        let ended = Arc::new(AtomicBool::new(false));
-        let thread_ended = Arc::clone(&ended);
-        let (closing, closed) = mpsc::channel::<()>();
-        let thread = std::thread::Builder::new()
-            .name("caliper-checker".to_string())
-            .stack_size(CHECKER_STACK_BYTES)
-            .spawn(move || serve(open, queues, thread_ended, closing))
-            .map_err(|error| format!("could not start the checker thread: {error}"))?;
-        Ok(InProcess { client: Linked { lanes: lanes.into(), lane: 0 }, thread, threads, ended, closed })
-    }
-}
-
-impl Linked {
-    async fn request(&self, method: &str, params: Value, deadline: Duration) -> Result<Box<RawValue>, TscClientError> {
-        let params = serde_json::to_vec(&params).map_err(|error| TscClientError::Serialize(Arc::new(error)))?;
+    /// One request, its answer the `result` as the JSON text it arrived as. The wait is bounded by `deadline`.
+    pub(crate) async fn request_raw(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: Duration,
+    ) -> Result<Box<RawValue>, RequestError> {
+        let params = serde_json::to_vec(&params)
+            .map_err(|error| RequestError::Malformed(format!("failed to serialize a request: {error}")))?;
         let (reply, answer) = oneshot::channel();
         let asked = Asked { method: method.to_string(), params, reply };
         let Some(jobs) = self.lanes.get(self.lane % self.lanes.len().max(1)) else {
-            return Err(TscClientError::SessionClosed);
+            return Err(RequestError::Closed);
         };
         if jobs.send(Job::Request(asked)).is_err() {
-            return Err(TscClientError::SessionClosed);
+            return Err(RequestError::Closed);
         }
         let answered = match tokio::time::timeout(deadline, answer).await {
             Ok(Ok(answered)) => answered,
             // The thread ended without answering: stopped, or its session could not be created.
-            Ok(Err(_dropped)) => return Err(TscClientError::SessionClosed),
-            Err(_elapsed) => return Err(TscClientError::Timeout { method: method.to_string(), after: deadline }),
+            Ok(Err(_dropped)) => return Err(RequestError::Closed),
+            Err(_elapsed) => return Err(RequestError::Timeout { method: method.to_string(), after: deadline }),
         };
         match answered {
             Ok(text) => RawValue::from_string(text)
-                .map_err(|_invalid| TscClientError::MalformedFrame { reason: MalformedFrameReason::InvalidJson }),
-            Err(message) => Err(TscClientError::RpcError { code: INTERNAL_ERROR, message, data: None }),
+                .map_err(|_invalid| RequestError::Malformed(format!("{method} answered with text that is not JSON"))),
+            Err(message) => Err(RequestError::Rejected(message)),
         }
     }
 
@@ -512,7 +414,7 @@ struct Lane<S> {
     ended: Arc<AtomicBool>,
     /// The threads that have not left; the last to leave closes the session.
     left: Arc<AtomicUsize>,
-    /// Dropped as the thread leaves: [`InProcess::closed`] disconnects once every thread has.
+    /// Dropped as the thread leaves: [`Backend::closed`] disconnects once every thread has.
     _closing: mpsc::Sender<()>,
 }
 
@@ -585,16 +487,16 @@ mod tests {
     }
 
     fn linked() -> Backend {
-        Backend::InProcess(InProcess::start(Utf8Path::new("/"), 1).unwrap())
+        Backend::start(Utf8Path::new("/"), 1).unwrap()
     }
 
-    async fn ask(client: &Client, method: &str, params: Value) -> Result<Value, TscClientError> {
+    async fn ask(client: &Client, method: &str, params: Value) -> Result<Value, RequestError> {
         let answer = client.request_raw(method, params, Duration::from_secs(120)).await?;
         Ok(serde_json::from_str(answer.get()).unwrap())
     }
 
     /// A program of `file` holding `text`, held in the checker's memory: its snapshot and project.
-    async fn program(client: &Client, file: &str, text: &str, resolution: u32) -> Result<Value, TscClientError> {
+    async fn program(client: &Client, file: &str, text: &str, resolution: u32) -> Result<Value, RequestError> {
         let options =
             json!({ "strict": true, "noEmit": true, "target": 9, "module": 99, "moduleResolution": resolution });
         let created = ask(
@@ -610,7 +512,7 @@ mod tests {
     }
 
     /// A program of `file` as it is on the disk.
-    async fn program_on_disk(client: &Client, file: &Utf8Path) -> Result<Value, TscClientError> {
+    async fn program_on_disk(client: &Client, file: &Utf8Path) -> Result<Value, RequestError> {
         let created = ask(
             client,
             "createSnapshot",
@@ -645,27 +547,6 @@ mod tests {
         format!("{}string{}", "{ a: ".repeat(depth), "; }".repeat(depth))
     }
 
-    #[test]
-    fn no_tsc_path_starts_the_linked_checker_and_an_explicit_one_is_checked_for_a_process() {
-        let runtime = runtime();
-        let start = |tsc_path: Option<&'static str>| Start {
-            project_root: Utf8Path::new("/"),
-            tsc_path: tsc_path.map(Utf8Path::new),
-            expected_versions: &["7.1"],
-            timeout: Duration::from_secs(5),
-            extra_env: &[],
-            threads: 1,
-        };
-
-        let linked = runtime.block_on(Backend::start(start(None))).unwrap();
-        let missing = runtime.block_on(Backend::start(start(Some("/nowhere/tsc"))));
-
-        assert!(matches!(linked, Backend::InProcess(_)));
-        assert_eq!(linked.process_id(), None);
-        assert_eq!(missing.err(), locate::explicit_tsc(Utf8Path::new("/nowhere/tsc")).err());
-        runtime.block_on(linked.shutdown());
-    }
-
     /// `tsrs` reports this panic as the client's fault, so the session is kept.
     #[test]
     fn a_panic_tsrs_reports_as_the_clients_fault_is_an_error_and_the_session_keeps_answering() {
@@ -680,13 +561,11 @@ mod tests {
         let after = runtime.block_on(program(&client, file, text, 100));
 
         match panicked {
-            Err(TscClientError::RpcError { code, message, data }) => {
-                assert_eq!(code, INTERNAL_ERROR);
+            Err(RequestError::Rejected(message)) => {
                 assert_eq!(
                     message,
                     "api: client error: unsupported moduleResolution value 12345 (not a ModuleResolutionKind)"
                 );
-                assert_eq!(data, None);
             }
             other => panic!("expected the panic as an error, got {other:?}"),
         }
@@ -721,7 +600,7 @@ mod tests {
     fn fake() -> (Backend, Arc<std::sync::atomic::AtomicU32>) {
         let closed = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let session = Fake { closed: Arc::clone(&closed) };
-        (Backend::InProcess(InProcess::spawn(1, move || session).unwrap()), closed)
+        (Backend::spawn(1, move || session).unwrap(), closed)
     }
 
     /// Each discarded answer's method and the snapshot it made.
@@ -755,13 +634,13 @@ mod tests {
         let runtime = runtime();
         let discarded = Arc::default();
         let session = Slow { discarded: Arc::clone(&discarded) };
-        let checker = Backend::InProcess(InProcess::spawn(1, move || session).unwrap());
+        let checker = Backend::spawn(1, move || session).unwrap();
         let client = checker.client();
 
         // The second waits until the first is done (300 ms) and is taken, then stops waiting before its own is.
         for (method, wait) in [("createSnapshot", 100), ("getTypeOfSymbol", 350)] {
             let late = runtime.block_on(client.request_raw(method, Value::Null, Duration::from_millis(wait)));
-            assert!(matches!(late, Err(TscClientError::Timeout { .. })), "{late:?}");
+            assert!(matches!(late, Err(RequestError::Timeout { .. })), "{late:?}");
         }
         let waited = std::time::Instant::now();
         while discarded.lock().unwrap().len() < 2 && waited.elapsed() < Duration::from_secs(5) {
@@ -791,11 +670,11 @@ mod tests {
 
             assert_eq!(before.unwrap(), json!("pong"));
             match panicked {
-                Err(TscClientError::RpcError { message, .. }) => assert_eq!(message, said),
+                Err(RequestError::Rejected(message)) => assert_eq!(message, said),
                 other => panic!("expected the panic as an error, got {other:?}"),
             }
             assert!(!alive, "{method}: the checker must not be asked again");
-            assert!(matches!(after, Err(TscClientError::SessionClosed)), "{method}: {after:?}");
+            assert!(matches!(after, Err(RequestError::Closed)), "{method}: {after:?}");
             let waited = std::time::Instant::now();
             while closed.load(Ordering::Relaxed) == 0 && waited.elapsed() < Duration::from_secs(5) {
                 std::thread::yield_now();
@@ -811,7 +690,7 @@ mod tests {
         let runtime = runtime();
         let closed = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let session = Fake { closed: Arc::clone(&closed) };
-        let checker = Backend::InProcess(InProcess::spawn(2, move || session).unwrap());
+        let checker = Backend::spawn(2, move || session).unwrap();
         let (first, second) = (checker.client().lane(0), checker.client().lane(1));
 
         let before = runtime.block_on(ask(&second, "ping", Value::Null));
@@ -819,15 +698,15 @@ mod tests {
         let after = runtime.block_on(ask(&second, "ping", Value::Null));
 
         assert_eq!(before.unwrap(), json!("pong"));
-        assert!(matches!(panicked, Err(TscClientError::RpcError { .. })), "{panicked:?}");
+        assert!(matches!(panicked, Err(RequestError::Rejected(_))), "{panicked:?}");
         match after {
-            Err(TscClientError::RpcError { message, .. }) => {
+            Err(RequestError::Rejected(message)) => {
                 assert_eq!(message, "the built-in checker stopped: a panic unwound through its session");
             }
             other => panic!("expected the other lane stopped, got {other:?}"),
         }
         assert!(!checker.is_alive());
-        assert!(matches!(runtime.block_on(ask(&second, "ping", Value::Null)), Err(TscClientError::SessionClosed)));
+        assert!(matches!(runtime.block_on(ask(&second, "ping", Value::Null)), Err(RequestError::Closed)));
         runtime.block_on(checker.shutdown_within(Duration::from_secs(5)));
         assert_eq!(closed.load(Ordering::Relaxed), 1, "the last lane to leave closes the session, once");
     }
@@ -880,7 +759,7 @@ mod tests {
         std::fs::write(&shallow, "export const m = 2;\n").unwrap();
         // Two lanes, as a whole-project run has: the refused requests go down the second while the first builds a
         // snapshot of its own, which must neither take the refusal nor be released.
-        let checker = Backend::InProcess(InProcess::start(&root, 2).unwrap());
+        let checker = Backend::start(&root, 2).unwrap();
         let (client, other) = (checker.client(), checker.client().lane(1));
         let snapshot = |scope: &Value| scope["snapshot"].as_u64().unwrap();
 
@@ -897,8 +776,8 @@ mod tests {
             .block_on(async { tokio::join!(program_on_disk(&other, &importer), program_on_disk(&client, &shallow)) });
         let after = runtime.block_on(program_on_disk(&client, &shallow)).unwrap();
 
-        assert!(matches!(updated, Err(TscClientError::RpcError { .. })), "{updated:?}");
-        assert!(matches!(created, Err(TscClientError::RpcError { .. })), "{created:?}");
+        assert!(matches!(updated, Err(RequestError::Rejected(_))), "{updated:?}");
+        assert!(matches!(created, Err(RequestError::Rejected(_))), "{created:?}");
         let beside = beside.unwrap();
         assert_eq!(snapshot(&after), snapshot(&kept) + 4, "three snapshots were made in between");
         let refused = (snapshot(&kept) + 1..snapshot(&after)).filter(|id| *id != snapshot(&beside));
@@ -926,14 +805,14 @@ mod tests {
         std::fs::write(&deep, format!("export type Deep = {}string{};\n", "{ a: ".repeat(depth), " }".repeat(depth)))
             .unwrap();
         std::fs::write(&shallow, "export const n = 1;\n").unwrap();
-        let checker = Backend::InProcess(InProcess::start(&root, 1).unwrap());
+        let checker = Backend::start(&root, 1).unwrap();
         let client = checker.client();
 
         let refused = runtime.block_on(program_on_disk(&client, &deep));
         let after = runtime.block_on(program_on_disk(&client, &shallow));
 
         match refused {
-            Err(TscClientError::RpcError { message, .. }) => assert_eq!(
+            Err(RequestError::Rejected(message)) => assert_eq!(
                 message,
                 format!(
                     "{deep} nests brackets {depth} deep, more than the {MAX_NESTING} the built-in checker reads \
@@ -957,17 +836,6 @@ mod tests {
 
         assert!(held.is_some_and(|mib| (1..4096).contains(&mib)), "{held:?}");
         runtime.block_on(checker.shutdown());
-    }
-
-    #[test]
-    fn a_running_process_has_resident_memory() {
-        let mib = resident_mib(std::process::id()).expect("this process is listed");
-        assert!((1..16_384).contains(&mib), "{mib} MiB");
-    }
-
-    #[test]
-    fn a_process_that_does_not_exist_has_none() {
-        assert_eq!(resident_mib(u32::MAX - 1), None);
     }
 
     /// A type nested 2,000 deep overflows a default 2 MiB thread and aborts the process; the checker thread's stack
@@ -1012,7 +880,7 @@ mod tests {
         let next = runtime.block_on(program(&client, "/virtual/next.ts", "export const n = 1;\n", 100));
 
         match late {
-            Err(TscClientError::Timeout { method, after }) => {
+            Err(RequestError::Timeout { method, after }) => {
                 assert_eq!((method.as_str(), after), ("createSnapshot", Duration::from_micros(1)));
             }
             other => panic!("expected a timeout, got {other:?}"),
@@ -1030,6 +898,6 @@ mod tests {
         runtime.block_on(checker.shutdown());
         let after = runtime.block_on(client.request_raw("initialize", Value::Null, Duration::from_secs(5)));
 
-        assert!(matches!(after, Err(TscClientError::SessionClosed)), "{after:?}");
+        assert!(matches!(after, Err(RequestError::Closed)), "{after:?}");
     }
 }

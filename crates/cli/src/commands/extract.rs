@@ -32,9 +32,6 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     if args.no_checker {
         options.checker = false;
     }
-    if let Some(path) = &args.tsc_path {
-        options.semantic_tsc_path = Some(path.into());
-    }
 
     let pb = if !quiet && !args.json {
         let pb = ProgressBar::new_spinner();
@@ -130,7 +127,6 @@ fn apply_semantic_backend(
         .tsconfig_path
         .clone()
         .or_else(|| request.project_root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
-    request.tsc_path = options.semantic_tsc_path.clone();
     request.request_timeout = timeout;
     let outcome = caliper_docgen_semantic::resolve(request);
     caliper_docgen_core::types::semantic::merge_semantic_with(output, outcome, resolver);

@@ -104,11 +104,6 @@ export interface JsExtractOptions {
    */
   checker?: boolean
   /**
-   * Session only, with the checker on: a checker binary to run instead of the built-in one (`typescript@7.1`'s
-   * `tsc`, or `tsrs`).
-   */
-  tscPath?: string
-  /**
    * Session only, with the checker on: how many milliseconds a request waits for the checker before it takes the
    * structural answer (default 150).
    */

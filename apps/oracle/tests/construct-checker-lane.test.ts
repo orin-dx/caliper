@@ -1,7 +1,7 @@
 // The construct suite through the checker path (ADR 0026; construct-suite/README.md "The checker lane"): every row's
 // verdict held to checker-expectations.json, so a row that regresses fails and a row that improves fails until the
-// expectation is updated. The live run needs Caliper's release binary and the pinned tsrs; without them it skips with a
-// warning, and REQUIRE_CALIPER_BIN=1 / REQUIRE_TSRS=1 turn each skip into a failure.
+// expectation is updated. The live run needs Caliper's release binary, which links the checker; without it, it skips with
+// a warning, and REQUIRE_CALIPER_BIN=1 turns the skip into a failure.
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -14,25 +14,12 @@ import {
   type LaneRun,
 } from '../src/construct-checker-run.ts'
 import { expectationProblems } from '../src/construct-suite.ts'
-import { resolveTsrsBin } from '../src/tsrs-bin.ts'
 
 const bin = resolve(
   process.env.CALIPER_BIN ?? join(import.meta.dirname, '..', '..', '..', 'target', 'release', 'caliper-docgen'),
 )
 const binAvailable = existsSync(bin)
-let tsrs: string | undefined
-let tsrsProblem = ''
-try {
-  tsrs = await resolveTsrsBin()
-  if (!existsSync(tsrs)) {
-    tsrsProblem = `no tsrs binary at ${tsrs}`
-    tsrs = undefined
-  }
-} catch (error) {
-  tsrsProblem = error instanceof Error ? error.message : String(error)
-}
 if (!binAvailable) console.warn(`checker lane skipped: no caliper binary at ${bin}. Set REQUIRE_CALIPER_BIN=1 to fail.`)
-if (tsrs === undefined) console.warn(`checker lane skipped: ${tsrsProblem}. Set REQUIRE_TSRS=1 to fail.`)
 
 const row = (id: string, verdict: LaneRun['rows'][number]['verdict'], answered = true): LaneRun['rows'][number] => ({
   id,
@@ -133,13 +120,9 @@ describe('the live checker lane', () => {
     expect(binAvailable ? 'present' : `REQUIRE_CALIPER_BIN=1 but there is no caliper binary at ${bin}`).toBe('present')
   })
 
-  it.runIf(process.env.REQUIRE_TSRS === '1')('has the tsrs binary when REQUIRE_TSRS=1', () => {
-    expect(tsrs === undefined ? `REQUIRE_TSRS=1 but ${tsrsProblem}` : 'present').toBe('present')
-  })
-
-  it.skipIf(!binAvailable || tsrs === undefined)('gives every row the verdict checker-expectations.json allows', () => {
+  it.skipIf(!binAvailable)('gives every row the verdict checker-expectations.json allows', () => {
     expect.hasAssertions()
-    const run = runCheckerLane(bin, tsrs!)
+    const run = runCheckerLane(bin)
     expect(run.backendProblem).toBeUndefined()
     expect(run.rows.length).toBeGreaterThan(0)
     expect(laneFailures(run, checkerExpectations())).toStrictEqual([])

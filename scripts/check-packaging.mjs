@@ -6,6 +6,10 @@
 //    binary). `scripts/napi-loader-version.mjs` rewrites the literal after the build.
 //  - every CLI linux-*-gnu package declares `libc: ["glibc"]` like the napi ones, so
 //    package managers do not hand the glibc binary to a musl host.
+//  - the `tsrs` release the oracle's parity gate runs (apps/oracle's npm `tsrs`,
+//    `<version>-ts<typescript>`) is the one the product links (the exact `=` pins of
+//    `tsrs_api` and `tsrs_vfs` in the root Cargo.toml), so `construct:parity` vouches
+//    for the checker that ships (ADR 0026).
 // Regenerate the loader with `pnpm --filter caliper-docgen-napi build:napi`.
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -33,6 +37,20 @@ for (const dir of ['packages/cli/npm', 'packages/napi/npm']) {
     if (JSON.stringify(libc) !== '["glibc"]') {
       problems.push(`${dir}/${name}/package.json has libc ${JSON.stringify(libc)}, expected ["glibc"]`)
     }
+  }
+}
+
+const cargo = readFileSync(join(root, 'Cargo.toml'), 'utf8')
+const npmTsrs = readJson('apps/oracle/package.json').devDependencies?.tsrs ?? ''
+const npmRelease = npmTsrs.split('-ts')[0]
+for (const crate of ['tsrs_api', 'tsrs_vfs']) {
+  const pin = cargo.match(new RegExp(`^${crate}\\s*=\\s*"=([^"]+)"`, 'm'))?.[1]
+  if (pin === undefined) {
+    problems.push(`Cargo.toml does not pin ${crate} exactly (\`${crate} = "=<version>"\`)`)
+  } else if (pin !== npmRelease) {
+    problems.push(
+      `Cargo.toml pins ${crate} =${pin}, but apps/oracle's tsrs is ${JSON.stringify(npmTsrs)}: construct:parity must run the release the product links`,
+    )
   }
 }
 

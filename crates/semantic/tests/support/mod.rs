@@ -1,5 +1,4 @@
-//! Shared by `tests/cases.rs` and the `record_fixture` example, which must lay a fixture out the same way: the recording
-//! is made from one copy and replayed against the other.
+//! Shared by the tests that copy a fixture project into a scratch directory.
 
 use camino::{Utf8Path, Utf8PathBuf};
 

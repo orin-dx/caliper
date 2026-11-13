@@ -1,17 +1,16 @@
-//! Typed calls over one checker session, linked or a `tsc --api` process ([`crate::checker`]). Wire shapes are the
-//! ones the official 7.1 client sends (traced against `7.1.0-beta`); a method this module does not name is not used.
+//! Typed calls over one session of the linked checker ([`crate::checker`]). Wire shapes are the ones the official 7.1
+//! client sends (traced against `7.1.0-beta`); a method this module does not name is not used.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use caliper_docgen_tsc_client::TscClientError;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
-use crate::checker::Client;
+use crate::checker::{Client, RequestError};
 
 /// Why a call failed, split by whether the rest of the run can go on.
 #[derive(Debug)]
@@ -30,9 +29,9 @@ impl std::fmt::Display for CallError {
     }
 }
 
-fn classify(error: TscClientError) -> CallError {
+fn classify(error: RequestError) -> CallError {
     match error {
-        TscClientError::RpcError { message, .. } => CallError::Rejected(message),
+        RequestError::Rejected(message) => CallError::Rejected(message),
         other => CallError::Fatal(other.to_string()),
     }
 }

@@ -8,7 +8,7 @@ Rerun them with `just gate-measure` (about 20 minutes), which also runs S6's wat
 
 - `scripts/gate_fixtures.mjs` installs `@chakra-ui/react` 3.37.0 and `@mui/material` 9.5.0 (the root `package.json`'s pins) with `pnpm`, and writes one wrapper per exported component, `export function ChakraButton(props: ComponentProps<typeof Button>)`: 1,616 components (1,466 Chakra, 150 MUI). The Chakra and MUI sources themselves were not fetched, so this is not the Chakra corpus of `docs/measurement.md`: it is what an app that wraps both libraries asks the checker.
 - Each request to the checker builds a program that loads one library's declarations whole, which is what makes it a large program.
-- The harness uses the session a Storybook addon runs: a lazy `WatchSession` with `load_dependencies` on, nothing collapsed, and a warm `OnDemand` that waits up to 120 s. The sections up to S6 ran it over the pinned tsrs binary the oracle's `tsrs-bin.ts` resolves; since trail 369 slice 2, `just gate-measure` runs it on the built-in checker (`--tsc built-in`), on mimalloc as the native binding is.
+- The harness uses the session a Storybook addon runs: a lazy `WatchSession` with `load_dependencies` on, nothing collapsed, and a warm `OnDemand` that waits up to 120 s. The sections up to S6 ran it over the pinned tsrs binary the oracle's `tsrs-bin.ts` resolved; since trail 369 slice 2, `just gate-measure` runs it on the built-in checker (`--tsc built-in`), on mimalloc as the native binding is, and since slice 4 removed the process route that is its only mode.
 
 ## Memory past 600 edits
 

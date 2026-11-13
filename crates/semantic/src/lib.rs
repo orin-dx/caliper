@@ -2,11 +2,9 @@
 //!
 //! Asks TypeScript's checker for the props of each component the structural pass found, and hands
 //! `caliper-docgen-core` a [`SemanticOutcome`] to merge (ADR 0006, ADR 0007). The checker is the `tsrs` crates, linked
-//! in and run on a thread of their own; an explicit `tsc_path` runs that binary as a `tsc --api` process instead
-//! (through `caliper-docgen-tsc-client`), which is how the tests and the parity gate run the Go checker. It is always
-//! compiled in and enabled at run time. Any failure to start or finish (a missing or unpinned binary, a crash, a
-//! timeout) yields an outcome with no components and one diagnostic, never an error: the structural result is
-//! complete on its own.
+//! in and run on threads of their own; it is always compiled in and enabled at run time. Any failure to start or
+//! finish (a checker thread that cannot be spawned, a timeout) yields an outcome with no components and one
+//! diagnostic, never an error: the structural result is complete on its own.
 //!
 //! This slice answers function components by the exports the extractor recorded for them (a name, `default`, or the
 //! property of an exported component a sub-component is attached to); a generic one whose first type parameter
@@ -20,13 +18,12 @@ mod component;
 mod convert;
 mod declared;
 mod instantiate;
-mod locate;
 mod on_demand;
 mod printed;
 mod rpc;
 mod stamps;
 
-pub use on_demand::{OnDemand, OnDemandConfig, Recycles, Snapshots};
+pub use on_demand::{OnDemand, OnDemandConfig, Snapshots};
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,18 +36,11 @@ use camino::{Utf8Path, Utf8PathBuf};
 use rustc_hash::FxHashMap;
 use tokio::task::JoinSet;
 
-use crate::checker::{Backend, Start};
+use crate::checker::Backend;
 use crate::component::Answer;
 use crate::convert::Converter;
 use crate::instantiate::Instantiation;
 use crate::rpc::{CallError, REQUESTS, Rpc};
-
-/// The checker binaries a `tsc_path` may name, the builds whose protocol this backend was traced against (the built-in
-/// checker is pinned in `Cargo.toml` instead): the `typescript` 7.1 series, from `7.1.0-beta` on, and the `tsrs` builds
-/// listed exactly (`<tsrs version>-ts<typescript version>`), each only while its TypeScript part is in the series above.
-/// The protocol has no version handshake, so the package's `package.json` version and the initialize call that follows
-/// the spawn are the whole check; a build that fails either takes the structural result with one warning.
-pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
 
 /// How many files are asked about at once, shared among the programs. A program's checker answers requests one at a
 /// time; this keeps it from idling between them.
@@ -93,7 +83,7 @@ pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
         .collect()
 }
 
-/// One whole-project request to the checker: the components to answer for, and which checker to ask. Built with
+/// One whole-project request to the checker: the components to answer for, and how to ask. Built with
 /// [`SemanticRequest::new`] and answered by [`resolve`].
 #[derive(Debug, Clone)]
 pub struct SemanticRequest {
@@ -101,38 +91,26 @@ pub struct SemanticRequest {
     pub project_root: Utf8PathBuf,
     /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
-    /// A checker binary to run as a `tsc --api` process (`typescript@7.1`'s `tsc`, or `tsrs`) instead of the built-in
-    /// checker.
-    pub tsc_path: Option<Utf8PathBuf>,
     /// The components to ask about.
     pub targets: Vec<Target>,
-    /// Bound on each request, and on a checker process's start-up handshake.
+    /// Bound on each request.
     pub request_timeout: Duration,
-    /// The versions a checker binary's `package.json` may declare; one that is not among them is a start-up failure.
-    /// The built-in checker is pinned and not checked.
-    pub expected_versions: &'static [&'static str],
-    /// Write every request and its answer here as JSON, to refresh the replay fixture the tests use.
+    /// Write every request and its answer here as JSON; the tests read it to count and inspect the calls a run makes.
     pub record_to: Option<Utf8PathBuf>,
-    /// Environment for a checker process; the tests use it to pick a replay scenario.
-    pub extra_env: Vec<(String, String)>,
     /// Ask the checker about a component's props, and about the members of each type, last to first. The answer must
     /// not change: no id the checker hands out, and so no order of queries, may show in it. The tests set this.
     pub reverse_queries: bool,
 }
 
 impl SemanticRequest {
-    /// A request for `targets` under `project_root`, with a 60 second timeout, the supported versions, and no
-    /// tsconfig or explicit `tsc` path.
+    /// A request for `targets` under `project_root`, with a 60 second timeout and no tsconfig.
     pub fn new(project_root: Utf8PathBuf, targets: Vec<Target>) -> Self {
         Self {
             project_root,
             tsconfig: None,
-            tsc_path: None,
             targets,
             request_timeout: Duration::from_secs(60),
-            expected_versions: SUPPORTED_VERSIONS,
             record_to: None,
-            extra_env: Vec::new(),
             reverse_queries: false,
         }
     }
@@ -171,19 +149,6 @@ fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8
     (outcome, by_file, order)
 }
 
-/// The checker `request` names: its `tsc_path` as a process, else the built-in one.
-async fn start_checker(request: &SemanticRequest, threads: usize) -> Result<Backend, String> {
-    Backend::start(Start {
-        project_root: &request.project_root,
-        tsc_path: request.tsc_path.as_deref(),
-        expected_versions: request.expected_versions,
-        timeout: request.request_timeout,
-        extra_env: &request.extra_env,
-        threads,
-    })
-    .await
-}
-
 /// Answers `request` with a checker started for it, asking `programs` programs at once, or by default as many as
 /// [`CHECKER_PROGRAMS`] and the files allow ([`MIN_FILES_PER_PROGRAM`]).
 async fn run(request: SemanticRequest, programs: Option<usize>) -> SemanticOutcome {
@@ -192,7 +157,7 @@ async fn run(request: SemanticRequest, programs: Option<usize>) -> SemanticOutco
     }
     let files = group_by_file(&request).2.len();
     let programs = programs.unwrap_or_else(|| CHECKER_PROGRAMS.min(files.div_ceil(MIN_FILES_PER_PROGRAM))).max(1);
-    let checker = match start_checker(&request, programs).await {
+    let checker = match Backend::start(&request.project_root, programs) {
         Ok(checker) => checker,
         Err(reason) => return SemanticOutcome::unavailable(reason),
     };
@@ -499,7 +464,7 @@ mod tests {
         let request = SemanticRequest::new(root.clone(), targets_of(&output));
         let asked = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let session = Panicking { asked: Arc::clone(&asked) };
-        let checker = Backend::InProcess(checker::InProcess::spawn(2, move || session).unwrap());
+        let checker = Backend::spawn(2, move || session).unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
 
         let outcome = runtime.block_on(answer_with(&checker, &request));

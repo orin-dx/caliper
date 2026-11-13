@@ -1,12 +1,12 @@
-// The construct suite through the checker path (ADR 0026): `caliper-docgen extract` (the checker is on by default) with a
-// `tsrs` binary over apps/oracle/construct-suite, and each row's verdict against its golden. It is a gate on
+// The construct suite through the checker path (ADR 0026): `caliper-docgen extract` (the checker is on by default) over
+// apps/oracle/construct-suite, and each row's verdict against its golden. It is a gate on
 // construct-suite/checker-expectations.json: it prints the report, then exits 1 when a row is better or worse than the
 // expectation allows (an improvement means the gap closed: update the file), when the checker did not answer for a row,
 // when the checker backend was unavailable, or when checker-expectations.json ranks a row below expectations.json
 // without an `improvement` reason (ADR 0026's S4 gate). Run it with `just test-checker-lane`, or by hand:
 //
 //   cargo build --release -p caliper-docgen
-//   CALIPER_SEMANTIC=1 TSRS_BIN=<node_modules/@tsrs/<platform>/tsrs> pnpm --filter caliper-docgen-oracle construct:checker
+//   CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker
 //
 // A row the checker did not answer for (it kept the structural result) is listed apart: its verdict says nothing about
 // the checker. `--json <file>` also writes every row with the type each side gave.
@@ -23,12 +23,7 @@ import {
 import { isAgreement } from './vocabulary.ts'
 
 if (process.env.CALIPER_SEMANTIC !== '1') {
-  console.error('construct-checker-lane: set CALIPER_SEMANTIC=1 (and TSRS_BIN) to run the suite through the checker.')
-  process.exit(2)
-}
-const tsrs = process.env.TSRS_BIN
-if (!tsrs || !existsSync(tsrs)) {
-  console.error(`construct-checker-lane: TSRS_BIN must name a tsrs binary (got ${JSON.stringify(tsrs)}).`)
+  console.error('construct-checker-lane: set CALIPER_SEMANTIC=1 to run the suite through the checker.')
   process.exit(2)
 }
 const bin = resolve(
@@ -40,7 +35,7 @@ if (!existsSync(bin)) {
 }
 const jsonOut = process.argv.includes('--json') ? process.argv[process.argv.indexOf('--json') + 1] : undefined
 
-const run = runCheckerLane(bin, tsrs)
+const run = runCheckerLane(bin)
 if (run.backendProblem !== undefined) {
   console.error(`construct-checker-lane: the checker was unavailable: ${run.backendProblem}`)
   process.exit(1)

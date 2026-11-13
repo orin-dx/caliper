@@ -3,7 +3,6 @@ members = [
     "crates/core",
     "crates/binding",
     "crates/cli",
-    "crates/tsc-client",
     "crates/semantic",
 ]
 resolver = "2"
@@ -76,7 +75,7 @@ miette            = "7.6"
 # Parallelism
 rayon             = "1.12"
 mimalloc          = "0.1"
-tokio             = { version = "1.52", features = ["rt-multi-thread", "process", "io-util", "sync", "macros"] }
+tokio             = { version = "1.52", features = ["rt-multi-thread", "sync", "macros"] }
 
 # File system
 ignore            = "0.4"

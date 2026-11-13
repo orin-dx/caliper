@@ -29,4 +29,10 @@ describe('assertValidOptions', () => {
       "[caliper-docgen] semanticTypes was replaced by checker: the checker is on by default, and 'checker: false' turns it off",
     )
   })
+
+  it('refuses the removed tscPath, which left unread would run another checker than the one it named', () => {
+    expect(() => assertValidOptions({ tscPath: '/opt/ts/bin/tsc' })).toThrow(
+      '[caliper-docgen] tscPath was removed: the checker is built in and cannot be replaced by a binary; drop the option',
+    )
+  })
 })

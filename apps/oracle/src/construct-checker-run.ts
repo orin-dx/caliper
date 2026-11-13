@@ -1,7 +1,7 @@
 // One run of the construct suite through the checker path (ADR 0026), shared by the lane script
 // (src/construct-checker-lane.ts) and its test (tests/construct-checker-lane.test.ts): `caliper-docgen extract
-// --no-resolver-facts` (the checker is on by default) with a `tsrs` binary over apps/oracle/construct-suite, and each
-// row's verdict against its golden and against checker-expectations.json.
+// --no-resolver-facts` (the checker is on by default, the `tsrs` crates linked into it) over apps/oracle/construct-suite,
+// and each row's verdict against its golden and against checker-expectations.json.
 import { execFileSync } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
@@ -82,11 +82,11 @@ function extract(bin: string, extra: string[]): any {
 }
 
 /** Run the suite through the checker path and give every row its verdict. */
-export function runCheckerLane(bin: string, tsrs: string): LaneRun {
+export function runCheckerLane(bin: string): LaneRun {
   const started = performance.now()
   // The resolver's answer is not read for the facts oxc's syntax supplies (ADR 0026, S7a2): the lane holds the checker
   // and the syntax alone to them.
-  const checked = extract(bin, ['--tsc-path', tsrs, '--no-resolver-facts'])
+  const checked = extract(bin, ['--no-resolver-facts'])
   const elapsedMs = Math.round(performance.now() - started)
 
   const backendProblem = (checked.diagnostics ?? []).find((d: any) =>

@@ -21,11 +21,10 @@ struct DocgenConfigSchema {
     load_dependencies: Option<bool>,
     collapse_inherited_props: Option<String>,
     checker: Option<bool>,
-    tsc_path: Option<String>,
 }
 
 /// The keys `DocgenConfigSchema` accepts, for the error help; a test holds this list to the struct's own field list.
-const CONFIG_KEYS: [&str; 12] = [
+const CONFIG_KEYS: [&str; 11] = [
     "srcDirs",
     "excludePatterns",
     "excludePrefixes",
@@ -37,7 +36,6 @@ const CONFIG_KEYS: [&str; 12] = [
     "loadDependencies",
     "collapseInheritedProps",
     "checker",
-    "tscPath",
 ];
 
 impl DocgenConfigSchema {
@@ -80,9 +78,6 @@ impl DocgenConfigSchema {
         }
         if let Some(on) = self.checker {
             opts.checker = on;
-        }
-        if let Some(path) = self.tsc_path {
-            opts.semantic_tsc_path = Some(path.into());
         }
         Ok(opts)
     }
@@ -239,9 +234,6 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
         if let Some(cache_dir) = opts.cache_dir.as_mut().filter(|cache_dir| cache_dir.is_relative()) {
             *cache_dir = dir.join(&*cache_dir);
         }
-        if let Some(tsc) = opts.semantic_tsc_path.as_mut().filter(|tsc| tsc.is_relative()) {
-            *tsc = dir.join(&*tsc);
-        }
     }
     Ok(Some(opts))
 }
@@ -305,30 +297,6 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     }
 
     Ok(opts)
-}
-
-/// The note for `watch`, which never runs the TypeScript checker, when the config names a checker binary anyway: the
-/// setting is read, and then has no effect, which a config the user wrote should not do quietly. `None` when the config
-/// names none. (`checker` itself is on by default, so a config that leaves it on says nothing about `watch`.)
-pub fn ignored_semantic_config_note(command: &str, options: &PipelineOptions) -> Option<String> {
-    options.semantic_tsc_path.as_ref()?;
-    Some(format!(
-        "warning: the config sets tscPath, but `{command}` never runs the TypeScript checker, so its output is the \
-         structural result. `extract`, `check` and `inspect` run the checker."
-    ))
-}
-
-/// Writes [`ignored_semantic_config_note`] to stderr, unless `quiet`.
-pub fn warn_ignored_semantic_config(command: &str, options: &PipelineOptions, quiet: bool) {
-    use std::io::Write;
-
-    if quiet {
-        return;
-    }
-    if let Some(note) = ignored_semantic_config_note(command, options) {
-        // A closed stderr isn't worth failing a run over.
-        writeln!(std::io::stderr().lock(), "{note}").ok();
-    }
 }
 
 #[cfg(test)]

@@ -1,8 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
 //! Where the checker says each prop is declared (ADR 0026 S7a): `parent`, `declarations`, tags and `composes` come from
-//! its answer, not from the structural prop of the same name. The `declared` fixture, replayed from
-//! `declared.recording.json` (made by the `record_fixture` example against the pinned `tsrs`) and asked live
-//! (the built-in checker, or the `tsrs` binary `TSRS_BIN` names):
+//! its answer, not from the structural prop of the same name. The `declared` fixture, asked of the built-in checker:
 //!
 //! - `Button`: `tone` declared in `ButtonProps` in `Button.tsx`, `size` in `BaseProps` in `Base.ts`, each with its
 //!   tags; it is made of React's `HTMLAttributes` (under an `Omit`) and `RefAttributes`;
@@ -22,25 +20,17 @@ use camino::Utf8PathBuf;
 mod support;
 use support::copy_fixture;
 
-const FAKE_VERSION: &str = "7.1.0-test";
-
 struct Project {
     _dir: tempfile::TempDir,
     root: Utf8PathBuf,
 }
 
 /// The fixture in a scratch directory whose name has an upper-case letter, so a file the checker names lower-cased is
-/// told from the path on disk, with `replay-tsc` installed as `node_modules/typescript/bin/tsc` when `replay`.
-fn project(replay: bool) -> Project {
+/// told from the path on disk.
+fn project() -> Project {
     let dir = tempfile::Builder::new().prefix("Declared").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     copy_fixture(&Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/declared"), &root);
-    if replay {
-        let package = root.join("node_modules/typescript");
-        std::fs::create_dir_all(package.join("bin")).unwrap();
-        std::fs::write(package.join("package.json"), format!(r#"{{"version": "{FAKE_VERSION}"}}"#)).unwrap();
-        std::fs::copy(env!("CARGO_BIN_EXE_replay-tsc"), package.join("bin/tsc")).unwrap();
-    }
     Project { _dir: dir, root }
 }
 
@@ -48,29 +38,13 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-fn answer(project: &Project, output: &ExtractionOutput, real: Option<&Option<Utf8PathBuf>>) -> SemanticOutcome {
+fn answer(project: &Project, output: &ExtractionOutput) -> SemanticOutcome {
     let mut request = SemanticRequest::new(project.root.clone(), targets_of(output));
     request.request_timeout = Duration::from_secs(60);
-    match real {
-        Some(bin) => request.tsc_path = bin.clone(),
-        None => {
-            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
-            request.expected_versions = &[FAKE_VERSION];
-            request.extra_env.push((
-                "REPLAY_FIXTURE".to_string(),
-                format!("{}/tests/fixtures/declared.recording.json", env!("CARGO_MANIFEST_DIR")),
-            ));
-        }
-    }
     let outcome = resolve(request);
     assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
     assert!(outcome.fallbacks.is_empty(), "{:?}", outcome.fallbacks);
     outcome
-}
-
-/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
-fn tsrs_bin() -> Option<Utf8PathBuf> {
-    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
 }
 
 /// Each prop of each component as `(component, prop) -> (parent, declarations, tags)`, and each component's `composes`.
@@ -119,10 +93,11 @@ fn expected(root: &Utf8PathBuf) -> Facts {
     (props, composes)
 }
 
-fn assert_declared(real: Option<&Option<Utf8PathBuf>>) {
-    let project = project(real.is_none());
+#[test]
+fn parent_declarations_tags_and_composes_are_the_checkers() {
+    let project = project();
     let mut output = structural(&project);
-    let outcome = answer(&project, &output, real);
+    let outcome = answer(&project, &output);
 
     assert_eq!(facts(&outcome), expected(&project.root));
 
@@ -133,15 +108,4 @@ fn assert_declared(real: Option<&Option<Utf8PathBuf>>) {
     let picked = &output.components["Picked"].props["disabled"];
     assert_eq!(picked.parent.as_ref().map(|parent| parent.name.as_str()), Some("BaseProps"));
     assert_eq!(output.components["Button"].composes, ["HTMLAttributes", "RefAttributes"]);
-}
-
-#[test]
-fn parent_declarations_tags_and_composes_are_the_checkers_replayed() {
-    assert_declared(None);
-}
-
-#[test]
-fn parent_declarations_tags_and_composes_are_the_checkers_from_a_real_tsrs() {
-    let bin = tsrs_bin();
-    assert_declared(Some(&bin));
 }
