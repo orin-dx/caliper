@@ -5,6 +5,9 @@ import { bareName, isBareObject, lit, MAX_DEPTH, prim, type HtmlFamily, type Nor
 
 const isIndexField = (field: ObjectField) => field.indexKey !== undefined
 
+/** The type keywords Caliper's `named` kind spells by name: the non-primitive `object` and `symbol`. */
+const KEYWORD_NAMES = new Set(['object', 'symbol'])
+
 /** A field's name as the checker side keys it. Caliper writes a member keyed by a symbol as the source does, `[tag]` or
  * `[Symbol.iterator]`; the checker keys it `__@tag@<symbol id>`, which src/oracle-checker.ts reads as `__@tag`. */
 export function fieldName(name: string): string {
@@ -137,7 +140,10 @@ export function caliperNorm(t: PropType, depth = 0): Norm {
       }))
       return { k: 'function', params, returns: inner(t.returnType) }
     }
+    // `object` and `symbol` are keywords Caliper writes as names (no declaration can take them): the primitives, as the
+    // checker side reads them.
     case 'named': {
+      if (KEYWORD_NAMES.has(t.name) && t.args.length === 0) return prim(t.name)
       const family = omittedFamily(t.name, t.args, inner)
       return { k: 'name', name: bareName(t.name), ...(family && { family }) }
     }

@@ -92,7 +92,7 @@ pub(super) enum Placed {
 pub(super) fn in_written_order(checker: &PropType, written: &[WrittenMember]) -> Option<(PropType, Placed)> {
     let PropType::Union(members) = checker else { return None };
     let mut places: Vec<Option<usize>> =
-        members.iter().map(|member| written.iter().position(|candidate| states(candidate, member))).collect();
+        members.iter().map(|member| closest(written.iter().map(|candidate| states(candidate, member)))).collect();
     for index in 0..members.len() {
         if places[index].is_some() {
             continue;
@@ -120,36 +120,58 @@ pub(super) fn in_written_order(checker: &PropType, written: &[WrittenMember]) ->
     Some((PropType::Union(known.into_iter().chain(unknown).map(|(member, _)| member).collect()), placed))
 }
 
-/// Whether the written member `written` states the checker's member `member`.
-fn states(written: &WrittenMember, member: &PropType) -> bool {
+/// How closely a written member states the checker's: a rank, lower is closer (see [`closeness`]), or `None` when it
+/// does not state it.
+type Closeness = Option<u8>;
+
+/// The place of the closest of `ranks`, the first of the closest when several are as close.
+fn closest(ranks: impl Iterator<Item = Closeness>) -> Option<usize> {
+    ranks.enumerate().filter_map(|(place, rank)| rank.map(|rank| (rank, place))).min().map(|(_, place)| place)
+}
+
+/// How closely the written member `written` states the checker's member `member`.
+fn states(written: &WrittenMember, member: &PropType) -> Closeness {
     match written {
         // `boolean` is `true | false` to the checker; the source may have written either.
-        WrittenMember::Type(written) => {
-            written == member || (*member == PropType::Boolean && matches!(written, PropType::BoolLiteral(_)))
-        }
+        WrittenMember::Type(written) => (written == member
+            || (*member == PropType::Boolean && matches!(written, PropType::BoolLiteral(_))))
+        .then_some(0),
         WrittenMember::Name(name) => answers_to(member, name),
-        WrittenMember::Kind(_) => false,
+        WrittenMember::Kind(_) => None,
     }
 }
 
-/// Whether the checker's member is the type the source names `written` (`React.ReactNode`, `Size.Small`), by the name
-/// without the namespace it was written through: the checker names the declaration.
-fn answers_to(member: &PropType, written: &str) -> bool {
-    let bare = |name: &str| name.rsplit('.').next().unwrap_or(name).to_owned();
-    let written_bare = bare(written);
+/// How closely the source's name `written` (`React.ReactNode`, `Size.Small`) names the checker's member. The checker
+/// names the declaration, and the source may reach it through a namespace.
+fn answers_to(member: &PropType, written: &str) -> Closeness {
     match member {
-        PropType::Named { name, .. } | PropType::Recursive { name, .. } => bare(name) == written_bare,
-        PropType::EnumMember { enum_name, member, .. } => {
-            written.strip_suffix(member.as_str()).and_then(|head| head.strip_suffix('.')).map(bare)
-                == Some(bare(enum_name))
-        }
-        PropType::Ref { name, .. } => *name == written_bare,
-        PropType::ReactNode => {
-            matches!(written_bare.as_str(), "ReactNode" | "ReactElement") || written == "JSX.Element"
-        }
-        PropType::CssProperties => written_bare == "CSSProperties",
-        PropType::ElementType => written_bare == "ElementType",
-        _ => false,
+        PropType::Named { name, .. } | PropType::Recursive { name, .. } => closeness(name, written),
+        PropType::EnumMember { enum_name, member, .. } => written
+            .strip_suffix(member.as_str())
+            .and_then(|head| head.strip_suffix('.'))
+            .and_then(|head| closeness(enum_name, head)),
+        PropType::Ref { name, .. } => closeness(name, written),
+        PropType::ReactNode => closeness("ReactNode", written),
+        PropType::CssProperties => closeness("CSSProperties", written),
+        PropType::ElementType => closeness("ElementType", written),
+        _ => None,
+    }
+}
+
+/// How closely the source's name `written` names the type the checker names `name`: 0 for the same name, 1 for `name`
+/// reached through a namespace (`React.ReactElement` for `ReactElement`, `React.JSX.Element` for `JSX.Element`), 2
+/// for the same last segment only. Two types can share a last segment: in `Element | React.JSX.Element`, the DOM's
+/// `Element` is the first member and React's `JSX.Element` the second, which only the closer match tells apart.
+fn closeness(name: &str, written: &str) -> Closeness {
+    let last = |name: &str| name.rsplit('.').next().unwrap_or(name).to_owned();
+    if written == name {
+        Some(0)
+    } else if written.strip_suffix(name).is_some_and(|head| head.ends_with('.')) {
+        Some(1)
+    } else if last(written) == last(name) {
+        Some(2)
+    } else {
+        None
     }
 }
 
@@ -203,14 +225,14 @@ fn reorder(members: Vec<PropType>, declared: &[PropType]) -> Vec<PropType> {
 
 /// The place of the checker's `member` in the structural union `declared`.
 fn position(member: &PropType, declared: &[PropType]) -> Option<usize> {
-    let bare = |name: &str| name.rsplit('.').next().unwrap_or(name).to_owned();
     declared.iter().position(|candidate| candidate == member).or_else(|| match member {
         // `boolean` is `true | false` to the checker; the source may have written either.
         PropType::Boolean => declared.iter().position(|candidate| matches!(candidate, PropType::BoolLiteral(_))),
         // The source may name a type through a namespace (`React.Ref`); the checker names the declaration.
-        PropType::Named { name, .. } => declared.iter().position(
-            |candidate| matches!(candidate, PropType::Named { name: written, .. } if bare(written) == bare(name)),
-        ),
+        PropType::Named { name, .. } => closest(declared.iter().map(|candidate| match candidate {
+            PropType::Named { name: written, .. } => closeness(name, written),
+            _ => None,
+        })),
         _ => None,
     })
 }
@@ -313,6 +335,47 @@ mod tests {
                 &PropType::Union(vec![named("React.NamedExoticComponent"), named("React.ForwardRefExoticComponent")]),
             ),
             PropType::Union(vec![named("NamedExoticComponent"), named("ForwardRefExoticComponent")])
+        );
+    }
+
+    /// `Element | React.JSX.Element | null`: the DOM's `Element` and React's `JSX.Element` share their last segment, and
+    /// each goes to the name that names it most closely, not to the first that ends the same.
+    #[test]
+    fn a_member_goes_to_the_name_that_names_it_most_closely() {
+        let named = |name: &str| PropType::Named { name: name.into(), args: vec![] };
+        let checker = PropType::Union(vec![PropType::Null, named("JSX.Element"), named("Element")]);
+        let expected = PropType::Union(vec![named("Element"), named("JSX.Element"), PropType::Null]);
+        let written = vec![name("Element"), name("React.JSX.Element"), WrittenMember::Type(PropType::Null)];
+        assert_eq!(in_written_order(&checker, &written), Some((expected.clone(), Placed::All)));
+        let declared = PropType::Union(vec![named("Element"), named("React.JSX.Element"), PropType::Null]);
+        assert_eq!(in_declared_order(checker, &declared), expected);
+        // The written order the other way round.
+        let checker = PropType::Union(vec![PropType::Null, named("Element"), named("JSX.Element")]);
+        let written = vec![name("React.JSX.Element"), name("Element"), WrittenMember::Type(PropType::Null)];
+        assert_eq!(
+            in_written_order(&checker, &written),
+            Some((PropType::Union(vec![named("JSX.Element"), named("Element"), PropType::Null]), Placed::All))
+        );
+    }
+
+    /// React's `ReactElement` and `JSX.Element` are their own types, not `ReactNode`, which also admits strings and
+    /// `null`: a written `ReactElement` places the checker's `ReactElement`, and `ReactNode` only a written `ReactNode`.
+    #[test]
+    fn a_react_element_answers_to_its_own_name_and_not_to_react_node() {
+        let element = PropType::Named { name: "ReactElement".into(), args: vec![] };
+        let checker = PropType::Union(vec![PropType::Null, element.clone()]);
+        assert_eq!(
+            in_written_order(&checker, &[name("React.ReactElement"), WrittenMember::Type(PropType::Null)]),
+            Some((PropType::Union(vec![element, PropType::Null]), Placed::All))
+        );
+        let checker = PropType::Union(vec![PropType::Null, PropType::ReactNode]);
+        assert_eq!(
+            in_written_order(&checker, &[name("React.ReactElement"), WrittenMember::Type(PropType::Null)]),
+            Some((checker.clone(), Placed::Some))
+        );
+        assert_eq!(
+            in_written_order(&checker, &[name("React.ReactNode"), WrittenMember::Type(PropType::Null)]),
+            Some((PropType::Union(vec![PropType::ReactNode, PropType::Null]), Placed::All))
         );
     }
 

@@ -258,16 +258,27 @@ impl Origin {
     }
 
     /// The React type that PropType holds as a terminal, found by the declaration and not by how it prints.
+    /// `ReactElement` and `JSX.Element` are not `ReactNode`, which also admits strings, numbers and `null`: they keep
+    /// their names ([`Self::name`]).
     fn react_terminal(&self) -> Option<PropType> {
         if !self.in_react() {
             return None;
         }
         match (self.name.as_str(), self.alias) {
-            ("ReactNode", true) | ("ReactElement" | "Element", false) => Some(PropType::ReactNode),
+            ("ReactNode", true) => Some(PropType::ReactNode),
             ("ElementType", true) => Some(PropType::ElementType),
             ("CSSProperties", false) => Some(PropType::CssProperties),
             _ => None,
         }
+    }
+
+    /// The name a reference to the type is given. React's `JSX.Element` is named through its namespace: the checker's
+    /// `Element` is also the DOM's (which `@types/react` declares empty in `global.d.ts` for a program without it).
+    fn name(&self) -> String {
+        if self.in_react() && !self.alias && self.name == "Element" && !self.file.ends_with("/global.d.ts") {
+            return "JSX.Element".to_string();
+        }
+        self.name.clone()
     }
 }
 
@@ -888,7 +899,7 @@ impl Converter {
 
     async fn named_type(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<PropType, CallError> {
         let args = self.type_arguments_of(info, origin, cx).await?;
-        Ok(PropType::Named { name: origin.name.clone().into(), args })
+        Ok(PropType::Named { name: origin.name().into(), args })
     }
 
     /// The one gate every descent into the parts of a type passes, before the parts are converted. It stops, in this
@@ -1690,5 +1701,22 @@ mod tests {
             (listed.signatures, listed.outside, listed.own.len(), listed.indexes.len()),
             (counted.signatures, counted.outside, counted.own.len(), counted.indexes.len())
         );
+    }
+
+    #[test]
+    fn react_names_its_element_types_by_their_declaration_and_only_react_node_is_the_terminal() {
+        let react = |name: &str, file: &str, alias: bool| Origin {
+            name: name.to_string(),
+            file: format!("/p/node_modules/@types/react/{file}"),
+            alias,
+        };
+        assert_eq!(react("ReactNode", "index.d.ts", true).react_terminal(), Some(PropType::ReactNode));
+        for element in [react("ReactElement", "index.d.ts", false), react("Element", "index.d.ts", false)] {
+            assert_eq!(element.react_terminal(), None, "{}", element.name);
+        }
+        assert_eq!(react("Element", "index.d.ts", false).name(), "JSX.Element");
+        // The DOM's `Element`, which `@types/react` declares empty for a program without the DOM lib.
+        assert_eq!(react("Element", "global.d.ts", false).name(), "Element");
+        assert_eq!(react("ReactElement", "index.d.ts", false).name(), "ReactElement");
     }
 }

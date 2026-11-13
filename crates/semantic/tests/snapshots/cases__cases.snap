@@ -1,5 +1,6 @@
 ---
 source: crates/semantic/tests/cases.rs
+assertion_line: 101
 expression: rendered(&outcome)
 ---
 {
@@ -3432,7 +3433,16 @@ expression: rendered(&outcome)
         "name": "element",
         "required": true,
         "type": {
-          "kind": "reactNode"
+          "kind": "named",
+          "name": "ReactElement",
+          "args": [
+            {
+              "kind": "any"
+            },
+            {
+              "kind": "any"
+            }
+          ]
         }
       },
       {
