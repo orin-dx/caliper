@@ -2633,6 +2633,37 @@ fn discovery_the_directory_walk_and_the_watcher_agree_on_every_exclude_list() {
     }
 }
 
+// A `.gitignore` (and a hidden file, which discovery keeps) must be answered the same by discovery and by the
+// watcher's per-path check.
+#[test]
+fn discovery_and_the_watcher_agree_on_gitignored_and_hidden_files() {
+    const FILES: [&str; 6] =
+        ["Button.tsx", "Generated.tsx", "out/Built.tsx", "ui/Skipped.tsx", "ui/Kept.tsx", ".hidden/Secret.tsx"];
+    let tmp = TempDir::new().unwrap();
+    // The ignore rules apply inside a git checkout only.
+    fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    fs::write(tmp.path().join(".gitignore"), "Generated.tsx\nout/\n").unwrap();
+    fs::create_dir_all(tmp.path().join("ui")).unwrap();
+    fs::write(tmp.path().join("ui/.gitignore"), "Skipped.tsx\n").unwrap();
+    for name in FILES {
+        let path = tmp.path().join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "export const X = () => null;").unwrap();
+    }
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+
+    let (files, _) = discover_files(std::slice::from_ref(&root), &[]);
+    let (dirs, _) = discover_dirs(std::slice::from_ref(&root), &[], |_| false);
+
+    let kept: Vec<_> = files.iter().map(|f| f.strip_prefix(&root).unwrap().to_string()).collect();
+    assert_eq!(kept, [".hidden/Secret.tsx", "Button.tsx", "ui/Kept.tsx"]);
+    assert!(!dirs.contains(&root.join("out")), "the directory walk skips an ignored directory");
+    for name in FILES {
+        let path = root.join(name);
+        assert_eq!(is_source_file(&path, std::slice::from_ref(&root), &[]), files.contains(&path), "{name}");
+    }
+}
+
 #[test]
 fn a_directory_named_like_a_source_file_is_not_a_source_file() {
     let tmp = TempDir::new().unwrap();
