@@ -177,7 +177,7 @@ impl SemanticOutcome {
         for component in &self.components {
             let mut held = Vec::with_capacity(component.props.len());
             for prop in &component.props {
-                let next = u32::try_from(props.len()).map_err(|_| "too many props to store".to_string())?;
+                let next = u32::try_from(props.len()).map_err(|_overflow| "too many props to store".to_string())?;
                 let at = *index.entry(Arc::as_ptr(prop)).or_insert_with(|| {
                     props.push(store_prop(prop));
                     next
@@ -221,7 +221,7 @@ impl SemanticOutcome {
                     .props
                     .iter()
                     .map(|at| {
-                        let at = usize::try_from(*at).map_err(|_| "a prop index out of range".to_string())?;
+                        let at = usize::try_from(*at).map_err(|_overflow| "a prop index out of range".to_string())?;
                         props.get(at).cloned().ok_or_else(|| "a prop index out of range".to_string())
                     })
                     .collect::<Result<_, String>>()?;
