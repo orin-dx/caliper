@@ -155,7 +155,7 @@ pub(crate) async fn props_of_type(
         })
         .collect();
     let references: Vec<_> = own.iter().map(|property| &property.reference).collect();
-    let types = if references.is_empty() { Vec::new() } else { rpc.types_of_symbols(&references).await? };
+    let types = if references.is_empty() { Vec::new() } else { converter.types_of_symbols(&references).await? };
 
     // React's own descriptions and tags are the structural pass's to give, and its props are most of a component's.
     let asked: Vec<Asked<'_>> = own

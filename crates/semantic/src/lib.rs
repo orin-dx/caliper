@@ -462,6 +462,34 @@ mod tests {
         assert_eq!(one, three);
     }
 
+    /// A symbol's type is kept by the symbol, not by what it is named or where it is declared: two instantiations of
+    /// one generic interface list a property of the same name and declaration, each a symbol of its own with its own
+    /// type, and the second component, answered after the first on the same program, is not handed the first's type.
+    #[test]
+    fn a_kept_symbol_type_is_the_type_of_that_symbol() {
+        let (_dir, root) = shared_types_project(0);
+        std::fs::write(
+            root.join("Boxes.tsx"),
+            "interface Box<T> { value: T; label?: string }\n\
+             export function Text(props: Box<string>) { return null; }\n\
+             export function Count(props: Box<number>) { return null; }\n\
+             export function Again(props: Box<string>) { return null; }\n",
+        )
+        .unwrap();
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+
+        let outcome = runtime.block_on(run(SemanticRequest::new(root.clone(), targets_of(&output)), Some(1)));
+
+        let value = |key: &str| {
+            let component = outcome.components.iter().find(|component| component.key == key).unwrap();
+            component.props.iter().find(|prop| prop.name == "value").unwrap().prop_type.clone()
+        };
+        assert_eq!(value("Text"), caliper_docgen_core::types::PropType::String);
+        assert_eq!(value("Count"), caliper_docgen_core::types::PropType::Number);
+        assert_eq!(value("Again"), caliper_docgen_core::types::PropType::String);
+    }
+
     /// A prop the converter keeps for later components is kept by what makes it, including which of its JSDoc was
     /// asked: a component whose structural pass already described `id` is not handed the description another asked for,
     /// and the one after it is not handed an empty one. The three are in one file, so they are answered in turn and the
