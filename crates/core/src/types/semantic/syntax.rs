@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::SemanticProp;
 use crate::extractor::written::{MAX_WRITTEN_MEMBERS, Owner, WrittenMember, WrittenUnions, written_unions};
@@ -69,14 +69,28 @@ impl SourceSyntax {
     /// type is a union. Files are read in parallel.
     pub(super) fn read<'a>(components: impl Iterator<Item = (&'a ComponentEntry, &'a [Arc<SemanticProp>])>) -> Self {
         let mut wanted: FxHashMap<Utf8PathBuf, Wanted> = FxHashMap::default();
+        // The checker's answer holds the same few thousand props under every component that inherits them, so a prop
+        // already seen, and a file already named, adds nothing: each is skipped without building a path. A file is
+        // still first inserted at its first sighting, so `wanted` iterates as it did when every prop inserted.
+        let mut seen_props: FxHashSet<usize> = FxHashSet::default();
+        let mut seen_files: FxHashSet<&str> = FxHashSet::default();
         for (entry, props) in components {
             wanted.entry(entry.file_path.clone()).or_default().defaults = true;
+            let mut own_file = false;
             for prop in props.iter().filter(|prop| matches!(prop.prop_type, PropType::Union(_))) {
-                let file = match &prop.parent {
-                    Some(parent) => Utf8PathBuf::from(&parent.file_name),
-                    None => entry.file_path.clone(),
-                };
-                wanted.entry(file).or_default().unions = true;
+                match &prop.parent {
+                    Some(parent) => {
+                        if seen_props.insert(Arc::as_ptr(prop) as usize) && seen_files.insert(parent.file_name.as_str())
+                        {
+                            wanted.entry(Utf8PathBuf::from(&parent.file_name)).or_default().unions = true;
+                        }
+                    }
+                    None if !own_file => {
+                        own_file = true;
+                        wanted.entry(entry.file_path.clone()).or_default().unions = true;
+                    }
+                    None => {}
+                }
             }
         }
         let read: Vec<(Utf8PathBuf, Result<FileSyntax, Option<Diagnostic>>)> = wanted
