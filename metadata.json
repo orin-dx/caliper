@@ -1,0 +1,67 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M79VQ6Z64ANVKYCPWF5F4ZNZ",
+  "strategy": "manual-commit",
+  "branch": "feat/delete-process-route",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    "README.md",
+    "crates/binding/src/lib.rs",
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/cli/tests/commands.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/locate.rs",
+    "crates/semantic/src/on_demand.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md",
+    "justfile",
+    "packages/napi/binding.d.ts",
+    "packages/storybook/README.md",
+    "packages/storybook/src/index.ts",
+    "packages/storybook/src/options.ts",
+    "packages/storybook/src/validate.ts",
+    "packages/storybook/tests/unit/validate.test.ts",
+    "scripts/check-packaging.mjs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 17201,
+    "cache_read_tokens": 2074531,
+    "output_tokens": 7457,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 420,
+      "cache_creation_tokens": 628890,
+      "cache_read_tokens": 71542851,
+      "output_tokens": 181890,
+      "api_call_count": 210
+    }
+  },
+  "redaction": {
+    "replacements": 34,
+    "layers": {
+      "betterleaks": 20,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

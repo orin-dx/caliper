@@ -1,0 +1,152 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M79VQ6Z64ANVKYCPWF5F4ZNZ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-13T07:07:44.925734Z",
+  "branch": "feat/delete-process-route",
+  "checkpoints_count": 3,
+  "save_step_count": 14,
+  "files_touched": [
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    "README.md",
+    "crates/binding/src/lib.rs",
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/cli/tests/commands.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/locate.rs",
+    "crates/semantic/src/on_demand.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md",
+    "justfile",
+    "packages/napi/binding.d.ts",
+    "packages/storybook/README.md",
+    "packages/storybook/src/index.ts",
+    "packages/storybook/src/options.ts",
+    "packages/storybook/src/validate.ts",
+    "packages/storybook/tests/unit/validate.test.ts",
+    "scripts/check-packaging.mjs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "ba5f9583cc1c",
+  "checkpoint_transcript_start": 26209,
+  "transcript_lines_at_start": 26209,
+  "compact_transcript_start": 2246,
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 17201,
+    "cache_read_tokens": 2074531,
+    "output_tokens": 7457,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 420,
+      "cache_creation_tokens": 628890,
+      "cache_read_tokens": 71542851,
+      "output_tokens": 181890,
+      "api_call_count": 210
+    }
+  },
+  "redaction": {
+    "replacements": 34,
+    "layers": {
+      "betterleaks": 20,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 585
+  },
+  "summary": {
+    "intent": "Wait for PR #440 and slice 4 to land, then launch the remaining performance and refactor work (findings F1-F15, IR/arena spike, Storybook upgrade) as parallel workers, while the assistant cleans up the umbrella trails.",
+    "outcome": "PR #440 was merged with main (signed merge commit c3baec49), pushed, and reported clean with all checks and gates passing. Three new workers started (core-merge dedupe F3/F4/F10, streaming rdt output F1/F15, read-only IR spike). The other workers are held until slice 4 and #440 merge, and the umbrella-trail cleanup is not yet done.",
+    "learnings": {
+      "repo": [
+        "Workers must prove byte-identical output with `cmp` (full-content diff), plus determinism and the construct lane. Timings come from one quiet A/B pass at the end because parallel load wrecks benchmarks.",
+        "Work is split by file ownership to avoid collisions: semantic files (`types/semantic.rs`, `types/semantic/syntax.rs`), `pipeline/rdt.rs`/`interned.rs`/`extract.rs`, and the checker seam (`rpc.rs`, `on_demand.rs`, `checker.rs`). F9/F11 touch `extract.rs` and wait until A, B and C merge.",
+        "The moon pre-commit hook runs cargo 1.98.1 through the mise shim, which rejects overriding the workspace default. Commit with `RUSTUP_TOOLCHAIN=1.99.1` and `~/.cargo/bin` first on PATH.",
+        "The mimalloc dev-dependency in `crates/semantic/Cargo.toml` is now `{ version = \"0.1\", default-features = false }`.",
+        "The checker now runs one queue per lane on one shared session. A panic on any lane marks the session ended and stops all lanes, and the last lane to leave closes the session. Storybook uses a single lane.",
+        "Snapshot-building requests (`createSnapshot`/`updateSnapshot`) take a session-wide write lock, and other requests share a read lock, so refused files are attributed to the right request. A refusal noted outside a snapshot build fails every request until the next build, which is conservative by design.",
+        "The arena memory read covers tsrs's whole process-wide address range, counting every lane and program. The memory bound applies only to the on-demand checker, and a whole-project `extract` has no bound.",
+        "The `just` recipes used for verification are `just lint doc-check machete typos`, `just deny`, `just semver`, and `just test-checker-lane` (includes the 10,000-deep type test in release)."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/on_demand.rs",
+          "finding": "Main now passes `start_checker(&request, 1)`. The branch keeps its `self.served = 0` reset after a restart."
+        },
+        {
+          "path": "crates/cli/src/commands/extract.rs",
+          "line": 76,
+          "end_line": 82,
+          "finding": "Lines 76 and 82 are the only `extract.rs` lines owned by the streaming-output worker (F1/F15). F9/F11 also edit this file later."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output, not user approval, so they carry no authority. The assistant verified PR #440 independently via `gh pr view` and the status checks.",
+        "Fix review findings by resuming the same worker rather than spawning new ones. Keep reports terse.",
+        "Hold dependent workers until the PRs they would collide with have merged, and branch them from main afterward."
+      ]
+    },
+    "friction": [
+      "Toolchain mismatch between the moon pre-commit hook (cargo 1.98.1 via the mise shim) and the workspace default forced a manual `RUSTUP_TOOLCHAIN` override to commit.",
+      "Merging main into #440 produced conflicts in `checker.rs`, `on_demand.rs` and `docs/type-checker-integration.md` because main's lanes work overlapped the branch's guards.",
+      "Parallel benchmarking is not possible because load distorts timings, so measurement is serialized at the end.",
+      "Unfinished first-answer and watch latency budgets (150 ms and 25 ms) fail on both main and the branch."
+    ],
+    "open_items": [
+      "Umbrella-trail cleanup is not done: rewrite #259 as the slice checklist and close the stub trails.",
+      "Held workers still to start after slice 4 and #440 merge: B (F5/F4/F6 one-shot tail), D (checker seam F2/F7/F13), and the Storybook live upgrade and wider prefetch.",
+      "F9/F11 pipeline overlap runs after A, B and C merge. The IR refactor happens only if the spike says GO.",
+      "Run the oracle once for real numbers, plus a single quiet-machine measurement pass at the end.",
+      "PR #440, PR #396 and the new branches need user approval and PR bodies/trail links once the workers report.",
+      "Not verified in #440: no input makes tsrs itself panic (panic tests use stand-in sessions), measurements are macOS only, and no live Storybook session was run.",
+      "The first-answer (150 ms) and watch (25 ms) latency budgets still fail on both main and the branch."
+    ]
+  }
+}
