@@ -60,6 +60,9 @@ const CHECKER_PROGRAMS: usize = 2;
 /// for a handful of components.
 const MIN_FILES_PER_PROGRAM: usize = 32;
 
+/// The file name an answer kept by [`resolve_cached`] has in the cache directory.
+pub const KEPT_ANSWER_FILE: &str = kept::FILE;
+
 /// A component the structural pass found.
 pub use caliper_docgen_core::types::semantic::SemanticTarget as Target;
 
@@ -159,30 +162,208 @@ pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
 /// that records its calls is answered as [`resolve`] answers it, and nothing is kept for it. The answer is the one
 /// [`resolve`] gives, and it is written before the call returns, whatever the request's [`Teardown`].
 pub fn resolve_cached(request: SemanticRequest, cache_dir: &Utf8Path) -> SemanticOutcome {
+    resolve_cached_early(request, cache_dir, None, None)
+}
+
+/// [`resolve_cached`] with what a run started before it had its request: the kept answer's validation
+/// ([`validate_kept_early`], which needs only the file; the request is compared here) and the checker's program
+/// ([`EarlyStart`], used only when it was opened over the root files this request has, with the options this request
+/// has, and dropped otherwise). Either is `None` for a run that started nothing.
+pub fn resolve_cached_early(
+    request: SemanticRequest,
+    cache_dir: &Utf8Path,
+    validated: Option<EarlyKept>,
+    early: Option<EarlyStart>,
+) -> SemanticOutcome {
     if request.record_to.is_some() {
+        discard(early);
         return resolve(request);
     }
     let file = cache_dir.join(kept::FILE);
     let key = kept::request_key(&request);
     let started = std::time::Instant::now();
-    if let Some(outcome) = kept::load(&file, key) {
+    let kept = match validated {
+        Some(early_kept) => early_kept.wait(),
+        None => kept::read(&file).and_then(kept::Read::validate),
+    };
+    if let Some(outcome) = kept.and_then(|kept| kept.outcome(key)) {
+        discard(early);
         tracing::debug!(ms = started.elapsed().as_millis() as u64, "the checker's kept answer still holds");
         return outcome;
     }
-    let reads = Arc::new(kept::Reads::default());
-    let outcome = resolve_noting(request, Some(reads.clone()));
+    let early = fitting(early, &request);
+    let reads = early.as_ref().and_then(|early| early.reads.clone()).unwrap_or_default();
+    let outcome = resolve_with(request, Some(reads.clone()), early);
     kept::save(&file, key, &reads, &outcome);
     outcome
 }
 
+/// [`resolve`] over the program an early start opened ([`start_early`]) when it was opened for this request, and as
+/// [`resolve`] does otherwise.
+pub fn resolve_early(request: SemanticRequest, early: Option<EarlyStart>) -> SemanticOutcome {
+    let early = fitting(early, &request);
+    resolve_with(request, None, early)
+}
+
+/// `early` when it [`fits`](EarlyStart::fits) `request`; otherwise it is stopped and there is none.
+fn fitting(early: Option<EarlyStart>, request: &SemanticRequest) -> Option<EarlyStart> {
+    match early {
+        Some(early) if early.fits(request) => Some(early),
+        other => {
+            discard(other);
+            None
+        }
+    }
+}
+
+/// The kept answer's file being read and its questions asked again on a thread of its own ([`validate_kept_early`]).
+pub struct EarlyKept(Option<std::thread::JoinHandle<Option<kept::Validated>>>);
+
+impl EarlyKept {
+    fn wait(self) -> Option<kept::Validated> {
+        self.0?.join().ok().flatten()
+    }
+}
+
+/// Reads the answer kept in `cache_dir` and asks the disk every question it recorded, on a thread of its own, so a run
+/// does it while its structural pass runs; [`resolve_cached_early`] takes the result and compares the request. Only
+/// the disk is asked, so nothing here depends on the structural pass; but the questions are asked now, not when the
+/// pass is done, so a file edited in between is not seen by them.
+pub fn validate_kept_early(cache_dir: &Utf8Path) -> EarlyKept {
+    let file = cache_dir.join(kept::FILE);
+    let spawned = std::thread::Builder::new()
+        .name("caliper-kept".into())
+        .spawn(move || kept::read(&file).and_then(kept::Read::validate));
+    EarlyKept(spawned.ok())
+}
+
+/// What an early start opened: the checker and the programs rooted at `roots`, or the outcome its failure gives.
+struct Opened {
+    runtime: tokio::runtime::Runtime,
+    checker: Backend,
+    programs: Result<Vec<Arc<Rpc>>, SemanticOutcome>,
+}
+
+/// The checker started, and its program opened, on a thread of its own before the structural pass is done: the
+/// program needs only the root files (the files of the exported components), the project root and the tsconfig. The run that has its
+/// request takes it with [`resolve_cached_early`] when the root files are the same, and drops it when they are not.
+pub struct EarlyStart {
+    handle: Option<std::thread::JoinHandle<Option<Opened>>>,
+    project_root: Utf8PathBuf,
+    tsconfig: Option<Utf8PathBuf>,
+    timeout: Duration,
+    roots: Vec<String>,
+    reads: Option<Arc<kept::Reads>>,
+}
+
+/// Starts the checker over a program rooted at `roots` (the files of the components that export something, in the
+/// order of the output) and opens it, on a thread of its own, for a run with `project_root`, `tsconfig` and
+/// `timeout`; `keep` has it note what it reads for the kept answer. `None` when there is nothing to ask about.
+pub fn start_early(
+    project_root: Utf8PathBuf,
+    tsconfig: Option<Utf8PathBuf>,
+    timeout: Duration,
+    roots: &[Utf8PathBuf],
+    keep: bool,
+) -> Option<EarlyStart> {
+    if roots.is_empty() {
+        return None;
+    }
+    let roots: Vec<String> = roots.iter().map(|file| file.to_string()).collect();
+    let reads = keep.then(|| Arc::new(kept::Reads::default()));
+    let (root, config, files, noting) = (project_root.clone(), tsconfig.clone(), roots.clone(), reads.clone());
+    let handle = std::thread::Builder::new()
+        .name("caliper-early".into())
+        .spawn(move || {
+            let threads = std::thread::available_parallelism().map_or(1, |count| count.get().min(CONVERTER_THREADS));
+            let runtime =
+                tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build().ok()?;
+            let programs = CHECKER_PROGRAMS.min(files.len().div_ceil(MIN_FILES_PER_PROGRAM)).max(1);
+            let checker = Backend::start_noting(&root, programs, noting).ok()?;
+            let tsconfig = config.as_ref().map(|path| path.as_str());
+            let count = checker.parallel_programs();
+            let opened =
+                runtime.block_on(Rpc::open_programs(checker.client(), timeout, tsconfig, &files, false, count));
+            let programs = opened
+                .map(|programs| programs.into_iter().map(Arc::new).collect())
+                .map_err(|error| SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")));
+            Some(Opened { runtime, checker, programs })
+        })
+        .ok();
+    Some(EarlyStart { handle, project_root, tsconfig, timeout, roots, reads })
+}
+
+impl EarlyStart {
+    /// Whether it was opened for this request: the same root files in the same order, and the same project root,
+    /// tsconfig and timeout.
+    fn fits(&self, request: &SemanticRequest) -> bool {
+        let roots = root_files(request);
+        let fits = self.handle.is_some()
+            && self.project_root == request.project_root
+            && self.tsconfig == request.tsconfig
+            && self.timeout == request.request_timeout
+            && self.roots == roots;
+        if !fits {
+            tracing::debug!(
+                same_root = self.project_root == request.project_root,
+                same_tsconfig = self.tsconfig == request.tsconfig,
+                same_timeout = self.timeout == request.request_timeout,
+                early_roots = self.roots.len(),
+                roots = roots.len(),
+                first_difference = ?self.roots.iter().zip(&roots).position(|(a, b)| a != b),
+                "the program opened early is not the request's; opening it again"
+            );
+        }
+        fits
+    }
+}
+
+/// Stops an early start nobody will use, without waiting for it.
+fn discard(early: Option<EarlyStart>) {
+    let Some(handle) = early.and_then(|early| early.handle) else { return };
+    std::thread::spawn(move || {
+        if let Ok(Some(opened)) = handle.join() {
+            opened.runtime.block_on(opened.checker.shutdown());
+        }
+    });
+}
+
 fn resolve_noting(request: SemanticRequest, reads: Option<Arc<kept::Reads>>) -> SemanticOutcome {
+    resolve_with(request, reads, None)
+}
+
+/// [`resolve_noting`], over the program an early start opened when there is one (it [`fits`](EarlyStart::fits)).
+fn resolve_with(
+    request: SemanticRequest,
+    reads: Option<Arc<kept::Reads>>,
+    early: Option<EarlyStart>,
+) -> SemanticOutcome {
+    let teardown = request.teardown;
+    if let Some(opened) = early.and_then(|early| early.handle).and_then(|handle| handle.join().ok().flatten()) {
+        let Opened { runtime, checker, programs } = opened;
+        let outcome = match programs {
+            Ok(programs) => runtime.block_on(async {
+                let files = root_files(&request);
+                let answered = answer_opened(programs, &request, &files, std::time::Instant::now()).await;
+                checker.shutdown().await;
+                answered
+            }),
+            Err(unavailable) => {
+                runtime.block_on(checker.shutdown());
+                unavailable
+            }
+        };
+        if teardown == Teardown::OneShot {
+            std::mem::forget(runtime);
+        }
+        return outcome;
+    }
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get().min(CONVERTER_THREADS));
     let built = tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build();
     let runtime = match built {
         Ok(runtime) => runtime,
         Err(error) => return SemanticOutcome::unavailable(format!("could not start an async runtime: {error}")),
     };
-    let teardown = request.teardown;
     let outcome = runtime.block_on(run_noting(request, None, reads));
     if teardown == Teardown::OneShot {
         // Dropping the runtime waits for its threads to wind down.
@@ -259,8 +440,22 @@ async fn answer_with(checker: &Backend, request: &SemanticRequest) -> SemanticOu
         Ok(programs) => programs.into_iter().map(Arc::new).collect(),
         Err(error) => return SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")),
     };
-    tracing::debug!(program_ms = started.elapsed().as_millis() as u64, programs = count, "semantic program built");
-    let answered = answer_on(&programs, request, &files).await;
+    answer_opened(programs, request, &files, started).await
+}
+
+/// Answers the request's targets over `programs`, opened for it at `started`, and releases them as its teardown says.
+async fn answer_opened(
+    programs: Vec<Arc<Rpc>>,
+    request: &SemanticRequest,
+    files: &[String],
+    started: std::time::Instant,
+) -> SemanticOutcome {
+    tracing::debug!(
+        program_ms = started.elapsed().as_millis() as u64,
+        programs = programs.len(),
+        "semantic program built"
+    );
+    let answered = answer_on(&programs, request, files).await;
     match request.teardown {
         Teardown::Session => {
             if let Some(first) = programs.first() {

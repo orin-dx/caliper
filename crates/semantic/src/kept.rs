@@ -285,22 +285,61 @@ pub(crate) fn request_key(request: &SemanticRequest) -> u128 {
 
 /// The answer kept at `file` for the request `key` names, when every question its checker asked of the disk has the
 /// same answer now; `None` otherwise, or when there is none, or it cannot be read.
+#[cfg(test)]
 pub(crate) fn load(file: &Utf8Path, key: u128) -> Option<SemanticOutcome> {
+    read(file)?.validate()?.outcome(key)
+}
+
+/// A kept answer as read from the file: its build is this one's, but nothing has been asked of the disk yet and the
+/// request it was made for is not compared. Neither needs the structural pass, so a run reads and validates the file
+/// while that pass runs ([`Read::validate`]) and compares the request once it has the request ([`Validated::outcome`]).
+pub(crate) struct Read {
+    bytes: Vec<u8>,
+    reads: Vec<(Question, u128)>,
+    at: usize,
+    request: u128,
+}
+
+/// A kept answer whose every question the disk answers as it did, when [`Read::validate`] asked them.
+pub(crate) struct Validated {
+    bytes: Vec<u8>,
+    at: usize,
+    request: u128,
+}
+
+/// The file's header and questions, when it was made by this build and can be read.
+pub(crate) fn read(file: &Utf8Path) -> Option<Read> {
     let size = std::fs::metadata(file).ok()?.len();
     if size > MAX_BYTES {
         return None;
     }
     let bytes = std::fs::read(file).ok()?;
     let mut decoder = rmp_serde::Deserializer::new(Cursor::new(bytes.as_slice()));
-    if Header::deserialize(&mut decoder).ok()? != Header::of(key) {
+    let header = Header::deserialize(&mut decoder).ok()?;
+    if header != Header::of(header.request) {
         return None;
     }
     let reads = Vec::<(Question, u128)>::deserialize(&mut decoder).ok()?;
     let at = usize::try_from(decoder.get_ref().position()).ok()?;
-    if !still_holds(&reads) {
-        return None;
+    Some(Read { bytes, reads, at, request: header.request })
+}
+
+impl Read {
+    /// Asks the disk every question again, now: the answer holds only if each is answered as it was, whatever the disk
+    /// said when the file was read.
+    pub(crate) fn validate(self) -> Option<Validated> {
+        still_holds(&self.reads).then_some(Validated { bytes: self.bytes, at: self.at, request: self.request })
     }
-    SemanticOutcome::from_bytes(bytes.get(at..)?).ok()
+}
+
+impl Validated {
+    /// The answer, when it was made for the request `key` names.
+    pub(crate) fn outcome(self, key: u128) -> Option<SemanticOutcome> {
+        if self.request != key {
+            return None;
+        }
+        SemanticOutcome::from_bytes(self.bytes.get(self.at..)?).ok()
+    }
 }
 
 /// Whether the disk answers every question as it did, asked on as many threads as the machine has.
@@ -434,6 +473,87 @@ mod tests {
         std::fs::write(root.join("tone.ts"), "export type Tone = 'calm' | 'loud';\n").unwrap();
 
         assert!(kept(&root, &cache).is_none());
+    }
+
+    /// The file is read and its questions are asked later (a run does both while the structural pass runs, then compares
+    /// the request): an edit between the two discards the answer, so what was read is never trusted for what the disk
+    /// said then.
+    #[test]
+    fn a_file_edited_between_reading_the_answer_and_validating_it_discards_it() {
+        let (_dir, root, cache) = project();
+        resolve_cached(request(&root), &cache);
+        let key = request_key(&request(&root));
+        let read = read(&cache.join(FILE)).expect("the answer was kept and is this build's");
+
+        std::fs::write(root.join("types.ts"), "export type Size = 'sm' | 'md' | 'lg';\n").unwrap();
+
+        assert!(read.validate().is_none());
+        assert!(load(&cache.join(FILE), key).is_none());
+    }
+
+    /// The request is compared after validation, against the one the structural pass made.
+    #[test]
+    fn a_validated_answer_is_given_only_for_the_request_it_was_made_for() {
+        let (_dir, root, cache) = project();
+        resolve_cached(request(&root), &cache);
+        let key = request_key(&request(&root));
+        let validated = || read(&cache.join(FILE)).and_then(Read::validate).expect("holds");
+
+        assert!(validated().outcome(key ^ 1).is_none());
+        assert_eq!(validated().outcome(key), Some(resolve(request(&root))));
+    }
+
+    /// The root files handed out while the structural pass runs are the ones the finished output gives, in the same
+    /// order: the program the early start opens is the one the run would open, files that share a component name
+    /// (suffixed with their file) and a file that exports nothing included.
+    #[test]
+    fn the_root_files_handed_out_early_are_those_the_finished_output_gives() {
+        let (_dir, root, _cache) = project();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/Button.tsx"), "export function Button(props: { x?: number }) { return null; }\n")
+            .unwrap();
+        std::fs::write(
+            root.join("Alpha.tsx"),
+            "function Hidden(props: { y: string }) { return null; }\nexport const A = 1;\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("Zed.tsx"), "export const Zed = (props: { z: string }) => null;\n").unwrap();
+        let options = PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() };
+        let mut early = None;
+
+        let output = caliper_docgen_core::pipeline::extract_with_early_roots(&options, |roots| early = Some(roots));
+
+        let mut request = SemanticRequest::new(root.clone(), targets_of(&output));
+        request.tsconfig = Some(root.join("tsconfig.json"));
+        let later: Vec<String> = crate::root_files(&request);
+        let early: Vec<String> = early.expect("handed out").iter().map(ToString::to_string).collect();
+        assert!(later.len() >= 4, "{later:?}");
+        assert_eq!(early, later);
+    }
+
+    /// A program opened early gives the answer a run that opens it itself gives, is kept the same way, and is left
+    /// unused (not failed on) when its root files are not the request's.
+    #[test]
+    fn an_early_start_gives_the_answer_a_run_gives_and_a_wrong_one_is_dropped() {
+        let (_dir, root, cache) = project();
+        let timeout = std::time::Duration::from_secs(60);
+        let roots: Vec<Utf8PathBuf> = root_files_of(&root);
+        let fresh = resolve(request(&root));
+
+        let early = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, true);
+        assert_eq!(crate::resolve_cached_early(request(&root), &cache, None, early), fresh);
+        assert!(kept(&root, &cache).is_some(), "the answer from an early start is kept");
+
+        std::fs::remove_file(cache.join(FILE)).unwrap();
+        let wrong = crate::start_early(root.clone(), None, timeout, &roots[..1], true);
+        assert_eq!(crate::resolve_cached_early(request(&root), &cache, None, wrong), fresh);
+        let validated = crate::validate_kept_early(&cache);
+        let again = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, true);
+        assert_eq!(crate::resolve_cached_early(request(&root), &cache, Some(validated), again), fresh);
+    }
+
+    fn root_files_of(root: &Utf8Path) -> Vec<Utf8PathBuf> {
+        crate::root_files(&request(root)).into_iter().map(Utf8PathBuf::from).collect()
     }
 
     #[test]

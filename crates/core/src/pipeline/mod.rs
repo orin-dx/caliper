@@ -181,6 +181,17 @@ pub fn extract(options: &PipelineOptions) -> ExtractionOutput {
     revision::Revision::cold_output(options)
 }
 
+/// [`extract`], handing `on_roots` the checker program's root files (the files of the components that export something,
+/// in the order the output lists them) as soon as the project is parsed and merged, while the rest of the pass is still
+/// to run. The list is a prediction: it is the one the finished output gives unless resolution drops a component, so
+/// work started on it must be checked against the output's own before it is used.
+pub fn extract_with_early_roots(
+    options: &PipelineOptions,
+    on_roots: impl FnOnce(Vec<Utf8PathBuf>),
+) -> ExtractionOutput {
+    revision::Revision::cold_output_early(options, Some(Box::new(on_roots)))
+}
+
 // ─── Helper functions ─────────────────────────────────────────────────────────
 
 /// Parse-or-load-from-cache a single `.d.ts` file and merge it into `global`,
