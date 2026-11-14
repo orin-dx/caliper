@@ -323,7 +323,8 @@ describe('replacing a structural answer, and the background prefetch', () => {
     const { provider, posted } = linked(fake)
     await provider({ entry: story('List') })
     await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'list' }]))
-    expect(fake.settles).toEqual([['List', 'ListItem']])
+    // The subcomponents are asked first, so a parent handed on cannot leave them out.
+    expect(fake.settles).toEqual([['ListItem', 'List']])
 
     // Asked again at the same revision, still structural (the checker's answer was refused): not said again.
     await provider({ entry: story('List') })
@@ -350,6 +351,40 @@ describe('replacing a structural answer, and the background prefetch', () => {
     expect(answeredFake.settles).toEqual([])
     expect(late.settles).toEqual([['Card']])
     expect([...answered.posted, ...unsettled.posted]).toEqual([])
+  })
+
+  it('asks for every declared subcomponent before a pending parent is handed on, so one refresh shows them all', async () => {
+    const fake = binding()
+    // The parent's structural answer is degraded (handed on) and pending; its subcomponent is pending too.
+    fake.output.diagnostics = [warning(['List']), awaiting('List'), awaiting('ListItem')]
+    const { provider, posted } = linked(fake)
+    expect(await provider({ entry: story('List') })).toEqual(NEXT)
+    await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'list' }]))
+    expect(fake.settles.map((keys) => keys.toSorted())).toEqual([['List', 'ListItem']])
+
+    // The checker has answered both: the refresh documents the parent and its subcomponent, and says nothing more.
+    fake.output.diagnostics = []
+    const refreshed = (await provider({ entry: story('List') })) as Record<string, any>
+    expect(Object.keys(refreshed.argTypes)).toEqual(['ordered'])
+    expect(Object.keys(refreshed.subcomponents.ListItem.argTypes)).toEqual(['bullet'])
+    await new Promise((done) => setTimeout(done, 10))
+    expect(posted).toHaveLength(1)
+  })
+
+  it('watches a component first found pending by the refresh, at the same revision', async () => {
+    const fake = binding()
+    fake.output.diagnostics = [awaiting('List')]
+    const { provider, posted } = linked(fake)
+    await provider({ entry: story('List') })
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    // The refresh finds ListItem pending for the first time (no watch had it): it is watched and said once.
+    fake.output.diagnostics = [awaiting('ListItem')]
+    await provider({ entry: story('List') })
+    await vi.waitFor(() => expect(posted).toHaveLength(2))
+    await provider({ entry: story('List') })
+    await new Promise((done) => setTimeout(done, 10))
+    expect(posted).toHaveLength(2)
+    expect(fake.settles).toEqual([['List'], ['ListItem']])
   })
 
   it('watches an eager session whose checker missed the wait, and says when it has answered', async () => {

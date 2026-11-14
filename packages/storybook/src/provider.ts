@@ -225,17 +225,19 @@ export function createDocgenProvider(
     const { csf, storyPath } = file
     // One look at the files for the story and its subcomponents: they are all answered from the same moment.
     await freshSession()
-    const { doc } = await component({ csf, storyPath, awaiting })
-    const { description, summary, jsDocTags } = extractComponentDescription(
-      extractDescription(csf._metaStatement, csf.editor) || undefined,
-      doc.description || undefined,
-      tagLists(doc.tags),
-    )
+    // The subcomponents first: a parent handed on throws, and every component the story names must be asked of the
+    // checker (and so watched) by this request, or the refresh that replaces it would ask some for the first time.
     const declared = extractDeclaredSubcomponents(csf)
     const subcomponents = Object.fromEntries(
       await Promise.all(
         declared.map(async (declaration) => [declaration.name, await subcomponent(file, declaration, awaiting)]),
       ),
+    )
+    const { doc } = await component({ csf, storyPath, awaiting })
+    const { description, summary, jsDocTags } = extractComponentDescription(
+      extractDescription(csf._metaStatement, csf.editor) || undefined,
+      doc.description || undefined,
+      tagLists(doc.tags),
     )
     return {
       id: getComponentIdFromEntry(entry),

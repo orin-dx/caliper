@@ -36,8 +36,8 @@ export class Background {
   private readonly link: Link<ToDevServer, ToProvider>
   /** The components being watched, with the revision of the answer each watch is for: the newest wins. */
   private readonly watching = new Map<string, number>()
-  /** The revision each component's structural answer was last said to be replaced at. */
-  private readonly replaced = new Map<string, number>()
+  /** The revision each component's structural answer was last said to be replaced at, and the keys said then. */
+  private readonly replaced = new Map<string, { revision: number; keys: Set<string> }>()
   private queue: IndexEntry[] = []
   private prefetching = false
 
@@ -59,8 +59,12 @@ export class Background {
     try {
       const session = await this.host.session()
       ;({ revision } = session)
+      // Said once per key and revision: a key a watch already said at this revision is not watched again, but one the
+      // refresh asked of the checker for the first time is.
+      const said = this.replaced.get(componentId)
+      const saidKeys = said?.revision === revision ? said.keys : new Set<string>()
       // One watch per component and revision: a newer answer's watch supersedes an older one, which then says nothing.
-      if (this.watching.get(componentId) === revision || this.replaced.get(componentId) === revision) {
+      if (this.watching.get(componentId) === revision || awaiting.every((key) => saidKeys.has(key))) {
         revision = undefined
         return
       }
@@ -68,7 +72,7 @@ export class Background {
       if (!(await session.checkerSettled(awaiting, CHECKER_WAIT_MS))) return
       // An edit since the answer drops the checker's answers; the watch of the answer that saw the edit says it.
       if (session.revision !== revision || this.watching.get(componentId) !== revision) return
-      this.replaced.set(componentId, revision)
+      this.replaced.set(componentId, { revision, keys: new Set([...saidKeys, ...awaiting]) })
       this.link.post({ type: 'answered', componentId })
     } catch (error) {
       logger.debug(`[caliper-docgen] ${componentId}: ${(error as Error).message}; the next request asks again`)
