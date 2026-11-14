@@ -1,0 +1,157 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M7DT35RH8V6BK55PZE89QH6D",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-14T19:56:19.103629Z",
+  "branch": "feat/fallback-off-rows",
+  "checkpoints_count": 8,
+  "save_step_count": 60,
+  "files_touched": [
+    "crates/cli/src/commands/extract.rs",
+    "crates/core/src/types/semantic.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "c130daa24479",
+  "checkpoint_transcript_start": 28890,
+  "transcript_lines_at_start": 28890,
+  "compact_transcript_start": 2438,
+  "token_usage": {
+    "input_tokens": 66,
+    "cache_creation_tokens": 46173,
+    "cache_read_tokens": 26388714,
+    "output_tokens": 18547,
+    "api_call_count": 30,
+    "subagent_tokens": {
+      "input_tokens": 92,
+      "cache_creation_tokens": 682297,
+      "cache_read_tokens": 12975799,
+      "output_tokens": 27275,
+      "api_call_count": 46
+    }
+  },
+  "redaction": {
+    "replacements": 38,
+    "layers": {
+      "betterleaks": 24,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 631
+  },
+  "summary": {
+    "intent": "Get all open PRs and Entire agent findings (per trail, not just per PR) in the caliper repo addressed and resolved, then keep the speed/fallback-removal work moving.",
+    "outcome": "Findings on #455, #458 and three rounds on #462 (nine total) were fixed by workers and resolved in Entire with commit and test citations. Main now contains #455, #458, #459, #461 and #463; only #462 and release PR #396 remain open, and a new S7 worker (feat/fallback-off-rows) was started.",
+    "learnings": {
+      "repo": [
+        "Entire findings live per trail, not per PR: use `entire trail finding list <trail#|--branch B> --repo gh/orin-dx/caliper --project gh/orin-dx --freshness any` and grep for IDs starting `01M`.",
+        "Findings are resolved with `entire trail finding resolve <id> --branch B --repo ... --project ... -m \"Fixed in <sha>: ... test ...\"`; Entire does not auto-clear them until it re-reviews, so resolve once the fix is verified in source.",
+        "PR bodies are published from files under ~/Projects/caliper-fixtures/pr/ via `gh pr edit N --body-file`.",
+        "The CLAUDE.md contract says tests should 'fail on base' for behavior changes; the proposed change is to word it by change type (bug fix, output-preserving, feature, concurrency).",
+        "Output-preserving perf work is validated by identity diffs against main, the construct lane against the real checker, and determinism gates across thread counts, not by red-green tests.",
+        "Storybook live-upgrade (#462) multi-client hazards: open component tracked per browser keyed by channel event sender id; DevServer instance keyed by channel (options.channel ?? options.presets); watches tracked by component and revision; eager sessions share the lazy answer/pending path."
+      ],
+      "code": [
+        {
+          "path": "packages/storybook/src/preset.ts",
+          "line": 94,
+          "end_line": 95,
+          "finding": "Server-wide single 'open' value let two browser tabs clobber each other; fixed in 30fb22ea with per-browser tracking."
+        },
+        {
+          "path": "packages/storybook/src/session.ts",
+          "line": 272,
+          "finding": "Eager (lazy:false) sessions returned early via docgenInfo() and dropped the checker-pending diagnostic, so no upgrade watch started; fixed to use the same pending path."
+        },
+        {
+          "path": "packages/storybook/src/preset.ts",
+          "line": 144,
+          "finding": "Empty neighbour list wasn't posted when navigating to the last component, leaving stale prefetch queue; fixed by posting the empty list."
+        },
+        {
+          "path": "packages/storybook/src/preset.ts",
+          "line": 158,
+          "end_line": 161,
+          "finding": "Storybook 11 applyPresets builds a fresh presets wrapper per hook, producing two DevServer instances; fixed by keying the shared instance by channel."
+        },
+        {
+          "path": "scripts/weekly.py",
+          "line": 322,
+          "end_line": 325,
+          "finding": "REFERENCE_VERSION needed bumping to 3 for the new pairing rule so version-2 records aren't treated as same reference."
+        },
+        {
+          "path": "crates/core/src/pipeline/discover.rs",
+          "line": 131,
+          "end_line": 136,
+          "finding": "Watcher rejected aliases to gitignored targets; is_source_file now accepts any path discovery reported."
+        }
+      ],
+      "workflow": [
+        "Passing CLI flags via a shell variable (R=\"--repo ... --project ...\") in zsh passes them as one argument, causing failures and bogus '0 findings' counts; pass flags explicitly.",
+        "Subagent hand-backs are not user authority; verify the pushed head, diff the source, and re-check CI before resolving findings.",
+        "A failed list command can look like zero findings; sanity-check counts against command output.",
+        "Save feedback to memory: resolve findings yourself once the fix is verified, citing commit and test."
+      ]
+    },
+    "friction": [
+      "Initially looked only at PR-attached findings when the user meant Entire agent findings on trails, requiring correction and a scan of 60 trails.",
+      "Shell-variable flag passing broke the first resolve/list attempt and produced misleading zero counts.",
+      "An earlier classifier block on resolving findings without explicit instruction delayed resolution.",
+      "#462 needed three rounds of findings, all in multi-client and timing edges of the live-upgrade mechanism."
+    ],
+    "open_items": [
+      "#462 (Storybook live-upgrade) and release PR #396 still await user approval/merge.",
+      "Live upgrade has never been run in a real `storybook dev` browser; multi-tab and timing paths are covered only by tests. napi nextest, `just semver` and a browser run were not re-run.",
+      "A closed tab's last component stays tracked since the channel doesn't signal closure (at most one extra request).",
+      "Next-stories queue is one per process (last opened tab wins); eager sessions now return checker props, a visible behavior change.",
+      "S7 slice feat/fallback-off-rows is running; follow-ups are resolver deletion (S7c-e), quiet-machine Storybook measurement, and the oracle run (user's cost call).",
+      "Proposed CLAUDE.md rewording of the fail-on-base rule by change type, and a permanent CI identity golden plus scoped mutation testing, awaiting user's go."
+    ]
+  }
+}
