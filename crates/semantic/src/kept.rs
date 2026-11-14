@@ -482,6 +482,37 @@ mod tests {
         assert_eq!(crate::resolve_cached_early(request(&root), &cache, wrong), fresh);
     }
 
+    /// An early start that did not note what it read cannot feed the kept answer: the answer saved after it would carry
+    /// no questions, and an edit to a file the checker read would not discard it.
+    #[test]
+    fn an_early_start_that_noted_no_reads_does_not_make_a_kept_answer_that_ignores_edits() {
+        let (_dir, root, cache) = project();
+        let timeout = std::time::Duration::from_secs(60);
+        let roots: Vec<Utf8PathBuf> = crate::root_files(&request(&root)).into_iter().map(Utf8PathBuf::from).collect();
+
+        let early = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, false);
+        crate::resolve_cached_early(request(&root), &cache, early);
+        std::fs::write(root.join("types.ts"), "export type Size = 'sm' | 'md' | 'lg';\n").unwrap();
+
+        assert!(kept(&root, &cache).is_none());
+    }
+
+    /// A request that records its calls gets its recording whatever was started early.
+    #[test]
+    fn a_request_that_records_is_recorded_though_a_program_was_opened_early() {
+        let (_dir, root, _cache) = project();
+        let timeout = std::time::Duration::from_secs(60);
+        let roots: Vec<Utf8PathBuf> = crate::root_files(&request(&root)).into_iter().map(Utf8PathBuf::from).collect();
+        let recording = root.parent().unwrap().join("recording.json");
+        let mut recorded = request(&root);
+        recorded.record_to = Some(recording.clone());
+
+        let early = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, false);
+        crate::resolve_early(recorded, early);
+
+        assert!(recording.exists());
+    }
+
     #[test]
     fn a_change_to_the_compiler_options_discards_the_answer() {
         let (_dir, root, cache) = project();

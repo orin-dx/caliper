@@ -184,7 +184,9 @@ pub fn resolve_cached_early(
         tracing::debug!(ms = started.elapsed().as_millis() as u64, "the checker's kept answer still holds");
         return outcome;
     }
-    let early = fitting(early, &request);
+    // The answer saved below carries what the run read: a program that did not note its reads cannot be used.
+    let noted = early.as_ref().is_some_and(|early| early.reads.is_some());
+    let early = fitting(early, &request, noted);
     let reads = early.as_ref().and_then(|early| early.reads.clone()).unwrap_or_default();
     let outcome = resolve_with(request, Some(reads.clone()), early);
     kept::save(&file, key, &reads, &outcome);
@@ -194,14 +196,15 @@ pub fn resolve_cached_early(
 /// [`resolve`] over the program an early start opened ([`start_early`]) when it was opened for this request, and as
 /// [`resolve`] does otherwise.
 pub fn resolve_early(request: SemanticRequest, early: Option<EarlyStart>) -> SemanticOutcome {
-    let early = fitting(early, &request);
+    // Early programs are opened without a recording.
+    let early = fitting(early, &request, request.record_to.is_none());
     resolve_with(request, None, early)
 }
 
-/// `early` when it [`fits`](EarlyStart::fits) `request`; otherwise it is stopped and there is none.
-fn fitting(early: Option<EarlyStart>, request: &SemanticRequest) -> Option<EarlyStart> {
+/// `early` when `usable` and it [`fits`](EarlyStart::fits) `request`; otherwise it is stopped and there is none.
+fn fitting(early: Option<EarlyStart>, request: &SemanticRequest, usable: bool) -> Option<EarlyStart> {
     match early {
-        Some(early) if early.fits(request) => Some(early),
+        Some(early) if usable && early.fits(request) => Some(early),
         other => {
             discard(other);
             None
