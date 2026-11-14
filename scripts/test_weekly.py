@@ -69,6 +69,7 @@ FILES = {
     'src/col/index.tsx': "// import directly from the old path.\nimport { Col } from '../grid';\n\nexport default Col;\n",
     'src/qr/index.tsx': "export { default } from './qr-code';\n",
     'src/qr/qr-code.tsx': "export default function QRCode() {}\n",
+    'src/card/Card.tsx': "const CardRoot = () => null;\nexport { CardRoot as Card };\n",
     'src/other/index.tsx': "import X from 'some-package';\nexport default X;\n",
 }
 
@@ -124,6 +125,13 @@ class Pairing(unittest.TestCase):
         self.assertEqual((stats['rdt_with_props'], stats['excluded'], stats['reference']),
                          (3, {'hook': 1, 'lib_members': 1}, 1))
         self.assertEqual([i['keys'] for i in items], [[('src/grid/col.tsx', 'col')]])
+
+    def test_aliased_export_pairs_under_its_export_name(self):
+        # Caliper names `export { CardRoot as Card }` by `Card`, RDT by the declaration `CardRoot`.
+        found = {('src/card/Card.tsx', 'card'): {'span'}}
+        items, stats = weekly.reference([self.entry('CardRoot', 'src/card/Card.tsx')], found, self.root)
+        self.assertEqual(stats['paired'], {'export_alias': 1})
+        self.assertEqual(items[0]['keys'], [('src/card/Card.tsx', 'cardroot'), ('src/card/Card.tsx', 'card')])
 
     def test_declaring_file_pairs_when_no_export_chain_does(self):
         found = {('src/grid/col.tsx', 'dropdown'): {'span'}}
