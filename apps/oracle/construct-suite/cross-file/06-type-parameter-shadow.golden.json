@@ -1,0 +1,66 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "lit",
+        "value": "lg",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "md",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "param",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "sm",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"param\" | Size",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "cross-file/06-type-parameter-shadow.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "param",
+        "of": "string"
+      },
+      {
+        "k": "union",
+        "members": [
+          {
+            "k": "lit",
+            "value": "lg",
+            "of": "string"
+          },
+          {
+            "k": "lit",
+            "value": "md",
+            "of": "string"
+          },
+          {
+            "k": "lit",
+            "value": "sm",
+            "of": "string"
+          }
+        ],
+        "alias": "Size"
+      }
+    ]
+  }
+}

@@ -195,6 +195,10 @@ export interface Expectation {
   /** checker-expectations.json only: why the checker path's answer is accepted although its verdict ranks below the
    * structural path's for the same row (see `againstStructural` in src/construct-checker-run.ts). */
   improvement?: string
+  /** checker-expectations.json only: the row's answer still leans on the structural fallback (ADR 0026, S7b), and why,
+   * as `fallbackCause` in src/construct-checker-run.ts states it. The list is the S7c to S7e worklist: the lane fails on
+   * a row that leans on the fallback unlisted, or is listed and no longer does. */
+  fallback?: string
 }
 
 /** Problems with the expectations against the fixtures; empty when they agree. */
@@ -220,6 +224,9 @@ export function expectationProblems(ids: string[], rows: Record<string, Expectat
     }
     if (!anyGreen && (typeof row.gap !== 'string' || row.gap.trim() === '')) {
       problems.push(`${id}: a row that is not identical or spelled is a documented gap and needs a "gap" reason`)
+    }
+    if (row.fallback !== undefined && (typeof row.fallback !== 'string' || row.fallback.trim() === '')) {
+      problems.push(`${id}: "fallback" names the cause the lane reports`)
     }
     for (const [fact, reason] of Object.entries(row.facts ?? {})) {
       if (!FACTS.includes(fact as FactName)) problems.push(`${id}: unknown fact ${fact}`)

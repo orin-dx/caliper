@@ -13,7 +13,7 @@ construct-suite/
   <family>/<NN>-<slug>.<Component>.golden.json   the golden of each component of a fixture that lists several
 ```
 
-A row id is `<family>/<NN>-<slug>`, or `<family>/<NN>-<slug>#<Component>` for a component of a fixture that lists several. The harness is `../src/construct-suite.ts` (pure helpers), `../src/construct-capture.ts` (the capture script) and `../tests/construct-suite.test.ts`. `seed/` holds the three rows that prove the harness. The other families are `literals`, `objects`, `tuples-arrays`, `utility-mapped`, `generics`, `react` and `exports`.
+A row id is `<family>/<NN>-<slug>`, or `<family>/<NN>-<slug>#<Component>` for a component of a fixture that lists several. The harness is `../src/construct-suite.ts` (pure helpers), `../src/construct-capture.ts` (the capture script) and `../tests/construct-suite.test.ts`. `seed/` holds the three rows that prove the harness. The other families are `literals`, `objects`, `tuples-arrays`, `utility-mapped`, `generics`, `react`, `exports`, `components` (a component made by a call: `forwardRef`, `memo`, a factory, a lowercase helper; a `default`-keyed export list; lib-typed function props; props from a hook's return type) and `cross-file` (a type imported from another file, through a renaming re-export, inherited across files, and names shadowed by a local declaration or a type parameter). A `.ts` file in a family is not a row: `cross-file/shared.ts` and `cross-file/barrel.ts` hold what its rows import.
 
 A fixture declares one `interface Props` with one prop `p`, and exports a component `Row` that takes it:
 
@@ -135,6 +135,17 @@ just test-checker-lane   # CI job "Test / Checker lane"
 
 The recipe builds the release binary, then runs `construct:check`, `construct:parity`, the lane (`construct:checker`) and `tests/construct-checker-lane.test.ts` with `REQUIRE_CALIPER_BIN=1`, so a missing binary fails instead of skipping. Regenerate an entry by running `CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker` and reading the report.
 
+### Fallback off (ADR 0026, S7b)
+
+S7 deletes the structural resolver for what this suite covers, and its gate is that every row passes with the structural fallback off. The lane's last section is that column: each row passes with the fallback off (the checker and oxc's syntax alone gave its prop) or leans on it, with the cause, read from what the merge reports (`fallbackCause` in `../src/construct-checker-run.ts`):
+
+- `kept structural result: <reason>`: the checker did not answer for the component, so it kept its structural result whole (the lane fails such a row anyway).
+- `kept structural type: <kinds>`: the checker's type for `p` held an unread part (`opaque`, these `degradedBy` kinds) where the structural type held none, so the merge kept the structural type and marked it.
+
+A default and a union's member order are already off (`--no-resolver-facts`). A description or tags the structural pass supplies where the checker has none would show as a `description` or `tags` fact difference, since the goldens are the checker's.
+
+A row that leans on the fallback carries the cause as `"fallback"` in `checker-expectations.json`. The lane fails when a row leans on it unlisted or with another cause, and when a listed row no longer does (remove the entry). The listed rows are the worklist of S7c to S7e; the gate holds when none is left.
+
 ADR 0026's S4 gate is that the checker path equals the structural path except listed improvements. The lane and `tests/construct-checker-lane.test.ts` (which needs no binary, so it runs with the package tests) hold the two files to it: a row whose checker verdicts rank below its `expectations.json` verdicts fails unless its `checker-expectations.json` entry gives an `"improvement"` reason, the case where the comparison scores the checker's answer lower although it states more (no row needs one today: `react/34` did until the comparator read `Omit<HTMLAttributes<…>>` as one family). An `"improvement"` on a row that does not rank below the structural path fails too, so the list stays honest. Rows the checker ranks above the structural path are improvements already explained by the structural `gap`. A member keyed by a symbol (`[tag]`) is read by `src/caliper-norm.ts` as the checker side states it.
 
 ## Not covered
@@ -144,13 +155,13 @@ Constructs the fixture format (one self-contained file, one prop `p`, no runtime
 - `declare const enum`: ambient const enums error under `isolatedModules` (TS2748); a local `const enum` is `literals/19`.
 - Computed enum members (`E.A = 1 << 2`): left out to stay on common spellings.
 - Computed property names from a runtime `const` or enum: needs runtime code; only literal keys and `declare const` unique-symbol keys are covered (`literals/24`, `objects/23`).
-- Cross-file declaration merging and module augmentation: a fixture has no imports beyond React types; same-file merging is `objects/30`.
+- Cross-file declaration merging and module augmentation: same-file merging is `objects/30`; the `cross-file` rows import types, but merge none.
+- A package under `node_modules`: the suite holds no fake package (a `node_modules` directory is ignored by git); `@types/react` is the only package a row reads.
 - DOM-typed `this` parameters: a plain object `this` type is used (`objects/18`, `generics/18`).
 - `as const` value-derived tuples: needs runtime code; `declare const` with `typeof` covers it (`tuples-arrays/32`, `utility-mapped/22`).
 - `ReactNode[]`: belongs to the React family's scope, not arrays.
 - Generic components instantiated by an alias at JSX level: covered at type level by `generics/13` and `generics/16`.
 - The global `JSX.Element` (removed in @types/react 19; `react/05` uses `React.JSX.Element`), `ReactChild`, `ReactChildren` and `LegacyRef` (removed or unstable across @types/react versions).
-- `forwardRef` / `memo` calls wrapping the component: a fixture exports a plain `Row`; only the resulting exotic types are covered (`react/31`, `react/32`).
 
 Fixtures that emit runtime code regardless: the enum fixtures (`literals/17` to `literals/23`) and the two shadowing fixtures (`generics/24`, `generics/25`), which need a local in the function body.
 

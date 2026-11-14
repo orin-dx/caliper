@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest'
 import {
   againstStructural,
   checkerExpectations,
+  fallbackCause,
+  fallbackFailure,
+  fallbackWorklist,
   laneFailures,
   runCheckerLane,
   structuralExpectations,
@@ -30,6 +33,50 @@ const row = (id: string, verdict: LaneRun['rows'][number]['verdict'], answered =
   degradedBy: undefined,
   golden: '',
   facts: [],
+  fallback: null,
+})
+
+describe('the fallback-off column (ADR 0026 S7b)', () => {
+  const plain = { type: { kind: 'stringLiteral', value: 'a' } }
+  it('says why a row leans on the structural fallback, and nothing for one the checker alone answered', () => {
+    expect.hasAssertions()
+    expect(fallbackCause({ answered: true, unreadComponent: false, prop: plain })).toBeNull()
+    expect(fallbackCause({ answered: false, keptReason: 'over the request budget', unreadComponent: false })).toBe(
+      'kept structural result: over the request budget',
+    )
+    expect(fallbackCause({ answered: false, unreadComponent: false })).toBe('kept structural result: not asked')
+    // A kept structural type: no opaque part, the checker's kinds in degradedBy.
+    const kept = { ...plain, degradedBy: ['indexedAccess', 'truncated'] }
+    expect(fallbackCause({ answered: true, unreadComponent: true, prop: kept })).toBe(
+      'kept structural type: indexedAccess',
+    )
+    // The checker's own opaque answer, or a cut one, is the checker's.
+    const opaque = { type: { kind: 'opaque', raw: 'T[K]' }, degradedBy: ['indexedAccess'] }
+    expect(fallbackCause({ answered: true, unreadComponent: true, prop: opaque })).toBeNull()
+    const cut = { ...plain, degradedBy: ['truncated'] }
+    expect(fallbackCause({ answered: true, unreadComponent: true, prop: cut })).toBeNull()
+  })
+
+  it('fails a row whose dependence on the fallback is unlisted, listed wrongly, or listed and gone', () => {
+    expect.hasAssertions()
+    const green = { verdicts: ['identical', 'spelled'] } satisfies Parameters<typeof fallbackFailure>[2]
+    const listed = { ...green, fallback: 'kept structural type: indexedAccess' }
+    expect(fallbackFailure('a/01', null, green)).toBeNull()
+    expect(fallbackFailure('a/01', 'kept structural type: indexedAccess', listed)).toBeNull()
+    expect(fallbackFailure('a/01', 'kept structural type: indexedAccess', green)).toContain('says nothing')
+    expect(fallbackFailure('a/01', 'kept structural result: not asked', listed)).toContain('leans on the structural')
+    expect(fallbackFailure('a/01', null, listed)).toContain('remove its "fallback" entry')
+  })
+
+  it('groups the rows that lean on the fallback by cause', () => {
+    expect.hasAssertions()
+    const rows = [
+      { ...row('a/01', 'identical'), fallback: 'kept structural type: indexedAccess' },
+      row('a/02', 'identical'),
+      { ...row('a/03', 'identical'), fallback: 'kept structural type: indexedAccess' },
+    ]
+    expect([...fallbackWorklist(rows)]).toStrictEqual([['kept structural type: indexedAccess', ['a/01', 'a/03']]])
+  })
 })
 
 describe('the checker lane expectations', () => {

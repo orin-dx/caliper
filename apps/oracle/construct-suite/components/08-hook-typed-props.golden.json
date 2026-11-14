@@ -1,0 +1,26 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "lit",
+        "value": "hooked",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "idle",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"hooked\" | \"idle\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": null,
+    "order": null
+  }
+}
