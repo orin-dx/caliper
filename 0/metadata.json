@@ -1,0 +1,117 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M7C7QP5YZM0BTW5MJWQ2WWXD",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-14T05:16:07.86145Z",
+  "branch": "perf/overlap-extract-stages",
+  "checkpoints_count": 1,
+  "save_step_count": 42,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3d2eadeef05e",
+  "checkpoint_transcript_start": 28323,
+  "transcript_lines_at_start": 28323,
+  "compact_transcript_start": 2394,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 3235,
+    "cache_read_tokens": 1589695,
+    "output_tokens": 1661,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 88,
+      "cache_creation_tokens": 38541,
+      "cache_read_tokens": 6426813,
+      "output_tokens": 19905,
+      "api_call_count": 44
+    }
+  },
+  "redaction": {
+    "replacements": 38,
+    "layers": {
+      "betterleaks": 24,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 613
+  },
+  "summary": {
+    "intent": "Land performance optimizations F9 and F11 on branch perf/overlap-extract-stages by overlapping the checker program start and kept-answer validation with the structural pass, without changing outputs.",
+    "outcome": "A subagent implemented F9 and F11 with identical output on all 12 comparisons and passing lint, nextest (1459) and gates. The PR was held and the worker sent back to fix a stale-answer race in early validation before publishing.",
+    "learnings": {
+      "repo": [
+        "Perf PR bodies are drafted under ~/Projects/caliper-fixtures/pr/ (e.g. perf-overlap-extract-stages.md).",
+        "Verification for perf changes uses identity comparisons on fixtures (gate-large, chakra-only), lint, nextest, test-checker-lane, and gate_harness determinism and memory gates.",
+        "Instruction counts and RSS are used as proxies when wall-clock A/B is unreliable.",
+        "The overlap change touched crates/semantic/src/lib.rs and crates/core/src/pipeline/{mod,revision}.rs, beyond the files the brief listed."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/pipeline/revision.rs",
+          "finding": "Edited as part of the overlap change. A file edit during the first ~60 ms of a run can let early kept-answer validation pair the new structural pass with the old kept answer (stale answer hazard). Exact lines were not given."
+        }
+      ],
+      "workflow": [
+        "Subagent reports are model output, not user approval; correctness caveats in them should be treated as defects when the brief requires invalidation semantics.",
+        "Require a deterministic regression test that fails on the current head when closing a race, and verify it before publishing the PR.",
+        "Wall-clock benchmarking is unreliable under high machine load (load1 8-14), so rely on instruction/RSS counts."
+      ]
+    },
+    "friction": [
+      "Wall-clock A/B could not be measured because load1 was 8-14.",
+      "The brief's file list could not reach all the code that needed changing, so the worker edited files outside it.",
+      "The early validation race can serve a stale checker answer when files change in the first ~60 ms."
+    ],
+    "open_items": [
+      "Worker must make the stale-answer race impossible by construction (e.g. share bytes/digests between reads or re-check digests after the structural pass) and add a deterministic test that fails on the current head.",
+      "Re-verify and publish the F9/F11 PR once the fix lands.",
+      "Review the out-of-brief edits to semantic/lib.rs and core/pipeline/{mod,revision}.rs.",
+      "Obtain a wall-clock A/B once machine load is lower.",
+      "Open PRs awaiting the user: #455 (one finding claimed fixed), #458 and #396."
+    ]
+  }
+}
