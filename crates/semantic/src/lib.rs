@@ -162,17 +162,14 @@ pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
 /// that records its calls is answered as [`resolve`] answers it, and nothing is kept for it. The answer is the one
 /// [`resolve`] gives, and it is written before the call returns, whatever the request's [`Teardown`].
 pub fn resolve_cached(request: SemanticRequest, cache_dir: &Utf8Path) -> SemanticOutcome {
-    resolve_cached_early(request, cache_dir, None, None)
+    resolve_cached_early(request, cache_dir, None)
 }
 
-/// [`resolve_cached`] with what a run started before it had its request: the kept answer's validation
-/// ([`validate_kept_early`], which needs only the file; the request is compared here) and the checker's program
-/// ([`EarlyStart`], used only when it was opened over the root files this request has, with the options this request
-/// has, and dropped otherwise). Either is `None` for a run that started nothing.
+/// [`resolve_cached`] over the checker's program when `early` ([`start_early`]) was opened for this request (over the
+/// root files this request has, with its options); it is dropped otherwise, and when the kept answer is used.
 pub fn resolve_cached_early(
     request: SemanticRequest,
     cache_dir: &Utf8Path,
-    validated: Option<EarlyKept>,
     early: Option<EarlyStart>,
 ) -> SemanticOutcome {
     if request.record_to.is_some() {
@@ -182,11 +179,7 @@ pub fn resolve_cached_early(
     let file = cache_dir.join(kept::FILE);
     let key = kept::request_key(&request);
     let started = std::time::Instant::now();
-    let kept = match validated {
-        Some(early_kept) => early_kept.wait(),
-        None => kept::read(&file).and_then(kept::Read::validate),
-    };
-    if let Some(outcome) = kept.and_then(|kept| kept.outcome(key)) {
+    if let Some(outcome) = kept::load(&file, key) {
         discard(early);
         tracing::debug!(ms = started.elapsed().as_millis() as u64, "the checker's kept answer still holds");
         return outcome;
@@ -214,27 +207,6 @@ fn fitting(early: Option<EarlyStart>, request: &SemanticRequest) -> Option<Early
             None
         }
     }
-}
-
-/// The kept answer's file being read and its questions asked again on a thread of its own ([`validate_kept_early`]).
-pub struct EarlyKept(Option<std::thread::JoinHandle<Option<kept::Validated>>>);
-
-impl EarlyKept {
-    fn wait(self) -> Option<kept::Validated> {
-        self.0?.join().ok().flatten()
-    }
-}
-
-/// Reads the answer kept in `cache_dir` and asks the disk every question it recorded, on a thread of its own, so a run
-/// does it while its structural pass runs; [`resolve_cached_early`] takes the result and compares the request. Only
-/// the disk is asked, so nothing here depends on the structural pass; but the questions are asked now, not when the
-/// pass is done, so a file edited in between is not seen by them.
-pub fn validate_kept_early(cache_dir: &Utf8Path) -> EarlyKept {
-    let file = cache_dir.join(kept::FILE);
-    let spawned = std::thread::Builder::new()
-        .name("caliper-kept".into())
-        .spawn(move || kept::read(&file).and_then(kept::Read::validate));
-    EarlyKept(spawned.ok())
 }
 
 /// What an early start opened: the checker and the programs rooted at `roots`, or the outcome its failure gives.

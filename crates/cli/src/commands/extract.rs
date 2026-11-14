@@ -49,7 +49,6 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         // What the checker's run needs that the structural pass does not decide starts now, beside the pass.
         true => {
             let cache_dir = options.effective_cache_dir();
-            started.kept = options.use_cache.then(|| caliper_docgen_semantic::validate_kept_early(&cache_dir));
             // With an answer kept the checker is most likely not needed, and a program opened for nothing takes the
             // structural pass's cores; so only a run with none kept (or a run with the cache off) opens it early.
             let open_early =
@@ -128,8 +127,6 @@ enum Pass {
 /// What `extract` started while the structural pass ran.
 #[derive(Default)]
 struct Prestarted {
-    /// The kept answer, read and asked of the disk again.
-    kept: Option<caliper_docgen_semantic::EarlyKept>,
     /// The checker's program, opened over the root files the structural pass predicted.
     early: Option<caliper_docgen_semantic::EarlyStart>,
 }
@@ -183,12 +180,9 @@ fn apply_semantic_backend(
     };
     let request = request.with_teardown(teardown);
     let outcome = match started {
-        Some(started) if options.use_cache => caliper_docgen_semantic::resolve_cached_early(
-            request,
-            &options.effective_cache_dir(),
-            started.kept,
-            started.early,
-        ),
+        Some(started) if options.use_cache => {
+            caliper_docgen_semantic::resolve_cached_early(request, &options.effective_cache_dir(), started.early)
+        }
         Some(started) => caliper_docgen_semantic::resolve_early(request, started.early),
         None => caliper_docgen_semantic::resolve(request),
     };

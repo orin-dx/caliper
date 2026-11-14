@@ -285,101 +285,34 @@ pub(crate) fn request_key(request: &SemanticRequest) -> u128 {
 
 /// The answer kept at `file` for the request `key` names, when every question its checker asked of the disk has the
 /// same answer now; `None` otherwise, or when there is none, or it cannot be read.
-#[cfg(test)]
 pub(crate) fn load(file: &Utf8Path, key: u128) -> Option<SemanticOutcome> {
-    read(file)?.validate()?.outcome(key)
-}
-
-/// A kept answer as read from the file: its build is this one's, but nothing has been asked of the disk yet and the
-/// request it was made for is not compared. Neither needs the structural pass, so a run reads and validates the file
-/// while that pass runs ([`Read::validate`]) and compares the request once it has the request ([`Validated::outcome`]).
-pub(crate) struct Read {
-    bytes: Vec<u8>,
-    reads: Vec<(Question, u128)>,
-    at: usize,
-    request: u128,
-}
-
-/// A kept answer whose every question the disk answers as it did, when [`Read::validate`] asked them.
-pub(crate) struct Validated {
-    bytes: Vec<u8>,
-    at: usize,
-    request: u128,
-    reads: Vec<(Question, u128)>,
-    /// When the questions began to be asked: a file whose text changed after this has a modification time after it.
-    asked_at: SystemTime,
-}
-
-/// How far before the questions began a modification time may be and still count as a change since: file systems
-/// record times coarsely.
-const MTIME_SLACK: std::time::Duration = std::time::Duration::from_secs(2);
-
-/// The file's header and questions, when it was made by this build and can be read.
-pub(crate) fn read(file: &Utf8Path) -> Option<Read> {
     let size = std::fs::metadata(file).ok()?.len();
     if size > MAX_BYTES {
         return None;
     }
     let bytes = std::fs::read(file).ok()?;
     let mut decoder = rmp_serde::Deserializer::new(Cursor::new(bytes.as_slice()));
-    let header = Header::deserialize(&mut decoder).ok()?;
-    if header != Header::of(header.request) {
+    if Header::deserialize(&mut decoder).ok()? != Header::of(key) {
         return None;
     }
     let reads = Vec::<(Question, u128)>::deserialize(&mut decoder).ok()?;
     let at = usize::try_from(decoder.get_ref().position()).ok()?;
-    Some(Read { bytes, reads, at, request: header.request })
-}
-
-impl Read {
-    /// Asks the disk every question again, now: the answer holds only if each is answered as it was, whatever the disk
-    /// said when the file was read.
-    pub(crate) fn validate(self) -> Option<Validated> {
-        let asked_at = SystemTime::now();
-        let holds = still_holds(&self.reads, |(question, answer)| question.answer(osvfs::fs()) == *answer);
-        holds.then_some(Validated {
-            bytes: self.bytes,
-            at: self.at,
-            request: self.request,
-            reads: self.reads,
-            asked_at,
-        })
+    if !still_holds(&reads) {
+        return None;
     }
-}
-
-impl Validated {
-    /// The answer, when it was made for the request `key` names and the disk still answers as it did when the questions
-    /// were asked. They were asked while the structural pass ran, which may have read a file after an edit that they
-    /// did not see, so what an edit since could have changed is asked again here: every question but a file's text is
-    /// asked again whole (a file or directory that appeared, a listing, a stat), and a file's text only when the file's
-    /// modification time is not older than the questions were (an edit stamps it with the time of the edit).
-    pub(crate) fn outcome(self, key: u128) -> Option<SemanticOutcome> {
-        if self.request != key {
-            return None;
-        }
-        let fs = osvfs::fs();
-        let since = self.asked_at.checked_sub(MTIME_SLACK).unwrap_or(SystemTime::UNIX_EPOCH);
-        let unchanged = still_holds(&self.reads, |(question, answer)| match question {
-            Question::ReadFile(path) => match fs.stat(path).and_then(|info| info.mod_time) {
-                Some(modified) if modified < since => true,
-                _ => question.answer(fs) == *answer,
-            },
-            _ => question.answer(fs) == *answer,
-        });
-        if !unchanged {
-            return None;
-        }
-        SemanticOutcome::from_bytes(self.bytes.get(self.at..)?).ok()
-    }
+    SemanticOutcome::from_bytes(bytes.get(at..)?).ok()
 }
 
 /// Whether the disk answers every question as it did, asked on as many threads as the machine has.
-fn still_holds(reads: &[(Question, u128)], holds: impl Fn(&(Question, u128)) -> bool + Sync) -> bool {
-    let holds = &holds;
+fn still_holds(reads: &[(Question, u128)]) -> bool {
+    let fs = osvfs::fs();
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get()).min(16);
     let chunk = reads.len().div_ceil(threads).max(1);
     std::thread::scope(|scope| {
-        let checks: Vec<_> = reads.chunks(chunk).map(|part| scope.spawn(move || part.iter().all(holds))).collect();
+        let checks: Vec<_> = reads
+            .chunks(chunk)
+            .map(|part| scope.spawn(move || part.iter().all(|(question, answer)| question.answer(fs) == *answer)))
+            .collect();
         checks.into_iter().all(|check| check.join().unwrap_or(false))
     })
 }
@@ -503,54 +436,6 @@ mod tests {
         assert!(kept(&root, &cache).is_none());
     }
 
-    /// The file is read and its questions are asked later (a run does both while the structural pass runs, then compares
-    /// the request): an edit between the two discards the answer, so what was read is never trusted for what the disk
-    /// said then.
-    #[test]
-    fn a_file_edited_between_reading_the_answer_and_validating_it_discards_it() {
-        let (_dir, root, cache) = project();
-        resolve_cached(request(&root), &cache);
-        let key = request_key(&request(&root));
-        let read = read(&cache.join(FILE)).expect("the answer was kept and is this build's");
-
-        std::fs::write(root.join("types.ts"), "export type Size = 'sm' | 'md' | 'lg';\n").unwrap();
-
-        assert!(read.validate().is_none());
-        assert!(load(&cache.join(FILE), key).is_none());
-    }
-
-    /// The questions are asked while the structural pass runs, so a file edited after they were asked and before the
-    /// pass read it must still discard the answer: the structural pass would describe the new text and the answer the
-    /// old. The run asks again what could have changed since, once the pass is done and its request is known.
-    #[test]
-    fn a_file_edited_after_the_early_validation_and_before_the_structural_read_discards_the_answer() {
-        let (_dir, root, cache) = project();
-        resolve_cached(request(&root), &cache);
-        let early = crate::validate_kept_early(&cache);
-        while !early.0.as_ref().expect("spawned").is_finished() {
-            std::thread::yield_now();
-        }
-
-        std::fs::write(root.join("types.ts"), "export type Size = 'sm' | 'md' | 'lg';\n").unwrap();
-        let served = crate::resolve_cached_early(request(&root), &cache, Some(early), None);
-
-        assert_eq!(served, resolve(request(&root)));
-        let size = served.components.iter().flat_map(|c| &c.props).find(|p| p.name == "size").unwrap();
-        assert!(format!("{:?}", size.prop_type).contains("md"), "{size:?}");
-    }
-
-    /// The request is compared after validation, against the one the structural pass made.
-    #[test]
-    fn a_validated_answer_is_given_only_for_the_request_it_was_made_for() {
-        let (_dir, root, cache) = project();
-        resolve_cached(request(&root), &cache);
-        let key = request_key(&request(&root));
-        let validated = || read(&cache.join(FILE)).and_then(Read::validate).expect("holds");
-
-        assert!(validated().outcome(key ^ 1).is_none());
-        assert_eq!(validated().outcome(key), Some(resolve(request(&root))));
-    }
-
     /// The root files handed out while the structural pass runs are the ones the finished output gives, in the same
     /// order: the program the early start opens is the one the run would open, files that share a component name
     /// (suffixed with their file) and a file that exports nothing included.
@@ -585,23 +470,16 @@ mod tests {
     fn an_early_start_gives_the_answer_a_run_gives_and_a_wrong_one_is_dropped() {
         let (_dir, root, cache) = project();
         let timeout = std::time::Duration::from_secs(60);
-        let roots: Vec<Utf8PathBuf> = root_files_of(&root);
+        let roots: Vec<Utf8PathBuf> = crate::root_files(&request(&root)).into_iter().map(Utf8PathBuf::from).collect();
         let fresh = resolve(request(&root));
 
         let early = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, true);
-        assert_eq!(crate::resolve_cached_early(request(&root), &cache, None, early), fresh);
+        assert_eq!(crate::resolve_cached_early(request(&root), &cache, early), fresh);
         assert!(kept(&root, &cache).is_some(), "the answer from an early start is kept");
 
         std::fs::remove_file(cache.join(FILE)).unwrap();
         let wrong = crate::start_early(root.clone(), None, timeout, &roots[..1], true);
-        assert_eq!(crate::resolve_cached_early(request(&root), &cache, None, wrong), fresh);
-        let validated = crate::validate_kept_early(&cache);
-        let again = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, true);
-        assert_eq!(crate::resolve_cached_early(request(&root), &cache, Some(validated), again), fresh);
-    }
-
-    fn root_files_of(root: &Utf8Path) -> Vec<Utf8PathBuf> {
-        crate::root_files(&request(root)).into_iter().map(Utf8PathBuf::from).collect()
+        assert_eq!(crate::resolve_cached_early(request(&root), &cache, wrong), fresh);
     }
 
     #[test]
