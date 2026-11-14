@@ -191,6 +191,32 @@ fn component_ids<'g>(
         .collect()
 }
 
+/// The files of the components that export something, in the order the finished output lists them (by key, a name's
+/// first component bare and the rest suffixed with their file as `assemble` does): the root files of the program the
+/// checker is asked in ([`ComponentEntry::exports`] is the mapping's). It is the list `assemble`'s output gives unless
+/// resolution drops a component (an alias or factory result with nothing to document); a caller that starts work on
+/// it must compare it with the output's before using that work.
+fn predicted_root_files(global: &GlobalSourceData, options: &PipelineOptions) -> Vec<Utf8PathBuf> {
+    let mut seen_names: FxHashMap<&str, u32> = FxHashMap::default();
+    let mut keyed: Vec<(String, &Utf8PathBuf, bool)> = Vec::new();
+    for (_, mapping) in component_ids(global, options) {
+        let count = seen_names.entry(mapping.component_name.as_str()).or_insert(0);
+        *count += 1;
+        let key = match *count {
+            1 => mapping.component_name.clone(),
+            _ => format!("{} ({})", mapping.component_name, mapping.file_path),
+        };
+        keyed.push((key, &mapping.file_path, !mapping.exports.is_empty()));
+    }
+    keyed.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut seen: rustc_hash::FxHashSet<&Utf8PathBuf> = rustc_hash::FxHashSet::default();
+    keyed
+        .into_iter()
+        .filter(|(_, file, exported)| *exported && seen.insert(file))
+        .map(|(_, file, _)| file.clone())
+        .collect()
+}
+
 /// [`component_ids`] with each mapping's position in `global.component_mappings` instead of the mapping.
 fn ordered_ids(global: &GlobalSourceData, options: &PipelineOptions) -> Vec<(ComponentId, usize)> {
     let mut ordinals: FxHashMap<(&Utf8Path, &str), u32> = FxHashMap::default();
@@ -418,7 +444,7 @@ impl Revision {
 impl Revision {
     /// Discover, parse, merge, resolve and assemble every source file.
     pub(crate) fn cold(options: &PipelineOptions, id: u64) -> Revision {
-        let mut revision = Revision::resolve_cold(options, id);
+        let mut revision = Revision::resolve_cold(options, id, None);
         let (output, keys) = revision
             .assemble(options, |id| revision.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
         revision.output = Arc::new(output);
@@ -428,7 +454,16 @@ impl Revision {
 
     /// The output of a cold run that is never updated, so each entry moves into it instead of being copied.
     pub(crate) fn cold_output(options: &PipelineOptions) -> ExtractionOutput {
-        let mut revision = Revision::resolve_cold(options, 0);
+        Revision::cold_output_early(options, None)
+    }
+
+    /// [`Revision::cold_output`], handing `on_roots` the checker program's root files as the parse has them, as soon as
+    /// the project is parsed and merged and before the rest of the pass ([`predicted_root_files`]).
+    pub(crate) fn cold_output_early(
+        options: &PipelineOptions,
+        on_roots: Option<Box<dyn FnOnce(Vec<Utf8PathBuf>) + '_>>,
+    ) -> ExtractionOutput {
+        let mut revision = Revision::resolve_cold(options, 0, on_roots);
         let mut resolved = std::mem::take(&mut revision.resolved);
         let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(Resolved::into_parts));
         free_in_background(revision);
@@ -436,7 +471,11 @@ impl Revision {
     }
 
     /// Everything [`Revision::cold`] does except assembling the output.
-    fn resolve_cold(options: &PipelineOptions, id: u64) -> Revision {
+    fn resolve_cold(
+        options: &PipelineOptions,
+        id: u64,
+        on_roots: Option<Box<dyn FnOnce(Vec<Utf8PathBuf>) + '_>>,
+    ) -> Revision {
         let Indexed {
             start,
             cache,
@@ -448,6 +487,9 @@ impl Revision {
             react_types,
             file_demands,
         } = Indexed::build(options);
+        if let Some(on_roots) = on_roots {
+            on_roots(predicted_root_files(&global, options));
+        }
         let demands: Vec<Demand> = file_demands.into_iter().flat_map(|(_, demands)| demands).collect();
 
         let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));

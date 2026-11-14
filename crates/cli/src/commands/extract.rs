@@ -43,14 +43,32 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         None
     };
 
-    let mut output = caliper_docgen_core::pipeline::extract(&options);
+    let timeout = std::time::Duration::from_millis(args.semantic_timeout_ms);
+    let mut started = Prestarted::default();
+    let mut output = match options.checker {
+        // What the checker's run needs that the structural pass does not decide starts now, beside the pass.
+        true => {
+            let cache_dir = options.effective_cache_dir();
+            // With an answer kept the checker is most likely not needed, and a program opened for nothing takes the
+            // structural pass's cores; so only a run with none kept (or a run with the cache off) opens it early.
+            let open_early =
+                !(options.use_cache && cache_dir.join(caliper_docgen_semantic::KEPT_ANSWER_FILE).is_file());
+            let setup = semantic_setup(&options);
+            let (keep, early) = (options.use_cache, &mut started.early);
+            caliper_docgen_core::pipeline::extract_with_early_roots(&options, |roots| {
+                if let (true, Some((root, tsconfig))) = (open_early, setup) {
+                    *early = caliper_docgen_semantic::start_early(root, tsconfig, timeout, &roots, keep);
+                }
+            })
+        }
+        false => caliper_docgen_core::pipeline::extract(&options),
+    };
     if options.checker {
         let resolver = match args.no_resolver_facts {
             true => caliper_docgen_core::types::semantic::ResolverFacts::Off,
             false => caliper_docgen_core::types::semantic::ResolverFacts::Used,
         };
-        let timeout = std::time::Duration::from_millis(args.semantic_timeout_ms);
-        apply_semantic_backend(&options, timeout, resolver, None, Pass::Extract, &mut output);
+        apply_semantic_backend(&options, timeout, resolver, None, Pass::Extract(started), &mut output);
     }
 
     if let Some(pb) = pb {
@@ -98,12 +116,36 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 }
 
 /// Which command asks the checker for the whole project.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pass {
-    /// `extract`: the process ends with the run, and the answer may be kept on disk for the next.
-    Extract,
+    /// `extract`: the process ends with the run, and the answer may be kept on disk for the next. Carries what the run
+    /// started while the structural pass ran.
+    Extract(Prestarted),
     /// `check` and `inspect`: the answer is not kept.
     Check,
+}
+
+/// What `extract` started while the structural pass ran.
+#[derive(Default)]
+struct Prestarted {
+    /// The checker's program, opened over the root files the structural pass predicted.
+    early: Option<caliper_docgen_semantic::EarlyStart>,
+}
+
+/// The project root the checker runs in and the tsconfig it reads, as the request will have them; `None` with no
+/// project directory.
+fn semantic_setup(
+    options: &caliper_docgen_core::pipeline::PipelineOptions,
+) -> Option<(camino::Utf8PathBuf, Option<camino::Utf8PathBuf>)> {
+    let root = options
+        .src_dirs
+        .first()
+        .and_then(|dir| caliper_docgen_core::canonical_path::canonicalize(dir).ok())
+        .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()))?;
+    let tsconfig = options
+        .tsconfig_path
+        .clone()
+        .or_else(|| root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
+    Some((root, tsconfig))
 }
 
 /// Resolve the components the structural pass found with TypeScript's checker, all in one program, and merge the answer
@@ -120,12 +162,7 @@ fn apply_semantic_backend(
     pass: Pass,
     output: &mut caliper_docgen_core::types::ExtractionOutput,
 ) {
-    let project_root = options
-        .src_dirs
-        .first()
-        .and_then(|dir| caliper_docgen_core::canonical_path::canonicalize(dir).ok())
-        .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()));
-    let Some(project_root) = project_root else {
+    let Some((project_root, tsconfig)) = semantic_setup(options) else {
         let outcome = caliper_docgen_core::types::semantic::SemanticOutcome::unavailable("no project directory");
         caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
         return;
@@ -135,19 +172,19 @@ fn apply_semantic_backend(
         targets.retain(|target| target.key == key);
     }
     let mut request = caliper_docgen_semantic::SemanticRequest::new(project_root, targets);
-    request.tsconfig = options
-        .tsconfig_path
-        .clone()
-        .or_else(|| request.project_root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
+    request.tsconfig = tsconfig;
     request.request_timeout = timeout;
-    let teardown = match pass {
-        Pass::Extract => caliper_docgen_semantic::Teardown::OneShot,
-        Pass::Check => caliper_docgen_semantic::Teardown::Session,
+    let (teardown, started) = match pass {
+        Pass::Extract(started) => (caliper_docgen_semantic::Teardown::OneShot, Some(started)),
+        Pass::Check => (caliper_docgen_semantic::Teardown::Session, None),
     };
     let request = request.with_teardown(teardown);
-    let outcome = match pass == Pass::Extract && options.use_cache {
-        true => caliper_docgen_semantic::resolve_cached(request, &options.effective_cache_dir()),
-        false => caliper_docgen_semantic::resolve(request),
+    let outcome = match started {
+        Some(started) if options.use_cache => {
+            caliper_docgen_semantic::resolve_cached_early(request, &options.effective_cache_dir(), started.early)
+        }
+        Some(started) => caliper_docgen_semantic::resolve_early(request, started.early),
+        None => caliper_docgen_semantic::resolve(request),
     };
     caliper_docgen_core::types::semantic::merge_semantic_with(output, outcome, resolver);
 }
