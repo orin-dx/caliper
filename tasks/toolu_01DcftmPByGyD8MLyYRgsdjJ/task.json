@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_01DcftmPByGyD8MLyYRgsdjJ",
+  "agent_id": "a7ab0bb1b0ed7e5f7",
+  "task_description": "Storybook live upgrade and wider prefetch",
+  "token_usage": {
+    "input_tokens": 220,
+    "cache_creation_tokens": 278698,
+    "cache_read_tokens": 17753643,
+    "output_tokens": 92817,
+    "api_call_count": 110
+  },
+  "started_at": "2026-11-13T22:02:52.73234-08:00",
+  "completed_at": "2026-11-13T22:19:11.706921-08:00"
+}
