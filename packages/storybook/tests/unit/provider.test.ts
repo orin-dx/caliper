@@ -351,6 +351,26 @@ describe('replacing a structural answer, and the background prefetch', () => {
     expect([...answered.posted, ...unsettled.posted]).toEqual([])
   })
 
+  it('says the answer of the newer revision when an edit comes while the checker is still answering, and only it', async () => {
+    const fake = binding()
+    fake.output.diagnostics = [awaiting('Card')]
+    let settle: (settled: boolean) => void = () => {}
+    fake.settled = new Promise((done) => {
+      settle = done
+    })
+    const { provider, posted } = linked(fake)
+    await provider({ entry: story('Card') })
+    await vi.waitFor(() => expect(fake.settles).toHaveLength(1))
+    // An edit, and the story asked again while the first wait is still pending: structural again, at a newer revision.
+    fake.updates.push({ updatedKeys: ['Card'] })
+    await provider({ entry: story('Card') })
+    await vi.waitFor(() => expect(fake.settles).toHaveLength(2))
+    settle(true)
+    await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'card' }]))
+    await new Promise((done) => setTimeout(done, 10))
+    expect(posted).toHaveLength(1)
+  })
+
   it("resolves the named stories' components in the background, in order, the newest list replacing the queue", async () => {
     const fake = binding()
     const { say } = linked(fake)

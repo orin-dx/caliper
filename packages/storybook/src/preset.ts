@@ -22,6 +22,8 @@ type PresetOptions = Omit<CaliperStorybookOptions, 'cache'> & { cache?: unknown 
 /** The part of Storybook's options the prefetch reads: its presets, for the story index. */
 export interface DevServerOptions extends PresetOptions {
   presets: { apply(extension: 'storyIndexGenerator'): Promise<{ getIndex(): Promise<StoryIndex> } | undefined> }
+  /** Storybook's server channel, the same object for every hook of one dev server. */
+  channel?: object
 }
 
 /** The addon's options travel to the docgen worker by structured clone, so only these plain fields go. */
@@ -141,7 +143,8 @@ export class DevServer {
     if (this.count <= 1) return
     try {
       const entries = neighbours(await this.index(), componentId, this.count - 1)
-      if (entries.length > 0) this.link.post({ type: 'prefetch', entries })
+      // Even an empty list: it replaces what the provider still has queued for the story the browser left.
+      this.link.post({ type: 'prefetch', entries })
     } catch (error) {
       logger.debug(`[caliper-docgen] prefetch after ${componentId} stopped: ${(error as Error).message}`)
     }
@@ -151,14 +154,15 @@ export class DevServer {
 const devServers = new WeakMap<object, DevServer>()
 
 /**
- * One per dev server, which Storybook's presets stand for: it calls `experimental_serverChannel` and
- * `experimental_devServer` once each, with the same presets.
+ * One per dev server, which Storybook's channel stands for: it calls `experimental_serverChannel` and
+ * `experimental_devServer` once each, with a fresh presets wrapper each time but the same channel.
  */
 function devServerFor(options: DevServerOptions): DevServer {
-  let server = devServers.get(options.presets)
+  const key = options.channel ?? options.presets
+  let server = devServers.get(key)
   if (!server) {
     server = new DevServer(options, channel())
-    devServers.set(options.presets, server)
+    devServers.set(key, server)
   }
   return server
 }

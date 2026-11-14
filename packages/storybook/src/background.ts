@@ -34,8 +34,8 @@ export interface BackgroundHost {
 export class Background {
   private readonly host: BackgroundHost
   private readonly link: Link<ToDevServer, ToProvider>
-  /** The components being watched. */
-  private readonly watching = new Set<string>()
+  /** The components being watched, with the revision of the answer each watch is for: the newest wins. */
+  private readonly watching = new Map<string, number>()
   /** The revision each component's structural answer was last said to be replaced at. */
   private readonly replaced = new Map<string, number>()
   private queue: IndexEntry[] = []
@@ -54,21 +54,26 @@ export class Background {
 
   /** Watches `componentId`'s answer, which went out structural for the components `awaiting` names (none: nothing to do). */
   async watch(componentId: string, awaiting: string[]): Promise<void> {
-    if (awaiting.length === 0 || this.watching.has(componentId)) return
-    this.watching.add(componentId)
+    if (awaiting.length === 0) return
+    let revision: number | undefined
     try {
       const session = await this.host.session()
-      const { revision } = session
-      if (this.replaced.get(componentId) === revision) return
+      ;({ revision } = session)
+      // One watch per component and revision: a newer answer's watch supersedes an older one, which then says nothing.
+      if (this.watching.get(componentId) === revision || this.replaced.get(componentId) === revision) {
+        revision = undefined
+        return
+      }
+      this.watching.set(componentId, revision)
       if (!(await session.checkerSettled(awaiting, CHECKER_WAIT_MS))) return
-      // An edit since the answer drops the checker's answers; the request that sees the edit answers it.
-      if (session.revision !== revision) return
+      // An edit since the answer drops the checker's answers; the watch of the answer that saw the edit says it.
+      if (session.revision !== revision || this.watching.get(componentId) !== revision) return
       this.replaced.set(componentId, revision)
       this.link.post({ type: 'answered', componentId })
     } catch (error) {
       logger.debug(`[caliper-docgen] ${componentId}: ${(error as Error).message}; the next request asks again`)
     } finally {
-      this.watching.delete(componentId)
+      if (revision !== undefined && this.watching.get(componentId) === revision) this.watching.delete(componentId)
     }
   }
 

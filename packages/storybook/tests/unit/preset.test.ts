@@ -4,10 +4,13 @@ import type { IndexEntry, StoryIndex } from 'storybook/internal/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CaliperStorybookOptions } from '../../src/index.js'
 import type { Link, ToDevServer, ToProvider } from '../../src/live.js'
+import { BroadcastChannel } from 'node:worker_threads'
+import { SET_CURRENT_STORY } from 'storybook/internal/core-events'
 import {
   DevServer,
   experimental_devServer,
   experimental_docgenProvider,
+  experimental_serverChannel,
   isDocgenProviderEnabled,
 } from '../../src/preset.js'
 
@@ -121,6 +124,32 @@ function fakeLink() {
 
 const docgen = async () => async (id: string) => core.extracted.push(id)
 
+describe('one dev server per Storybook channel', () => {
+  it('shares the dev server between the hooks, whose presets differ, so startup does not undo the browser', async () => {
+    const heard: ToProvider[] = []
+    const listener = new BroadcastChannel('caliper-docgen-storybook')
+    listener.addEventListener('message', (event) => heard.push((event as MessageEvent<ToProvider>).data))
+    try {
+      const listeners = new Map<string, (payload?: { storyId?: unknown }) => void>()
+      const serverChannel = {
+        on: (event: string, on: (payload?: { storyId?: unknown }) => void) => listeners.set(event, on),
+      }
+      // Storybook builds a fresh presets wrapper for each hook; the channel is the same object.
+      const first = { ...devServerOptions({ prefetchStories: 2 }).options, channel: serverChannel }
+      const second = { ...devServerOptions({ prefetchStories: 2 }).options, channel: serverChannel }
+      experimental_serverChannel(serverChannel, first)
+      listeners.get(SET_CURRENT_STORY)!({ storyId: 'card--basic' })
+      experimental_devServer({}, second)
+      await vi.waitFor(() => expect(core.extracted).toEqual(['button']))
+      await new Promise((done) => setTimeout(done, 50))
+      // The browser shows Card: its neighbour Menu is prefetched, never the opening Button's neighbour Card.
+      expect(heard).toEqual([{ type: 'prefetch', entries: [story('menu--basic')] }])
+    } finally {
+      listener.close()
+    }
+  })
+})
+
 describe('the dev server replacing a structural answer', () => {
   const answered = (componentId: string): ToDevServer => ({ type: 'answered', componentId })
 
@@ -165,6 +194,11 @@ describe('the dev server replacing a structural answer', () => {
     const wide = fakeLink()
     new DevServer(devServerOptions({ prefetchStories: 2 }).options, wide.link, docgen).shown('button--ghost')
     await vi.waitFor(() => expect(wide.posted).toEqual([{ type: 'prefetch', entries: [story('card--basic')] }]))
+
+    // The last component has no neighbour: the empty list still replaces what the provider has queued.
+    const last = fakeLink()
+    new DevServer(devServerOptions({ prefetchStories: 3 }).options, last.link, docgen).shown('menu--basic')
+    await vi.waitFor(() => expect(last.posted).toEqual([{ type: 'prefetch', entries: [] }]))
 
     const narrow = fakeLink()
     const server = new DevServer(devServerOptions().options, narrow.link, docgen)
