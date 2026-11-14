@@ -29,13 +29,12 @@ export function exportKey(filePath: string, name: string, members: readonly stri
   return [filePath, name, ...members].join('\u0000')
 }
 
-/** What `keyOf` and `degradedBy` read, derived from the components and diagnostics. */
+/** What `keyOf` reads, derived from where the components are. */
 export interface Lookups {
   byFile: Map<string, string[]>
   byName: Map<string, string[]>
   /** The components each way of exporting names, by `exportKey`. */
   byExport: Map<string, string[]>
-  degradedBy: Map<string, Set<string>>
 }
 
 function push(map: Map<string, string[]>, at: string, key: string): void {
@@ -55,20 +54,7 @@ export function incompleteMessages(diagnostics: Diagnostic[]): string[] {
   return [...new Set(diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').map((d) => d.message))]
 }
 
-/** Whether `diagnostic` says the checker had not answered yet and the structural props stand in for its. */
-export function awaitsChecker(diagnostic: Diagnostic): boolean {
-  return (
-    diagnostic.code === 'SEMANTIC_BACKEND' &&
-    diagnostic.severity === 'info' &&
-    diagnostic.message.startsWith('the TypeScript checker has not answered yet')
-  )
-}
-
-export function diagnosticId(diagnostic: Diagnostic): string {
-  return JSON.stringify(diagnostic)
-}
-
-export function buildLookups(components: Map<string, ComponentRef>, diagnostics: Iterable<Diagnostic>): Lookups {
+export function buildLookups(components: Map<string, ComponentRef>): Lookups {
   const byFile = new Map<string, string[]>()
   const byName = new Map<string, string[]>()
   const byExport = new Map<string, string[]>()
@@ -77,14 +63,5 @@ export function buildLookups(components: Map<string, ComponentRef>, diagnostics:
     push(byName, ref.displayName, key)
     for (const { name, members } of ref.exports) push(byExport, exportKey(ref.filePath, name, members), key)
   }
-  const degradedBy = new Map<string, Set<string>>()
-  for (const diagnostic of diagnostics) {
-    if (diagnostic.severity === 'info') continue
-    for (const key of diagnostic.affects ?? []) {
-      const messages = degradedBy.get(key) ?? new Set<string>()
-      messages.add(diagnostic.message)
-      degradedBy.set(key, messages)
-    }
-  }
-  return { byFile, byName, byExport, degradedBy }
+  return { byFile, byName, byExport }
 }

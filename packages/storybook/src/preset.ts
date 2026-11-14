@@ -3,6 +3,7 @@ import { CURRENT_STORY_WAS_SET, SET_CURRENT_STORY } from 'storybook/internal/cor
 import { logger } from 'storybook/internal/node-logger'
 import type { DocgenProviderDescriptor, StoryIndex } from 'storybook/internal/types'
 import type { CaliperStorybookOptions } from './index.js'
+import { type Event, initialState, step } from './lifecycle.js'
 import { channel, componentOf, type Link, type ToDevServer, type ToProvider } from './live.js'
 import { assertValidOptions } from './validate.js'
 import { OPTION_KEYS } from './option-keys.js'
@@ -63,21 +64,17 @@ async function docgenService(): Promise<Extract> {
 }
 
 /**
- * The dev server's side of the addon. It documents the opening story before a browser asks, follows the story the
- * browser shows, has the provider resolve the next stories' components in the background, and has the docgen service
- * ask again for a component whose structural answer the checker has since replaced: the service stores the new answer
- * and the browser's Controls and docs, which read it live, show it without a reload. Only for a component some browser
- * shows; one the provider says was answered while no browser showed it is asked again, once, when one comes back to
- * it. The next stories' queue is one for the process: the last story opened in any browser sets it.
+ * The dev server's side of the addon: an adapter between Storybook and the answer lifecycle (`lifecycle.ts`), which
+ * decides everything. It documents the opening story before a browser asks, turns what the browsers show and what the
+ * provider says into lifecycle events, and carries out the effects: a `refresh` has Storybook's docgen service ask
+ * again, which stores the new answer, and the browser's Controls and docs, which read it live, show it without a
+ * reload. The channel says nothing when a tab closes, so a closed tab's last component stays shown in the lifecycle:
+ * at most one extra refresh for it.
  */
 export class DevServer {
-  /**
-   * The component each browser shows, by its channel's sender id. The channel says nothing when a tab closes, so a
-   * closed tab's last component stays: at most one extra request when the checker answers it.
-   */
-  private readonly open = new Map<string, string>()
-  /** Components the checker answered while no browser showed them, to ask again when one comes back. */
-  private readonly answeredAway = new Set<string>()
+  private readonly state = initialState()
+  /** The provider that answered last, which the next stories' queue goes to. */
+  private provider: string | undefined
   private readonly count: number
   private readonly options: DevServerOptions
   private readonly link: Link<ToProvider, ToDevServer>
@@ -93,10 +90,20 @@ export class DevServer {
     this.extractWith = extractWith
     this.count = options.prefetchStories ?? PREFETCH_STORIES
     link.listen((message) => {
-      if (message.type !== 'answered') return
-      if (this.onScreen(message.componentId)) void this.extract(message.componentId)
-      else this.answeredAway.add(message.componentId)
+      if (message.type === 'answer') {
+        this.provider = message.provider
+        this.dispatch({ ...message, type: 'answer' })
+      } else if (message.type === 'settled') this.dispatch(message)
     })
+  }
+
+  /** Applies `event` to the lifecycle and carries out its effects. */
+  dispatch(event: Event): void {
+    for (const effect of step(this.state, event)) {
+      if (effect.type === 'watch') this.link.post({ ...effect, type: 'watch' })
+      else if (effect.type === 'refresh') void this.extract(effect.component)
+      else void this.prefetchAfter(effect.component)
+    }
   }
 
   private async index(): Promise<StoryIndex> {
@@ -108,9 +115,8 @@ export class DevServer {
   /** Asks the docgen service for `componentId` again, which stores the answer where the browser reads it. */
   private async extract(componentId: string): Promise<void> {
     try {
-      await (
-        await this.extractWith()
-      )(componentId)
+      const extract = await this.extractWith()
+      await extract(componentId)
     } catch (error) {
       logger.debug(`[caliper-docgen] ${componentId} not asked again: ${(error as Error).message}`)
     }
@@ -126,15 +132,10 @@ export class DevServer {
     try {
       const extract = await this.extractWith()
       const opening = await prefetch({ index: () => this.index(), extract })
-      if (opening !== undefined && this.open.size === 0) await this.prefetchAfter(opening)
+      if (opening !== undefined && this.state.clients.size === 0) await this.prefetchAfter(opening)
     } catch (error) {
       logger.debug(`[caliper-docgen] prefetch stopped: ${(error as Error).message}`)
     }
-  }
-
-  /** Whether any browser shows a story of `componentId`. */
-  private onScreen(componentId: string): boolean {
-    return [...this.open.values()].includes(componentId)
   }
 
   /**
@@ -142,11 +143,7 @@ export class DevServer {
    * component, in place of what it showed before.
    */
   shown(storyId: string, client = ''): void {
-    const componentId = componentOf(storyId)
-    if (this.open.get(client) === componentId) return
-    this.open.set(client, componentId)
-    if (this.answeredAway.delete(componentId)) void this.extract(componentId)
-    void this.prefetchAfter(componentId)
+    this.dispatch({ type: 'selected', client, component: componentOf(storyId) })
   }
 
   /** Has the provider resolve the `prefetchStories - 1` components after `componentId` in the background. Best effort. */
@@ -155,7 +152,7 @@ export class DevServer {
     try {
       const entries = neighbours(await this.index(), componentId, this.count - 1)
       // Even an empty list: it replaces what the provider still has queued for the story the browser left.
-      this.link.post({ type: 'prefetch', entries })
+      this.link.post({ type: 'prefetch', provider: this.provider, entries })
     } catch (error) {
       logger.debug(`[caliper-docgen] prefetch after ${componentId} stopped: ${(error as Error).message}`)
     }

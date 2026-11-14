@@ -133,11 +133,15 @@ export declare function resolutionConfigFiles(sessionId: number): Array<string>
 export declare function sessionCheckerSettled(sessionId: number, keys: Array<string>, waitMs: number): Promise<boolean>
 
 /**
- * What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
- * diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
- * component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
- * whether a component's props may be incomplete from the same call that returns them. Errors for an unknown or closed
- * session.
+ * What a host needs to answer for one component, decided here and nowhere else, for a lazy and an eager session
+ * alike: `{ key: { docgenInfo, diagnostics, awaitsChecker, revision } }`. `docgenInfo` is the documentation with the
+ * checker's props merged when it answered in time; `diagnostics` are the component's own, each with `affects` set to
+ * the key, the checker's merged and the structural ones its props supersede dropped (a project diagnostic that names
+ * the component is among them; one that names none is in the session index only). `awaitsChecker` says the props are
+ * the structural ones because the checker had not answered in time, so asking again once `sessionCheckerSettled`
+ * resolves `true` gets its props; `revision` is the session's revision of the files the answer was made at, which
+ * only rises. A key the session has no component under is left out. A lazy session resolves each requested component
+ * now (in parallel). Errors for an unknown or closed session.
  */
 export declare function sessionComponentAnswers(sessionId: number, keys: Array<string>): string
 

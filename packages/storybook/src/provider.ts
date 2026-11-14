@@ -25,6 +25,12 @@ import { assertValidOptions } from './validate.js'
 
 type Subcomponent = NonNullable<DocgenPayload['subcomponents']>[string]
 
+/** What one request answered, for the answer lifecycle: the keys still awaiting the checker, and the revision. */
+interface Answered {
+  pending: string[]
+  revision: number
+}
+
 export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
   binding?: SessionBinding,
@@ -157,24 +163,25 @@ export function createDocgenProvider(
   /**
    * The session key, file and documentation of the component `name` (default: `meta.component`) names, or why there
    * is none. The caller has brought the session up to date for this request. A component answered with structural
-   * props because the checker had not answered in time goes in `awaiting`, whether it is answered or handed on.
+   * props because the checker had not answered in time goes in `answered.pending`, whether it is answered or handed on.
    */
   async function component({
     csf,
     storyPath,
-    awaiting,
+    answered,
     name,
   }: {
     csf: CsfFile
     storyPath: string
-    awaiting: string[]
+    answered: Answered
     name?: string
   }): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
     const target = name ? storyFor(csf, storyPath, name) : csf
     const session = await getSession()
     const { key, path } = locate(session, target, storyPath)
-    const { doc, degradedBy, awaitsChecker } = session.documentation(key)
-    if (awaitsChecker) awaiting.push(key)
+    const { doc, degradedBy, awaitsChecker, revision } = session.documentation(key)
+    answered.revision = Math.max(answered.revision, revision)
+    if (awaitsChecker) answered.pending.push(key)
     if (fallback === 'degraded' && degradedBy.length > 0) {
       const reason = degradedBy.join('; ')
       reportFallback(key, reason)
@@ -192,10 +199,10 @@ export function createDocgenProvider(
   async function subcomponent(
     { csf, storyPath, importPath }: StoryFile,
     { name, componentName }: { name: string; componentName: string },
-    awaiting: string[],
+    answered: Answered,
   ): Promise<Subcomponent> {
     try {
-      const { path, doc } = await component({ csf, storyPath, awaiting, name: componentName })
+      const { path, doc } = await component({ csf, storyPath, answered, name: componentName })
       const { description, summary, jsDocTags } = extractComponentDescription(
         undefined,
         doc.description || undefined,
@@ -220,7 +227,7 @@ export function createDocgenProvider(
     return { csf, storyPath, importPath }
   }
 
-  async function document(entry: IndexEntry, importPath: string, awaiting: string[]): Promise<DocgenPayload> {
+  async function document(entry: IndexEntry, importPath: string, answered: Answered): Promise<DocgenPayload> {
     const file = await storyFile(entry, importPath)
     const { csf, storyPath } = file
     // One look at the files for the story and its subcomponents: they are all answered from the same moment.
@@ -230,10 +237,10 @@ export function createDocgenProvider(
     const declared = extractDeclaredSubcomponents(csf)
     const subcomponents = Object.fromEntries(
       await Promise.all(
-        declared.map(async (declaration) => [declaration.name, await subcomponent(file, declaration, awaiting)]),
+        declared.map(async (declaration) => [declaration.name, await subcomponent(file, declaration, answered)]),
       ),
     )
-    const { doc } = await component({ csf, storyPath, awaiting })
+    const { doc } = await component({ csf, storyPath, answered })
     const { description, summary, jsDocTags } = extractComponentDescription(
       extractDescription(csf._metaStatement, csf.editor) || undefined,
       doc.description || undefined,
@@ -273,14 +280,14 @@ export function createDocgenProvider(
   return (next) => async (input) => {
     const importPath = getStoryImportPathFromEntry(input.entry)
     if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return next(input)
-    const awaiting: string[] = []
+    const answered: Answered = { pending: [], revision: 0 }
     try {
-      return await document(input.entry, importPath, awaiting)
+      return await document(input.entry, importPath, answered)
     } catch (error) {
       logger.debug(`[caliper-docgen] ${importPath}: ${(error as Error).message}; asking the next docgen provider`)
       return next(input)
     } finally {
-      void background.watch(getComponentIdFromEntry(input.entry), awaiting)
+      background.answered(getComponentIdFromEntry(input.entry), answered.revision, answered.pending)
     }
   }
 }

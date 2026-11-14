@@ -444,15 +444,21 @@ pub fn session_docgen_info(session_id: u32, keys: Vec<String>) -> napi::Result<S
     }
 }
 
-/// What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
-/// diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
-/// component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
-/// whether a component's props may be incomplete from the same call that returns them. Errors for an unknown or closed
-/// session.
+/// What a host needs to answer for one component, decided here and nowhere else, for a lazy and an eager session
+/// alike: `{ key: { docgenInfo, diagnostics, awaitsChecker, revision } }`. `docgenInfo` is the documentation with the
+/// checker's props merged when it answered in time; `diagnostics` are the component's own, each with `affects` set to
+/// the key, the checker's merged and the structural ones its props supersede dropped (a project diagnostic that names
+/// the component is among them; one that names none is in the session index only). `awaitsChecker` says the props are
+/// the structural ones because the checker had not answered in time, so asking again once `sessionCheckerSettled`
+/// resolves `true` gets its props; `revision` is the session's revision of the files the answer was made at, which
+/// only rises. A key the session has no component under is left out. A lazy session resolves each requested component
+/// now (in parallel). Errors for an unknown or closed session.
 #[napi]
 pub fn session_component_answers(session_id: u32, keys: Vec<String>) -> napi::Result<String> {
     match caliper_docgen_core::panic_guard::contain_panic("session_component_answers", move || {
         let session = live_session(session_id)?;
+        // Read before answering: an edit applied meanwhile makes the answer newer than this, never older.
+        let revision = session.revision();
         let answered = session.components(&keys);
         let answers: serde_json::Map<String, serde_json::Value> = keys
             .into_iter()
@@ -461,6 +467,8 @@ pub fn session_component_answers(session_id: u32, keys: Vec<String>) -> napi::Re
                 let answer = answer?;
                 let answer = serde_json::json!({
                     "docgenInfo": caliper_docgen_core::pipeline::rdt::docgen_info(&answer.entry),
+                    "awaitsChecker": caliper_docgen_core::pipeline::awaits_checker(&answer),
+                    "revision": revision,
                     "diagnostics": answer.diagnostics,
                 });
                 Some((key, answer))
@@ -1105,6 +1113,8 @@ mod tests {
         assert_eq!(lazy_answers, eager_answers);
         assert_eq!(lazy_answers["Card"]["docgenInfo"]["displayName"], "Card");
         assert_eq!(lazy_answers["Card"]["diagnostics"], serde_json::json!([]));
+        assert_eq!(lazy_answers["Card"]["awaitsChecker"], false, "the binding decides, for both sessions alike");
+        assert!(lazy_answers["Card"]["revision"].is_u64());
         assert!(lazy_answers.get("Missing").is_none());
         assert_eq!(lazy_stats(lazy).expect("stats").resolved, 1, "Button was never asked for");
 

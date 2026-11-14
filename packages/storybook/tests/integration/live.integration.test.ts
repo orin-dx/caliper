@@ -94,6 +94,11 @@ describe.skipIf(!bindingAvailable)('the checker replacing a structural answer on
     const serverChannel = {
       on: (event: string, listener: (payload?: { storyId?: unknown }) => void) => listeners.set(event, listener),
     }
+    // The fresh session answers before the dev server listens: one provider reports to it, as in Storybook.
+    const checked = await asker(fresh).extract(badge)
+    expect(Object.keys(checked.argTypes ?? {}).toSorted()).toEqual(['label', 'tone'])
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
     const options = { srcDirs, presets: { apply: async () => ({ getIndex: async () => index }) } }
     experimental_serverChannel(serverChannel, options)
     experimental_devServer({}, options)
@@ -105,8 +110,6 @@ describe.skipIf(!bindingAvailable)('the checker replacing a structural answer on
     // The browser opens the story; the checker's answer is then asked for and stored, without the browser asking.
     listeners.get(SET_CURRENT_STORY)!({ storyId: 'badge--basic' })
 
-    const checked = await asker(fresh).extract(badge)
-    expect(Object.keys(checked.argTypes ?? {}).toSorted()).toEqual(['label', 'tone'])
     await expect
       .poll(() => docgen.queries.docgen.get({ id: 'badge' })?.argTypes, { timeout: 30_000 })
       .toEqual(checked.argTypes)

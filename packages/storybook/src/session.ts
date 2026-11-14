@@ -3,9 +3,7 @@ import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
 import { toNapiOptions, type SessionOptions } from './options.js'
 import {
-  awaitsChecker,
   buildLookups,
-  diagnosticId,
   exportKey,
   incompleteMessages,
   only,
@@ -14,7 +12,7 @@ import {
   type ComponentRef,
   type Lookups,
 } from './lookups.js'
-import { assertSchemaVersion, expandDiagnostics } from './schema.js'
+import { assertSchemaVersion } from './schema.js'
 
 export type { SessionOptions } from './options.js'
 
@@ -24,36 +22,47 @@ export type SessionBinding = Pick<
   | 'createSession'
   | 'initializeSessionIndex'
   | 'ensureFresh'
-  | 'sessionDocgenInfo'
   | 'sessionComponentAnswers'
   | 'sessionPrefetch'
   | 'sessionCheckerSettled'
   | 'closeSession'
 >
 
-/** What the session says about one component: its documentation and why its props may be incomplete. */
+/**
+ * What the session says about one component, as the binding decided it (`sessionComponentAnswers`): nothing here is
+ * derived from the session index, for a lazy and an eager session alike.
+ */
 export interface Documentation {
   doc: RdtComponentDoc | undefined
-  /** The messages of the warnings and errors that say the props may be incomplete; empty when none does. */
+  /** The messages of the answer's warnings and errors, which say the props may be incomplete; empty when none does. */
   degradedBy: string[]
   /**
-   * Set when the props are the structural ones because the checker had not answered within `semanticWaitMs`: once
+   * The props are the structural ones because the checker had not answered within `semanticWaitMs`: once
    * `checkerSettled` says it has, asking again gets the checker's.
    */
-  awaitsChecker?: true
+  awaitsChecker: boolean
+  /** The binding's revision of the files the answer was made at. */
+  revision: number
+}
+
+/** One component's answer as the binding returns it. */
+interface Answer {
+  docgenInfo: RdtComponentDoc
+  diagnostics: Diagnostic[]
+  awaitsChecker: boolean
+  revision: number
 }
 
 /**
  * One watch session over the source directories, created on first use. Storybook gives no file events to a docgen
  * worker, so `fresh()` has the native session compare every source file's mtime and size with the last look and apply
- * the changed ones before a request is answered: an answer never trails a saved edit. The session holds the props;
- * this class holds only where each component lives and, for an eager session, which ones a diagnostic says are
- * incomplete. A lazy session (the default) resolves a component when `documentation` asks, and holds no answers.
+ * the changed ones before a request is answered: an answer never trails a saved edit. The session holds the props and
+ * decides each answer; this class holds only where each component lives. A lazy session (the default) resolves a
+ * component when `documentation` asks, and holds no answers.
  */
 export class DocgenSession {
   private readonly components = new Map<string, ComponentRef>()
-  private readonly diagnostics = new Map<string, Diagnostic>()
-  /** Rebuilt from `components` and `diagnostics` on the first lookup after either changes. */
+  /** Rebuilt from `components` on the first lookup after it changes. */
   private index: Lookups | undefined
   private sessionId: number | undefined
   private ready: Promise<void> | undefined
@@ -86,16 +95,13 @@ export class DocgenSession {
     await this.reindex()
   }
 
-  /** Reads where every component is declared (and, for an eager session, which diagnostics affect them). */
+  /** Reads where every component is declared. */
   private async reindex(): Promise<void> {
     const json = await this.napi.initializeSessionIndex(this.sessionId!, this.napiOptions())
     const output = assertSchemaVersion(JSON.parse(json) as SessionIndex, 'session index')
     this.components.clear()
     for (const [key, entry] of Object.entries(output.components)) {
       this.components.set(key, refOf(entry))
-    }
-    for (const diagnostic of expandDiagnostics(output.diagnostics, output.nameLists)) {
-      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
     }
     this.index = undefined
   }
@@ -109,12 +115,6 @@ export class DocgenSession {
       const entry = update.updatedComponents[i]
       if (entry) this.components.set(key, refOf(entry))
     })
-    for (const diagnostic of expandDiagnostics(update.removedDiagnostics, update.nameLists)) {
-      this.diagnostics.delete(diagnosticId(diagnostic))
-    }
-    for (const diagnostic of expandDiagnostics(update.diagnostics, update.nameLists)) {
-      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
-    }
   }
 
   private async check(): Promise<void> {
@@ -189,7 +189,7 @@ export class DocgenSession {
   }
 
   private lookups(): Lookups {
-    return (this.index ??= buildLookups(this.components, this.diagnostics.values()))
+    return (this.index ??= buildLookups(this.components))
   }
 
   /**
@@ -241,38 +241,23 @@ export class DocgenSession {
     return keys.flatMap((key) => this.components.get(key)?.displayName ?? [])
   }
 
-  /** Whether a warning or error says `key`'s props may be incomplete. An eager session only: see `documentation`. */
-  degraded(key: string): boolean {
-    return this.degradedBy(key).length > 0
-  }
-
-  /** The messages of the warnings and errors that say `key`'s props may be incomplete. */
-  degradedBy(key: string): string[] {
-    return [...(this.lookups().degradedBy.get(key) ?? [])]
-  }
-
   /**
-   * The documentation of `key` and why its props may be incomplete. A lazy session resolves the component now, or
+   * The documentation of `key`, why its props may be incomplete and whether the checker is still answering, as the
+   * binding decided them: one call for a lazy and an eager session. A lazy session resolves the component now, or
    * answers from what an earlier story resolved; nothing is kept here, so an edit cannot leave a stale answer behind.
    */
   documentation(key: string): Documentation {
-    if (this.sessionId === undefined) return { doc: undefined, degradedBy: [] }
-    // One answer for either session, so whether the checker is still answering is decided in one place.
-    const answers = JSON.parse(this.napi.sessionComponentAnswers(this.sessionId, [key])) as Record<
-      string,
-      { docgenInfo: RdtComponentDoc; diagnostics: Diagnostic[] }
-    >
+    const none = { doc: undefined, degradedBy: [], awaitsChecker: false, revision: this.latestRevision }
+    if (this.sessionId === undefined) return none
+    const answers = JSON.parse(this.napi.sessionComponentAnswers(this.sessionId, [key])) as Record<string, Answer>
     const answer = answers[key]
     if (!answer) {
       // The listing includes a re-export of a package component that has nothing to show; it is no component.
-      if (this.lazy && this.components.delete(key)) this.index = undefined
-      return { doc: undefined, degradedBy: this.lazy ? [] : this.degradedBy(key) }
+      if (this.components.delete(key)) this.index = undefined
+      return none
     }
-    // An eager session's index holds every diagnostic, the project-wide ones included; a lazy one's answer does.
-    const degradedBy = this.lazy ? incompleteMessages(answer.diagnostics) : this.degradedBy(key)
-    const documentation: Documentation = { doc: answer.docgenInfo, degradedBy }
-    if (answer.diagnostics.some(awaitsChecker)) documentation.awaitsChecker = true
-    return documentation
+    const { docgenInfo: doc, diagnostics, awaitsChecker, revision } = answer
+    return { doc, degradedBy: incompleteMessages(diagnostics), awaitsChecker, revision }
   }
 
   /** Resolves `keys` in the background, in order, the checker's answers included (kept). Lazy only; waits for nobody. */
@@ -285,12 +270,6 @@ export class DocgenSession {
   checkerSettled(keys: string[], waitMs: number): Promise<boolean> {
     if (this.sessionId === undefined) return Promise.resolve(false)
     return this.napi.sessionCheckerSettled(this.sessionId, keys, waitMs)
-  }
-
-  docgenInfo(key: string): RdtComponentDoc | undefined {
-    if (this.sessionId === undefined) return undefined
-    const docs = JSON.parse(this.napi.sessionDocgenInfo(this.sessionId, [key])) as Record<string, RdtComponentDoc>
-    return docs[key]
   }
 
   close(): void {

@@ -1,15 +1,17 @@
-// The provider's work that no request waits for (ADR 0022): replacing a structural answer once the checker has
-// answered, and resolving the next stories' components in the background.
+// The provider's side of the answer lifecycle (`lifecycle.ts`): it reports each answer to the dev server, which decides
+// everything, and carries out what the dev server asks of it: waiting for the checker, and resolving the next stories'
+// components in the background. It holds no lifecycle state, only the queue of stories to resolve.
 
+import { randomUUID } from 'node:crypto'
 import { logger } from 'storybook/internal/node-logger'
 import type { IndexEntry } from 'storybook/internal/types'
 import type { Link, ToDevServer, ToProvider } from './live.js'
 import type { DocgenSession } from './session.js'
 
 /**
- * How long a component answered with its structural props waits for the checker's answer to replace them. The checker
- * answers a story someone opened before any background work, so only a checker still starting (seconds on a large
- * project) comes near this; past it, the next request asks again.
+ * How long a watch waits for the checker. The checker answers a story someone opened before any background work, so
+ * only a checker still starting (seconds on a large project) comes near this; past it, the watch reports a failure and
+ * the next request asks again.
  */
 const CHECKER_WAIT_MS = 60_000
 
@@ -20,24 +22,11 @@ export interface BackgroundHost {
   keysOf(entry: IndexEntry): Promise<string[]>
 }
 
-/**
- * Replacing a structural answer: one that went out with structural props because the checker had not answered in time
- * is watched until the checker has answered every component in it; then the dev server, if the browser shows that
- * component, has the docgen service ask again, and the provider answers from the checker's kept answer. Said once per
- * component and revision of the files, so an answer the checker could not improve (its answer refused for an edit made
- * meanwhile) is not asked for again until the files change.
- *
- * The prefetch beyond the opening story: the dev server names the stories after the one on screen, and their components
- * are resolved in the background, one story at a time, the checker's answers included. A newer list replaces what is
- * still queued.
- */
 export class Background {
+  /** Names this provider in the messages, since every end of the channel hears every other. */
+  readonly id = randomUUID()
   private readonly host: BackgroundHost
   private readonly link: Link<ToDevServer, ToProvider>
-  /** The components being watched, with the revision of the answer each watch is for: the newest wins. */
-  private readonly watching = new Map<string, number>()
-  /** The revision each component's structural answer was last said to be replaced at, and the keys said then. */
-  private readonly replaced = new Map<string, { revision: number; keys: Set<string> }>()
   private queue: IndexEntry[] = []
   private prefetching = false
 
@@ -45,40 +34,30 @@ export class Background {
     this.host = host
     this.link = link
     link.listen((message) => {
-      // Every end of the channel hears every other, another provider's word included.
-      if (message.type !== 'prefetch') return
-      this.queue = [...message.entries]
-      void this.drain()
+      if (message.type === 'watch' && message.provider === this.id) void this.watch(message)
+      else if (message.type === 'prefetch' && (message.provider ?? this.id) === this.id) {
+        this.queue = [...message.entries]
+        void this.drain()
+      }
     })
   }
 
-  /** Watches `componentId`'s answer, which went out structural for the components `awaiting` names (none: nothing to do). */
-  async watch(componentId: string, awaiting: string[]): Promise<void> {
-    if (awaiting.length === 0) return
-    let revision: number | undefined
+  /** Tells the dev server what this provider answered for `component`, the service storing it. */
+  answered(component: string, revision: number, pending: string[]): void {
+    this.link.post({ type: 'answer', provider: this.id, component, revision, pending })
+  }
+
+  private async watch({ component, revision, keys }: { component: string; revision: number; keys: string[] }) {
+    let ok = false
+    let revisionNow = revision
     try {
       const session = await this.host.session()
-      ;({ revision } = session)
-      // Said once per key and revision: a key a watch already said at this revision is not watched again, but one the
-      // refresh asked of the checker for the first time is.
-      const said = this.replaced.get(componentId)
-      const saidKeys = said?.revision === revision ? said.keys : new Set<string>()
-      // One watch per component and revision: a newer answer's watch supersedes an older one, which then says nothing.
-      if (this.watching.get(componentId) === revision || awaiting.every((key) => saidKeys.has(key))) {
-        revision = undefined
-        return
-      }
-      this.watching.set(componentId, revision)
-      if (!(await session.checkerSettled(awaiting, CHECKER_WAIT_MS))) return
-      // An edit since the answer drops the checker's answers; the watch of the answer that saw the edit says it.
-      if (session.revision !== revision || this.watching.get(componentId) !== revision) return
-      this.replaced.set(componentId, { revision, keys: new Set([...saidKeys, ...awaiting]) })
-      this.link.post({ type: 'answered', componentId })
+      ok = await session.checkerSettled(keys, CHECKER_WAIT_MS)
+      ;({ revision: revisionNow } = session)
     } catch (error) {
-      logger.debug(`[caliper-docgen] ${componentId}: ${(error as Error).message}; the next request asks again`)
-    } finally {
-      if (revision !== undefined && this.watching.get(componentId) === revision) this.watching.delete(componentId)
+      logger.debug(`[caliper-docgen] ${component}: ${(error as Error).message}; the next request asks again`)
     }
+    this.link.post({ type: 'settled', component, revision, keys, ok, revisionNow })
   }
 
   private async drain(): Promise<void> {

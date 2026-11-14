@@ -19,6 +19,7 @@ pub mod watch;
 
 pub use crate::types::options::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions};
 pub use revision::{ComponentAnswer, ComponentLocation};
+pub use semantic_hook::awaits_checker;
 pub use watch::{LazyStats, WatchSession};
 
 /// Filename that trips a simulated panic in the Phase 2 parse closure —

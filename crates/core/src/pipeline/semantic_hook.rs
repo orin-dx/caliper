@@ -120,6 +120,21 @@ enum Found {
 /// 0.4 to 0.8 s.
 pub(crate) const DEFAULT_WAIT_EMPTY: Duration = Duration::from_secs(2);
 
+/// What an answer says when the checker had not answered within the wait and the structural props stand in for its.
+const CHECKER_PENDING: &str = "the TypeScript checker has not answered yet; the structural props are used, and the \
+                               checker's replace them on the next request";
+
+/// Whether `answer`'s props are the structural ones because the checker had not answered within the wait: asked again
+/// once the checker has answered, and before any source file changes, the session answers with the checker's props.
+/// The one place that decides it, for hosts that show an answer and replace it later.
+pub fn awaits_checker(answer: &ComponentAnswer) -> bool {
+    answer.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::SemanticBackend
+            && diagnostic.severity == DiagnosticSeverity::Info
+            && diagnostic.message == CHECKER_PENDING
+    })
+}
+
 pub(crate) struct SemanticHook {
     provider: Arc<dyn SemanticProvider>,
     /// How long a request waits for the checker before it takes the structural answer.
@@ -217,12 +232,8 @@ impl SemanticHook {
                 answer.diagnostics.push(stopped);
             }
             None => {
-                let mut pending = Diagnostic::new(
-                    DiagnosticSeverity::Info,
-                    DiagnosticCode::SemanticBackend,
-                    "the TypeScript checker has not answered yet; the structural props are used, and the checker's \
-                     replace them on the next request",
-                );
+                let mut pending =
+                    Diagnostic::new(DiagnosticSeverity::Info, DiagnosticCode::SemanticBackend, CHECKER_PENDING);
                 pending.affects = vec![answer.key.clone()];
                 answer.diagnostics.push(pending);
             }

@@ -86,7 +86,9 @@ describe('prefetch at dev server start', () => {
     const { link, posted } = fakeLink()
     await new DevServer(options, link, docgen).start()
     expect(core.extracted).toEqual(['button'])
-    expect(posted).toEqual([{ type: 'prefetch', entries: [story('card--basic'), story('menu--basic')] }])
+    expect(posted).toEqual([
+      { type: 'prefetch', provider: undefined, entries: [story('card--basic'), story('menu--basic')] },
+    ])
   })
 
   it('asks nothing with `prefetchStories: 0`', async () => {
@@ -143,80 +145,66 @@ describe('one dev server per Storybook channel', () => {
       await vi.waitFor(() => expect(core.extracted).toEqual(['button']))
       await new Promise((done) => setTimeout(done, 50))
       // The browser shows Card: its neighbour Menu is prefetched, never the opening Button's neighbour Card.
-      expect(heard).toEqual([{ type: 'prefetch', entries: [story('menu--basic')] }])
+      expect(heard).toEqual([{ type: 'prefetch', provider: undefined, entries: [story('menu--basic')] }])
     } finally {
       listener.close()
     }
   })
 })
 
-describe('the dev server replacing a structural answer', () => {
-  const answered = (componentId: string): ToDevServer => ({ type: 'answered', componentId })
-
-  it('asks the service again for the component on screen, once per word from the provider', async () => {
-    const { link, say } = fakeLink()
-    const server = new DevServer(devServerOptions().options, link, docgen)
-    server.shown('card--basic')
-    server.shown('card--other')
-    say(answered('card'))
-    await vi.waitFor(() => expect(core.extracted).toEqual(['card']))
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(core.extracted).toEqual(['card'])
+// The lifecycle itself is tested in lifecycle.test.ts; these test the dev server's translation to and from it.
+describe('the dev server as an adapter of the answer lifecycle', () => {
+  const answer = (component: string, pending: string[], revision = 1): ToDevServer => ({
+    type: 'answer',
+    provider: 'p1',
+    component,
+    revision,
+    pending,
+  })
+  const settled = (component: string, keys: string[], revision = 1): ToDevServer => ({
+    type: 'settled',
+    component,
+    revision,
+    keys,
+    ok: true,
+    revisionNow: revision,
   })
 
-  it('asks again for a component any browser shows, each browser following its own story', async () => {
+  it("asks the answering provider to watch an answer's pending keys, and the service again once they settle", async () => {
+    const { link, posted, say } = fakeLink()
+    const server = new DevServer(devServerOptions().options, link, docgen)
+    server.shown('card--basic', 'tab-a')
+    say(answer('card', ['Card', 'CardHeader']))
+    expect(posted).toEqual([
+      { type: 'watch', provider: 'p1', component: 'card', revision: 1, keys: ['Card', 'CardHeader'] },
+    ])
+    say(settled('card', ['Card', 'CardHeader']))
+    await vi.waitFor(() => expect(core.extracted).toEqual(['card']))
+  })
+
+  it('follows each browser by its channel sender id, and refreshes for whichever shows the component', async () => {
     const { link, say } = fakeLink()
     const server = new DevServer(devServerOptions().options, link, docgen)
     server.shown('card--basic', 'tab-a')
     server.shown('menu--basic', 'tab-b')
-    say(answered('card'))
+    say(answer('card', ['Card']))
+    say(settled('card', ['Card']))
     await vi.waitFor(() => expect(core.extracted).toEqual(['card']))
-    say(answered('menu'))
-    await vi.waitFor(() => expect(core.extracted).toEqual(['card', 'menu']))
-    // Tab A moves on: Card is on no screen now, so its next answer waits for a browser to come back to it.
-    server.shown('button--primary', 'tab-a')
-    say(answered('card'))
-    await new Promise((done) => setTimeout(done, 10))
-    expect(core.extracted).toEqual(['card', 'menu'])
-    server.shown('card--basic', 'tab-b')
-    await vi.waitFor(() => expect(core.extracted).toEqual(['card', 'menu', 'card']))
   })
 
-  it('asks nothing for a component the browser left, and asks once when the browser comes back to it', async () => {
-    const { link, say } = fakeLink()
-    const server = new DevServer(devServerOptions().options, link, docgen)
-    server.shown('card--basic')
-    server.shown('menu--basic')
-    say(answered('card'))
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(core.extracted).toEqual([])
-    server.shown('card--basic')
-    await vi.waitFor(() => expect(core.extracted).toEqual(['card']))
-    server.shown('menu--basic')
-    server.shown('card--basic')
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(core.extracted).toEqual(['card'])
-  })
-
-  it('asks again for the opening component answered before the browser said what it shows', async () => {
-    const { link, say } = fakeLink()
-    const server = new DevServer(devServerOptions().options, link, docgen)
-    await server.start()
-    expect(core.extracted).toEqual(['button'])
-    say(answered('button'))
-    server.shown('button--primary')
-    await vi.waitFor(() => expect(core.extracted).toEqual(['button', 'button']))
-  })
-
-  it('has the provider prefetch the components after the one on screen, nearest first, none with the default', async () => {
+  it('sends the next stories to the provider that answered last, an empty list too', async () => {
     const wide = fakeLink()
-    new DevServer(devServerOptions({ prefetchStories: 2 }).options, wide.link, docgen).shown('button--ghost')
-    await vi.waitFor(() => expect(wide.posted).toEqual([{ type: 'prefetch', entries: [story('card--basic')] }]))
+    const widening = new DevServer(devServerOptions({ prefetchStories: 2 }).options, wide.link, docgen)
+    wide.say(answer('button', []))
+    widening.shown('button--ghost')
+    await vi.waitFor(() =>
+      expect(wide.posted).toEqual([{ type: 'prefetch', provider: 'p1', entries: [story('card--basic')] }]),
+    )
 
     // The last component has no neighbour: the empty list still replaces what the provider has queued.
     const last = fakeLink()
     new DevServer(devServerOptions({ prefetchStories: 3 }).options, last.link, docgen).shown('menu--basic')
-    await vi.waitFor(() => expect(last.posted).toEqual([{ type: 'prefetch', entries: [] }]))
+    await vi.waitFor(() => expect(last.posted).toEqual([{ type: 'prefetch', provider: undefined, entries: [] }]))
 
     const narrow = fakeLink()
     const server = new DevServer(devServerOptions().options, narrow.link, docgen)

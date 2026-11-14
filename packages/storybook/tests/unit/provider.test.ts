@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url'
 import type { DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { logger } from 'storybook/internal/node-logger'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { Diagnostic } from 'caliper-docgen-napi'
 import type { CaliperStorybookOptions } from '../../src/index.js'
 import type { Link, ToDevServer, ToProvider } from '../../src/live.js'
 import { createDocgenProvider } from '../../src/provider.js'
@@ -297,13 +296,9 @@ describe('createDocgenProvider', () => {
   })
 })
 
-describe('replacing a structural answer, and the background prefetch', () => {
-  const awaiting = (key: string): Diagnostic => ({
-    ...warning([key], 'info'),
-    code: 'SEMANTIC_BACKEND',
-    message: 'the TypeScript checker has not answered yet; the structural props are used',
-  })
-
+// The lifecycle itself is tested in lifecycle.test.ts; these test the provider's reports and how it carries out what
+// the dev server asks of it.
+describe('the provider as an adapter of the answer lifecycle', () => {
   function linked(fake: FakeBinding, options: CaliperStorybookOptions = {}) {
     const posted: ToDevServer[] = []
     let receive: (message: ToProvider) => void = () => {}
@@ -317,111 +312,54 @@ describe('replacing a structural answer, and the background prefetch', () => {
     return { provider, posted, say: (message: ToProvider) => receive(message) }
   }
 
-  it('says once per revision of the files that the checker has answered every component of a structural answer', async () => {
-    const fake = binding()
-    fake.output.diagnostics = [awaiting('List'), awaiting('ListItem')]
-    const { provider, posted } = linked(fake)
-    await provider({ entry: story('List') })
-    await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'list' }]))
-    // The subcomponents are asked first, so a parent handed on cannot leave them out.
-    expect(fake.settles).toEqual([['ListItem', 'List']])
-
-    // Asked again at the same revision, still structural (the checker's answer was refused): not said again.
-    await provider({ entry: story('List') })
-    await new Promise((done) => setTimeout(done, 10))
-    expect(posted).toHaveLength(1)
-
-    // After an edit, a structural answer is watched again.
-    fake.updates.push({ updatedKeys: ['List'] })
-    await provider({ entry: story('List') })
-    await vi.waitFor(() => expect(posted).toHaveLength(2))
+  it("reports every answer with the binding's pending keys, the subcomponents asked before a parent handed on", async () => {
+    for (const lazy of [true, false]) {
+      const fake = binding()
+      // The parent is degraded (handed on) and pending; its subcomponent is pending too.
+      fake.output.diagnostics = [warning(['List'])]
+      fake.pending.add('List').add('ListItem')
+      const { provider, posted } = linked(fake, { lazy })
+      expect(await provider({ entry: story('List') })).toEqual(NEXT)
+      expect(posted).toEqual([
+        { type: 'answer', provider: expect.any(String), component: 'list', revision: 1, pending: ['ListItem', 'List'] },
+      ])
+    }
   })
 
-  it("says nothing for an answer that has the checker's props, or when the checker did not settle", async () => {
-    const answeredFake = binding()
-    const answered = linked(answeredFake)
-    await answered.provider({ entry: story('Card') })
-
-    const late = binding()
-    late.output.diagnostics = [awaiting('Card')]
-    late.settled = Promise.resolve(false)
-    const unsettled = linked(late)
-    await unsettled.provider({ entry: story('Card') })
-    await new Promise((done) => setTimeout(done, 10))
-    expect(answeredFake.settles).toEqual([])
-    expect(late.settles).toEqual([['Card']])
-    expect([...answered.posted, ...unsettled.posted]).toEqual([])
-  })
-
-  it('asks for every declared subcomponent before a pending parent is handed on, so one refresh shows them all', async () => {
-    const fake = binding()
-    // The parent's structural answer is degraded (handed on) and pending; its subcomponent is pending too.
-    fake.output.diagnostics = [warning(['List']), awaiting('List'), awaiting('ListItem')]
-    const { provider, posted } = linked(fake)
-    expect(await provider({ entry: story('List') })).toEqual(NEXT)
-    await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'list' }]))
-    expect(fake.settles.map((keys) => keys.toSorted())).toEqual([['List', 'ListItem']])
-
-    // The checker has answered both: the refresh documents the parent and its subcomponent, and says nothing more.
-    fake.output.diagnostics = []
-    const refreshed = (await provider({ entry: story('List') })) as Record<string, any>
-    expect(Object.keys(refreshed.argTypes)).toEqual(['ordered'])
-    expect(Object.keys(refreshed.subcomponents.ListItem.argTypes)).toEqual(['bullet'])
-    await new Promise((done) => setTimeout(done, 10))
-    expect(posted).toHaveLength(1)
-  })
-
-  it('watches a component first found pending by the refresh, at the same revision', async () => {
-    const fake = binding()
-    fake.output.diagnostics = [awaiting('List')]
-    const { provider, posted } = linked(fake)
-    await provider({ entry: story('List') })
-    await vi.waitFor(() => expect(posted).toHaveLength(1))
-    // The refresh finds ListItem pending for the first time (no watch had it): it is watched and said once.
-    fake.output.diagnostics = [awaiting('ListItem')]
-    await provider({ entry: story('List') })
-    await vi.waitFor(() => expect(posted).toHaveLength(2))
-    await provider({ entry: story('List') })
-    await new Promise((done) => setTimeout(done, 10))
-    expect(posted).toHaveLength(2)
-    expect(fake.settles).toEqual([['List'], ['ListItem']])
-  })
-
-  it('watches an eager session whose checker missed the wait, and says when it has answered', async () => {
-    const fake = binding()
-    fake.output.diagnostics = [awaiting('Card')]
-    const { provider, posted } = linked(fake, { lazy: false })
+  it('reports an answer with nothing pending, so the lifecycle knows the structural answer was replaced', async () => {
+    const { provider, posted } = linked(binding())
     await provider({ entry: story('Card') })
-    await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'card' }]))
+    expect(posted).toEqual([
+      { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [] },
+    ])
+  })
+
+  it('carries out a watch addressed to it, and reports the revision the files are at; not one for another', async () => {
+    const fake = binding()
+    fake.pending.add('Card')
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'watch', provider: 'someone-else', component: 'card', revision: 1, keys: ['Card'] })
+    fake.settled = Promise.resolve(false)
+    say({ type: 'watch', provider: id, component: 'card', revision: 1, keys: ['Card'] })
+    await vi.waitFor(() =>
+      expect(posted.slice(1)).toEqual([
+        { type: 'settled', component: 'card', revision: 1, keys: ['Card'], ok: false, revisionNow: 1 },
+      ]),
+    )
     expect(fake.settles).toEqual([['Card']])
-  })
-
-  it('says the answer of the newer revision when an edit comes while the checker is still answering, and only it', async () => {
-    const fake = binding()
-    fake.output.diagnostics = [awaiting('Card')]
-    let settle: (settled: boolean) => void = () => {}
-    fake.settled = new Promise((done) => {
-      settle = done
-    })
-    const { provider, posted } = linked(fake)
-    await provider({ entry: story('Card') })
-    await vi.waitFor(() => expect(fake.settles).toHaveLength(1))
-    // An edit, and the story asked again while the first wait is still pending: structural again, at a newer revision.
-    fake.updates.push({ updatedKeys: ['Card'] })
-    await provider({ entry: story('Card') })
-    await vi.waitFor(() => expect(fake.settles).toHaveLength(2))
-    settle(true)
-    await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'card' }]))
-    await new Promise((done) => setTimeout(done, 10))
-    expect(posted).toHaveLength(1)
   })
 
   it("resolves the named stories' components in the background, in order, the newest list replacing the queue", async () => {
     const fake = binding()
-    const { say } = linked(fake)
-    say({ type: 'prefetch', entries: [story('List'), story('Card')] })
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'prefetch', provider: 'someone-else', entries: [story('Card')] })
+    say({ type: 'prefetch', provider: id, entries: [story('List'), story('Card')] })
     await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card']]))
-    say({ type: 'prefetch', entries: [story('Button')] })
+    say({ type: 'prefetch', provider: undefined, entries: [story('Button')] })
     await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card'], ['Button']]))
   })
 })
