@@ -109,3 +109,57 @@ fn parent_declarations_tags_and_composes_are_the_checkers() {
     assert_eq!(picked.parent.as_ref().map(|parent| parent.name.as_str()), Some("BaseProps"));
     assert_eq!(output.components["Button"].composes, ["HTMLAttributes", "RefAttributes"]);
 }
+
+type Read = Vec<(String, String, String, Vec<(String, String)>)>;
+
+/// Every JSDoc of the `oneline` fixture, whatever lines it and its declaration share, as `(component, prop,
+/// description, tags)`.
+#[test]
+fn jsdoc_on_the_same_line_as_its_declaration_is_read() {
+    let dir = tempfile::Builder::new().prefix("OneLine").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    copy_fixture(&Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/oneline"), &root);
+    let project = Project { _dir: dir, root };
+    let mut output = structural(&project);
+    let outcome = answer(&project, &output);
+    merge_semantic(&mut output, outcome);
+    let mut read: Read = Vec::new();
+    for (key, component) in &output.components {
+        for (name, prop) in &component.props {
+            let tags = prop.tags.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            read.push((key.clone(), name.clone(), prop.description.clone(), tags));
+        }
+    }
+    let want = |component: &str, prop: &str, description: &str, tags: &[(&str, &str)]| {
+        let tags = tags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        (component.to_string(), prop.to_string(), description.to_string(), tags)
+    };
+    let mut expected: Read = vec![
+        want("Five", "inline", "Inline.", &[]),
+        want("Four", "one", "One.", &[]),
+        want("Four", "two", "Two.", &[]),
+        want("One", "id", "The id.", &[]),
+        want("Three", "a", "a", &[]),
+        want("Three", "b", "b", &[]),
+        want("Eight", "id", "The id.", &[]),
+        want("Eight", "own", "Own.", &[]),
+        want("Eleven", "a", "a", &[]),
+        want("Eleven", "b", "b", &[]),
+        want("Eleven", "size", "Its size.", &[]),
+        want("Eleven", "tone", "", &[("default", "'md' @deprecated use scale")]),
+        want("Nine", "b", "b", &[]),
+        want("Nine", "id", "The id.", &[]),
+        want("Nine", "size", "Its size.", &[]),
+        want("Nine", "tone", "", &[("default", "'md' @deprecated use scale")]),
+        want("Ten", "id", "The id.", &[]),
+        // A tag mid-line is text, as it is for TypeScript: only the first `@` after `/**` opens a tag.
+        want("Seven", "both", "", &[("default", "1 @deprecated gone")]),
+        want("Six", "id", "The id.", &[]),
+        want("Six", "tone", "Its tone.", &[]),
+        want("Two", "legacy", "", &[("deprecated", "use scale")]),
+        want("Two", "size", "", &[("default", "'md'")]),
+    ];
+    expected.sort();
+    read.sort();
+    assert_eq!(read, expected);
+}
