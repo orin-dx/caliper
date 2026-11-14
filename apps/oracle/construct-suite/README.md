@@ -135,7 +135,7 @@ just test-checker-lane   # CI job "Test / Checker lane"
 
 The recipe builds the release binary, then runs `construct:check`, `construct:parity`, the lane (`construct:checker`) and `tests/construct-checker-lane.test.ts` with `REQUIRE_CALIPER_BIN=1`, so a missing binary fails instead of skipping. Regenerate an entry by running `CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker` and reading the report.
 
-### Fallback off (ADR 0026, S7b)
+### Fallback off (ADR 0026, S7)
 
 S7 deletes the structural resolver for what this suite covers, and its gate is that every row passes with the structural fallback off. The lane runs `extract` a second time with the hidden, test-only `--no-structural-fallback` (`ResolverFacts::NoFallback`: `--no-resolver-facts`, and the merge takes nothing from the structural answer, so a type the checker cannot read stays its `opaque` type with `degradedBy`, a description and tags are the checker's alone, and a component the checker did not answer for has `opaque` `unknown` props, each case with a warning). Its last section is that column: a row passes with the fallback off when it reads the same in both runs, and otherwise leans on it, with the cause (`fallbackCause` in `../src/construct-checker-run.ts`):
 
@@ -144,7 +144,7 @@ S7 deletes the structural resolver for what this suite covers, and its gate is t
 - `structural <facts>`: a description or tags only the structural pass had.
 - `type: <verdict>`: any other change, with the verdict it has with the fallback off.
 
-A row that leans on the fallback carries the cause as `"fallback"` in `checker-expectations.json`. The lane fails when a row leans on it unlisted or with another cause, and when a listed row no longer does (remove the entry). The listed rows are the worklist of S7c to S7e; the gate holds when none is left.
+This is S7's gate: a row that leans on the fallback fails the lane, listed or not. The one exception is a genuine checker limit, a `checker could not read: <kinds>` cause, whose answer with the fallback off is typed (`opaque`, with `degradedBy` and a warning): its row carries the cause as `"fallback"` and why it is a limit as `"limit"` in `checker-expectations.json`. The lane also fails when a listed row no longer differs (remove the entry). Under `--no-structural-fallback` the checker is asked for every description, including those the structural pass has, which the default run skips. Today one row is listed: `generics/29`, where the checker defers `T["name"]` while `T` is open.
 
 ADR 0026's S4 gate is that the checker path equals the structural path except listed improvements. The lane and `tests/construct-checker-lane.test.ts` (which needs no binary, so it runs with the package tests) hold the two files to it: a row whose checker verdicts rank below its `expectations.json` verdicts fails unless its `checker-expectations.json` entry gives an `"improvement"` reason, the case where the comparison scores the checker's answer lower although it states more (no row needs one today: `react/34` did until the comparator read `Omit<HTMLAttributes<…>>` as one family). An `"improvement"` on a row that does not rank below the structural path fails too, so the list stays honest. Rows the checker ranks above the structural path are improvements already explained by the structural `gap`. A member keyed by a symbol (`[tag]`) is read by `src/caliper-norm.ts` as the checker side states it.
 
