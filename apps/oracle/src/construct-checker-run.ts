@@ -7,6 +7,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { checkCaliperShape, flattenProps } from './caliper-input.ts'
 import {
+  CHECKER_LIMIT,
   expectationFailure,
   expectationProblems,
   factDifferences,
@@ -223,19 +224,22 @@ export function laneFailures(run: LaneRun, expectations: Expectations): string[]
   return failures
 }
 
-/** Null when the row's `fallback` entry says what the run found: absent for a row that passes with the fallback off,
- * the cause for one that leans on it. Otherwise what moved: an unlisted dependence is a regression, a listed one that
- * went is worklist progress to record by removing the entry. */
+/** Null when the row passes with the fallback off, or differs only by a checker limit its `fallback` entry lists (ADR
+ * 0026, S7: the gate). Any other dependence on the structural fallback fails: a row must read the same without it. A
+ * listed limit that went is recorded by removing the entry. */
 export function fallbackFailure(id: string, cause: string | null, row: Expectation): string | null {
   if (cause === null && row.fallback === undefined) return null
   if (cause === null) return `${id}: passes with the structural fallback off now: remove its "fallback" entry`
+  if (!cause.startsWith(CHECKER_LIMIT)) {
+    return `${id}: leans on the structural fallback (${cause}): the checker's answer must stand alone`
+  }
   if (row.fallback !== cause) {
     return `${id}: leans on the structural fallback (${cause}); "fallback" says ${row.fallback === undefined ? 'nothing' : `"${row.fallback}"`}`
   }
   return null
 }
 
-/** The rows that lean on the structural fallback, by cause: the S7c to S7e worklist. */
+/** The rows that differ with the structural fallback off, by cause: the listed checker limits, and any failure. */
 export function fallbackWorklist(rows: Row[]): Map<string, string[]> {
   const byCause = new Map<string, string[]>()
   for (const row of rows) {

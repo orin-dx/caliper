@@ -167,7 +167,8 @@ pub struct SemanticTarget {
     /// It answers only for exported components and reports the rest as fallbacks.
     pub exports: Vec<ComponentExport>,
     /// Props the structural pass already has a description for. The checker is not asked for those: it is 65% of
-    /// the requests on Mantine, and the merge keeps the structural description when the checker's is empty.
+    /// the requests on Mantine, and the merge keeps the structural description when the checker's is empty. Empty
+    /// under [`ResolverFacts::NoFallback`] ([`ResolverFacts::ready`]), whose merge keeps no structural description.
     pub described: rustc_hash::FxHashSet<String>,
     /// Which props `@types/react` declares the checker reports: `None` for all of them, else only these names. The
     /// session decides from `htmlAttributes` (`react_types::react_props_wanted`); the checker never filters by itself.
@@ -328,6 +329,17 @@ impl ResolverFacts {
     /// Whether the merge may fall back to the structural answer where the checker has none.
     fn falls_back(self) -> bool {
         self != Self::NoFallback
+    }
+
+    /// Readies `targets` for a request whose outcome this mode merges. With [`ResolverFacts::NoFallback`] the checker
+    /// is asked for every prop's description, [`SemanticTarget::described`] included: the merge keeps no structural
+    /// description, so a prop the checker was not asked about would lose its own.
+    pub fn ready(self, targets: &mut [SemanticTarget]) {
+        if !self.falls_back() {
+            for target in targets {
+                target.described.clear();
+            }
+        }
     }
 }
 

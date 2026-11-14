@@ -54,12 +54,29 @@ describe('the fallback-off column (ADR 0026 S7b)', () => {
   it('fails a row whose dependence on the fallback is unlisted, listed wrongly, or listed and gone', () => {
     expect.hasAssertions()
     const green = { verdicts: ['identical', 'spelled'] } satisfies Parameters<typeof fallbackFailure>[2]
-    const listed = { ...green, fallback: 'checker could not read: indexedAccess' }
+    const listed = { ...green, fallback: 'checker could not read: indexedAccess', limit: 'why' }
     expect(fallbackFailure('a/01', null, green)).toBeNull()
     expect(fallbackFailure('a/01', 'checker could not read: indexedAccess', listed)).toBeNull()
     expect(fallbackFailure('a/01', 'checker could not read: indexedAccess', green)).toContain('says nothing')
     expect(fallbackFailure('a/01', 'no checker answer', listed)).toContain('leans on the structural')
     expect(fallbackFailure('a/01', null, listed)).toContain('remove its "fallback" entry')
+  })
+
+  it('fails a row that leans on the fallback for anything but a checker limit, listed or not (S7)', () => {
+    expect.hasAssertions()
+    const green = { verdicts: ['identical', 'spelled'] } satisfies Parameters<typeof fallbackFailure>[2]
+    const structural = { ...green, fallback: 'structural description', limit: 'why' }
+    expect(fallbackFailure('a/01', 'structural description', structural)).toContain('must stand alone')
+    expect(fallbackFailure('a/01', 'no checker answer', { ...green, fallback: 'no checker answer' })).toContain(
+      'must stand alone',
+    )
+    expect(expectationProblems(['a/01'], { 'a/01': structural })).toStrictEqual([
+      'a/01: "fallback" may only list a checker limit ("checker could not read: <kinds>"); fix the row instead',
+    ])
+    const unexplained = { ...green, fallback: 'checker could not read: indexedAccess' }
+    expect(expectationProblems(['a/01'], { 'a/01': unexplained })).toStrictEqual([
+      'a/01: "fallback" and "limit" go together: a listed checker limit says why it is one',
+    ])
   })
 
   it('groups the rows that lean on the fallback by cause', () => {

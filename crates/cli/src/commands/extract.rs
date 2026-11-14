@@ -173,6 +173,7 @@ fn apply_semantic_backend(
     if let Some(key) = only {
         targets.retain(|target| target.key == key);
     }
+    resolver.ready(&mut targets);
     let mut request = caliper_docgen_semantic::SemanticRequest::new(project_root, targets);
     request.tsconfig = tsconfig;
     request.request_timeout = timeout;

@@ -9,9 +9,9 @@
 //   CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker
 //
 // A row the checker did not answer for (it kept the structural result) is listed apart: its verdict says nothing about
-// the checker. The last section is the fallback-off column (ADR 0026, S7b): each row passes with the structural
-// fallback off or leans on it, grouped by cause, which is the S7c to S7e worklist; a row's `fallback` entry in
-// checker-expectations.json holds its cause, and the gate fails when the run and the entry disagree. `--json <file>` also
+// the checker. The last section is the fallback-off column (ADR 0026, S7): each row passes with the structural
+// fallback off or leans on it, grouped by cause. A row that leans on it fails the gate, except a checker limit its
+// `fallback` and `limit` entries in checker-expectations.json list (`fallbackFailure`). `--json <file>` also
 // writes every row with the type each side gave and its fallback cause.
 import { existsSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -78,7 +78,7 @@ console.log('')
 const worklist = fallbackWorklist(rows)
 const leaning = [...worklist.values()].reduce((sum, ids) => sum + ids.length, 0)
 console.log(
-  `Fallback off (ADR 0026, S7b): ${rows.length - leaning} rows pass with the structural fallback off, ${leaning} lean on it (the S7c to S7e worklist, by cause):`,
+  `Fallback off (ADR 0026, S7): ${rows.length - leaning} rows pass with the structural fallback off, ${leaning} differ (by cause; only a listed checker limit passes):`,
 )
 for (const [cause, ids] of worklist) {
   console.log(`  ${cause} (${ids.length}):`)
