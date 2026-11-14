@@ -170,6 +170,28 @@ fn a_change_to_a_gitignored_file_changes_nothing() {
     assert!(session.update_file(&kept).revision > revision);
 }
 
+// Discovery reports the target of an unignored symlink even where the target is gitignored, and the watcher
+// canonicalizes a changed path to that target: an edit through the alias must still reach the component.
+#[cfg(unix)]
+#[test]
+fn an_edit_to_a_discovered_alias_of_a_gitignored_file_is_applied() {
+    let (tmp, widget, options) = widget_project("export function Widget() { return null; }\n");
+    std::fs::create_dir(tmp.path().join(".git")).expect("create .git");
+    std::fs::write(tmp.path().join(".gitignore"), "src/Target.tsx\n").expect("write .gitignore");
+    let target = widget.with_file_name("Target.tsx");
+    std::fs::write(&target, "export function Target() { return null; }\n").expect("write Target.tsx");
+    let alias = widget.with_file_name("Alias.tsx");
+    std::os::unix::fs::symlink(&target, &alias).expect("symlink");
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+    let revision = session.update_file(camino::Utf8Path::new("/nonexistent/x.tsx")).revision;
+
+    std::fs::write(&target, "export function Target(props: { a: string }) { return null; }\n").expect("edit");
+    let update = session.update_file(&alias);
+
+    assert!(update.revision > revision, "{update:?}");
+}
+
 /// A src dir holding `Widget.tsx` and the options over it; the DTS cache lives beside it, outside the watched tree.
 fn widget_project(source: &str) -> (tempfile::TempDir, Utf8PathBuf, PipelineOptions) {
     let tmp = tempfile::tempdir().expect("tempdir");
