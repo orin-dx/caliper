@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_01PqKxuEXGEsUvPMZAFV9a1G",
+  "agent_id": "abd47792a6c2db068",
+  "task_description": "S7b fallback-off mode and worklist",
+  "token_usage": {
+    "input_tokens": 174,
+    "cache_creation_tokens": 166756,
+    "cache_read_tokens": 10217700,
+    "output_tokens": 66419,
+    "api_call_count": 87
+  },
+  "started_at": "2026-11-13T22:02:53.509068-08:00",
+  "completed_at": "2026-11-13T22:14:01.385781-08:00"
+}
