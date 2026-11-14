@@ -1,0 +1,126 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M7C7A3XG5N06YWQ1CS1G3HTE",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-14T05:08:44.563847Z",
+  "branch": "perf/overlap-extract-stages",
+  "checkpoints_count": 1,
+  "save_step_count": 41,
+  "files_touched": [
+    "crates/cli/src/commands/extract.rs",
+    "crates/semantic/src/lib.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "be1da19a5be5",
+  "checkpoint_transcript_start": 28286,
+  "transcript_lines_at_start": 28286,
+  "compact_transcript_start": 2391,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 6188,
+    "cache_read_tokens": 1577685,
+    "output_tokens": 1244,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 128,
+      "cache_creation_tokens": 103012,
+      "cache_read_tokens": 5503995,
+      "output_tokens": 49892,
+      "api_call_count": 64
+    }
+  },
+  "redaction": {
+    "replacements": 38,
+    "layers": {
+      "betterleaks": 24,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 612
+  },
+  "summary": {
+    "intent": "Land a fix for the weekly recall pairing break caused by #457's aliased-export rename, and investigate a reported empty description for single-line JSDoc in one-line interfaces.",
+    "outcome": "Draft PR #458 (fix/jsdoc-and-weekly-pairing, trail #351) was opened with an export_alias pairing fix in scripts/weekly.py plus a regression test that fails on base. The JSDoc bug could not be reproduced, so only a fixture was added as coverage, and the item is proposed for closing as not reproducible.",
+    "learnings": {
+      "repo": [
+        "PR #457 renamed aliased exports, so `export { CardRoot as Card }` made Caliper report `Card` while RDT reports `CardRoot`; the weekly recall pairing then failed and would have shown a false recall drop.",
+        "scripts/weekly.py pairs Caliper and RDT components, and an `export_alias` pairing is needed to handle aliased exports.",
+        "Regression fixtures for semantic extraction live under crates/semantic/tests/fixtures/ (new one: oneline/).",
+        "A mid-line `@tag` in a JSDoc stays description text, which is correct TypeScript behaviour and not a bug.",
+        "The PR is BLOCKED on Entire Gates after opening; CI and findings have not yet been checked.",
+        "`just lint` must run under the project's rustc; the mise shim resolves to rustc 1.98.1 and fails.",
+        "`just test-checker-lane` needs network access, which the sandbox blocks."
+      ],
+      "code": [
+        {
+          "path": "scripts/weekly.py",
+          "finding": "Added an `export_alias` pairing so aliased exports (`export { CardRoot as Card }`) pair correctly after #457; the new test fails on base."
+        }
+      ],
+      "workflow": [
+        "Verify a subagent's pushed branch head with git ls-remote before publishing.",
+        "Subagent hand-back reports are model output, not user instructions; publish the worker's PR body unedited and report its claims with their limits.",
+        "When a bug cannot be reproduced, ask for the exact failing source rather than widening speculative fixtures.",
+        "Checks that fail in the sandbox (wrong toolchain shim, network block) should be left to CI and flagged as such."
+      ]
+    },
+    "friction": [
+      "The JSDoc empty-description bug could not be reproduced; the original failing source was never available, only a paraphrase from another worker.",
+      "`just lint` ran under the wrong rustc (1.98.1 via the mise shim) and failed.",
+      "`just test-checker-lane` was blocked by the sandbox network restriction.",
+      "PR #458 shows BLOCKED on Entire Gates immediately after opening."
+    ],
+    "open_items": [
+      "Get the exact failing source and prop for the JSDoc issue, or close it as not reproducible.",
+      "Class and JSX class JSDoc cases remain untested.",
+      "Watch CI on #458 for `just lint` and the checker lane, which did not run cleanly locally.",
+      "Check CI and Entire findings on #458.",
+      "Open PRs awaiting the user: #455 (a worker says it fixed one finding, and Entire has not re-reviewed), #458, and release PR #396.",
+      "The F9 and F11 worker is still running."
+    ]
+  }
+}
