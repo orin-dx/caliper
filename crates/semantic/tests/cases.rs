@@ -1,17 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
 //! The checker path over a fixture project of hand-written cases (`tests/fixtures/cases`): the 14 of the checker-first
-//! deep dive in `Cases.tsx`, and one component per further mapping rule in `Rules.tsx`. The answer is held to a JSON
-//! snapshot made from a real `tsrs` (`tests/snapshots/`), three ways:
-//!
-//! - replayed from its recording (`cases.recording.json`), always: the converter's output over exactly the answers the
-//!   real checker gave, with no binary;
-//! - against a real `tsrs` (the built-in checker, or the binary `TSRS_BIN` names), which also holds the answer to be
-//!   the same when the checker is asked last to first (type handles change with the order of queries; the answer may
-//!   not);
-//! - merged over the structural result, which puts a union's members back in the order they were written in.
-//!
-//! Refresh the recording and the snapshot with `cargo run -p caliper-docgen-semantic --example record_fixture --
-//! $TSRS_BIN cases`, then `cargo insta review`.
+//! deep dive in `Cases.tsx`, and one component per further mapping rule in `Rules.tsx`. The built-in checker's answer is
+//! held to a JSON snapshot (`tests/snapshots/`, refreshed with `cargo insta review`), and to be the same when the checker
+//! is asked last to first (type handles change with the order of queries; the answer may not). Merged over the
+//! structural result, it puts a union's members back in the order they were written in.
 
 use std::time::Duration;
 
@@ -25,25 +17,16 @@ use serde_json::{Value, json};
 mod support;
 use support::copy_fixture;
 
-const FAKE_VERSION: &str = "7.1.0-test";
-
 struct Project {
     _dir: tempfile::TempDir,
     root: Utf8PathBuf,
 }
 
-/// The cases in a scratch directory whose name has an upper-case letter (see `replay_tsc.rs`), with `replay-tsc`
-/// installed as `node_modules/typescript/bin/tsc` when `replay`.
-fn project(replay: bool) -> Project {
+/// The cases in a scratch directory.
+fn project() -> Project {
     let dir = tempfile::Builder::new().prefix("Cases").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     copy_fixture(&Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cases"), &root);
-    if replay {
-        let package = root.join("node_modules/typescript");
-        std::fs::create_dir_all(package.join("bin")).unwrap();
-        std::fs::write(package.join("package.json"), format!(r#"{{"version": "{FAKE_VERSION}"}}"#)).unwrap();
-        std::fs::copy(env!("CARGO_BIN_EXE_replay-tsc"), package.join("bin/tsc")).unwrap();
-    }
     Project { _dir: dir, root }
 }
 
@@ -51,40 +34,18 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-enum Checker {
-    Replay,
-    Real { bin: Option<Utf8PathBuf>, reverse: bool },
-}
-
 /// How long a conversion may take before the test says it does not end (a type that contains itself must not hang it).
 const END_OF_CONVERSION: Duration = Duration::from_secs(60);
 
-fn answer(project: &Project, output: &ExtractionOutput, checker: &Checker) -> SemanticOutcome {
-    let request = request_for(project, output, checker);
+/// The checker's answer, asked first to last, or last to first when `reverse`.
+fn answer(project: &Project, output: &ExtractionOutput, reverse: bool) -> SemanticOutcome {
+    let mut request = SemanticRequest::new(project.root.clone(), targets_of(output));
+    request.request_timeout = Duration::from_secs(60);
+    request.reverse_queries = reverse;
     let (sender, receiver) = std::sync::mpsc::channel();
     // A conversion that does not end keeps its thread until the test process exits; the test fails meanwhile.
     std::thread::spawn(move || sender.send(resolve(request)).ok());
     receiver.recv_timeout(END_OF_CONVERSION).expect("the conversion ends")
-}
-
-fn request_for(project: &Project, output: &ExtractionOutput, checker: &Checker) -> SemanticRequest {
-    let mut request = SemanticRequest::new(project.root.clone(), targets_of(output));
-    request.request_timeout = Duration::from_secs(60);
-    match checker {
-        Checker::Replay => {
-            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
-            request.expected_versions = &[FAKE_VERSION];
-            request.extra_env.push((
-                "REPLAY_FIXTURE".to_string(),
-                format!("{}/tests/fixtures/cases.recording.json", env!("CARGO_MANIFEST_DIR")),
-            ));
-        }
-        Checker::Real { bin, reverse } => {
-            request.tsc_path = bin.clone();
-            request.reverse_queries = *reverse;
-        }
-    }
-    request
 }
 
 /// An output key without the scratch directory: a name two components share is keyed `Name (<path>)`, and the
@@ -121,11 +82,6 @@ fn rendered(outcome: &SemanticOutcome) -> Value {
     json!({ "components": components, "fallbacks": fallbacks })
 }
 
-/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
-fn tsrs_bin() -> Option<Utf8PathBuf> {
-    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
-}
-
 fn prop_type(rendered: &Value, component: &str, prop: &str) -> Value {
     rendered["components"][component]
         .as_array()
@@ -135,23 +91,11 @@ fn prop_type(rendered: &Value, component: &str, prop: &str) -> Value {
 }
 
 #[test]
-fn the_recorded_answers_of_the_checker_convert_to_the_snapshot() {
-    let project = project(true);
+fn the_checker_gives_the_snapshot() {
+    let project = project();
     let output = structural(&project);
 
-    let outcome = answer(&project, &output, &Checker::Replay);
-
-    assert_eq!(outcome.diagnostics, []);
-    insta::assert_json_snapshot!("cases", rendered(&outcome));
-}
-
-#[test]
-fn a_real_tsrs_gives_the_snapshot() {
-    let bin = tsrs_bin();
-    let project = project(false);
-    let output = structural(&project);
-
-    let outcome = answer(&project, &output, &Checker::Real { bin, reverse: false });
+    let outcome = answer(&project, &output, false);
 
     assert_eq!(outcome.diagnostics, []);
     insta::assert_json_snapshot!("cases", rendered(&outcome));
@@ -161,12 +105,11 @@ fn a_real_tsrs_gives_the_snapshot() {
 /// sorted by them. The answer must not show it.
 #[test]
 fn asking_the_checker_last_to_first_gives_the_same_bytes() {
-    let bin = tsrs_bin();
-    let project = project(false);
+    let project = project();
     let output = structural(&project);
 
-    let forward = answer(&project, &output, &Checker::Real { bin: bin.clone(), reverse: false });
-    let reversed = answer(&project, &output, &Checker::Real { bin, reverse: true });
+    let forward = answer(&project, &output, false);
+    let reversed = answer(&project, &output, true);
 
     assert_eq!(forward.diagnostics, []);
     assert_eq!(reversed.diagnostics, []);
@@ -180,9 +123,9 @@ fn asking_the_checker_last_to_first_gives_the_same_bytes() {
 /// in, from the structural pass, which read them from the type node.
 #[test]
 fn the_merge_puts_a_unions_members_back_in_declaration_order() {
-    let project = project(true);
+    let project = project();
     let mut output = structural(&project);
-    let outcome = answer(&project, &output, &Checker::Replay);
+    let outcome = answer(&project, &output, false);
     let size = |outcome: &SemanticOutcome| {
         let component = outcome.components.iter().find(|component| component.key == "Plain").unwrap();
         let prop = component.props.iter().find(|prop| prop.name == "size").unwrap();
@@ -206,9 +149,9 @@ fn the_merge_puts_a_unions_members_back_in_declaration_order() {
 
 #[test]
 fn a_mapped_conditional_or_aliased_type_is_what_the_checker_resolved() {
-    let project = project(true);
+    let project = project();
     let output = structural(&project);
-    let rendered = rendered(&answer(&project, &output, &Checker::Replay));
+    let rendered = rendered(&answer(&project, &output, false));
 
     // `Partial<Omit<Base, 'd'>> & { [K in 'x' | 'y']: number }`: members the checker computed.
     let names = |component: &str| -> Vec<String> {
@@ -233,9 +176,9 @@ fn a_mapped_conditional_or_aliased_type_is_what_the_checker_resolved() {
 
 #[test]
 fn the_error_type_is_an_unresolvable_import_and_a_written_any_is_any() {
-    let project = project(true);
+    let project = project();
     let output = structural(&project);
-    let rendered = rendered(&answer(&project, &output, &Checker::Replay));
+    let rendered = rendered(&answer(&project, &output, false));
 
     assert_eq!(prop_type(&rendered, "Lost", "gone")["reason"]["type"], "unresolvableImport");
     assert_eq!(prop_type(&rendered, "Scalars", "any"), json!({ "kind": "any" }));
@@ -243,9 +186,9 @@ fn the_error_type_is_an_unresolvable_import_and_a_written_any_is_any() {
 
 #[test]
 fn nothing_the_checker_hands_out_by_number_is_in_the_answer() {
-    let project = project(true);
+    let project = project();
     let output = structural(&project);
-    let text = serde_json::to_string(&rendered(&answer(&project, &output, &Checker::Replay))).unwrap();
+    let text = serde_json::to_string(&rendered(&answer(&project, &output, false))).unwrap();
 
     // A symbol-keyed property is `[Symbol.iterator]`, not the checker's `__@iterator@<symbol id>`.
     assert!(!text.contains("__@"), "{text}");
@@ -265,17 +208,12 @@ fn within(value: &Value, pointer: &str) -> Value {
     value.pointer(pointer).unwrap_or_else(|| panic!("{pointer} is in {value}")).clone()
 }
 
-/// The answer replayed, and from a real `tsrs` asked first to last and last to first.
+/// The answer asked first to last and last to first.
 fn answers(check: impl Fn(&Value)) {
-    let replayed = project(true);
-    let output = structural(&replayed);
-    check(&rendered(&answer(&replayed, &output, &Checker::Replay)));
-
-    let bin = tsrs_bin();
-    let real = project(false);
-    let output = structural(&real);
+    let project = project();
+    let output = structural(&project);
     for reverse in [false, true] {
-        check(&rendered(&answer(&real, &output, &Checker::Real { bin: bin.clone(), reverse })));
+        check(&rendered(&answer(&project, &output, reverse)));
     }
 }
 
@@ -326,9 +264,9 @@ fn an_instantiation_is_not_its_declaration() {
 /// Every cap fires where it says it does, with its limit and, for a width, how many there were.
 #[test]
 fn every_cap_cuts_where_it_is_set() {
-    let project = project(true);
+    let project = project();
     let output = structural(&project);
-    let rendered = rendered(&answer(&project, &output, &Checker::Replay));
+    let rendered = rendered(&answer(&project, &output, false));
     let cut = |component: &str, prop: &str, pointer: &str| {
         let ty = within(&prop_type(&rendered, component, prop), pointer);
         assert_eq!(ty["kind"], "truncated", "{component}.{prop}{pointer}: {ty}");

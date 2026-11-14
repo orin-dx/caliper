@@ -91,8 +91,8 @@ pub struct ExtractArgs {
     #[arg(long)]
     pub cache_dir: Option<String>,
 
-    /// Neither read nor write the on-disk caches (the declaration parse cache and the dependency index); the output is
-    /// the same, a run just parses everything
+    /// Neither read nor write the on-disk caches (the declaration parse cache, the dependency index and the checker's
+    /// kept answer); the output is the same, a run just parses and asks the checker everything
     #[arg(long)]
     pub no_cache: bool,
 
@@ -132,10 +132,6 @@ pub struct ExtractArgs {
     /// the checker cannot. By default every component's props come from the checker, all in one program, waited for
     #[arg(long)]
     pub no_checker: bool,
-
-    /// A checker binary to run instead of the built-in one: `typescript@7.1`'s `tsc`, or `tsrs`
-    #[arg(long, conflicts_with = "no_checker")]
-    pub tsc_path: Option<String>,
 
     /// How long the checker may take to start or to answer any one request, in milliseconds, before the run takes the
     /// structural result with one warning

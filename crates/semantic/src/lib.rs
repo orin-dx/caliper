@@ -2,11 +2,9 @@
 //!
 //! Asks TypeScript's checker for the props of each component the structural pass found, and hands
 //! `caliper-docgen-core` a [`SemanticOutcome`] to merge (ADR 0006, ADR 0007). The checker is the `tsrs` crates, linked
-//! in and run on a thread of their own; an explicit `tsc_path` runs that binary as a `tsc --api` process instead
-//! (through `caliper-docgen-tsc-client`), which is how the tests and the parity gate run the Go checker. It is always
-//! compiled in and enabled at run time. Any failure to start or finish (a missing or unpinned binary, a crash, a
-//! timeout) yields an outcome with no components and one diagnostic, never an error: the structural result is
-//! complete on its own.
+//! in and run on threads of their own; it is always compiled in and enabled at run time. Any failure to start or
+//! finish (a checker thread that cannot be spawned, a timeout) yields an outcome with no components and one
+//! diagnostic, never an error: the structural result is complete on its own.
 //!
 //! This slice answers function components by the exports the extractor recorded for them (a name, `default`, or the
 //! property of an exported component a sub-component is attached to); a generic one whose first type parameter
@@ -20,13 +18,13 @@ mod component;
 mod convert;
 mod declared;
 mod instantiate;
-mod locate;
+mod kept;
 mod on_demand;
 mod printed;
 mod rpc;
 mod stamps;
 
-pub use on_demand::{OnDemand, OnDemandConfig, Recycles, Snapshots};
+pub use on_demand::{OnDemand, OnDemandConfig, Snapshots};
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,22 +37,16 @@ use camino::{Utf8Path, Utf8PathBuf};
 use rustc_hash::FxHashMap;
 use tokio::task::JoinSet;
 
-use crate::checker::{Backend, Start};
+use crate::checker::Backend;
 use crate::component::Answer;
 use crate::convert::Converter;
 use crate::instantiate::Instantiation;
 use crate::rpc::{CallError, REQUESTS, Rpc};
 
-/// The checker binaries a `tsc_path` may name, the builds whose protocol this backend was traced against (the built-in
-/// checker is pinned in `Cargo.toml` instead): the `typescript` 7.1 series, from `7.1.0-beta` on, and the `tsrs` builds
-/// listed exactly (`<tsrs version>-ts<typescript version>`), each only while its TypeScript part is in the series above.
-/// The protocol has no version handshake, so the package's `package.json` version and the initialize call that follows
-/// the spawn are the whole check; a build that fails either takes the structural result with one warning.
-pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
-
 /// How many files are asked about at once, shared among the programs. A program's checker answers requests one at a
-/// time; this keeps it from idling between them.
-const FILES_IN_FLIGHT: usize = 16;
+/// time; this keeps it from idling between them. Four per program is enough: more only queue behind the checker, and
+/// sixteen measured slower and 100 to 150 MiB larger on Chakra's components (docs/gate-measurements.md).
+const FILES_IN_FLIGHT: usize = 8;
 
 /// The most threads the whole-project run converts the checker's answers on: past four, the checker's own thread is
 /// the bound (measured on Chakra's components, docs/gate-measurements.md).
@@ -93,7 +85,24 @@ pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
         .collect()
 }
 
-/// One whole-project request to the checker: the components to answer for, and which checker to ask. Built with
+/// What a run does with the memory and the checker's snapshot when it is done: free them, or leave them to the end of
+/// the process.
+///
+/// Freeing a large project's converters, interner and snapshot one allocation at a time costs tens of milliseconds
+/// that a process about to exit spends waiting for nothing. [`Teardown::OneShot`] is for that process alone (the CLI's
+/// `extract`): it forgets what the run built instead of dropping it, and does not ask the checker to release its
+/// snapshot, which the checker's shutdown takes down anyway. Anything that outlives the run (a watch, a Storybook
+/// session, the binding, a command that keeps running) must use [`Teardown::Session`], which is the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Teardown {
+    /// The process ends when the run does: forget the run's memory and do not release its snapshot.
+    OneShot,
+    /// The process goes on: free the run's memory and release its snapshot.
+    #[default]
+    Session,
+}
+
+/// One whole-project request to the checker: the components to answer for, and how to ask. Built with
 /// [`SemanticRequest::new`] and answered by [`resolve`].
 #[derive(Debug, Clone)]
 pub struct SemanticRequest {
@@ -101,40 +110,37 @@ pub struct SemanticRequest {
     pub project_root: Utf8PathBuf,
     /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
-    /// A checker binary to run as a `tsc --api` process (`typescript@7.1`'s `tsc`, or `tsrs`) instead of the built-in
-    /// checker.
-    pub tsc_path: Option<Utf8PathBuf>,
     /// The components to ask about.
     pub targets: Vec<Target>,
-    /// Bound on each request, and on a checker process's start-up handshake.
+    /// Bound on each request.
     pub request_timeout: Duration,
-    /// The versions a checker binary's `package.json` may declare; one that is not among them is a start-up failure.
-    /// The built-in checker is pinned and not checked.
-    pub expected_versions: &'static [&'static str],
-    /// Write every request and its answer here as JSON, to refresh the replay fixture the tests use.
+    /// Write every request and its answer here as JSON; the tests read it to count and inspect the calls a run makes.
     pub record_to: Option<Utf8PathBuf>,
-    /// Environment for a checker process; the tests use it to pick a replay scenario.
-    pub extra_env: Vec<(String, String)>,
     /// Ask the checker about a component's props, and about the members of each type, last to first. The answer must
     /// not change: no id the checker hands out, and so no order of queries, may show in it. The tests set this.
     pub reverse_queries: bool,
+    teardown: Teardown,
 }
 
 impl SemanticRequest {
-    /// A request for `targets` under `project_root`, with a 60 second timeout, the supported versions, and no
-    /// tsconfig or explicit `tsc` path.
+    /// A request for `targets` under `project_root`, with a 60 second timeout and no tsconfig.
     pub fn new(project_root: Utf8PathBuf, targets: Vec<Target>) -> Self {
         Self {
             project_root,
             tsconfig: None,
-            tsc_path: None,
             targets,
             request_timeout: Duration::from_secs(60),
-            expected_versions: SUPPORTED_VERSIONS,
             record_to: None,
-            extra_env: Vec::new(),
             reverse_queries: false,
+            teardown: Teardown::Session,
         }
+    }
+
+    /// The request with `teardown` as what the run does with its memory and snapshot when done ([`Teardown`]).
+    #[must_use]
+    pub fn with_teardown(mut self, teardown: Teardown) -> Self {
+        self.teardown = teardown;
+        self
     }
 }
 
@@ -142,13 +148,47 @@ impl SemanticRequest {
 /// inside one. The runtime has up to four threads: the built-in checker answers two programs at once, each on a thread
 /// of its own, and while it does, the answers it gave the other files in flight are read and converted on these.
 pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
+    resolve_noting(request, None)
+}
+
+/// [`resolve`], with the answer kept in `cache_dir` for the next run over the same request: a run whose checker would
+/// read the disk exactly as the last one did gets the last one's answer without starting the checker. Every question
+/// that checker asked of the file system (each file it read or looked for, each directory it listed, the tsconfig and
+/// what it extends) is asked again first, and any different answer, a new file where it found none included, discards
+/// the kept answer whole; so does another build of Caliper or of the pinned checker, and another request. A request
+/// that records its calls is answered as [`resolve`] answers it, and nothing is kept for it. The answer is the one
+/// [`resolve`] gives, and it is written before the call returns, whatever the request's [`Teardown`].
+pub fn resolve_cached(request: SemanticRequest, cache_dir: &Utf8Path) -> SemanticOutcome {
+    if request.record_to.is_some() {
+        return resolve(request);
+    }
+    let file = cache_dir.join(kept::FILE);
+    let key = kept::request_key(&request);
+    let started = std::time::Instant::now();
+    if let Some(outcome) = kept::load(&file, key) {
+        tracing::debug!(ms = started.elapsed().as_millis() as u64, "the checker's kept answer still holds");
+        return outcome;
+    }
+    let reads = Arc::new(kept::Reads::default());
+    let outcome = resolve_noting(request, Some(reads.clone()));
+    kept::save(&file, key, &reads, &outcome);
+    outcome
+}
+
+fn resolve_noting(request: SemanticRequest, reads: Option<Arc<kept::Reads>>) -> SemanticOutcome {
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get().min(CONVERTER_THREADS));
     let built = tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build();
     let runtime = match built {
         Ok(runtime) => runtime,
         Err(error) => return SemanticOutcome::unavailable(format!("could not start an async runtime: {error}")),
     };
-    runtime.block_on(run(request, None))
+    let teardown = request.teardown;
+    let outcome = runtime.block_on(run_noting(request, None, reads));
+    if teardown == Teardown::OneShot {
+        // Dropping the runtime waits for its threads to wind down.
+        std::mem::forget(runtime);
+    }
+    outcome
 }
 
 /// The exported targets by file, in first-seen order, and an outcome that already holds a fallback for each target
@@ -171,28 +211,25 @@ fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8
     (outcome, by_file, order)
 }
 
-/// The checker `request` names: its `tsc_path` as a process, else the built-in one.
-async fn start_checker(request: &SemanticRequest, threads: usize) -> Result<Backend, String> {
-    Backend::start(Start {
-        project_root: &request.project_root,
-        tsc_path: request.tsc_path.as_deref(),
-        expected_versions: request.expected_versions,
-        timeout: request.request_timeout,
-        extra_env: &request.extra_env,
-        threads,
-    })
-    .await
-}
-
 /// Answers `request` with a checker started for it, asking `programs` programs at once, or by default as many as
 /// [`CHECKER_PROGRAMS`] and the files allow ([`MIN_FILES_PER_PROGRAM`]).
+#[cfg(test)]
 async fn run(request: SemanticRequest, programs: Option<usize>) -> SemanticOutcome {
+    run_noting(request, programs, None).await
+}
+
+/// [`run`], the linked checker noting what it reads in `reads` ([`kept`]).
+async fn run_noting(
+    request: SemanticRequest,
+    programs: Option<usize>,
+    reads: Option<Arc<kept::Reads>>,
+) -> SemanticOutcome {
     if request.targets.iter().all(|target| target.exports.is_empty()) {
         return group_by_file(&request).0;
     }
     let files = group_by_file(&request).2.len();
     let programs = programs.unwrap_or_else(|| CHECKER_PROGRAMS.min(files.div_ceil(MIN_FILES_PER_PROGRAM))).max(1);
-    let checker = match start_checker(&request, programs).await {
+    let checker = match Backend::start_noting(&request.project_root, programs, reads) {
         Ok(checker) => checker,
         Err(reason) => return SemanticOutcome::unavailable(reason),
     };
@@ -224,8 +261,14 @@ async fn answer_with(checker: &Backend, request: &SemanticRequest) -> SemanticOu
     };
     tracing::debug!(program_ms = started.elapsed().as_millis() as u64, programs = count, "semantic program built");
     let answered = answer_on(&programs, request, &files).await;
-    if let Some(first) = programs.first() {
-        first.release().await;
+    match request.teardown {
+        Teardown::Session => {
+            if let Some(first) = programs.first() {
+                first.release().await;
+            }
+        }
+        // The checker's shutdown, next, takes the snapshot down with it.
+        Teardown::OneShot => std::mem::forget(programs),
     }
     answered.unwrap_or_else(|error| SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")))
 }
@@ -333,6 +376,10 @@ async fn session(
     );
     outcome.components.sort_by(|a, b| a.key.cmp(&b.key));
     outcome.fallbacks.sort_by(|a, b| a.key.cmp(&b.key));
+    if request.teardown == Teardown::OneShot {
+        std::mem::forget(converters);
+        std::mem::forget(interner);
+    }
     Ok(outcome)
 }
 
@@ -443,6 +490,32 @@ mod tests {
         runtime.block_on(run(request, Some(programs)))
     }
 
+    /// A symbol's type is kept by the symbol, not by what it is named or where it is declared: two instantiations of
+    /// one generic interface list a property of the same name and declaration, each a symbol of its own with its own
+    /// type, and the second component, answered after the first on the same program, is not handed the first's type.
+    #[test]
+    fn a_kept_symbol_type_is_the_type_of_that_symbol() {
+        let (_dir, root) = shared_types_project(0);
+        std::fs::write(
+            root.join("Boxes.tsx"),
+            "interface Box<T> { value: T; label?: string }\n\
+             export function Text(props: Box<string>) { return null; }\n\
+             export function Count(props: Box<number>) { return null; }\n\
+             export function Again(props: Box<string>) { return null; }\n",
+        )
+        .unwrap();
+
+        let outcome = answered(&root, 1);
+
+        let value = |key: &str| {
+            let component = outcome.components.iter().find(|component| component.key == key).unwrap();
+            component.props.iter().find(|prop| prop.name == "value").unwrap().prop_type.clone()
+        };
+        assert_eq!(value("Text"), caliper_docgen_core::types::PropType::String);
+        assert_eq!(value("Count"), caliper_docgen_core::types::PropType::Number);
+        assert_eq!(value("Again"), caliper_docgen_core::types::PropType::String);
+    }
+
     /// Three programs on the built-in checker, each answering some of the files, give the answer one program gives:
     /// each holds every root file, so what one file declares (here a global augmentation in the last) reaches the
     /// components the other programs answer.
@@ -499,7 +572,7 @@ mod tests {
         let request = SemanticRequest::new(root.clone(), targets_of(&output));
         let asked = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let session = Panicking { asked: Arc::clone(&asked) };
-        let checker = Backend::InProcess(checker::InProcess::spawn(2, move || session).unwrap());
+        let checker = Backend::spawn(2, move || session).unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
 
         let outcome = runtime.block_on(answer_with(&checker, &request));
@@ -524,6 +597,59 @@ mod tests {
         assert!((1..=2).contains(&asked.load(std::sync::atomic::Ordering::Relaxed)));
         assert!(!checker.is_alive());
         runtime.block_on(checker.shutdown());
+    }
+
+    /// Stands in for the checker's session: makes snapshots, refuses every question about them, and counts the
+    /// snapshots released.
+    struct Refusing {
+        released: Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    impl checker::Served for Refusing {
+        fn handle(&self, method: &str, params: &[u8]) -> Result<String, checker::Failure> {
+            match method {
+                "initialize" => Ok("null".to_string()),
+                "release" => {
+                    self.released.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Ok("null".to_string())
+                }
+                "createSnapshot" => {
+                    let params: serde_json::Value = serde_json::from_slice(params).unwrap();
+                    let count = params["createPrograms"].as_array().map_or(1, Vec::len);
+                    let projects: Vec<_> = (0..count).map(|n| serde_json::json!({ "id": format!("p{n}") })).collect();
+                    Ok(serde_json::json!({ "snapshot": 1, "projects": projects }).to_string())
+                }
+                _ => Err(checker::Failure { message: "refused".to_string(), panicked: false }),
+            }
+        }
+
+        fn discard(&self, _method: &str, _answer: &str) {}
+
+        fn close(&self) {}
+    }
+
+    /// How many times a run under `teardown` asks the checker to release its snapshot.
+    fn releases_under(teardown: Teardown) -> u32 {
+        let (_dir, root) = shared_types_project(2);
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let request = SemanticRequest::new(root, targets_of(&output)).with_teardown(teardown);
+        let released = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let session = Refusing { released: Arc::clone(&released) };
+        let checker = Backend::spawn(1, move || session).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        runtime.block_on(answer_with(&checker, &request));
+        runtime.block_on(checker.shutdown());
+        released.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// A run that goes on after it (a session, the library) releases its snapshot, even when the checker failed it;
+    /// one whose process ends with it does not wait for the release.
+    #[test]
+    fn only_a_session_run_releases_its_snapshot() {
+        assert_eq!(releases_under(Teardown::Session), 1);
+        assert_eq!(releases_under(Teardown::OneShot), 0);
+        assert_eq!(Teardown::default(), Teardown::Session);
+        assert_eq!(SemanticRequest::new(Utf8PathBuf::new(), Vec::new()).teardown, Teardown::Session);
     }
 
     /// A prop the converter keeps for later components is kept by what makes it, including which of its JSDoc was

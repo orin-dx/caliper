@@ -31,7 +31,7 @@ use rustc_hash::FxHashMap;
 
 use crate::component;
 use crate::convert::Converter;
-use crate::rpc::{CallError, FileDiagnostic, Rpc, SignatureInfo, SignatureKind};
+use crate::rpc::{CallError, FileDiagnostic, Rpc, SignatureInfo, SignatureKind, SymbolRef};
 use crate::{Target, fallback_of};
 
 /// The file the instantiations are declared in, in the project's root directory. It exists only in the checker's memory.
@@ -63,7 +63,7 @@ pub(crate) async fn default_arguments(rpc: &Rpc, signature: &SignatureInfo) -> R
 /// default of that parameter, in the checker that holds the probe file: the same type, not one of the same name.
 async fn arguments_keep_their_meaning(
     layered: &Rpc,
-    probes: &FxHashMap<String, serde_json::Value>,
+    probes: &FxHashMap<String, SymbolRef>,
     index: usize,
     instantiation: &Instantiation,
 ) -> Result<bool, CallError> {
@@ -168,7 +168,7 @@ async fn answer_layered(
         outcome.fallbacks.extend(pending.iter().map(|(target, _)| fallback_of(target, reason)));
         return Ok(outcome);
     };
-    let probes: FxHashMap<String, serde_json::Value> = layered
+    let probes: FxHashMap<String, SymbolRef> = layered
         .exports_of_module(&module.reference)
         .await?
         .into_iter()
@@ -221,7 +221,7 @@ async fn read_probe(
     layered: &Rpc,
     converter: &Converter,
     interner: &PropInterner,
-    symbol: &serde_json::Value,
+    symbol: &SymbolRef,
     target: &Target,
 ) -> Result<Result<component::Props, String>, CallError> {
     let props_type = layered.declared_type_of_symbol(symbol).await?;
@@ -255,15 +255,6 @@ mod tests {
         assert!(line.contains(r#"from "C:\\p\\a\"b.tsx";"#), "{line}");
     }
 
-    /// The binary `TSRS_BIN`, else `CALIPER_TEST_TSC`, names, run as a process; with neither, the built-in checker (as
-    /// in `tests/instantiate.rs`).
-    fn checker_binary() -> Option<camino::Utf8PathBuf> {
-        ["TSRS_BIN", "CALIPER_TEST_TSC"]
-            .into_iter()
-            .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
-            .map(camino::Utf8PathBuf::from)
-    }
-
     /// ADR 0026's S5 gate: `Poly<"div">` has at least 260 props, and `Anchor<"a">`, the same props at another default,
     /// others. An instantiation is always at the defaults, so a second element is a second component.
     #[test]
@@ -283,13 +274,11 @@ mod tests {
             export: export.to_string(),
             arguments: vec![format!("\"{element}\"")],
         };
-        let mut request = crate::SemanticRequest::new(root.clone(), Vec::new());
-        request.tsc_path = checker_binary();
         let timeout = std::time::Duration::from_secs(60);
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
         let outcome = runtime.block_on(async {
-            let checker = crate::start_checker(&request, 1).await.unwrap();
+            let checker = crate::checker::Backend::start(&root, 1).unwrap();
             let tsconfig = root.join("tsconfig.json");
             let files = [file.to_string()];
             let rpc = Rpc::open_programs(checker.client(), timeout, Some(tsconfig.as_str()), &files, false, 1)

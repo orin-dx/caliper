@@ -38,7 +38,6 @@ graph TD
     binding["crates/binding\ncaliper-docgen-napi\nNAPI + tokio runtime"]
     cli["crates/cli\ncaliper-docgen\nCLI binary"]
     semantic["crates/semantic\ncaliper-docgen-semantic\nTS 7.1 checker backend (default)"]
-    tsc["crates/tsc-client\ncaliper-docgen-tsc-client\ntsc --api transport"]
     napi["packages/napi\ncaliper-docgen-napi\nTS types + dev binary loader"]
     vite["packages/vite-plugin\ncaliper-docgen-vite-plugin\nVite HMR plugin"]
     storybook["packages/storybook\ncaliper-docgen-storybook\nStorybook 11 docgen provider"]
@@ -47,7 +46,6 @@ graph TD
     core --> binding
     core --> cli
     core --> semantic
-    tsc --> semantic
     semantic --> cli
     semantic --> binding
     binding --> napi
@@ -57,7 +55,7 @@ graph TD
     napi -.->|"runtime dep"| oracle
 ```
 
-`crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host. It does read and write files itself: source discovery, module resolution, the parse and dependency caches (`cache.rs`, `dependency_types.rs`) and tsconfig lookups. It never spawns a process; the checker backend that does lives in `crates/semantic`. `crates/semantic` and `crates/tsc-client` are published crates, always compiled into the CLI and the binding and enabled at run time (ADR 0007); Callisto publishes them before the CLI.
+`crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host. It does read and write files itself: source discovery, module resolution, the parse and dependency caches (`cache.rs`, `dependency_types.rs`) and tsconfig lookups. It never runs the TypeScript checker; `crates/semantic`, which links it (the `tsrs` crates), does. `crates/semantic` is a published crate, always compiled into the CLI and the binding and enabled at run time (ADR 0007); Callisto publishes it before the CLI.
 
 ## Module layout
 
@@ -140,9 +138,9 @@ commands/
   completions.rs  — shell completion generation
 ```
 
-### `crates/semantic/src/` and `crates/tsc-client/src/`
+### `crates/semantic/src/`
 
-`semantic` is the TypeScript 7.1 checker backend, on by default: `lib.rs` (the whole-project run), `on_demand.rs` (a warm checker that answers one component at a time), `checker.rs` (the built-in `tsrs` checker, or a `--tsc-path` process), `component.rs`, `convert.rs`, `locate.rs` (checks an explicit checker binary) and `rpc.rs` (typed calls over one checker session). `tsc-client` is the process supervisor and JSON-RPC transport under it.
+`semantic` is the TypeScript 7.1 checker backend, on by default: `lib.rs` (the whole-project run), `on_demand.rs` (a warm checker that answers one component at a time), `checker.rs` (the built-in `tsrs` checker, on threads of its own), `component.rs`, `convert.rs` and `rpc.rs` (typed calls over one checker session).
 
 ## Key types
 

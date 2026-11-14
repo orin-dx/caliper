@@ -11,13 +11,8 @@ homepage.workspace = true
 [lints]
 workspace = true
 
-[[bin]]
-name = "replay-tsc"
-path = "tests/bin/replay_tsc.rs"
-
 [dependencies]
 caliper-docgen-core       = { path = "../core", version = "0.10.0" }
-caliper-docgen-tsc-client = { path = "../tsc-client", version = "0.2.1" }
 tokio                     = { workspace = true, features = ["time", "rt", "sync"] }
 serde.workspace           = true
 serde_json                = { workspace = true, features = ["raw_value"] }
@@ -27,6 +22,8 @@ rustc-hash.workspace      = true
 tsrs_api.workspace        = true
 tsrs_vfs.workspace        = true
 tsrs_core.workspace       = true
+rmp-serde.workspace       = true
+xxhash-rust.workspace     = true
 
 [dev-dependencies]
 tempfile.workspace        = true

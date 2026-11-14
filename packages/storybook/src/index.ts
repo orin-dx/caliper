@@ -53,8 +53,6 @@ export interface CaliperStorybookOptions {
    * `semanticWaitMs`; its answer is kept for the next request. `false` never starts it.
    */
   checker?: boolean
-  /** A checker binary to run instead of the built-in one: `typescript@7.1`'s `tsc`, or `tsrs`. */
-  tscPath?: string
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
   semanticWaitMs?: number
   /**

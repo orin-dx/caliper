@@ -165,12 +165,21 @@ function sameRecord(a: Record<string, string>, b: Record<string, string>): boole
   return JSON.stringify(keys) === JSON.stringify(Object.keys(b).toSorted()) && keys.every((key) => a[key] === b[key])
 }
 
-/** Whether Caliper's union states the written members it has in their written order. */
+/** Whether Caliper's union states the written members it has in their written order. A member of Caliper's states one
+ * written member: in `Element | React.JSX.Element`, the DOM's `Element` and React's `JSX.Element` both agree with
+ * Caliper's `Element` by name (the checker side names both `Element`), and the second goes to the next that agrees. */
 function keepsOrder(type: any, written: Norm[]): boolean {
   if (type?.kind !== 'union' || !Array.isArray(type.members)) return true
   const members = type.members.map((member: any) => caliperNorm(member))
+  const used = new Set<number>()
   const positions = written
-    .map((member) => members.findIndex((mine: Norm) => isAgreement(compare(mine, member))))
+    .map((member) => {
+      const position = members.findIndex(
+        (mine: Norm, index: number) => !used.has(index) && isAgreement(compare(mine, member)),
+      )
+      used.add(position)
+      return position
+    })
     .filter((position) => position >= 0)
   return positions.every((position, index) => index === 0 || position > positions[index - 1]!)
 }

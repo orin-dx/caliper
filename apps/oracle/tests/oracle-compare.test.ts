@@ -114,6 +114,37 @@ describe('the oracle comparison', () => {
     })
   })
 
+  it("ReactNode beside other members is spelled, though the checker flattened it into the union's members", () => {
+    expect.hasAssertions()
+    // `ReactNode | ((open: boolean) => ReactNode)`, as the golden of react/07 states it: the checker keeps the alias
+    // `ReactNode` only on a union of exactly its members.
+    const object = (alias: string): Norm => ({ k: 'object', fields: [], index: false, alias })
+    const reactNode = [
+      prim('null'),
+      prim('string'),
+      prim('number'),
+      prim('bigint'),
+      prim('boolean'),
+      object('Iterable'),
+      object('Promise'),
+      object('ReactElement'),
+      object('ReactPortal'),
+    ]
+    const render: Norm = {
+      k: 'function',
+      params: [{ optional: false, rest: false, type: prim('boolean') }],
+      returns: { ...union(...reactNode), alias: 'ReactNode' },
+    }
+    const name: Norm = { k: 'name', name: 'ReactNode' }
+    const caliper = union(name, { ...render, returns: name })
+    expect(compare(caliper, optional(union(...reactNode, render)))).toBe('spelled')
+    // A union without all of ReactNode's members is not ReactNode, and the name is not proof of the same type.
+    const withoutString = union(...reactNode.filter((m) => m.k !== 'prim' || m.name !== 'string'), render)
+    expect(compare(caliper, optional(withoutString))).toBe('less precise')
+    const withoutPortal = union(...reactNode.filter((m) => m.alias !== 'ReactPortal'), render)
+    expect(compare(caliper, optional(withoutPortal))).toBe('less precise')
+  })
+
   it('an optional prop of type never is undefined in the checker', () => {
     expect.hasAssertions()
     // `classNames?: never` reads `undefined`, the optional marker the comparison drops.

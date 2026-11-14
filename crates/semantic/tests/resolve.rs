@@ -1,19 +1,16 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The backend end to end against `replay-tsc`, which answers from a recording of the real `7.1.0-beta`
-//! (`tests/fixtures/recording.json`, refreshed by the `record_fixture` example) and runs as the `tsc_path` process, and
-//! the fallbacks that must never be errors: a missing binary, an unpinned version, a crash, a hang.
+//! The backend end to end against the built-in checker, and the fallback that must never be an error: a checker that
+//! does not answer in time.
 
 use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{PipelineOptions, extract};
-use caliper_docgen_core::types::semantic::{SemanticFallback, SemanticOutcome, merge_semantic};
+use caliper_docgen_core::types::semantic::{SemanticOutcome, merge_semantic};
 use caliper_docgen_core::types::{
     DefaultValue, DiagnosticCode, DiagnosticSeverity, ExtractionOutput, FunctionParam, ParsedProp, PropType,
 };
 use caliper_docgen_semantic::{SemanticRequest, resolve, targets_of};
 use camino::Utf8PathBuf;
-
-const FAKE_VERSION: &str = "7.1.0-test";
 
 struct Project {
     // Held for its Drop.
@@ -21,25 +18,18 @@ struct Project {
     root: Utf8PathBuf,
 }
 
-/// The fixture project in a scratch directory whose name has an upper-case letter (see `replay_tsc.rs`), with
-/// `replay-tsc` installed as `node_modules/typescript/bin/tsc` when `with_tsc`.
-fn project(with_tsc: bool) -> Project {
-    project_of("project", &["Button.tsx", "tsconfig.json"], with_tsc)
+/// The fixture project in a scratch directory.
+fn project() -> Project {
+    project_of("project", &["Button.tsx", "tsconfig.json"])
 }
 
 /// The same, for the fixture project `tests/fixtures/<fixture>` with the files named.
-fn project_of(fixture: &str, files: &[&str], with_tsc: bool) -> Project {
-    let dir = tempfile::Builder::new().prefix("Replay").tempdir().unwrap();
+fn project_of(fixture: &str, files: &[&str]) -> Project {
+    let dir = tempfile::Builder::new().prefix("Resolve").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     for name in files {
         std::fs::copy(fixtures.join(fixture).join(name), root.join(name)).unwrap();
-    }
-    if with_tsc {
-        let package = root.join("node_modules/typescript");
-        std::fs::create_dir_all(package.join("bin")).unwrap();
-        std::fs::write(package.join("package.json"), format!(r#"{{"version": "{FAKE_VERSION}"}}"#)).unwrap();
-        std::fs::copy(env!("CARGO_BIN_EXE_replay-tsc"), package.join("bin/tsc")).unwrap();
     }
     Project { _dir: dir, root }
 }
@@ -48,27 +38,9 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-fn request(project: &Project, output: &ExtractionOutput, scenario: Option<&str>) -> SemanticRequest {
-    request_replaying(project, output, scenario, "recording.json")
-}
-
-/// The same, answered from `tests/fixtures/<recording>`.
-fn request_replaying(
-    project: &Project,
-    output: &ExtractionOutput,
-    scenario: Option<&str>,
-    recording: &str,
-) -> SemanticRequest {
+fn request(project: &Project, output: &ExtractionOutput) -> SemanticRequest {
     let mut request = SemanticRequest::new(project.root.clone(), targets_of(output));
-    request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
-    request.expected_versions = &[FAKE_VERSION];
-    request.request_timeout = Duration::from_secs(20);
-    request
-        .extra_env
-        .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/{recording}", env!("CARGO_MANIFEST_DIR"))));
-    if let Some(scenario) = scenario {
-        request.extra_env.push(("REPLAY_SCENARIO".to_string(), scenario.to_string()));
-    }
+    request.request_timeout = Duration::from_secs(60);
     request
 }
 
@@ -78,11 +50,11 @@ fn prop(output: &ExtractionOutput, component: &str, name: &str) -> ParsedProp {
 
 #[test]
 fn function_components_get_the_checkers_props_merged_over_the_structural_ones() {
-    let project = project(true);
+    let project = project();
     let mut output = structural(&project);
     let structural_size = prop(&output, "Button", "size");
 
-    let outcome = resolve(request(&project, &output, None));
+    let outcome = resolve(request(&project, &output));
     merge_semantic(&mut output, outcome);
 
     let button = &output.components["Button"];
@@ -133,12 +105,12 @@ fn function_components_get_the_checkers_props_merged_over_the_structural_ones() 
 /// reader sees is the one the source writes.
 #[test]
 fn a_prop_name_that_starts_with_underscores_is_the_name_the_source_writes() {
-    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"], true);
+    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"]);
     let mut output = structural(&project);
     let structural_names: Vec<_> = output.components["Markers"].props.keys().cloned().collect();
     assert_eq!(structural_names, ["___triple", "__size", "_single", "plain"]);
 
-    let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
+    let outcome = resolve(request(&project, &output));
     assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
 
     let answered = &outcome.components.iter().find(|component| component.key == "Markers").unwrap().props;
@@ -158,10 +130,10 @@ fn a_prop_name_that_starts_with_underscores_is_the_name_the_source_writes() {
 /// parameter whose type merely includes `undefined` does not become optional.
 #[test]
 fn function_parameters_keep_their_optional_and_rest_markers() {
-    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"], true);
+    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"]);
     let output = structural(&project);
 
-    let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
+    let outcome = resolve(request(&project, &output));
     assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
 
     let callbacks = &outcome.components.iter().find(|component| component.key == "Callbacks").unwrap().props;
@@ -215,10 +187,10 @@ fn function_parameters_keep_their_optional_and_rest_markers() {
 /// signature of an overload set has its own markers. Where nothing can be read, no parameter is made required.
 #[test]
 fn optional_parameters_are_read_through_an_alias_a_long_type_a_this_parameter_and_overloads() {
-    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"], true);
+    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"]);
     let output = structural(&project);
 
-    let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
+    let outcome = resolve(request(&project, &output));
     assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
 
     let aliased = &outcome.components.iter().find(|component| component.key == "Aliased").unwrap().props;
@@ -254,10 +226,10 @@ fn optional_parameters_are_read_through_an_alias_a_long_type_a_this_parameter_an
 
 #[test]
 fn provenance_lists_the_resolved_components_and_the_one_the_module_does_not_export() {
-    let project = project(true);
+    let project = project();
     let mut output = structural(&project);
 
-    let outcome = resolve(request(&project, &output, None));
+    let outcome = resolve(request(&project, &output));
     merge_semantic(&mut output, outcome);
 
     let notes: Vec<_> = output
@@ -283,8 +255,14 @@ fn provenance_lists_the_resolved_components_and_the_one_the_module_does_not_expo
     );
 }
 
-/// An unavailable backend is the structural result plus exactly one warning, whatever the reason.
-fn assert_falls_back(project: &Project, request: SemanticRequest, output: &ExtractionOutput, reason: &str) {
+/// A checker that does not answer in time leaves the structural result, plus exactly one warning that says so.
+#[test]
+fn a_checker_that_does_not_answer_in_time_falls_back_with_one_diagnostic() {
+    let project = project();
+    let output = structural(&project);
+    let mut request = request(&project, &output);
+    request.request_timeout = Duration::from_micros(1);
+
     let mut merged = output.clone();
     merge_semantic(&mut merged, resolve(request));
 
@@ -293,90 +271,12 @@ fn assert_falls_back(project: &Project, request: SemanticRequest, output: &Extra
     let added = merged.diagnostics.last().unwrap();
     assert_eq!(added.code, DiagnosticCode::SemanticBackend);
     assert_eq!(added.severity, DiagnosticSeverity::Warning);
-    assert!(added.message.contains(reason), "{} should mention {reason:?}", added.message);
-    let _ = project;
-}
-
-/// Without a `tsc_path` the built-in checker answers, whatever the project installs: this one has no `typescript`.
-#[test]
-fn without_a_tsc_path_the_built_in_checker_answers_a_project_without_typescript() {
-    let project = project(false);
-    let mut output = structural(&project);
-    let mut request = request(&project, &output, None);
-    request.tsc_path = None;
-
-    let outcome = resolve(request);
-    assert_eq!(outcome.diagnostics, []);
-    assert_eq!(
-        outcome.fallbacks,
-        [SemanticFallback { key: "Hidden".to_string(), reason: "not exported by its module".to_string() }]
-    );
-    merge_semantic(&mut output, outcome);
-
-    let names: Vec<_> = output.components["Button"].props.keys().map(String::as_str).collect();
-    assert_eq!(names, ["box", "disabled", "label", "onClick", "pair", "size", "tags"]);
-    assert_eq!(prop(&output, "Button", "tags").prop_type, PropType::Array(Box::new(PropType::String)));
-    assert_eq!(prop(&output, "Other", "a").prop_type, PropType::Number);
+    assert!(added.message.contains("timed out"), "{} should say it timed out", added.message);
 }
 
 #[test]
-fn a_tsc_path_with_no_binary_falls_back_with_one_diagnostic_that_says_what_to_pass() {
-    let project = project(false);
-    let output = structural(&project);
-    let missing = project.root.join("node_modules/typescript/bin/tsc");
-
-    assert_falls_back(
-        &project,
-        request(&project, &output, None),
-        &output,
-        &format!(
-            "no tsc binary at {missing}; pass --tsc-path (tscPath) a `tsc` of typescript@7.1 or a `tsrs` binary, or \
-             leave it out to use the built-in checker"
-        ),
-    );
-}
-
-#[test]
-fn an_unsupported_typescript_version_falls_back_with_one_diagnostic() {
-    let project = project(true);
-    let output = structural(&project);
-    let mut request = request(&project, &output, None);
-    request.expected_versions = &["7.1.0-beta"];
-
-    assert_falls_back(&project, request, &output, "not a supported version");
-}
-
-#[test]
-fn a_missing_explicit_tsc_path_falls_back_with_one_diagnostic() {
-    let project = project(true);
-    let output = structural(&project);
-    let mut request = request(&project, &output, None);
-    request.tsc_path = Some(project.root.join("nowhere/tsc"));
-
-    assert_falls_back(&project, request, &output, "no tsc binary at");
-}
-
-#[test]
-fn a_tsc_that_crashes_falls_back_with_one_diagnostic() {
-    let project = project(true);
-    let output = structural(&project);
-
-    assert_falls_back(&project, request(&project, &output, Some("crash")), &output, "stopped answering");
-}
-
-#[test]
-fn a_tsc_that_hangs_times_out_and_falls_back_with_one_diagnostic() {
-    let project = project(true);
-    let output = structural(&project);
-    let mut request = request(&project, &output, Some("hang"));
-    request.request_timeout = Duration::from_millis(400);
-
-    assert_falls_back(&project, request, &output, "timed out");
-}
-
-#[test]
-fn a_run_with_nothing_exported_never_starts_tsc() {
-    let project = project(false);
+fn a_run_with_nothing_exported_never_starts_the_checker() {
+    let project = project();
     let mut output = structural(&project);
     for entry in output.components.values_mut() {
         entry.exported = false;
@@ -384,17 +284,17 @@ fn a_run_with_nothing_exported_never_starts_tsc() {
     }
     let before = output.components.clone();
 
-    let outcome = resolve(request(&project, &output, None));
+    let outcome = resolve(request(&project, &output));
 
     assert!(outcome.components.is_empty());
-    assert!(outcome.diagnostics.is_empty(), "no tsc was needed, so none was missing");
+    assert!(outcome.diagnostics.is_empty(), "no checker was needed");
     merge_semantic(&mut output, outcome);
     assert_eq!(output.components, before);
 }
 
 #[test]
 fn an_empty_outcome_merges_to_the_structural_output_unchanged() {
-    let project = project(false);
+    let project = project();
     let mut output = structural(&project);
     let before = serde_json::to_string(&output).unwrap();
 
@@ -403,47 +303,22 @@ fn an_empty_outcome_merges_to_the_structural_output_unchanged() {
     assert_eq!(serde_json::to_string(&output).unwrap(), before);
 }
 
-/// The checker gives an unresolved import or an undeclared name the flag of `any` as well; only its `intrinsicName`
-/// (`"error"`, where a written `any` says `"any"`) tells them apart. An error type is not `any`: the prop says it
-/// could not be resolved.
-#[test]
-fn an_unresolved_name_is_degraded_and_a_written_any_is_not() {
-    let project = project_of("errors", &["Errors.tsx", "tsconfig.json"], true);
-    let mut output = structural(&project);
-
-    let outcome = resolve(request_replaying(&project, &output, None, "errors.recording.json"));
-    assert!(outcome.diagnostics.is_empty() && outcome.fallbacks.is_empty(), "{outcome:?}");
-    merge_semantic(&mut output, outcome);
-
-    let degraded_by = |name: &str| prop(&output, "Errors", name).degraded_by;
-    assert_eq!(prop(&output, "Errors", "explicitAny").prop_type, PropType::Any);
-    assert!(degraded_by("explicitAny").is_empty());
-    assert!(degraded_by("label").is_empty());
-    for name in ["fromImport", "undeclared"] {
-        assert_eq!(degraded_by(name), ["unresolvableImport"], "{name}: {:?}", prop(&output, "Errors", name).prop_type);
-        assert_ne!(prop(&output, "Errors", name).prop_type, PropType::Any, "{name}");
-    }
-}
-
 /// The program is created from `createPrograms[].compilerOptions`; the Node client sends the same list under
 /// `options`. The checker accepts both, so this pins the key the backend sends.
 #[test]
 fn the_snapshot_is_created_with_compiler_options_for_the_root_files() {
-    let project = project(true);
+    let project = project();
     let output = structural(&project);
-    let log = project.root.join("requests.jsonl");
-    let mut request = request(&project, &output, None);
-    request.extra_env.push(("REPLAY_LOG".to_string(), log.to_string()));
+    let log = project.root.join("requests.json");
+    let mut request = request(&project, &output);
+    request.record_to = Some(log.clone());
 
     let outcome = resolve(request);
     assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
 
-    let sent: Vec<serde_json::Value> = std::fs::read_to_string(&log)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .filter(|request: &serde_json::Value| request["method"] == "createSnapshot")
-        .collect();
+    let recorded: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(&log).unwrap()).unwrap();
+    let sent: Vec<serde_json::Value> =
+        recorded.into_iter().filter(|request: &serde_json::Value| request["method"] == "createSnapshot").collect();
     let [snapshot] = sent.as_slice() else { panic!("one createSnapshot expected: {sent:?}") };
     let [program] = snapshot["params"]["createPrograms"].as_array().unwrap().as_slice() else {
         panic!("one program expected: {snapshot}")

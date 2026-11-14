@@ -16,7 +16,6 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         no_load_dependencies: false,
         collapse_inherited_props: None,
         no_checker: true,
-        tsc_path: None,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
         no_resolver_facts: false,
     }
@@ -482,7 +481,6 @@ export function Button(props: ButtonProps) { return null; }
         no_load_dependencies: false,
         collapse_inherited_props: None,
         no_checker: true,
-        tsc_path: None,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
         no_resolver_facts: false,
     };
@@ -586,8 +584,8 @@ fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_
         no_load_dependencies: false,
         collapse_inherited_props: None,
         no_checker: !semantic,
-        tsc_path: semantic.then(|| tmp.path().join("no-such-tsc").to_str().unwrap().to_owned()),
-        semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
+        // Too short for the checker to build a program, so it is unavailable.
+        semantic_timeout_ms: if semantic { 1 } else { crate::DEFAULT_SEMANTIC_TIMEOUT_MS },
         no_resolver_facts: false,
     };
 
@@ -621,60 +619,7 @@ fn an_unavailable_checker_adds_one_warning_and_leaves_every_component_as_it_was(
     assert_eq!(added.len(), 1, "{added:?}");
     assert_eq!(added[0]["code"], "SEMANTIC_BACKEND");
     assert_eq!(added[0]["severity"], "warning");
-    assert!(added[0]["message"].as_str().unwrap().contains("no tsc binary at"), "{added:?}");
-}
-
-/// A checker that never answers is waited for only `--semantic-timeout-ms`, then the run takes the structural result
-/// with one warning that says it timed out.
-#[cfg(unix)]
-#[test]
-fn a_checker_that_never_answers_is_given_up_after_the_semantic_timeout() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let tmp = tempfile::TempDir::new().unwrap();
-    std::fs::write(tmp.path().join("Plain.tsx"), "export function Plain(props: { a: string }) { return null; }\n")
-        .unwrap();
-    // A supported version whose binary starts and then says nothing.
-    let package = tmp.path().join("checker/node_modules/typescript");
-    std::fs::create_dir_all(package.join("bin")).unwrap();
-    std::fs::write(package.join("package.json"), r#"{"version": "7.1.0-beta"}"#).unwrap();
-    let tsc = package.join("bin/tsc");
-    std::fs::write(&tsc, "#!/bin/sh\nexec sleep 30\n").unwrap();
-    std::fs::set_permissions(&tsc, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let out = tmp.path().join("out.json");
-    let args = crate::ExtractArgs {
-        src: vec![tmp.path().to_str().unwrap().to_owned()],
-        out: Some(out.to_str().unwrap().to_owned()),
-        format: crate::OutputFormat::Canonical,
-        cache_dir: None,
-        no_cache: true,
-        html_attributes: None,
-        extra_builtins: vec![],
-        include_unexported: false,
-        json: false,
-        load_dependencies: false,
-        no_load_dependencies: false,
-        collapse_inherited_props: None,
-        no_checker: false,
-        tsc_path: Some(tsc.to_str().unwrap().to_owned()),
-        semantic_timeout_ms: 300,
-        no_resolver_facts: false,
-    };
-
-    let started = std::time::Instant::now();
-    assert_eq!(cmd_extract(args, true, None).unwrap(), 0);
-
-    assert!(started.elapsed() < std::time::Duration::from_secs(10), "waited {:?}", started.elapsed());
-    let output: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(out).unwrap()).unwrap();
-    let warnings: Vec<&str> = output["diagnostics"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|d| d["code"] == "SEMANTIC_BACKEND")
-        .map(|d| d["message"].as_str().unwrap())
-        .collect();
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    assert!(warnings[0].contains("timed out"), "{warnings:?}");
+    assert!(added[0]["message"].as_str().unwrap().contains("timed out"), "{added:?}");
 }
 
 #[test]
@@ -686,12 +631,14 @@ fn the_checker_is_on_by_default_with_a_ten_second_timeout() {
     assert!(!args.no_checker);
     assert_eq!(args.semantic_timeout_ms, 10_000);
 
-    for flag in [&["--semantic-timeout-ms", "500"][..], &["--tsc-path", "/opt/tsc"], &["--no-resolver-facts"]] {
+    for flag in [&["--semantic-timeout-ms", "500"][..], &["--no-resolver-facts"]] {
         let refused = crate::Cli::try_parse_from([&["caliper-docgen", "extract", "--no-checker"][..], flag].concat());
         assert!(refused.is_err(), "{flag:?} with --no-checker is refused");
     }
     let removed = crate::Cli::try_parse_from(["caliper-docgen", "extract", "--experimental-semantic-types"]);
     assert!(removed.is_err(), "the old opt-in flag is gone");
+    let removed = crate::Cli::try_parse_from(["caliper-docgen", "extract", "--tsc-path", "/opt/tsc"]);
+    assert!(removed.is_err(), "the checker binary flag is gone");
 }
 
 // The RDT-shaped projection Storybook's `extractArgTypes` turns into controls.

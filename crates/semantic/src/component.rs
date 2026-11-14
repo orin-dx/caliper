@@ -155,7 +155,7 @@ pub(crate) async fn props_of_type(
         })
         .collect();
     let references: Vec<_> = own.iter().map(|property| &property.reference).collect();
-    let types = if references.is_empty() { Vec::new() } else { rpc.types_of_symbols(&references).await? };
+    let types = if references.is_empty() { Vec::new() } else { converter.types_of_symbols(&references).await? };
 
     // React's own descriptions and tags are the structural pass's to give, and its props are most of a component's.
     let asked: Vec<Asked<'_>> = own
@@ -176,7 +176,8 @@ pub(crate) async fn props_of_type(
         .collect();
     let mut props: Vec<Option<Arc<SemanticProp>>> = keys.iter().map(|key| converter.known_prop(key)).collect();
     let missing: Vec<usize> = (0..props.len()).filter(|index| props.get(*index).is_some_and(Option::is_none)).collect();
-    let unknown_types: Vec<TypeInfo> = missing.iter().filter_map(|index| types.get(*index).cloned()).collect();
+    let unknown_types: Vec<TypeInfo> =
+        missing.iter().filter_map(|index| types.get(*index).map(|info| TypeInfo::clone(info))).collect();
     let converted = converter.convert_roots(&unknown_types).await?;
     let unknown_asked: Vec<Asked<'_>> = missing
         .iter()
@@ -216,7 +217,7 @@ mod tests {
 
     fn property(declaration: &str) -> SymbolInfo {
         SymbolInfo {
-            reference: serde_json::Value::Null,
+            reference: serde_json::Value::Null.into(),
             name: "x".to_string(),
             flags: 4,
             declarations: vec![declaration.to_string()],

@@ -16,11 +16,10 @@ use std::sync::{Mutex, PoisonError};
 
 use caliper_docgen_core::types::PropParent;
 use rustc_hash::FxHashMap;
-use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 
 use crate::convert::declared_in;
-use crate::rpc::{CallError, CompactSymbol, JsDocTag, Rpc, SymbolInfo, decode, flag};
+use crate::rpc::{Asking, CallError, CompactSymbol, JsDocTag, Rpc, SymbolInfo, SymbolRef, decode, flag};
 
 /// One prop to look up, and which of its JSDoc to ask for.
 pub(crate) struct Asked<'a> {
@@ -43,7 +42,7 @@ pub(crate) struct Declared {
 }
 
 /// The symbol a declaration declares, by the parent it names and the reference that asks about it.
-type DeclaredSymbol = Option<(Option<CompactSymbol>, Value)>;
+type DeclaredSymbol = Option<(Option<CompactSymbol>, SymbolRef)>;
 
 /// What one snapshot's answers about declarations are kept as: they do not change inside it.
 #[derive(Debug, Default)]
@@ -67,13 +66,17 @@ enum Pending {
 
 /// What a prop's JSDoc is kept by: its declarations, where the checker reads it, or the symbol when it has none.
 fn jsdoc_key(property: &SymbolInfo) -> String {
-    if property.declarations.is_empty() { property.reference.to_string() } else { property.declarations.join("\n") }
+    if property.declarations.is_empty() {
+        property.reference.text().to_string()
+    } else {
+        property.declarations.join("\n")
+    }
 }
 
 /// The declarations, description and tags of every prop of `asked`, in its order: at most one round trip for what
 /// this snapshot has not been asked yet, one for the parents it has not named yet, and one per snapshot for its files.
 pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Result<Vec<Declared>, CallError> {
-    let mut requests: Vec<(&str, Value)> = Vec::new();
+    let mut requests: Vec<(&'static str, Asking<'_>)> = Vec::new();
     let mut pending: Vec<Pending> = Vec::new();
     {
         let descriptions = memo.descriptions.lock().unwrap_or_else(PoisonError::into_inner);
@@ -84,11 +87,11 @@ pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Res
             let property = prop.property;
             let key = jsdoc_key(property);
             if prop.description && !descriptions.contains_key(&key) && queued.insert(("d", key.clone())) {
-                requests.push(("getDocumentationComment", json!({ "symbol": property.reference })));
+                requests.push(("getDocumentationComment", Asking::Symbol { symbol: &property.reference }));
                 pending.push(Pending::Description(key.clone()));
             }
             if prop.tags && !tags.contains_key(&key) && queued.insert(("t", key.clone())) {
-                requests.push(("getJsDocTags", json!({ "symbol": property.reference })));
+                requests.push(("getJsDocTags", Asking::Symbol { symbol: &property.reference }));
                 pending.push(Pending::Tags(key));
             }
             if is_own_member(property) {
@@ -96,7 +99,7 @@ pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Res
             }
             for declaration in &property.declarations {
                 if !symbols.contains_key(declaration) && queued.insert(("s", declaration.clone())) {
-                    requests.push(("getSymbolOfDeclarationForChecker", json!({ "location": declaration })));
+                    requests.push(("getSymbolOfDeclarationForChecker", Asking::Location { location: declaration }));
                     pending.push(Pending::Symbol(declaration.clone()));
                 }
             }
@@ -188,7 +191,7 @@ async fn parent_names(
     declares: &[Vec<DeclaredSymbol>],
 ) -> Result<FxHashMap<CompactSymbol, Option<String>>, CallError> {
     let mut known: FxHashMap<CompactSymbol, Option<String>> = FxHashMap::default();
-    let mut unseen: Vec<(CompactSymbol, &Value)> = Vec::new();
+    let mut unseen: Vec<(CompactSymbol, &SymbolRef)> = Vec::new();
     {
         let seen = memo.parents.lock().unwrap_or_else(PoisonError::into_inner);
         let named = declares.iter().flatten().flatten();
@@ -211,7 +214,7 @@ async fn parent_names(
         return Ok(known);
     }
     let requests =
-        unseen.iter().map(|(_, reference)| ("getParentOfSymbolForChecker", json!({ "symbol": reference }))).collect();
+        unseen.iter().map(|(_, symbol)| ("getParentOfSymbolForChecker", Asking::Symbol { symbol })).collect();
     let answers = rpc.batch(requests).await?;
     let mut seen = memo.parents.lock().unwrap_or_else(PoisonError::into_inner);
     for ((parent, _), answer) in unseen.into_iter().zip(answers) {
@@ -256,6 +259,8 @@ fn tags_of(tags: Vec<JsDocTag>) -> BTreeMap<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     fn tag(name: &str, text: Option<&str>) -> JsDocTag {
@@ -264,7 +269,7 @@ mod tests {
 
     fn symbol(declarations: &[&str], parent: Option<u64>) -> SymbolInfo {
         SymbolInfo {
-            reference: json!({ "id": 7 }),
+            reference: json!({ "id": 7 }).into(),
             name: "x".to_string(),
             flags: 4,
             declarations: declarations.iter().map(|declaration| declaration.to_string()).collect(),
@@ -307,7 +312,7 @@ mod tests {
     #[test]
     fn jsdoc_is_kept_by_the_declarations_so_two_symbols_of_one_declaration_share_it() {
         let declared = symbol(&["8.173./p/base.ts"], Some(3));
-        let mapped = SymbolInfo { reference: json!({ "id": 99 }), ..symbol(&["8.173./p/base.ts"], None) };
+        let mapped = SymbolInfo { reference: json!({ "id": 99 }).into(), ..symbol(&["8.173./p/base.ts"], None) };
         let synthetic = symbol(&[], None);
 
         assert_eq!(jsdoc_key(&declared), jsdoc_key(&mapped));

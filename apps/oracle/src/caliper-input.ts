@@ -16,7 +16,7 @@ export function checkCaliperShape(caliper: any): void {
     }
   }
   for (const [key, component] of Object.entries<any>(caliper.components)) {
-    if (!Array.isArray(component?.exports)) throw new Error(`caliper component ${key} has no "exports" list`)
+    if (!Array.isArray(component?.exports)) throw new TypeError(`caliper component ${key} has no "exports" list`)
   }
 }
 
