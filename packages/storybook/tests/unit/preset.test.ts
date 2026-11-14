@@ -164,6 +164,24 @@ describe('the dev server replacing a structural answer', () => {
     expect(core.extracted).toEqual(['card'])
   })
 
+  it('asks again for a component any browser shows, each browser following its own story', async () => {
+    const { link, say } = fakeLink()
+    const server = new DevServer(devServerOptions().options, link, docgen)
+    server.shown('card--basic', 'tab-a')
+    server.shown('menu--basic', 'tab-b')
+    say(answered('card'))
+    await vi.waitFor(() => expect(core.extracted).toEqual(['card']))
+    say(answered('menu'))
+    await vi.waitFor(() => expect(core.extracted).toEqual(['card', 'menu']))
+    // Tab A moves on: Card is on no screen now, so its next answer waits for a browser to come back to it.
+    server.shown('button--primary', 'tab-a')
+    say(answered('card'))
+    await new Promise((done) => setTimeout(done, 10))
+    expect(core.extracted).toEqual(['card', 'menu'])
+    server.shown('card--basic', 'tab-b')
+    await vi.waitFor(() => expect(core.extracted).toEqual(['card', 'menu', 'card']))
+  })
+
   it('asks nothing for a component the browser left, and asks once when the browser comes back to it', async () => {
     const { link, say } = fakeLink()
     const server = new DevServer(devServerOptions().options, link, docgen)

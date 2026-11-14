@@ -452,7 +452,7 @@ describe('DocgenSession, lazy', () => {
     expect(binding.initializations).toBe(2)
   })
 
-  it('answers an eager session from the index it holds, resolving nothing per request', async () => {
+  it("answers an eager session from its published answer, with the index's diagnostics", async () => {
     const binding = new FakeBinding({
       components: { Button: entry('Button', join(src, 'Button.tsx')) },
       diagnostics: [warning(['Button'])],
@@ -464,7 +464,31 @@ describe('DocgenSession, lazy', () => {
       doc: rdtDoc('Button', ['label']),
       degradedBy: ['Cannot resolve type'],
     })
-    expect(binding.resolved).toEqual([])
+    // The native eager session answers from what it published (`published_component`), the checker's props merged.
+    expect(binding.resolved).toEqual(['Button'])
+  })
+
+  it('says an eager answer awaits the checker, as a lazy one does', async () => {
+    const binding = new FakeBinding({
+      components: { Button: entry('Button', join(src, 'Button.tsx')) },
+      diagnostics: [
+        {
+          ...warning(['Button'], 'info'),
+          code: 'SEMANTIC_BACKEND',
+          message: 'the TypeScript checker has not answered yet; the structural props are used',
+        },
+      ],
+    })
+    binding.docs = { Button: rdtDoc('Button', ['label']) }
+    for (const lazy of [false, true]) {
+      const session = new DocgenSession({ srcDirs: [src], lazy }, binding)
+      await session.fresh()
+      expect(session.documentation('Button')).toEqual({
+        doc: rdtDoc('Button', ['label']),
+        degradedBy: [],
+        awaitsChecker: true,
+      })
+    }
   })
 })
 

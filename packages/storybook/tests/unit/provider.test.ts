@@ -4,6 +4,7 @@ import type { DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { logger } from 'storybook/internal/node-logger'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Diagnostic } from 'caliper-docgen-napi'
+import type { CaliperStorybookOptions } from '../../src/index.js'
 import type { Link, ToDevServer, ToProvider } from '../../src/live.js'
 import { createDocgenProvider } from '../../src/provider.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
@@ -303,7 +304,7 @@ describe('replacing a structural answer, and the background prefetch', () => {
     message: 'the TypeScript checker has not answered yet; the structural props are used',
   })
 
-  function linked(fake: FakeBinding) {
+  function linked(fake: FakeBinding, options: CaliperStorybookOptions = {}) {
     const posted: ToDevServer[] = []
     let receive: (message: ToProvider) => void = () => {}
     const link: Link<ToDevServer, ToProvider> = {
@@ -312,7 +313,7 @@ describe('replacing a structural answer, and the background prefetch', () => {
         receive = listener
       },
     }
-    const provider = createDocgenProvider({}, fake, link)(async () => NEXT)
+    const provider = createDocgenProvider(options, fake, link)(async () => NEXT)
     return { provider, posted, say: (message: ToProvider) => receive(message) }
   }
 
@@ -349,6 +350,15 @@ describe('replacing a structural answer, and the background prefetch', () => {
     expect(answeredFake.settles).toEqual([])
     expect(late.settles).toEqual([['Card']])
     expect([...answered.posted, ...unsettled.posted]).toEqual([])
+  })
+
+  it('watches an eager session whose checker missed the wait, and says when it has answered', async () => {
+    const fake = binding()
+    fake.output.diagnostics = [awaiting('Card')]
+    const { provider, posted } = linked(fake, { lazy: false })
+    await provider({ entry: story('Card') })
+    await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'card' }]))
+    expect(fake.settles).toEqual([['Card']])
   })
 
   it('says the answer of the newer revision when an edit comes while the checker is still answering, and only it', async () => {

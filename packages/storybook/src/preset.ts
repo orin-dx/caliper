@@ -66,14 +66,17 @@ async function docgenService(): Promise<Extract> {
  * The dev server's side of the addon. It documents the opening story before a browser asks, follows the story the
  * browser shows, has the provider resolve the next stories' components in the background, and has the docgen service
  * ask again for a component whose structural answer the checker has since replaced: the service stores the new answer
- * and the browser's Controls and docs, which read it live, show it without a reload. Only for the component on screen;
- * one the provider says was answered while the browser showed another is asked again when the browser comes back to
- * it, once.
+ * and the browser's Controls and docs, which read it live, show it without a reload. Only for a component some browser
+ * shows; one the provider says was answered while no browser showed it is asked again, once, when one comes back to
+ * it. The next stories' queue is one for the process: the last story opened in any browser sets it.
  */
 export class DevServer {
-  /** The component of the story the browser shows, once it has said. */
-  private open: string | undefined
-  /** Components the checker answered while the browser showed another, to ask again when it comes back. */
+  /**
+   * The component each browser shows, by its channel's sender id. The channel says nothing when a tab closes, so a
+   * closed tab's last component stays: at most one extra request when the checker answers it.
+   */
+  private readonly open = new Map<string, string>()
+  /** Components the checker answered while no browser showed them, to ask again when one comes back. */
   private readonly answeredAway = new Set<string>()
   private readonly count: number
   private readonly options: DevServerOptions
@@ -91,7 +94,7 @@ export class DevServer {
     this.count = options.prefetchStories ?? PREFETCH_STORIES
     link.listen((message) => {
       if (message.type !== 'answered') return
-      if (message.componentId === this.open) void this.extract(message.componentId)
+      if (this.onScreen(message.componentId)) void this.extract(message.componentId)
       else this.answeredAway.add(message.componentId)
     })
   }
@@ -123,17 +126,25 @@ export class DevServer {
     try {
       const extract = await this.extractWith()
       const opening = await prefetch({ index: () => this.index(), extract })
-      if (opening !== undefined && this.open === undefined) await this.prefetchAfter(opening)
+      if (opening !== undefined && this.open.size === 0) await this.prefetchAfter(opening)
     } catch (error) {
       logger.debug(`[caliper-docgen] prefetch stopped: ${(error as Error).message}`)
     }
   }
 
-  /** The browser shows a story of `storyId`'s component. */
-  shown(storyId: string): void {
+  /** Whether any browser shows a story of `componentId`. */
+  private onScreen(componentId: string): boolean {
+    return [...this.open.values()].includes(componentId)
+  }
+
+  /**
+   * The browser `client` (a tab's manager or preview, by its channel's sender id) shows a story of `storyId`'s
+   * component, in place of what it showed before.
+   */
+  shown(storyId: string, client = ''): void {
     const componentId = componentOf(storyId)
-    if (componentId === this.open) return
-    this.open = componentId
+    if (this.open.get(client) === componentId) return
+    this.open.set(client, componentId)
     if (this.answeredAway.delete(componentId)) void this.extract(componentId)
     void this.prefetchAfter(componentId)
   }
@@ -174,8 +185,10 @@ export const experimental_serverChannel = <Channel extends ServerChannel>(
 ): Channel => {
   const server = devServerFor(options)
   for (const event of STORY_SHOWN) {
-    serverChannel.on(event, (shown?: { storyId?: unknown }) => {
-      if (typeof shown?.storyId === 'string') server.shown(shown.storyId)
+    // Storybook's channel calls a listener with the event as `this`, whose `from` names the sending browser channel.
+    serverChannel.on(event, function storyShown(this: { from?: unknown } | undefined, shown?: { storyId?: unknown }) {
+      if (typeof shown?.storyId !== 'string') return
+      server.shown(shown.storyId, typeof this?.from === 'string' ? this.from : '')
     })
   }
   return serverChannel

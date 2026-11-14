@@ -256,8 +256,8 @@ export class DocgenSession {
    * answers from what an earlier story resolved; nothing is kept here, so an edit cannot leave a stale answer behind.
    */
   documentation(key: string): Documentation {
-    if (!this.lazy) return { doc: this.docgenInfo(key), degradedBy: this.degradedBy(key) }
     if (this.sessionId === undefined) return { doc: undefined, degradedBy: [] }
+    // One answer for either session, so whether the checker is still answering is decided in one place.
     const answers = JSON.parse(this.napi.sessionComponentAnswers(this.sessionId, [key])) as Record<
       string,
       { docgenInfo: RdtComponentDoc; diagnostics: Diagnostic[] }
@@ -265,10 +265,12 @@ export class DocgenSession {
     const answer = answers[key]
     if (!answer) {
       // The listing includes a re-export of a package component that has nothing to show; it is no component.
-      if (this.components.delete(key)) this.index = undefined
-      return { doc: undefined, degradedBy: [] }
+      if (this.lazy && this.components.delete(key)) this.index = undefined
+      return { doc: undefined, degradedBy: this.lazy ? [] : this.degradedBy(key) }
     }
-    const documentation: Documentation = { doc: answer.docgenInfo, degradedBy: incompleteMessages(answer.diagnostics) }
+    // An eager session's index holds every diagnostic, the project-wide ones included; a lazy one's answer does.
+    const degradedBy = this.lazy ? incompleteMessages(answer.diagnostics) : this.degradedBy(key)
+    const documentation: Documentation = { doc: answer.docgenInfo, degradedBy }
     if (answer.diagnostics.some(awaitsChecker)) documentation.awaitsChecker = true
     return documentation
   }
