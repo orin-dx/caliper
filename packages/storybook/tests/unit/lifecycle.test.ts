@@ -1,8 +1,11 @@
 // A model-based test of the answer lifecycle (`src/lifecycle.ts`): a simulated Storybook, provider, session and checker
 // drive the reducer through random event sequences, then run to quiescence, and the spec's invariants are checked.
 // Named sequences replay the review findings the reducer replaced spot fixes for.
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { type Event, initialState, step } from '../../src/lifecycle.js'
+import { DocgenSession } from '../../src/session.js'
+import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
 /** Each component's keys: the component and its declared subcomponents. */
 const COMPONENTS: Record<string, string[]> = { a: ['A', 'A.Item'], b: ['B'], c: ['C', 'C.Part'] }
@@ -275,5 +278,30 @@ describe('the answer lifecycle, named regressions', () => {
     expect(world.watchCount.get('B@0')).toBe(2)
     expect(world.refreshes.length).toBeLessThanOrEqual(2)
     expect(world.violations()).toEqual([])
+  })
+})
+
+// What an answer says is the binding's, not the lifecycle's; this regression is about which diagnostics reach a story.
+describe('the answer lifecycle, named regressions at the session', () => {
+  it('a project diagnostic naming no component reaches no story; one naming components reaches each, as before', async () => {
+    const src = join('/project', 'src')
+    for (const lazy of [false, true]) {
+      const binding = new FakeBinding({
+        components: { Button: entry('Button', join(src, 'Button.tsx')), Card: entry('Card', join(src, 'Card.tsx')) },
+        diagnostics: [
+          { ...warning([]), message: 'tsconfig.json could not be read' },
+          { ...warning(['Button', 'Card']), message: 'Button and Card share a name' },
+        ],
+      })
+      binding.docs = { Button: rdtDoc('Button', ['label']), Card: rdtDoc('Card', ['title']) }
+      const session = new DocgenSession({ srcDirs: [src], lazy }, binding)
+      await session.fresh()
+      for (const key of ['Button', 'Card']) {
+        expect(session.documentation(key)).toMatchObject({
+          doc: rdtDoc(key, key === 'Button' ? ['label'] : ['title']),
+          degradedBy: ['Button and Card share a name'],
+        })
+      }
+    }
   })
 })
