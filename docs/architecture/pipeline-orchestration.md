@@ -28,7 +28,7 @@ This is the orchestration layer: it owns nothing about _how_ a component is pars
 
 `Revision::next(changed)`:
 
-1. Ignores a path discovery would not include (outside every source directory, excluded, not TypeScript): `discover::is_source_file`.
+1. Ignores a path discovery would not include (outside every source directory, excluded, not TypeScript, ignored by a `.gitignore`): `discover::is_source_file`. The walks and this check build their walker with one function (`walk_builder`), so a `.gitignore` is read the same way by each.
 2. Re-parses `changed` into copies of the previous global data and named-type index. A missing file is a deletion; any other read error (permissions, invalid UTF-8) declares nothing and records an `IoError`, exactly as a cold run does.
 3. With `load_dependencies`, loads only the demands of `changed` the session's layer has not followed (`DependencyLayer::missing`) into a new layer built on the previous one's parsed files and answers, so a new package import costs one load and an unchanged one none.
 4. Re-resolves the components that are new, live in `changed`, or whose recorded dependencies the change touches (below). Every other component keeps its previous `Arc<Resolved>`.

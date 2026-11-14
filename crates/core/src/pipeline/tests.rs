@@ -2625,12 +2625,84 @@ fn discovery_the_directory_walk_and_the_watcher_agree_on_every_exclude_list() {
         for name in FILES.iter().filter(|name| name.ends_with(".ts") || name.ends_with(".tsx")) {
             let path = root.join(name);
             assert_eq!(
-                is_source_file(&path, std::slice::from_ref(&root), &patterns),
+                is_source_file(&path, std::slice::from_ref(&root), &patterns, &Default::default()),
                 files.contains(&path),
                 "is_source_file({name}) for {patterns:?}"
             );
         }
     }
+}
+
+// A `.gitignore` (and a hidden file, which discovery keeps) must be answered the same by discovery and by the
+// watcher's per-path check.
+#[test]
+fn discovery_and_the_watcher_agree_on_gitignored_and_hidden_files() {
+    const FILES: [&str; 6] =
+        ["Button.tsx", "Generated.tsx", "out/Built.tsx", "ui/Skipped.tsx", "ui/Kept.tsx", ".hidden/Secret.tsx"];
+    let tmp = TempDir::new().unwrap();
+    // The ignore rules apply inside a git checkout only.
+    fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    fs::write(tmp.path().join(".gitignore"), "Generated.tsx\nout/\n").unwrap();
+    fs::create_dir_all(tmp.path().join("ui")).unwrap();
+    fs::write(tmp.path().join("ui/.gitignore"), "Skipped.tsx\n").unwrap();
+    for name in FILES {
+        let path = tmp.path().join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "export const X = () => null;").unwrap();
+    }
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+
+    let (files, _) = discover_files(std::slice::from_ref(&root), &[]);
+    let (dirs, _) = discover_dirs(std::slice::from_ref(&root), &[], |_| false);
+
+    let kept: Vec<_> = files.iter().map(|f| f.strip_prefix(&root).unwrap().to_string()).collect();
+    assert_eq!(kept, [".hidden/Secret.tsx", "Button.tsx", "ui/Kept.tsx"]);
+    assert!(!dirs.contains(&root.join("out")), "the directory walk skips an ignored directory");
+    for name in FILES {
+        let path = root.join(name);
+        assert_eq!(
+            is_source_file(&path, std::slice::from_ref(&root), &[], &Default::default()),
+            files.contains(&path),
+            "{name}"
+        );
+    }
+}
+
+// Whether `.gitignore` applies is decided from the directory as configured: a source directory reached through a
+// symlink is inside `node_modules` (or not) by the path it was given, not by where it points.
+#[cfg(unix)]
+#[test]
+fn discovery_and_the_watcher_decide_the_ignore_policy_from_the_configured_directory() {
+    // (configured directory, where it points)
+    for (link, target) in [("node_modules/lib", "packages/lib"), ("lib", "node_modules/pkg")] {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        fs::write(tmp.path().join(".gitignore"), "Ignored.tsx\n").unwrap();
+        for name in ["Ignored.tsx", "Kept.tsx"] {
+            write_file_at(tmp.path(), &format!("{target}/{name}"), "export const X = () => null;");
+        }
+        fs::create_dir_all(tmp.path().join(link).parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join(target), tmp.path().join(link)).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let configured = vec![root.join(link)];
+
+        let (files, _) = discover_files(&configured, &[]);
+        for name in ["Ignored.tsx", "Kept.tsx"] {
+            let canonical = root.join(target).join(name);
+            assert_eq!(
+                is_source_file(&canonical, &configured, &[], &Default::default()),
+                files.contains(&canonical),
+                "{name} through {link}"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+fn write_file_at(root: &std::path::Path, name: &str, content: &str) {
+    let path = root.join(name);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, content).unwrap();
 }
 
 #[test]
@@ -2643,7 +2715,7 @@ fn a_directory_named_like_a_source_file_is_not_a_source_file() {
     let (files, _) = discover_files(std::slice::from_ref(&root), &[]);
 
     assert_eq!(files, [root.join("Weird.tsx/Inner.tsx")]);
-    assert!(!is_source_file(&root.join("Weird.tsx"), std::slice::from_ref(&root), &[]));
+    assert!(!is_source_file(&root.join("Weird.tsx"), std::slice::from_ref(&root), &[], &Default::default()));
 }
 
 #[test]

@@ -277,7 +277,7 @@ impl Revision {
         changed: &Utf8Path,
     ) -> Option<(Revision, IncrementalUpdate)> {
         let previous = self.lazy.as_ref()?;
-        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns) {
+        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns, self.source_files()) {
             return None;
         }
         let start = Instant::now();
