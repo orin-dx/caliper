@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest'
 import {
   againstStructural,
   checkerExpectations,
+  fallbackCause,
+  fallbackFailure,
+  fallbackWorklist,
   laneFailures,
   runCheckerLane,
   structuralExpectations,
@@ -30,6 +33,44 @@ const row = (id: string, verdict: LaneRun['rows'][number]['verdict'], answered =
   degradedBy: undefined,
   golden: '',
   facts: [],
+  fallback: null,
+})
+
+describe('the fallback-off column (ADR 0026 S7b)', () => {
+  it('says how a row changes with the fallback off, and nothing for one that reads the same', () => {
+    expect.hasAssertions()
+    const on = { ...row('a/01', 'identical'), type: { kind: 'string' }, degradedBy: ['indexedAccess'] }
+    expect(fallbackCause(on, { ...on })).toBeNull()
+    expect(fallbackCause(on, undefined)).toBe('no checker answer')
+    expect(fallbackCause(on, { ...on, answered: false })).toBe('no checker answer')
+    const opaque = { ...on, verdict: 'opaque with marker' as const, type: { kind: 'opaque' } }
+    expect(fallbackCause(on, opaque)).toBe('checker could not read: indexedAccess')
+    expect(fallbackCause(on, { ...on, facts: ['description' as const] })).toBe('structural description')
+    expect(fallbackCause(on, { ...on, verdict: 'wrong', type: { kind: 'number' }, degradedBy: undefined })).toBe(
+      'type: wrong',
+    )
+  })
+
+  it('fails a row whose dependence on the fallback is unlisted, listed wrongly, or listed and gone', () => {
+    expect.hasAssertions()
+    const green = { verdicts: ['identical', 'spelled'] } satisfies Parameters<typeof fallbackFailure>[2]
+    const listed = { ...green, fallback: 'checker could not read: indexedAccess' }
+    expect(fallbackFailure('a/01', null, green)).toBeNull()
+    expect(fallbackFailure('a/01', 'checker could not read: indexedAccess', listed)).toBeNull()
+    expect(fallbackFailure('a/01', 'checker could not read: indexedAccess', green)).toContain('says nothing')
+    expect(fallbackFailure('a/01', 'no checker answer', listed)).toContain('leans on the structural')
+    expect(fallbackFailure('a/01', null, listed)).toContain('remove its "fallback" entry')
+  })
+
+  it('groups the rows that lean on the fallback by cause', () => {
+    expect.hasAssertions()
+    const rows = [
+      { ...row('a/01', 'identical'), fallback: 'checker could not read: indexedAccess' },
+      row('a/02', 'identical'),
+      { ...row('a/03', 'identical'), fallback: 'checker could not read: indexedAccess' },
+    ]
+    expect([...fallbackWorklist(rows)]).toStrictEqual([['checker could not read: indexedAccess', ['a/01', 'a/03']]])
+  })
 })
 
 describe('the checker lane expectations', () => {
