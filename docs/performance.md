@@ -132,3 +132,9 @@ Output is exact: the new default is byte-identical to the previous build's `--lo
 | shadcn   | 144 → 188 | 1.28 → 1.72 |    220 → 301 |  5.9 → 12.2 |
 
 The default is slower and larger than the old one at that commit: wall time +9 to +31%, peak RSS +12 to +37%, canonical JSON +42 to +105%. Most of the wall time was a lookup bug, fixed in #241 (indexing component lookups by name): shadcn `full` went from 153 to 127 ms, against 124 ms for the old default, with identical output. On the Storybook request path the first story was no slower with `full` than with `none`. Storybook parity (props Storybook lists that the addon lacks, antd / shadcn / Spectrum): 37 / 0 / 1 → 34 / 0 / 1. `ref` on `forwardRef` components written as `React.forwardRef(Inner)` is listed since #244; `PurePanel`'s 33 props, Drawer's own, remain because the declared type does not extend them.
+
+## Release binaries carry no symbol table
+
+`[profile.release]` sets `strip = "symbols"`. The CLI went from 34.9 MB to 28.7 MB (-17.7%) and the napi addon from 32.0 MB to 26.0 MB (-18.7%), measured on macOS arm64 with Rust 1.99.1; the output of `extract --json` is byte-identical apart from `stats`. Panics still print their message and `file:line`, and the panic guards recover as before (`panic` stays `unwind`); what is lost is the function names in a backtrace (`RUST_BACKTRACE=1` prints frames without names).
+
+To profile or read a backtrace, build without the strip: `CARGO_PROFILE_RELEASE_STRIP=none cargo build --release`. `[profile.bench]` inherits the release profile, so `just bench` and `cargo bench` also strip the debug info it asks for; add `CARGO_PROFILE_BENCH_STRIP=none` to profile one.
