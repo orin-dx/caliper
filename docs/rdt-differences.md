@@ -220,15 +220,15 @@ props: { a?: React.ReactElement; b?: JSX.Element; c?: React.ReactNode }
 ```
 
 - RDT: `ReactElement<unknown, string | JSXElementConstructor<any>>`, `any`, `ReactNode`.
-- Caliper: `{"kind":"reactNode"}` for all three.
+- Caliper: `{"kind":"reactNode"}` for all three from the structural fallback (`--no-checker`). The checker, the default, keeps `ReactElement` and `JSX.Element` (`React.JSX.Element`) as `named` types with their arguments, found by their declaration in `@types/react`, and `ReactNode` as `reactNode`.
 - Checker: `ReactElement<unknown, string | JSXElementConstructor<any>> | undefined`, `any` (the React 19 types declare no global `JSX`), and the long `ReactNode` union.
-- Verdicts: `a` less precise, `b` checker any/error, `c` spelled.
+- Verdicts: `a` spelled with the checker, less precise with the fallback; `b` checker any/error; `c` spelled.
 
-**Why not better, but deliberate.** `reactNode` is wider than `ReactElement`: it also admits strings and numbers. Storybook gives both the same control, and the canonical JSON has one terminal for them (`resolver/react.rs`, `types/output.rs`). Splitting them is a change to the canonical JSON and a schema version bump (ADR 0017). Whether to make that change is open. 236 occurrences.
+**Why not better, but deliberate.** On the fallback only: `reactNode` is wider than `ReactElement`: it also admits strings and numbers. The structural resolver has one terminal for them (`resolver/react.rs`). The checker path keeps them apart with the `named` kind, so the canonical JSON is unchanged. 236 occurrences.
 
-**Measured.** `less precise` (and `checker any/error` for `JSX.Element`). Scored right.
+**Measured.** `less precise` on the fallback (and `checker any/error` for `JSX.Element`). Scored right.
 
-**Accounted.** Documented here and by the ADR; no marker.
+**Accounted.** Documented here and by the ADR; no marker on the fallback.
 
 ### 11. Intersections left as written
 
@@ -374,7 +374,7 @@ What RDT does that Caliper does not, run on small files:
 - Alias by name: the reader follows a name; `Parameters` and `ReturnType` show unevaluated.
 - Caliper more complete: a long type is whole instead of cut.
 - Opaque: the type is flagged as partial.
-- `reactNode`: a `ReactElement` prop also reads as accepting text.
+- `reactNode`: on the structural fallback, a `ReactElement` prop also reads as accepting text.
 - Unreduced intersection: no select control, and an agent must reduce it.
 - Type parameters: a concrete type, or `unknown`.
 - Checker has no type: nothing; Caliper keeps the declared name.

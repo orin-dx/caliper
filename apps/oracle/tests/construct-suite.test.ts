@@ -153,6 +153,32 @@ describe('the construct suite helpers', () => {
     expect(factDifferences(undefined, golden, suite)).toStrictEqual([])
   })
 
+  it('each member of a union states one written member, so two written members of one name are two places', () => {
+    expect.hasAssertions()
+    // react/37: `Element | React.JSX.Element | null`, both objects named `Element` on the checker side.
+    const element = (fields: string[]): Golden['checker'] => ({ k: 'object', fields, index: false, alias: 'Element' })
+    const golden: Golden = {
+      checker: prim('null'),
+      text: '',
+      facts: { ...noFacts, order: [element(['tagName']), element(['key', 'props', 'type']), prim('null')] },
+    }
+    const named = (name: string) => ({ kind: 'named', name, args: [] })
+    const prop = (...members: object[]) => ({
+      type: { kind: 'union', members },
+      description: '',
+      tags: {},
+      defaultValue: null,
+      required: true,
+      parent: null,
+    })
+    expect(
+      factDifferences(prop(named('Element'), named('JSX.Element'), { kind: 'null' }), golden, suite),
+    ).toStrictEqual([])
+    expect(
+      factDifferences(prop({ kind: 'null' }, named('Element'), named('JSX.Element')), golden, suite),
+    ).toStrictEqual(['order'])
+  })
+
   it('a differing fact fails unless listed, and a listed fact that agrees fails as stale', () => {
     expect.hasAssertions()
     const row: Expectation = { verdicts: ['identical', 'spelled'], facts: { order: 'the checker sorts members' } }

@@ -1,0 +1,48 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "Element"
+      }
+    ]
+  },
+  "text": "Element | null",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "react/36-jsx-element-or-null.tsx"
+    },
+    "order": [
+      {
+        "k": "object",
+        "fields": [
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "Element"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      }
+    ]
+  }
+}

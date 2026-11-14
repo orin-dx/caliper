@@ -457,7 +457,8 @@ pub enum PropType {
     },
 
     // ── React-specific terminals
-    /// ReactNode, ReactElement, JSX.Element — all treated the same for docgen
+    /// React's `ReactNode`. The checker keeps `ReactElement` and `JSX.Element`, which are narrower, as
+    /// [`Named`](PropType::Named); the structural resolver collapses them into this terminal.
     ReactNode,
     /// React.CSSProperties
     CssProperties,

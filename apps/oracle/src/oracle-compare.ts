@@ -87,10 +87,37 @@ function members(n: Norm, coverLiterals = false): Norm[] {
   return kept
 }
 
+/** The members of React's `ReactNode` (the `bigint` and `Promise` of React 19 when there), by kind and by the
+ * checker's name for each object. */
+const REACT_NODE_PRIMS = ['null', 'string', 'number', 'boolean']
+const REACT_NODE_OBJECTS = ['ReactElement', 'ReactPortal', 'Iterable']
+const isReactNodeMember = (m: Norm) =>
+  (m.k === 'prim' && [...REACT_NODE_PRIMS, 'bigint'].includes(m.name)) ||
+  (m.k === 'object' && m.alias !== undefined && [...REACT_NODE_OBJECTS, 'Promise'].includes(m.alias))
+
+/** The checker's union members with `ReactNode`'s own taken back into one union named `ReactNode`, when Caliper's union
+ * names `ReactNode` and the checker's holds all of its members: TypeScript keeps the alias only on a union of exactly
+ * them, so `ReactNode | ((open: boolean) => ReactNode)` arrives flattened. Unchanged otherwise. */
+function withReactNode(cm: Norm[], km: Norm[]): Norm[] {
+  if (!cm.some((m) => m.k === 'name' && m.name === 'ReactNode')) return km
+  const span = km.filter((m) => isReactNodeMember(m))
+  const has = (m: Norm) =>
+    span.some(
+      (s) => (s.k === 'prim' && m.k === 'prim' && s.name === m.name) || (s.k === 'object' && s.alias === m.alias),
+    )
+  const required: Norm[] = [
+    ...REACT_NODE_PRIMS.map((name) => prim(name)),
+    ...REACT_NODE_OBJECTS.map((alias): Norm => ({ k: 'object', fields: [], index: false, alias })),
+  ]
+  if (!required.every((m) => has(m))) return km
+  return [...km.filter((m) => !isReactNodeMember(m)), { k: 'union', members: span, alias: 'ReactNode' }]
+}
+
 /** Two unions: each checker member covered by one of Caliper's (a missing member makes Caliper's type too narrow),
  * and each of Caliper's matched by one of the checker's (an extra member makes it too wide, unless it widens
  * literals). */
-function compareUnions(cm: Norm[], km: Norm[], depth: number): Verdict {
+function compareUnions(cm: Norm[], checkerMembers: Norm[], depth: number): Verdict {
+  const km = withReactNode(cm, checkerMembers)
   const kCovered = km.map((m) => best(cm.map((cMember) => compare(cMember, m, depth + 1))))
   const cMatched = cm.map((m) => {
     const verdict = best(km.map((kMember) => compare(m, kMember, depth + 1)))

@@ -115,6 +115,14 @@ describe('caliperNorm', () => {
     expect(() => caliperNorm({ kind: 'array', element: added })).toThrow('brandNewKind')
   })
 
+  it('reads the object and symbol keywords Caliper writes as names as the primitives they are', () => {
+    expect.hasAssertions()
+    expect(caliperNorm({ kind: 'named', name: 'object', args: [] })).toStrictEqual(prim('object'))
+    expect(caliperNorm({ kind: 'named', name: 'symbol', args: [] })).toStrictEqual(prim('symbol'))
+    // `Object`, the interface, is a name like any other.
+    expect(caliperNorm({ kind: 'named', name: 'Object', args: [] })).toStrictEqual({ k: 'name', name: 'Object' })
+  })
+
   it('a type nested deeper than the limit is opaque, not an error', () => {
     expect.hasAssertions()
     let nested: PropType = string
