@@ -460,7 +460,7 @@ impl ResolutionContext {
         let index = self.mapping_index.get_or_init(|| {
             let mut index: FxHashMap<CompactString, Vec<usize>> = FxHashMap::default();
             for (position, mapping) in self.global.component_mappings.iter().enumerate() {
-                index.entry(CompactString::from(mapping.component_name.as_str())).or_default().push(position);
+                index.entry(CompactString::from(mapping.binding_name())).or_default().push(position);
             }
             index
         });

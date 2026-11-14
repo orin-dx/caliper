@@ -643,13 +643,43 @@ impl<'src> SourceDataCollector<'src> {
                 }
             }
         }
+        let mut named_by_display_name = FxHashSet::default();
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
-            if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.is_binding_named(&obj_name)) {
-                mapping.component_name = display_name;
+            if let Some(index) = self.data.component_mappings.iter().position(|m| m.is_binding_named(&obj_name)) {
+                self.data.component_mappings[index].component_name = display_name;
+                named_by_display_name.insert(index);
             }
         }
+        self.name_by_the_export(&named_by_display_name);
         self.name_the_anonymous_default();
         self.data
+    }
+
+    /// A component its module exports under one name other than its own is reported under that name:
+    /// `export { _Card as Card }` is `Card`. The one place that names a component after an export; the exports
+    /// themselves are what identify it (ADR 0027). Left alone: a component with a `displayName`, one exported under
+    /// its own name or under several others, a sub-component (reached through a path) and one whose export name
+    /// another component already has.
+    fn name_by_the_export(&mut self, named_by_display_name: &FxHashSet<usize>) {
+        let mappings = &self.data.component_mappings;
+        let renames: Vec<(usize, String)> = mappings
+            .iter()
+            .enumerate()
+            .filter(|(index, mapping)| mapping.bound && !named_by_display_name.contains(index))
+            .filter_map(|(index, mapping)| {
+                let mut named = mapping.exports.iter().filter(|e| e.members.is_empty() && e.name != "default");
+                let (export, None) = (named.next()?, named.next()) else { return None };
+                let free = mappings.iter().all(|other| other.component_name != export.name);
+                (free && export.name != mapping.component_name).then(|| (index, export.name.clone()))
+            })
+            .collect();
+        let mut taken = FxHashSet::default();
+        for (index, name) in renames {
+            if taken.insert(name.clone()) {
+                let mapping = &mut self.data.component_mappings[index];
+                mapping.local_name = Some(std::mem::replace(&mut mapping.component_name, name));
+            }
+        }
     }
 
     /// `import { A } from "./a"; export { A }` re-exports `A` exactly like `export { A } from "./a"`, and

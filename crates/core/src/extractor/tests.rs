@@ -1720,7 +1720,7 @@ fn a_component_records_the_exports_its_module_has_for_it_or_for_the_export_it_is
             ("Menu", &["Menu"]),
             ("MenuItem", &["Menu.Item"]),
             ("Orphan", &[]),
-            ("Renamed", &["Public"]),
+            ("Public", &["Public"]),
         ])
     );
     assert_eq!(
@@ -1743,7 +1743,7 @@ fn a_component_records_the_exports_its_module_has_for_it_or_for_the_export_it_is
     "#;
     assert_eq!(
         exports("/test/menu.tsx", source),
-        named(&[("Item", &["default.Item"]), ("Menu", &["default"]), ("Ping", &["Game"]), ("Pong", &["Game.Pong"]),])
+        named(&[("Game", &["Game"]), ("Item", &["default.Item"]), ("Menu", &["default"]), ("Pong", &["Game.Pong"]),])
     );
     assert_eq!(
         exports(
@@ -1751,6 +1751,49 @@ fn a_component_records_the_exports_its_module_has_for_it_or_for_the_export_it_is
             "export function Twice(props: { a: string }) { return <b />; } export default Twice;"
         ),
         named(&[("Twice", &["Twice", "default"])])
+    );
+}
+
+// A component exported under one other name is reported under that name: `export { _Card as Card }` is `Card`, not the
+// implementation's `_Card`. The exports stay what identifies it (ADR 0027).
+#[test]
+fn a_component_exported_under_another_name_is_named_by_that_export() {
+    let named = |source: &str| -> Vec<(String, Vec<String>)> {
+        let data = parse_file(Utf8Path::new("/test/aliased.tsx"), source);
+        let mut found: Vec<(String, Vec<String>)> = data
+            .component_mappings
+            .iter()
+            .map(|m| (m.component_name.to_string(), m.exports.iter().map(ToString::to_string).collect()))
+            .collect();
+        found.sort_unstable();
+        found
+    };
+    let pair = |name: &str, exports: &[&str]| (name.to_owned(), exports.iter().map(ToString::to_string).collect());
+    let source = r#"
+        interface P { label: string }
+        function _Card(props: P) { return <div />; }
+        function Wrapped(props: P) { return <b />; }
+        function Twice(props: P) { return <i />; }
+        function Taken(props: P) { return <u />; }
+        export function Shown(props: P) { return <s />; }
+        function Labeled(props: P) { return <em />; }
+        function Both(props: P) { return <p />; }
+        Labeled.displayName = "Tagged";
+        export { _Card as Card, Wrapped as DialogTrigger, Twice as One, Twice as Two, Taken as Shown, Labeled as Name };
+        export { Both as Pair };
+        export default Both;
+    "#;
+    assert_eq!(
+        named(source),
+        [
+            pair("Card", &["Card"]),
+            pair("DialogTrigger", &["DialogTrigger"]),
+            pair("Pair", &["Pair", "default"]),
+            pair("Shown", &["Shown"]),
+            pair("Tagged", &["Name"]),
+            pair("Taken", &["Shown"]),
+            pair("Twice", &["One", "Two"]),
+        ]
     );
 }
 

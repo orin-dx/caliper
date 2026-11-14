@@ -1002,7 +1002,7 @@ fn declares(data: &SourceData, file: &Utf8Path, name: &str) -> bool {
         || data.type_aliases.contains_key(&key)
         || data.enums.contains_key(&key)
         || data.const_arrays.contains_key(&key)
-        || data.component_mappings.iter().any(|m| m.component_name == name)
+        || data.component_mappings.iter().any(|m| m.binding_name() == name)
         // A constant declared by its type alone (`declare const Primitive: Primitives`).
         || data.type_aliases.contains_key(&format!("{file}:typeof {name}"))
 }
@@ -1016,7 +1016,7 @@ fn declaration_refs(data: &SourceData, file: &Utf8Path, name: &str, out: &mut Fx
     if let Some(alias) = data.type_aliases.get(&key) {
         alias_refs(alias, out);
     }
-    for mapping in data.component_mappings.iter().filter(|m| m.component_name == name) {
+    for mapping in data.component_mappings.iter().filter(|m| m.binding_name() == name) {
         mapping_refs(mapping, out);
     }
     // A reference that omits an argument reads the default (`DOMAttributes<T = FocusableElement>`).
@@ -1149,7 +1149,7 @@ pub(crate) fn load(
     component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
     let mut component_positions: FxHashMap<CompactString, Vec<usize>> = FxHashMap::default();
     for (position, mapping) in component_mappings.iter().enumerate() {
-        component_positions.entry(CompactString::from(mapping.component_name.as_str())).or_default().push(position);
+        component_positions.entry(CompactString::from(mapping.binding_name())).or_default().push(position);
     }
     let named_types = Arc::new(named);
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
