@@ -3,7 +3,7 @@
   "entries": [
     {
       "package": "cargo/caliper-docgen",
-      "targetVersion": "0.10.0",
+      "targetVersion": "0.11.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -12,7 +12,7 @@
     },
     {
       "package": "cargo/caliper-docgen-core",
-      "targetVersion": "0.10.0",
+      "targetVersion": "0.11.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -21,7 +21,7 @@
     },
     {
       "package": "cargo/caliper-docgen-napi",
-      "targetVersion": "0.10.0",
+      "targetVersion": "0.11.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -30,16 +30,7 @@
     },
     {
       "package": "cargo/caliper-docgen-semantic",
-      "targetVersion": "0.4.0",
-      "reasons": [
-        {
-          "kind": "changeset"
-        }
-      ]
-    },
-    {
-      "package": "cargo/caliper-docgen-tsc-client",
-      "targetVersion": "0.2.1",
+      "targetVersion": "0.5.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -48,7 +39,7 @@
     },
     {
       "package": "npm/caliper-docgen",
-      "targetVersion": "0.10.0",
+      "targetVersion": "0.11.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -57,7 +48,7 @@
     },
     {
       "package": "npm/caliper-docgen-napi",
-      "targetVersion": "0.10.0",
+      "targetVersion": "0.11.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -66,7 +57,7 @@
     },
     {
       "package": "npm/caliper-docgen-storybook",
-      "targetVersion": "0.10.0",
+      "targetVersion": "0.11.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -75,13 +66,14 @@
     },
     {
       "package": "npm/caliper-docgen-vite-plugin",
-      "targetVersion": "0.10.0",
+      "targetVersion": "0.11.0",
       "reasons": [
         {
-          "kind": "changeset"
+          "kind": "fixedGroup",
+          "groupId": "napi-and-binding"
         }
       ]
     }
   ],
-  "digest": "87ff1b67517ff39b2bbfe27f61c9aecd289d96fb78986cf45c02c587a9f3539e"
+  "digest": "546ab248a5226ac4dfc1a521be59766757a0372f7cb18c83383ac24f3191754e"
 }

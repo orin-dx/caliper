@@ -1,5 +1,24 @@
 # caliper-docgen-vite-plugin
 
+## 0.11.0
+
+_2026-11-14 · [compare](https://github.com/orin-dx/caliper/compare/caliper-docgen-vite-plugin@0.10.0...caliper-docgen-vite-plugin@0.11.0)_
+
+### Minor Changes
+
+- Released together with the `napi-and-binding` fixed group.
+
+### Patch Changes
+
+- The built-in TypeScript checker now answers by default (ADR 0026). `extract`, `check` and `inspect` merge its answer over the structural one, prop by prop, and wait for it. A native session and the Storybook addon ask it for each component a request names, and still show the structural props first when it is slower than `semanticWaitMs` (150 ms). `--no-checker`, or `checker: false` in `docgen.config.ts`, the native options or the addon's options, runs the structural resolver alone, as before. `watch`, `extractAll` and the Vite plugin stay structural.
+
+  The checker costs time and memory. `extract` of an app with 938 Chakra UI and MUI components takes about 6 s and 970 MiB, against 0.1 s and 200 MiB with `--no-checker`. A session that answered every one of them peaks at about 1 GB, against 380 MiB without the checker: each answer the session keeps now shares its props with the others, where before each kept its own copy, about 6.7 MiB per Chakra component.
+
+  Breaking: `--experimental-semantic-types`, the config's `experimentalSemanticTypes` and the `semanticTypes` option of the native binding and the Storybook addon are removed. The CLI and the config reject the old names as unknown, and the addon rejects `semanticTypes` by name. `PipelineOptions::experimental_semantic_types` is now `PipelineOptions::checker`, and it is `true` by default.
+
+  Action: drop `--experimental-semantic-types`, `experimentalSemanticTypes: true` and `semanticTypes: 'on-demand'`, since the checker now runs without them. Replace `semanticTypes: 'off'`, or a run that relied on the old structural default, with `checker: false` or `--no-checker`.
+- The canonical JSON now says how each component's module exports it: `exports`, a list of `{ name, members }` per component (`default` for the default export, `Card` for `export { _Card as Card }`, and for a sub-component attached to an export the export it hangs from with the property that reaches it, so `Menu.Item = Item` beside `export default Menu` is `default` with `Item`). The session index the Storybook addon reads lists them too. Readers can find a component by file and export instead of by display name, which two components of one file can share. The output's `schemaVersion` is 7, so the Vite plugin and the Storybook addon need the same release as the binary, and `caliper-docgen schema` and the TypeScript declarations list the new field. The RDT and TOON output are unchanged, and the parse cache is not rebuilt. For library users: a `ComponentEntry` read back from the JSON has its `exports`, which it did not before.
+
 ## 0.10.0
 
 - An invalid option value now fails at startup with a message naming the choices, such as `fallback: 'degrade'` in the addon or `logLevel: 'verbose'` in the Vite plugin; a typo used to log everything or act as `fallback: 'never'`. Check your options if the build now stops with a `[caliper-docgen]` message.
