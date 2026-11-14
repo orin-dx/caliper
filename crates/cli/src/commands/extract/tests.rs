@@ -18,6 +18,7 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         no_checker: true,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
         no_resolver_facts: false,
+        no_structural_fallback: false,
     }
 }
 
@@ -483,6 +484,7 @@ export function Button(props: ButtonProps) { return null; }
         no_checker: true,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
         no_resolver_facts: false,
+        no_structural_fallback: false,
     };
 
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);
@@ -587,6 +589,7 @@ fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_
         // Too short for the checker to build a program, so it is unavailable.
         semantic_timeout_ms: if semantic { 1 } else { crate::DEFAULT_SEMANTIC_TIMEOUT_MS },
         no_resolver_facts: false,
+        no_structural_fallback: false,
     };
 
     assert_eq!(cmd_extract(args, true, None).unwrap(), 0);
@@ -631,7 +634,7 @@ fn the_checker_is_on_by_default_with_a_ten_second_timeout() {
     assert!(!args.no_checker);
     assert_eq!(args.semantic_timeout_ms, 10_000);
 
-    for flag in [&["--semantic-timeout-ms", "500"][..], &["--no-resolver-facts"]] {
+    for flag in [&["--semantic-timeout-ms", "500"][..], &["--no-resolver-facts"], &["--no-structural-fallback"]] {
         let refused = crate::Cli::try_parse_from([&["caliper-docgen", "extract", "--no-checker"][..], flag].concat());
         assert!(refused.is_err(), "{flag:?} with --no-checker is refused");
     }

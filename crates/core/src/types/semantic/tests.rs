@@ -241,6 +241,39 @@ fn a_prop_the_checker_could_not_read_keeps_its_structural_type_and_says_why() {
 }
 
 #[test]
+fn with_no_fallback_an_unread_type_stays_the_checkers_opaque_one_and_an_unanswered_component_is_opaque() {
+    let mut out = output();
+    out.components.get_mut("Card").unwrap().props.insert("tone".to_string(), structural("tone", "Card tone.", None));
+    let unresolved = unresolved_type("Missing");
+    let outcome = SemanticOutcome {
+        components: vec![button(vec![typed("label", unresolved.clone()), typed("size", PropType::String)])],
+        ..Default::default()
+    };
+
+    merge_semantic_with(&mut out, outcome, ResolverFacts::NoFallback);
+
+    let props = &out.components["Button"].props;
+    assert_eq!(props["label"].prop_type, unresolved, "the checker's placeholder, not the structural `any`");
+    assert_eq!(props["label"].degraded_by, ["unresolvableImport"]);
+    assert_eq!(props["label"].description, "", "no structural description");
+    assert_eq!(props["size"].default_value, None, "no structural default");
+    let tone = &out.components["Card"].props["tone"];
+    assert_eq!(tone.prop_type, degraded_type("unknown", OpaqueReason::UnsupportedExpression));
+    assert_eq!((tone.description.as_str(), tone.required), ("", true));
+    let messages: Vec<_> = out.diagnostics.iter().map(|d| (d.message.as_str(), d.affects.clone())).collect();
+    assert!(
+        messages.iter().any(|(m, a)| m.starts_with("1 prop(s) of 1 component(s) are opaque") && a == &["Button"]),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|(m, a)| m.contains("structural fallback is off: their props are opaque") && a == &["Card"]),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn a_checker_type_that_is_only_cut_at_a_limit_or_where_both_are_opaque_is_the_checkers() {
     let mut out = output();
     let opaque = |raw: &str| degraded_type(raw, OpaqueReason::ConditionalType);

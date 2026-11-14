@@ -1,0 +1,27 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      }
+    ]
+  },
+  "text": "number | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "components/07-lib-parameters-of.tsx"
+    },
+    "order": null
+  }
+}

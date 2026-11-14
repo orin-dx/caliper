@@ -1,0 +1,19 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "forwarded",
+    "of": "string"
+  },
+  "text": "\"forwarded\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "components/01-forwardref-call.tsx"
+    },
+    "order": null
+  }
+}

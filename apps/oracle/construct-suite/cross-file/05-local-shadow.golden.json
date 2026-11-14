@@ -1,0 +1,66 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "lit",
+        "value": "lg",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "local",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "md",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "sm",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"local\" | Size",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "cross-file/05-local-shadow.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "local",
+        "of": "string"
+      },
+      {
+        "k": "union",
+        "members": [
+          {
+            "k": "lit",
+            "value": "lg",
+            "of": "string"
+          },
+          {
+            "k": "lit",
+            "value": "md",
+            "of": "string"
+          },
+          {
+            "k": "lit",
+            "value": "sm",
+            "of": "string"
+          }
+        ],
+        "alias": "Size"
+      }
+    ]
+  }
+}
