@@ -695,3 +695,22 @@ fn a_component_whose_props_repeat_an_earlier_ones_gets_the_same_props_and_a_repe
     );
     assert_eq!(out.components["Button"].props["alpha"].description, "Later");
 }
+
+#[test]
+fn with_no_fallback_the_checker_is_asked_for_every_description() {
+    let target = SemanticTarget {
+        key: "Button".to_string(),
+        file_path: "/src/Button.tsx".into(),
+        display_name: "Button".to_string(),
+        exports: Vec::new(),
+        described: ["label".to_string()].into_iter().collect(),
+        react_wanted: None,
+    };
+    for (resolver, asked_for_label) in
+        [(ResolverFacts::Used, false), (ResolverFacts::Off, false), (ResolverFacts::NoFallback, true)]
+    {
+        let mut targets = vec![target.clone()];
+        resolver.ready(&mut targets);
+        assert_eq!(targets[0].described.is_empty(), asked_for_label, "{resolver:?}");
+    }
+}

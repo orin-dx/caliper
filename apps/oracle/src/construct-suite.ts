@@ -195,11 +195,17 @@ export interface Expectation {
   /** checker-expectations.json only: why the checker path's answer is accepted although its verdict ranks below the
    * structural path's for the same row (see `againstStructural` in src/construct-checker-run.ts). */
   improvement?: string
-  /** checker-expectations.json only: the row's answer still leans on the structural fallback (ADR 0026, S7b), and why,
-   * as `fallbackCause` in src/construct-checker-run.ts states it. The list is the S7c to S7e worklist: the lane fails on
-   * a row that leans on the fallback unlisted, or is listed and no longer does. */
+  /** checker-expectations.json only: the row's answer differs with the structural fallback off (ADR 0026, S7), as
+   * `fallbackCause` in src/construct-checker-run.ts states it. Only a checker limit may be listed: a cause `checker could
+   * not read: <kinds>`, whose answer with the fallback off is typed (`opaque`, with `degradedBy`), with `limit` saying
+   * why the checker cannot do better. Any other dependence on the fallback fails the lane, listed or not. */
   fallback?: string
+  /** checker-expectations.json only, with `fallback`: why the type is a genuine limit and not a gap in Caliper. */
+  limit?: string
 }
+
+/** The cause prefix of the one kind of `fallback` entry the lane accepts: a type the checker leaves unread. */
+export const CHECKER_LIMIT = 'checker could not read: '
 
 /** Problems with the expectations against the fixtures; empty when they agree. */
 export function expectationProblems(ids: string[], rows: Record<string, Expectation>): string[] {
@@ -225,8 +231,13 @@ export function expectationProblems(ids: string[], rows: Record<string, Expectat
     if (!anyGreen && (typeof row.gap !== 'string' || row.gap.trim() === '')) {
       problems.push(`${id}: a row that is not identical or spelled is a documented gap and needs a "gap" reason`)
     }
-    if (row.fallback !== undefined && (typeof row.fallback !== 'string' || row.fallback.trim() === '')) {
-      problems.push(`${id}: "fallback" names the cause the lane reports`)
+    if (row.fallback !== undefined && (typeof row.fallback !== 'string' || !row.fallback.startsWith(CHECKER_LIMIT))) {
+      problems.push(`${id}: "fallback" may only list a checker limit ("${CHECKER_LIMIT}<kinds>"); fix the row instead`)
+    }
+    if ((row.fallback === undefined) !== (row.limit === undefined)) {
+      problems.push(`${id}: "fallback" and "limit" go together: a listed checker limit says why it is one`)
+    } else if (row.limit !== undefined && (typeof row.limit !== 'string' || row.limit.trim() === '')) {
+      problems.push(`${id}: "limit" needs a reason`)
     }
     for (const [fact, reason] of Object.entries(row.facts ?? {})) {
       if (!FACTS.includes(fact as FactName)) problems.push(`${id}: unknown fact ${fact}`)
