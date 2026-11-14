@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 import type { DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { logger } from 'storybook/internal/node-logger'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { Diagnostic } from 'caliper-docgen-napi'
+import type { Link, ToDevServer, ToProvider } from '../../src/live.js'
 import { createDocgenProvider } from '../../src/provider.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
@@ -291,5 +293,70 @@ describe('createDocgenProvider', () => {
     const docs = { ...story('Intro', './src/Intro.mdx'), type: 'docs', storiesImports: [] } as unknown as IndexEntry
     expect(await request(fake, docs)).toEqual({ payload: NEXT, nextCalls: 1 })
     expect(fake.initializations).toBe(0)
+  })
+})
+
+describe('replacing a structural answer, and the background prefetch', () => {
+  const awaiting = (key: string): Diagnostic => ({
+    ...warning([key], 'info'),
+    code: 'SEMANTIC_BACKEND',
+    message: 'the TypeScript checker has not answered yet; the structural props are used',
+  })
+
+  function linked(fake: FakeBinding) {
+    const posted: ToDevServer[] = []
+    let receive: (message: ToProvider) => void = () => {}
+    const link: Link<ToDevServer, ToProvider> = {
+      post: (message) => posted.push(message),
+      listen: (listener) => {
+        receive = listener
+      },
+    }
+    const provider = createDocgenProvider({}, fake, link)(async () => NEXT)
+    return { provider, posted, say: (message: ToProvider) => receive(message) }
+  }
+
+  it('says once per revision of the files that the checker has answered every component of a structural answer', async () => {
+    const fake = binding()
+    fake.output.diagnostics = [awaiting('List'), awaiting('ListItem')]
+    const { provider, posted } = linked(fake)
+    await provider({ entry: story('List') })
+    await vi.waitFor(() => expect(posted).toEqual([{ type: 'answered', componentId: 'list' }]))
+    expect(fake.settles).toEqual([['List', 'ListItem']])
+
+    // Asked again at the same revision, still structural (the checker's answer was refused): not said again.
+    await provider({ entry: story('List') })
+    await new Promise((done) => setTimeout(done, 10))
+    expect(posted).toHaveLength(1)
+
+    // After an edit, a structural answer is watched again.
+    fake.updates.push({ updatedKeys: ['List'] })
+    await provider({ entry: story('List') })
+    await vi.waitFor(() => expect(posted).toHaveLength(2))
+  })
+
+  it("says nothing for an answer that has the checker's props, or when the checker did not settle", async () => {
+    const answeredFake = binding()
+    const answered = linked(answeredFake)
+    await answered.provider({ entry: story('Card') })
+
+    const late = binding()
+    late.output.diagnostics = [awaiting('Card')]
+    late.settled = Promise.resolve(false)
+    const unsettled = linked(late)
+    await unsettled.provider({ entry: story('Card') })
+    await new Promise((done) => setTimeout(done, 10))
+    expect(answeredFake.settles).toEqual([])
+    expect(late.settles).toEqual([['Card']])
+    expect([...answered.posted, ...unsettled.posted]).toEqual([])
+  })
+
+  it("resolves the named stories' components in the background, in order, the newest list replacing the queue", async () => {
+    const fake = binding()
+    const { say } = linked(fake)
+    say({ type: 'prefetch', entries: [story('List'), story('Card')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card']]))
+    say({ type: 'prefetch', entries: [story('Button')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card'], ['Button']]))
   })
 })

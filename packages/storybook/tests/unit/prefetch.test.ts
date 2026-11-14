@@ -1,6 +1,6 @@
 import type { IndexEntry, StoryIndex } from 'storybook/internal/types'
 import { describe, expect, it } from 'vitest'
-import { openingComponents, prefetch } from '../../src/prefetch.js'
+import { neighbours, openingComponents, prefetch } from '../../src/prefetch.js'
 
 function story(id: string, subtype: 'story' | 'test' = 'story'): IndexEntry {
   const title = id.split('--')[0]!
@@ -38,37 +38,50 @@ describe('openingComponents', () => {
   })
 })
 
-describe('prefetch', () => {
-  it('asks for one component after the other, each once its predecessor answered', async () => {
-    const events: string[] = []
-    const asked = await prefetch(
-      {
-        index: async () => stories,
-        extract: async (id) => {
-          events.push(`start ${id}`)
-          await new Promise((resolve) => setTimeout(resolve, 5))
-          events.push(`end ${id}`)
-        },
-      },
-      2,
-    )
-    expect(asked).toEqual(['button', 'card'])
-    expect(events).toEqual(['start button', 'end button', 'start card', 'end card'])
+describe('neighbours', () => {
+  it("takes one story each of the components after a component, nearest first, in the sidebar's order", () => {
+    expect(neighbours(stories, 'button', 1)).toEqual([story('card--basic')])
+    expect(neighbours(stories, 'button', 5)).toEqual([story('card--basic'), story('menu--basic')])
+    expect(neighbours(stories, 'card', 2)).toEqual([story('menu--basic')])
   })
 
-  it('stops at the first failure', async () => {
+  it('takes none after the last component, for a count of 0, or for a component the stories do not show', () => {
+    expect(neighbours(stories, 'menu', 3)).toEqual([])
+    expect(neighbours(stories, 'button', 0)).toEqual([])
+    expect(neighbours(stories, 'intro', 3)).toEqual([])
+  })
+})
+
+describe('prefetch', () => {
+  it('asks for the opening component and says which it asked for', async () => {
     const asked: string[] = []
-    const failing = prefetch(
-      {
-        index: async () => stories,
-        extract: async (id) => {
-          asked.push(id)
-          throw new Error(`no ${id}`)
-        },
+    const opening = await prefetch({
+      index: async () => stories,
+      extract: async (id) => {
+        asked.push(id)
       },
-      3,
-    )
-    await expect(failing).rejects.toThrow('no button')
+    })
+    expect(opening).toBe('button')
     expect(asked).toEqual(['button'])
+  })
+
+  it('asks for nothing when no story shows a component', async () => {
+    const asked: string[] = []
+    const opening = await prefetch({
+      index: async () => index(docs('intro--docs')),
+      extract: async (id) => asked.push(id),
+    })
+    expect(opening).toBeUndefined()
+    expect(asked).toEqual([])
+  })
+
+  it('fails with the extraction', async () => {
+    const failing = prefetch({
+      index: async () => stories,
+      extract: async (id) => {
+        throw new Error(`no ${id}`)
+      },
+    })
+    await expect(failing).rejects.toThrow('no button')
   })
 })

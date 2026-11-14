@@ -17,17 +17,6 @@ export interface SessionOptions {
    */
   lazy?: boolean
   /**
-   * After a lazy session starts, resolve a few components in the background so the dependency declarations and memos
-   * the stories share are loaded before the first one asks. Default: `false`: measured against the same stories, it
-   * did not make the first story faster, because the warm-up and the story compete for the same threads.
-   */
-  warmUp?: boolean
-  /**
-   * Once this many distinct components were asked for, resolve the rest in one background pass. Default: `0`, never:
-   * it lowers the median story latency but raises peak memory by 170 to 420 MB.
-   */
-  fillAfter?: number
-  /**
    * Ask the built-in TypeScript checker for each component a story names. Default: `true`: it is kept warm, asked for
    * exactly the requested component, and the structural props stand when it is slower than `semanticWaitMs`. `false`
    * never starts it.
