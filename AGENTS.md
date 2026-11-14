@@ -5,6 +5,7 @@ Faster than react-docgen-typescript; measured numbers are in `docs/performance.m
 ## Commands
 
 ```bash
+just lint doc-check machete typos          # what CI runs; pass before pushing
 cargo test -p caliper-docgen-core          # unit + snapshot tests
 cargo clippy -p caliper-docgen-core -- -D warnings
 cargo build --release                         # full build including CLI
@@ -52,6 +53,16 @@ Two habits that repeatedly caught real bugs during the 2026-08-12 spec-validatio
 ## Scripts
 
 No new sh, py or mjs script unless a CI job, the weekly or a documented recipe calls it; prefer a Rust test or the existing oracle TypeScript. A measurement run once is recorded in docs (`docs/measurement.md`, `docs/gate-measurements.md`), not committed as a script. Each script's caller is listed in `docs/measurement.md`.
+
+## Plugins
+
+Start work through these commands so their checks run:
+
+- Options before deciding: `/guide:explore`. Does it work: `/guide:spike`.
+- Bug or review findings: `/guide:fix`. Real feature or shared change: `/guide:build`.
+- Verify or find bugs: `/guide:check`. Commit message: `/guide:ship`.
+
+Pull requests are opened by Entire from the branch's trail, so `/guide:ship` stops at the commit.
 
 ## Writing and commits
 
