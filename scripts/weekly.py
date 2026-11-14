@@ -39,7 +39,7 @@ SLOWER = 1.10
 RECALL_DROP = 0.02
 # The rules that decide what the reference is: the exclusions and the pairing. Raise it when a change to them moves recall,
 # so that a record is never compared on recall with one made under other rules (a record without it is version 1).
-REFERENCE_VERSION = 2
+REFERENCE_VERSION = 3
 # The universe of the oracle's scores (`oracle.tools`): version 2 counts candidate components only, naming a default export
 # by its declaration; a record without it is version 1, which counted every function the checker takes for a component
 # and named a default export `default`. Version 3 pairs a checker component with Caliper's by file and export name
