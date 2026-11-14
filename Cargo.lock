@@ -281,6 +281,7 @@ dependencies = [
  "camino",
  "insta",
  "mimalloc",
+ "rmp-serde",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -290,6 +291,7 @@ dependencies = [
  "tsrs_api",
  "tsrs_core",
  "tsrs_vfs",
+ "xxhash-rust",
 ]
 
 [[package]]

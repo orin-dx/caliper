@@ -18,6 +18,7 @@ mod component;
 mod convert;
 mod declared;
 mod instantiate;
+mod kept;
 mod on_demand;
 mod printed;
 mod rpc;
@@ -43,8 +44,9 @@ use crate::instantiate::Instantiation;
 use crate::rpc::{CallError, REQUESTS, Rpc};
 
 /// How many files are asked about at once, shared among the programs. A program's checker answers requests one at a
-/// time; this keeps it from idling between them.
-const FILES_IN_FLIGHT: usize = 16;
+/// time; this keeps it from idling between them. Four per program is enough: more only queue behind the checker, and
+/// sixteen measured slower and 100 to 150 MiB larger on Chakra's components (docs/gate-measurements.md).
+const FILES_IN_FLIGHT: usize = 8;
 
 /// The most threads the whole-project run converts the checker's answers on: past four, the checker's own thread is
 /// the bound (measured on Chakra's components, docs/gate-measurements.md).
@@ -146,6 +148,34 @@ impl SemanticRequest {
 /// inside one. The runtime has up to four threads: the built-in checker answers two programs at once, each on a thread
 /// of its own, and while it does, the answers it gave the other files in flight are read and converted on these.
 pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
+    resolve_noting(request, None)
+}
+
+/// [`resolve`], with the answer kept in `cache_dir` for the next run over the same request: a run whose checker would
+/// read the disk exactly as the last one did gets the last one's answer without starting the checker. Every question
+/// that checker asked of the file system (each file it read or looked for, each directory it listed, the tsconfig and
+/// what it extends) is asked again first, and any different answer, a new file where it found none included, discards
+/// the kept answer whole; so does another build of Caliper or of the pinned checker, and another request. A request
+/// that records its calls is answered as [`resolve`] answers it, and nothing is kept for it. The answer is the one
+/// [`resolve`] gives, and it is written before the call returns, whatever the request's [`Teardown`].
+pub fn resolve_cached(request: SemanticRequest, cache_dir: &Utf8Path) -> SemanticOutcome {
+    if request.record_to.is_some() {
+        return resolve(request);
+    }
+    let file = cache_dir.join(kept::FILE);
+    let key = kept::request_key(&request);
+    let started = std::time::Instant::now();
+    if let Some(outcome) = kept::load(&file, key) {
+        tracing::debug!(ms = started.elapsed().as_millis() as u64, "the checker's kept answer still holds");
+        return outcome;
+    }
+    let reads = Arc::new(kept::Reads::default());
+    let outcome = resolve_noting(request, Some(reads.clone()));
+    kept::save(&file, key, &reads, &outcome);
+    outcome
+}
+
+fn resolve_noting(request: SemanticRequest, reads: Option<Arc<kept::Reads>>) -> SemanticOutcome {
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get().min(CONVERTER_THREADS));
     let built = tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build();
     let runtime = match built {
@@ -153,7 +183,7 @@ pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
         Err(error) => return SemanticOutcome::unavailable(format!("could not start an async runtime: {error}")),
     };
     let teardown = request.teardown;
-    let outcome = runtime.block_on(run(request, None));
+    let outcome = runtime.block_on(run_noting(request, None, reads));
     if teardown == Teardown::OneShot {
         // Dropping the runtime waits for its threads to wind down.
         std::mem::forget(runtime);
@@ -183,13 +213,23 @@ fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8
 
 /// Answers `request` with a checker started for it, asking `programs` programs at once, or by default as many as
 /// [`CHECKER_PROGRAMS`] and the files allow ([`MIN_FILES_PER_PROGRAM`]).
+#[cfg(test)]
 async fn run(request: SemanticRequest, programs: Option<usize>) -> SemanticOutcome {
+    run_noting(request, programs, None).await
+}
+
+/// [`run`], the linked checker noting what it reads in `reads` ([`kept`]).
+async fn run_noting(
+    request: SemanticRequest,
+    programs: Option<usize>,
+    reads: Option<Arc<kept::Reads>>,
+) -> SemanticOutcome {
     if request.targets.iter().all(|target| target.exports.is_empty()) {
         return group_by_file(&request).0;
     }
     let files = group_by_file(&request).2.len();
     let programs = programs.unwrap_or_else(|| CHECKER_PROGRAMS.min(files.div_ceil(MIN_FILES_PER_PROGRAM))).max(1);
-    let checker = match Backend::start(&request.project_root, programs) {
+    let checker = match Backend::start_noting(&request.project_root, programs, reads) {
         Ok(checker) => checker,
         Err(reason) => return SemanticOutcome::unavailable(reason),
     };
@@ -448,6 +488,32 @@ mod tests {
         let request = SemanticRequest::new(root.to_owned(), targets_of(&output));
         let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         runtime.block_on(run(request, Some(programs)))
+    }
+
+    /// A symbol's type is kept by the symbol, not by what it is named or where it is declared: two instantiations of
+    /// one generic interface list a property of the same name and declaration, each a symbol of its own with its own
+    /// type, and the second component, answered after the first on the same program, is not handed the first's type.
+    #[test]
+    fn a_kept_symbol_type_is_the_type_of_that_symbol() {
+        let (_dir, root) = shared_types_project(0);
+        std::fs::write(
+            root.join("Boxes.tsx"),
+            "interface Box<T> { value: T; label?: string }\n\
+             export function Text(props: Box<string>) { return null; }\n\
+             export function Count(props: Box<number>) { return null; }\n\
+             export function Again(props: Box<string>) { return null; }\n",
+        )
+        .unwrap();
+
+        let outcome = answered(&root, 1);
+
+        let value = |key: &str| {
+            let component = outcome.components.iter().find(|component| component.key == key).unwrap();
+            component.props.iter().find(|prop| prop.name == "value").unwrap().prop_type.clone()
+        };
+        assert_eq!(value("Text"), caliper_docgen_core::types::PropType::String);
+        assert_eq!(value("Count"), caliper_docgen_core::types::PropType::Number);
+        assert_eq!(value("Again"), caliper_docgen_core::types::PropType::String);
     }
 
     /// Three programs on the built-in checker, each answering some of the files, give the answer one program gives:

@@ -348,7 +348,24 @@ class Baseline(unittest.TestCase):
         header = next(l for l in weekly.markdown(now, []).splitlines() if l.startswith('Caliper x,'))
         self.assertEqual(header, 'Caliper x, time the median of 5 runs (after one warm-up run) and memory the largest peak '
                                  'of them; RDT and react-docgen one cold run each, so the comparison favours Caliper. '
-                                 'Whole process, Node start included.')
+                                 'Whole process, Node start included. Each Caliper run asks the checker everything; Rerun '
+                                 "is a run over unchanged files, which reuses the checker's kept answer.")
+
+    def test_each_timed_caliper_run_asks_the_checker_and_the_reruns_find_its_kept_answer(self):
+        kept_before = []
+
+        def run_once(command, **kwargs):
+            cache = command[command.index('--cache-dir') + 1]
+            kept = os.path.join(cache, 'checker-answers.msgpack')
+            kept_before.append(os.path.exists(kept))
+            open(kept, 'w').close()
+            return 1.0, 10
+
+        with mock.patch.object(weekly, 'run_once', run_once):
+            result = weekly.caliper_run('/bin/caliper-docgen', '/src', 2)
+        # The warm-up, two timed runs that find no kept answer, two reruns that find it.
+        self.assertEqual(kept_before, [False, False, False, True, True])
+        self.assertEqual(result['rerun_ms'], 1000)
 
     def test_an_oracle_error_is_an_issue_line(self):
         record = {'corpora': {'chakra': {'oracle': {'error': 'the comparison is empty'}, 'agent_eval': {'recall': 1}}}}

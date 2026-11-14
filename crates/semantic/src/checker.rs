@@ -41,6 +41,8 @@ use tokio::sync::oneshot;
 use tsrs_api::{ErrorKind, Handler, Response, Session, SessionOptions};
 use tsrs_vfs::{FS, bundled, osvfs, wrapvfs};
 
+use crate::kept::{Reads, Recording};
+
 /// The stack of the thread the linked checker answers on: what the `tsrs` binary gives each of its threads.
 const CHECKER_STACK_BYTES: usize = 512 << 20;
 
@@ -92,8 +94,17 @@ impl Backend {
     /// each of its programs down a lane of its own has them answered at once. A thread that cannot be spawned is an
     /// error that says so.
     pub(crate) fn start(project_root: &Utf8Path, threads: usize) -> Result<Backend, String> {
+        Backend::start_noting(project_root, threads, None)
+    }
+
+    /// [`Backend::start`], every question the session asks of the disk noted in `reads` ([`crate::kept`]).
+    pub(crate) fn start_noting(
+        project_root: &Utf8Path,
+        threads: usize,
+        reads: Option<Arc<Reads>>,
+    ) -> Result<Backend, String> {
         let cwd = project_root.to_string();
-        Backend::spawn(threads, move || TsrsSession::open(cwd))
+        Backend::spawn(threads, move || TsrsSession::open(cwd, reads))
     }
 
     /// Spawns the checker threads over the session `open` makes on the first.
@@ -389,9 +400,12 @@ struct TsrsSession {
 }
 
 impl TsrsSession {
-    fn open(cwd: String) -> TsrsSession {
+    /// With `reads`, every question the session asks of the disk is noted there ([`crate::kept`]) with the answer the
+    /// session got; a file refused for its nesting also spoils the notes, so a run that met one keeps no answer.
+    fn open(cwd: String, reads: Option<Arc<Reads>>) -> TsrsSession {
         let refused: Arc<Mutex<Vec<(String, usize)>>> = Arc::default();
         let noted = Arc::clone(&refused);
+        let spoiled = reads.clone();
         let measured = wrapvfs::wrap(
             osvfs::fs(),
             wrapvfs::Replacements {
@@ -402,12 +416,20 @@ impl TsrsSession {
                         return Some(text);
                     }
                     noted.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((path.to_string(), depth));
+                    if let Some(reads) = &spoiled {
+                        reads.spoil();
+                    }
                     None
                 })),
                 ..wrapvfs::Replacements::default()
             },
         );
-        let fs: Arc<dyn FS> = Arc::new(bundled::wrap_fs(measured));
+        // Noted outside the measuring, so each question is noted as the session saw it answered: a refused file as
+        // absent, which the disk does not answer again.
+        let fs: Arc<dyn FS> = match reads {
+            Some(reads) => Arc::new(bundled::wrap_fs(Recording { inner: measured, reads })),
+            None => Arc::new(bundled::wrap_fs(measured)),
+        };
         let session = Session::new(SessionOptions::new(cwd, bundled::lib_path(), fs, false));
         TsrsSession { session, refused, building: RwLock::new(()) }
     }

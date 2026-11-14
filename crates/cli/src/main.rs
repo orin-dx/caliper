@@ -91,8 +91,8 @@ pub struct ExtractArgs {
     #[arg(long)]
     pub cache_dir: Option<String>,
 
-    /// Neither read nor write the on-disk caches (the declaration parse cache and the dependency index); the output is
-    /// the same, a run just parses everything
+    /// Neither read nor write the on-disk caches (the declaration parse cache, the dependency index and the checker's
+    /// kept answer); the output is the same, a run just parses and asks the checker everything
     #[arg(long)]
     pub no_cache: bool,
 
