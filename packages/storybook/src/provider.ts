@@ -17,10 +17,18 @@ import { logger } from 'storybook/internal/node-logger'
 import type { DocgenMiddleware, DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { type ExtractArgTypes, loadExtractArgTypes, toArgTypes } from './arg-types.js'
 import type { CaliperStorybookOptions } from './index.js'
+import { channel, type Link, type ToDevServer, type ToProvider } from './live.js'
 import { DocgenSession, type SessionBinding } from './session.js'
 import { assertValidOptions } from './validate.js'
 
 type Subcomponent = NonNullable<DocgenPayload['subcomponents']>[string]
+
+/**
+ * How long a component answered with its structural props waits for the checker's answer to replace them. The checker
+ * answers a story someone opened before any background work, so only a checker still starting (seconds on a large
+ * project) comes near this; past it, the next request asks again.
+ */
+const CHECKER_WAIT_MS = 60_000
 
 interface StoryFile {
   csf: CsfFile
@@ -65,6 +73,7 @@ function noComponent(session: DocgenSession, name: string, path: string): string
 export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
   binding?: SessionBinding,
+  link: Link<ToDevServer, ToProvider> = channel(),
 ): DocgenMiddleware {
   assertValidOptions(options)
   const cwd = process.cwd()
@@ -79,8 +88,6 @@ export function createDocgenProvider(
     loadDependencies: options.loadDependencies ?? true,
     collapseInheritedProps: options.collapseInheritedProps ?? 'none',
     lazy: options.lazy,
-    warmUp: options.warmUp,
-    fillAfter: options.fillAfter,
     checker: options.checker,
     semanticWaitMs: options.semanticWaitMs,
     semanticWaitEmptyMs: options.semanticWaitEmptyMs,
@@ -194,17 +201,20 @@ export function createDocgenProvider(
 
   /**
    * The session key, file and documentation of the component `name` (default: `meta.component`) names, or why there
-   * is none. The caller has brought the session up to date for this request.
+   * is none. The caller has brought the session up to date for this request. A component answered with structural
+   * props because the checker had not answered in time goes in `awaiting`, whether it is answered or handed on.
    */
   async function component(
     csf: CsfFile,
     storyPath: string,
+    awaiting: string[],
     name?: string,
   ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
     const target = name ? storyFor(csf, storyPath, name) : csf
     const session = await getSession()
     const { key, path } = locate(session, target, storyPath)
-    const { doc, degradedBy } = session.documentation(key)
+    const { doc, degradedBy, awaitsChecker } = session.documentation(key)
+    if (awaitsChecker) awaiting.push(key)
     if (fallback === 'degraded' && degradedBy.length > 0) {
       const reason = degradedBy.join('; ')
       reportFallback(key, reason)
@@ -222,9 +232,10 @@ export function createDocgenProvider(
   async function subcomponent(
     { csf, storyPath, importPath }: StoryFile,
     { name, componentName }: { name: string; componentName: string },
+    awaiting: string[],
   ): Promise<Subcomponent> {
     try {
-      const { path, doc } = await component(csf, storyPath, componentName)
+      const { path, doc } = await component(csf, storyPath, awaiting, componentName)
       const { description, summary, jsDocTags } = extractComponentDescription(
         undefined,
         doc.description || undefined,
@@ -242,13 +253,19 @@ export function createDocgenProvider(
     }
   }
 
-  async function document(entry: IndexEntry, importPath: string): Promise<DocgenPayload> {
+  async function storyFile(entry: IndexEntry, importPath: string): Promise<StoryFile> {
     const storyPath = resolve(cwd, importPath)
     const code = await readFile(storyPath, 'utf8')
     const csf = loadCsf(code, { fileName: storyPath, makeTitle: () => entry.title }).parse()
+    return { csf, storyPath, importPath }
+  }
+
+  async function document(entry: IndexEntry, importPath: string, awaiting: string[]): Promise<DocgenPayload> {
+    const file = await storyFile(entry, importPath)
+    const { csf, storyPath } = file
     // One look at the files for the story and its subcomponents: they are all answered from the same moment.
     await freshSession()
-    const { doc } = await component(csf, storyPath)
+    const { doc } = await component(csf, storyPath, awaiting)
     const { description, summary, jsDocTags } = extractComponentDescription(
       extractDescription(csf._metaStatement, csf.editor) || undefined,
       doc.description || undefined,
@@ -257,10 +274,7 @@ export function createDocgenProvider(
     const declared = extractDeclaredSubcomponents(csf)
     const subcomponents = Object.fromEntries(
       await Promise.all(
-        declared.map(async (declaration) => [
-          declaration.name,
-          await subcomponent({ csf, storyPath, importPath }, declaration),
-        ]),
+        declared.map(async (declaration) => [declaration.name, await subcomponent(file, declaration, awaiting)]),
       ),
     )
     return {
@@ -275,14 +289,96 @@ export function createDocgenProvider(
     }
   }
 
+  // Replacing a structural answer (ADR 0022). An answer that went out with structural props because the checker had
+  // not answered in time is watched until the checker has answered every component in it; then the dev server, if the
+  // browser shows that component, has the docgen service ask again, and this provider answers from the checker's kept
+  // answer. Said once per component and revision of the files, so an answer the checker could not improve (its answer
+  // refused for an edit made meanwhile) is not asked for again until the files change.
+
+  /** The components being watched. */
+  const watching = new Set<string>()
+  /** The revision each component's structural answer was last said to be replaced at. */
+  const replaced = new Map<string, number>()
+
+  async function watch(componentId: string, awaiting: string[]): Promise<void> {
+    if (awaiting.length === 0 || watching.has(componentId)) return
+    watching.add(componentId)
+    try {
+      const session = await getSession()
+      const { revision } = session
+      if (replaced.get(componentId) === revision) return
+      if (!(await session.checkerSettled(awaiting, CHECKER_WAIT_MS))) return
+      // An edit since the answer drops the checker's answers; the request that sees the edit answers it.
+      if (session.revision !== revision) return
+      replaced.set(componentId, revision)
+      link.post({ type: 'answered', componentId })
+    } catch (error) {
+      logger.debug(`[caliper-docgen] ${componentId}: ${(error as Error).message}; the next request asks again`)
+    } finally {
+      watching.delete(componentId)
+    }
+  }
+
+  // The prefetch beyond the opening story: the dev server names the stories after the one on screen, and their
+  // components are resolved in the background, one story at a time, the checker's answers included. A newer list
+  // replaces what is still queued.
+  let queue: IndexEntry[] = []
+  let prefetching = false
+
+  async function drain(): Promise<void> {
+    if (prefetching) return
+    prefetching = true
+    try {
+      while (queue.length > 0) {
+        const entry = queue.shift()!
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one story at a time, so a story someone opens waits behind one at most
+          await prefetchStory(entry)
+        } catch (error) {
+          logger.debug(`[caliper-docgen] prefetch of ${entry.importPath} stopped: ${(error as Error).message}`)
+        }
+      }
+    } finally {
+      prefetching = false
+    }
+  }
+
+  /** Resolves the components `entry`'s story file names in the background: `meta.component` and its subcomponents. */
+  async function prefetchStory(entry: IndexEntry): Promise<void> {
+    const importPath = getStoryImportPathFromEntry(entry)
+    if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return
+    const { csf, storyPath } = await storyFile(entry, importPath)
+    await freshSession()
+    const session = await getSession()
+    const names = [undefined, ...extractDeclaredSubcomponents(csf).map(({ componentName }) => componentName)]
+    const keys = names.flatMap((name) => {
+      try {
+        return [locate(session, name ? storyFor(csf, storyPath, name) : csf, storyPath).key]
+      } catch {
+        return []
+      }
+    })
+    await session.prefetch(keys)
+  }
+
+  link.listen((message) => {
+    // Every end of the channel hears every other, another provider's word included.
+    if (message.type !== 'prefetch') return
+    queue = [...message.entries]
+    void drain()
+  })
+
   return (next) => async (input) => {
     const importPath = getStoryImportPathFromEntry(input.entry)
     if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return next(input)
+    const awaiting: string[] = []
     try {
-      return await document(input.entry, importPath)
+      return await document(input.entry, importPath, awaiting)
     } catch (error) {
       logger.debug(`[caliper-docgen] ${importPath}: ${(error as Error).message}; asking the next docgen provider`)
       return next(input)
+    } finally {
+      void watch(getComponentIdFromEntry(input.entry), awaiting)
     }
   }
 }

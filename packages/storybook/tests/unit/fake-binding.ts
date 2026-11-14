@@ -154,12 +154,21 @@ export class FakeBinding implements SessionBinding {
     )
   }
 
-  /** The sessions asked to warm up, with how many components. */
-  warmUps: number[] = []
+  /** The keys of each background prefetch, in order. */
+  prefetched: string[][] = []
 
-  sessionWarmUp = async (_sessionId: number, count: number): Promise<number> => {
-    this.warmUps.push(count)
-    return count
+  sessionPrefetch = async (_sessionId: number, keys: string[]): Promise<number> => {
+    this.prefetched.push(keys)
+    return keys.length
+  }
+
+  /** The keys of each wait for the checker; the wait resolves with `settled`. */
+  settles: string[][] = []
+  settled: Promise<boolean> = Promise.resolve(true)
+
+  sessionCheckerSettled = async (_sessionId: number, keys: string[]): Promise<boolean> => {
+    this.settles.push(keys)
+    return this.settled
   }
 
   closeSession = (): void => {

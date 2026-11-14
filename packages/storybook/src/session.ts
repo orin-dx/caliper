@@ -1,7 +1,6 @@
 import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
-import { Fill } from './fill.js'
 import { toNapiOptions, type SessionOptions } from './options.js'
 import {
   buildLookups,
@@ -26,21 +25,30 @@ export type SessionBinding = Pick<
   | 'ensureFresh'
   | 'sessionDocgenInfo'
   | 'sessionComponentAnswers'
-  | 'sessionWarmUp'
+  | 'sessionPrefetch'
+  | 'sessionCheckerSettled'
   | 'closeSession'
 >
-
-/** How many components the background warm-up resolves, spread over the project. */
-const WARM_UP_COMPONENTS = 8
-const FILL_AFTER = 0
-/** The most components `sessionWarmUp` takes: all of them. */
-const ALL_COMPONENTS = 2 ** 32 - 1
 
 /** What the session says about one component: its documentation and why its props may be incomplete. */
 export interface Documentation {
   doc: RdtComponentDoc | undefined
   /** The messages of the warnings and errors that say the props may be incomplete; empty when none does. */
   degradedBy: string[]
+  /**
+   * Set when the props are the structural ones because the checker had not answered within `semanticWaitMs`: once
+   * `checkerSettled` says it has, asking again gets the checker's.
+   */
+  awaitsChecker?: true
+}
+
+/** Whether `diagnostic` says the checker had not answered yet and the structural props stand in for its. */
+function awaitsChecker(diagnostic: Diagnostic): boolean {
+  return (
+    diagnostic.code === 'SEMANTIC_BACKEND' &&
+    diagnostic.severity === 'info' &&
+    diagnostic.message.startsWith('the TypeScript checker has not answered yet')
+  )
 }
 
 /**
@@ -60,14 +68,17 @@ export class DocgenSession {
   private checking: Promise<void> | undefined
   private queued: Promise<void> | undefined
   private latestRevision = 0
-  private readonly fill: Fill
   private readonly options: SessionOptions
   private readonly napi: SessionBinding
 
   constructor(options: SessionOptions, napi: SessionBinding) {
     this.options = options
     this.napi = napi
-    this.fill = new Fill(options.fillAfter ?? FILL_AFTER)
+  }
+
+  /** The revision of the files the session last looked at; it rises with every look that found a change. */
+  get revision(): number {
+    return this.latestRevision
   }
 
   private napiOptions(): Napi.JsExtractOptions {
@@ -81,17 +92,6 @@ export class DocgenSession {
   private async initialize(): Promise<void> {
     this.sessionId = this.napi.createSession(this.napiOptions())
     await this.reindex()
-    // Not awaited: the first story answers as soon as it can, and shares what the warm-up has loaded by then.
-    if (this.lazy && this.options.warmUp === true) void this.warmUp(this.sessionId, WARM_UP_COMPONENTS)
-  }
-
-  /** Best effort: a background resolution that fails costs the stories the time it would have saved. */
-  private async warmUp(sessionId: number, count: number): Promise<void> {
-    try {
-      await this.napi.sessionWarmUp(sessionId, count)
-    } catch {
-      // The stories resolve what they need themselves.
-    }
   }
 
   /** Reads where every component is declared (and, for an eager session, which diagnostics affect them). */
@@ -276,8 +276,28 @@ export class DocgenSession {
       if (this.components.delete(key)) this.index = undefined
       return { doc: undefined, degradedBy: [] }
     }
-    if (this.fill.asked(key)) void this.warmUp(this.sessionId, ALL_COMPONENTS)
-    return { doc: answer.docgenInfo, degradedBy: incompleteMessages(answer.diagnostics) }
+    const documentation: Documentation = { doc: answer.docgenInfo, degradedBy: incompleteMessages(answer.diagnostics) }
+    if (answer.diagnostics.some(awaitsChecker)) documentation.awaitsChecker = true
+    return documentation
+  }
+
+  /**
+   * Resolves `keys` in the background, in that order, the checker's answers included, so a request for one later is
+   * answered from them. Never waits for the checker, which answers every component someone waits for first. A lazy
+   * session only; best effort.
+   */
+  async prefetch(keys: string[]): Promise<void> {
+    if (!this.lazy || this.sessionId === undefined || keys.length === 0) return
+    await this.napi.sessionPrefetch(this.sessionId, keys)
+  }
+
+  /**
+   * Waits up to `waitMs` until the checker has answered each of `keys` it was asked for: true when a request for them
+   * now gets the checker's props, unless a file changed since; false at the deadline or without a checker.
+   */
+  async checkerSettled(keys: string[], waitMs: number): Promise<boolean> {
+    if (this.sessionId === undefined) return false
+    return this.napi.sessionCheckerSettled(this.sessionId, keys, waitMs)
   }
 
   docgenInfo(key: string): RdtComponentDoc | undefined {

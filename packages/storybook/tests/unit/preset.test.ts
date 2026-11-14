@@ -3,7 +3,13 @@ import { logger } from 'storybook/internal/node-logger'
 import type { IndexEntry, StoryIndex } from 'storybook/internal/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CaliperStorybookOptions } from '../../src/index.js'
-import { experimental_devServer, experimental_docgenProvider, isDocgenProviderEnabled } from '../../src/preset.js'
+import type { Link, ToDevServer, ToProvider } from '../../src/live.js'
+import {
+  DevServer,
+  experimental_devServer,
+  experimental_docgenProvider,
+  isDocgenProviderEnabled,
+} from '../../src/preset.js'
 
 /** Storybook's docgen service as the preset finds it: every `getService` call, and the extractions asked of it. */
 const core = vi.hoisted(() => ({
@@ -72,9 +78,12 @@ describe('prefetch at dev server start', () => {
     expect(asked).toEqual(['storyIndexGenerator'])
   })
 
-  it('documents the first `prefetchStories` components in index order', async () => {
-    await experimental_devServer({}, devServerOptions({ prefetchStories: 2 }).options)
-    await vi.waitFor(() => expect(core.extracted).toEqual(['button', 'card']))
+  it('documents only the opening component through the service; the next stories go to the provider', async () => {
+    const { options } = devServerOptions({ prefetchStories: 3 })
+    const { link, posted } = fakeLink()
+    await new DevServer(options, link, docgen).start()
+    expect(core.extracted).toEqual(['button'])
+    expect(posted).toEqual([{ type: 'prefetch', entries: [story('card--basic'), story('menu--basic')] }])
   })
 
   it('asks nothing with `prefetchStories: 0`', async () => {
@@ -97,6 +106,75 @@ describe('prefetch at dev server start', () => {
   })
 })
 
+/** The dev server's end of the channel to the provider: what it posted, and a way to say what the provider says. */
+function fakeLink() {
+  const posted: ToProvider[] = []
+  let receive: (message: ToDevServer) => void = () => {}
+  const link: Link<ToProvider, ToDevServer> = {
+    post: (message) => posted.push(message),
+    listen: (listener) => {
+      receive = listener
+    },
+  }
+  return { link, posted, say: (message: ToDevServer) => receive(message) }
+}
+
+const docgen = async () => async (id: string) => core.extracted.push(id)
+
+describe('the dev server replacing a structural answer', () => {
+  const answered = (componentId: string): ToDevServer => ({ type: 'answered', componentId })
+
+  it('asks the service again for the component on screen, once per word from the provider', async () => {
+    const { link, say } = fakeLink()
+    const server = new DevServer(devServerOptions().options, link, docgen)
+    server.shown('card--basic')
+    server.shown('card--other')
+    say(answered('card'))
+    await vi.waitFor(() => expect(core.extracted).toEqual(['card']))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(core.extracted).toEqual(['card'])
+  })
+
+  it('asks nothing for a component the browser left, and asks once when the browser comes back to it', async () => {
+    const { link, say } = fakeLink()
+    const server = new DevServer(devServerOptions().options, link, docgen)
+    server.shown('card--basic')
+    server.shown('menu--basic')
+    say(answered('card'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(core.extracted).toEqual([])
+    server.shown('card--basic')
+    await vi.waitFor(() => expect(core.extracted).toEqual(['card']))
+    server.shown('menu--basic')
+    server.shown('card--basic')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(core.extracted).toEqual(['card'])
+  })
+
+  it('asks again for the opening component answered before the browser said what it shows', async () => {
+    const { link, say } = fakeLink()
+    const server = new DevServer(devServerOptions().options, link, docgen)
+    await server.start()
+    expect(core.extracted).toEqual(['button'])
+    say(answered('button'))
+    server.shown('button--primary')
+    await vi.waitFor(() => expect(core.extracted).toEqual(['button', 'button']))
+  })
+
+  it('has the provider prefetch the components after the one on screen, nearest first, none with the default', async () => {
+    const wide = fakeLink()
+    new DevServer(devServerOptions({ prefetchStories: 2 }).options, wide.link, docgen).shown('button--ghost')
+    await vi.waitFor(() => expect(wide.posted).toEqual([{ type: 'prefetch', entries: [story('card--basic')] }]))
+
+    const narrow = fakeLink()
+    const server = new DevServer(devServerOptions().options, narrow.link, docgen)
+    server.shown('button--ghost')
+    await server.start()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(narrow.posted).toEqual([])
+  })
+})
+
 describe('preset', () => {
   it('registers the provider after existing ones, with only cloneable options', async () => {
     const react = { moduleSpecifier: '/react/docgen-worker.js' }
@@ -114,8 +192,6 @@ describe('preset', () => {
       loadDependencies: undefined,
       collapseInheritedProps: undefined,
       lazy: undefined,
-      warmUp: undefined,
-      fillAfter: undefined,
       fallback: 'never',
     })
     expect(ours?.moduleSpecifier).toMatch(/provider\.(js|ts)$/)
@@ -139,8 +215,6 @@ describe('preset', () => {
       loadDependencies: false,
       collapseInheritedProps: 'all',
       lazy: false,
-      warmUp: true,
-      fillAfter: 5,
       prefetchStories: 3,
       checker: false,
       semanticWaitMs: 7,

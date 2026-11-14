@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import type { Diagnostic } from 'caliper-docgen-napi'
 import { describe, expect, it } from 'vitest'
 import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 import { DocgenSession } from '../../src/session.js'
@@ -369,38 +370,7 @@ describe('DocgenSession, lazy', () => {
     expect(binding.resolved).toEqual(['Button', 'Card', 'Missing'])
   })
 
-  it('warms a lazy session up in the background, unless told not to or eager', async () => {
-    const warmed = async (options: Partial<ConstructorParameters<typeof DocgenSession>[0]>) => {
-      const binding = new FakeBinding({})
-      await new DocgenSession({ srcDirs: [src], ...options }, binding).fresh()
-      return binding.warmUps
-    }
-    expect(await warmed({ warmUp: true })).toEqual([8])
-    expect(await warmed({})).toEqual([])
-    expect(await warmed({ warmUp: true, lazy: false })).toEqual([])
-  })
-
-  it('resolves the rest in one pass once enough distinct components were asked for, and only once', async () => {
-    const names = ['A', 'B', 'C', 'D', 'E']
-    const binding = new FakeBinding({
-      components: Object.fromEntries(names.map((name) => [name, entry(name, join(src, `${name}.tsx`))])),
-    })
-    binding.docs = Object.fromEntries(names.map((name) => [name, rdtDoc(name)]))
-    const session = new DocgenSession({ srcDirs: [src], fillAfter: 3 }, binding)
-    await session.fresh()
-    for (const name of ['A', 'A', 'B']) await session.documentation(name)
-    expect(binding.warmUps).toEqual([])
-    await session.documentation('C')
-    await session.documentation('D')
-    expect(binding.warmUps).toEqual([2 ** 32 - 1])
-
-    const never = new DocgenSession({ srcDirs: [src], fillAfter: 0 }, binding)
-    await never.fresh()
-    for (const name of names) await never.documentation(name)
-    expect(binding.warmUps).toEqual([2 ** 32 - 1])
-  })
-
-  it('never resolves the rest in one pass by default, however many components were asked for', async () => {
+  it('resolves nothing in the background unless asked, and only in a lazy session', async () => {
     const names = Array.from({ length: 40 }, (_, i) => `C${i}`)
     const binding = new FakeBinding({
       components: Object.fromEntries(names.map((name) => [name, entry(name, join(src, `${name}.tsx`))])),
@@ -409,7 +379,41 @@ describe('DocgenSession, lazy', () => {
     const session = new DocgenSession({ srcDirs: [src] }, binding)
     await session.fresh()
     for (const name of names) await session.documentation(name)
-    expect(binding.warmUps).toEqual([])
+    expect(binding.prefetched).toEqual([])
+
+    await session.prefetch(['C3', 'C1'])
+    await session.prefetch([])
+    expect(binding.prefetched).toEqual([['C3', 'C1']])
+
+    const eager = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
+    await eager.fresh()
+    await eager.prefetch(['C2'])
+    expect(binding.prefetched).toEqual([['C3', 'C1']])
+  })
+
+  it("says when an answer's props are structural because the checker had not answered yet", async () => {
+    const pending: Diagnostic = {
+      ...warning(['Button'], 'info'),
+      code: 'SEMANTIC_BACKEND',
+      message:
+        "the TypeScript checker has not answered yet; the structural props are used, and the checker's replace them on the next request",
+    }
+    const binding = new FakeBinding({
+      components: { Button: entry('Button', join(src, 'Button.tsx')), Card: entry('Card', join(src, 'Card.tsx')) },
+      diagnostics: [pending, { ...pending, affects: ['Card'], message: '1 component(s) resolved by the checker' }],
+    })
+    binding.docs = { Button: rdtDoc('Button', ['label']), Card: rdtDoc('Card', ['title']) }
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    await session.fresh()
+
+    expect(session.documentation('Button')).toEqual({
+      doc: rdtDoc('Button', ['label']),
+      degradedBy: [],
+      awaitsChecker: true,
+    })
+    expect(session.documentation('Card').awaitsChecker).toBeUndefined()
+    expect(await session.checkerSettled(['Button'], 5)).toBe(true)
+    expect(binding.settles).toEqual([['Button']])
   })
 
   it('forgets a listed key that has no component, so a lookup names what the file really has', async () => {
