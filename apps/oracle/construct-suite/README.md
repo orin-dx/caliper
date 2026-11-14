@@ -137,12 +137,12 @@ The recipe builds the release binary, then runs `construct:check`, `construct:pa
 
 ### Fallback off (ADR 0026, S7b)
 
-S7 deletes the structural resolver for what this suite covers, and its gate is that every row passes with the structural fallback off. The lane's last section is that column: each row passes with the fallback off (the checker and oxc's syntax alone gave its prop) or leans on it, with the cause, read from what the merge reports (`fallbackCause` in `../src/construct-checker-run.ts`):
+S7 deletes the structural resolver for what this suite covers, and its gate is that every row passes with the structural fallback off. The lane runs `extract` a second time with the hidden, test-only `--no-structural-fallback` (`ResolverFacts::NoFallback`: `--no-resolver-facts`, and the merge takes nothing from the structural answer, so a type the checker cannot read stays its `opaque` type with `degradedBy`, a description and tags are the checker's alone, and a component the checker did not answer for has `opaque` `unknown` props, each case with a warning). Its last section is that column: a row passes with the fallback off when it reads the same in both runs, and otherwise leans on it, with the cause (`fallbackCause` in `../src/construct-checker-run.ts`):
 
-- `kept structural result: <reason>`: the checker did not answer for the component, so it kept its structural result whole (the lane fails such a row anyway).
-- `kept structural type: <kinds>`: the checker's type for `p` held an unread part (`opaque`, these `degradedBy` kinds) where the structural type held none, so the merge kept the structural type and marked it.
-
-A default and a union's member order are already off (`--no-resolver-facts`). A description or tags the structural pass supplies where the checker has none would show as a `description` or `tags` fact difference, since the goldens are the checker's.
+- `no checker answer`: the component's props became opaque.
+- `checker could not read: <kinds>`: the checker's `opaque` type replaced the structural one.
+- `structural <facts>`: a description or tags only the structural pass had.
+- `type: <verdict>`: any other change, with the verdict it has with the fallback off.
 
 A row that leans on the fallback carries the cause as `"fallback"` in `checker-expectations.json`. The lane fails when a row leans on it unlisted or with another cause, and when a listed row no longer does (remove the entry). The listed rows are the worklist of S7c to S7e; the gate holds when none is left.
 

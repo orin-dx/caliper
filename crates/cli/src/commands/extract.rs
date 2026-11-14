@@ -45,9 +45,11 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 
     let mut output = caliper_docgen_core::pipeline::extract(&options);
     if options.checker {
-        let resolver = match args.no_resolver_facts {
-            true => caliper_docgen_core::types::semantic::ResolverFacts::Off,
-            false => caliper_docgen_core::types::semantic::ResolverFacts::Used,
+        use caliper_docgen_core::types::semantic::ResolverFacts;
+        let resolver = match (args.no_structural_fallback, args.no_resolver_facts) {
+            (true, _) => ResolverFacts::NoFallback,
+            (false, true) => ResolverFacts::Off,
+            (false, false) => ResolverFacts::Used,
         };
         let timeout = std::time::Duration::from_millis(args.semantic_timeout_ms);
         apply_semantic_backend(&options, timeout, resolver, None, Pass::Extract, &mut output);

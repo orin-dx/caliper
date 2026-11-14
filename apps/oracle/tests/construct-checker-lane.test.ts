@@ -37,45 +37,39 @@ const row = (id: string, verdict: LaneRun['rows'][number]['verdict'], answered =
 })
 
 describe('the fallback-off column (ADR 0026 S7b)', () => {
-  const plain = { type: { kind: 'stringLiteral', value: 'a' } }
-  it('says why a row leans on the structural fallback, and nothing for one the checker alone answered', () => {
+  it('says how a row changes with the fallback off, and nothing for one that reads the same', () => {
     expect.hasAssertions()
-    expect(fallbackCause({ answered: true, unreadComponent: false, prop: plain })).toBeNull()
-    expect(fallbackCause({ answered: false, keptReason: 'over the request budget', unreadComponent: false })).toBe(
-      'kept structural result: over the request budget',
+    const on = { ...row('a/01', 'identical'), type: { kind: 'string' }, degradedBy: ['indexedAccess'] }
+    expect(fallbackCause(on, { ...on })).toBeNull()
+    expect(fallbackCause(on, undefined)).toBe('no checker answer')
+    expect(fallbackCause(on, { ...on, answered: false })).toBe('no checker answer')
+    const opaque = { ...on, verdict: 'opaque with marker' as const, type: { kind: 'opaque' } }
+    expect(fallbackCause(on, opaque)).toBe('checker could not read: indexedAccess')
+    expect(fallbackCause(on, { ...on, facts: ['description' as const] })).toBe('structural description')
+    expect(fallbackCause(on, { ...on, verdict: 'wrong', type: { kind: 'number' }, degradedBy: undefined })).toBe(
+      'type: wrong',
     )
-    expect(fallbackCause({ answered: false, unreadComponent: false })).toBe('kept structural result: not asked')
-    // A kept structural type: no opaque part, the checker's kinds in degradedBy.
-    const kept = { ...plain, degradedBy: ['indexedAccess', 'truncated'] }
-    expect(fallbackCause({ answered: true, unreadComponent: true, prop: kept })).toBe(
-      'kept structural type: indexedAccess',
-    )
-    // The checker's own opaque answer, or a cut one, is the checker's.
-    const opaque = { type: { kind: 'opaque', raw: 'T[K]' }, degradedBy: ['indexedAccess'] }
-    expect(fallbackCause({ answered: true, unreadComponent: true, prop: opaque })).toBeNull()
-    const cut = { ...plain, degradedBy: ['truncated'] }
-    expect(fallbackCause({ answered: true, unreadComponent: true, prop: cut })).toBeNull()
   })
 
   it('fails a row whose dependence on the fallback is unlisted, listed wrongly, or listed and gone', () => {
     expect.hasAssertions()
     const green = { verdicts: ['identical', 'spelled'] } satisfies Parameters<typeof fallbackFailure>[2]
-    const listed = { ...green, fallback: 'kept structural type: indexedAccess' }
+    const listed = { ...green, fallback: 'checker could not read: indexedAccess' }
     expect(fallbackFailure('a/01', null, green)).toBeNull()
-    expect(fallbackFailure('a/01', 'kept structural type: indexedAccess', listed)).toBeNull()
-    expect(fallbackFailure('a/01', 'kept structural type: indexedAccess', green)).toContain('says nothing')
-    expect(fallbackFailure('a/01', 'kept structural result: not asked', listed)).toContain('leans on the structural')
+    expect(fallbackFailure('a/01', 'checker could not read: indexedAccess', listed)).toBeNull()
+    expect(fallbackFailure('a/01', 'checker could not read: indexedAccess', green)).toContain('says nothing')
+    expect(fallbackFailure('a/01', 'no checker answer', listed)).toContain('leans on the structural')
     expect(fallbackFailure('a/01', null, listed)).toContain('remove its "fallback" entry')
   })
 
   it('groups the rows that lean on the fallback by cause', () => {
     expect.hasAssertions()
     const rows = [
-      { ...row('a/01', 'identical'), fallback: 'kept structural type: indexedAccess' },
+      { ...row('a/01', 'identical'), fallback: 'checker could not read: indexedAccess' },
       row('a/02', 'identical'),
-      { ...row('a/03', 'identical'), fallback: 'kept structural type: indexedAccess' },
+      { ...row('a/03', 'identical'), fallback: 'checker could not read: indexedAccess' },
     ]
-    expect([...fallbackWorklist(rows)]).toStrictEqual([['kept structural type: indexedAccess', ['a/01', 'a/03']]])
+    expect([...fallbackWorklist(rows)]).toStrictEqual([['checker could not read: indexedAccess', ['a/01', 'a/03']]])
   })
 })
 

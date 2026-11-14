@@ -316,6 +316,19 @@ pub enum ResolverFacts {
     Used,
     /// The structural answer is not read for these facts.
     Off,
+    /// `Off`, and no structural fallback at all: the test-only mode of ADR 0026's S7b gate (`extract
+    /// --no-structural-fallback`), the merge as it will be once the resolver is gone. A prop whose checker type holds an
+    /// unread part keeps the checker's `opaque` type and its `degradedBy`, not the structural type; a description and
+    /// tags come from the checker alone; and every prop of a component the checker did not answer for is an `opaque`
+    /// `unknown` (`unsupportedExpression`), with one diagnostic naming the components.
+    NoFallback,
+}
+
+impl ResolverFacts {
+    /// Whether the merge may fall back to the structural answer where the checker has none.
+    fn falls_back(self) -> bool {
+        self != Self::NoFallback
+    }
 }
 
 /// Replaces `entry`'s props and `composes` with the checker's, keeping a description or tags only the structural pass
@@ -422,6 +435,63 @@ pub(crate) fn unread_diagnostic(props: usize, affects: Vec<String>) -> Diagnosti
     diagnostic
 }
 
+/// [`ResolverFacts::NoFallback`]'s diagnostic for the props of `affects` whose checker type holds a part the checker
+/// could not read, where the structural type read it all: they keep the checker's `opaque` type.
+fn unread_without_fallback(props: usize, affects: Vec<String>) -> Diagnostic {
+    let mut diagnostic = Diagnostic::new(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::SemanticBackend,
+        format!(
+            "{props} prop(s) of {} component(s) are opaque: the TypeScript checker could not read their type, the \
+             structural fallback is off, and their degradedBy says what it could not read",
+            affects.len()
+        ),
+    );
+    diagnostic.affects = affects;
+    diagnostic
+}
+
+/// [`ResolverFacts::NoFallback`]: every component of `output` the checker did not answer for (`answered`, sorted) keeps
+/// its props by name and whether they are required, each typed an `opaque` `unknown` (`unsupportedExpression`) with no
+/// default, description or tags, and one warning names the components.
+fn degrade_unanswered(output: &mut ExtractionOutput, answered: &[String]) {
+    let mut affects = Vec::new();
+    for (key, entry) in &mut output.components {
+        if answered.binary_search(key).is_ok() {
+            continue;
+        }
+        affects.push(key.clone());
+        for prop in entry.props.values_mut() {
+            let unknown = degraded_type("unknown", OpaqueReason::UnsupportedExpression);
+            *prop = Arc::new(ParsedProp::new(
+                prop.name.clone(),
+                unknown,
+                prop.required,
+                None,
+                String::new(),
+                BTreeMap::new(),
+                None,
+                Vec::new(),
+            ));
+        }
+    }
+    if affects.is_empty() {
+        return;
+    }
+    affects.sort();
+    let mut diagnostic = Diagnostic::new(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::SemanticBackend,
+        format!(
+            "{} component(s) have no TypeScript checker answer and the structural fallback is off: their props are \
+             opaque",
+            affects.len()
+        ),
+    );
+    diagnostic.affects = affects;
+    output.diagnostics.push(diagnostic);
+}
+
 /// A component the checker answered for, as [`drop_superseded`] reads it.
 pub(crate) struct Superseding<'a> {
     key: &'a str,
@@ -503,7 +573,7 @@ fn default_of(
     }
     match resolver {
         ResolverFacts::Used => structural.and_then(|structural| structural.default_value.clone()),
-        ResolverFacts::Off => None,
+        ResolverFacts::Off | ResolverFacts::NoFallback => None,
     }
 }
 
@@ -520,7 +590,7 @@ fn declared_order(
 ) -> PropType {
     let structural = match resolver {
         ResolverFacts::Used => structural,
-        ResolverFacts::Off => None,
+        ResolverFacts::Off | ResolverFacts::NoFallback => None,
     };
     // The structural order also reaches the unions nested in members, which the written one does not.
     let (ordered, placed) = match structural {
@@ -568,22 +638,24 @@ fn replace_props<'a>(
             continue;
         }
         let written = written.unwrap_or_else(|| syntax.written(entry, prop));
+        // With no fallback, the structural prop gives nothing: the checker's description, tags and type stand.
+        let fallback = structural.filter(|_| resolver.falls_back());
         let description = if prop.description.is_empty() {
-            structural.map(|s| s.description.clone()).unwrap_or_default()
+            fallback.map(|s| s.description.clone()).unwrap_or_default()
         } else {
             prop.description.clone()
         };
-        let tags = if prop.tags.is_empty() {
-            structural.map(|s| s.tags.clone()).unwrap_or_default()
-        } else {
-            prop.tags.clone()
-        };
+        let tags =
+            if prop.tags.is_empty() { fallback.map(|s| s.tags.clone()).unwrap_or_default() } else { prop.tags.clone() };
         let unread_kinds = structural.map(|s| unread_by_checker(&prop.prop_type, &s.prop_type)).unwrap_or_default();
+        let was_unread = !unread_kinds.is_empty();
+        unread += usize::from(was_unread);
+        // Without the fallback the checker's type keeps its own `opaque` part, which already carries the kinds.
+        let unread_kinds = if resolver.falls_back() { unread_kinds } else { Vec::new() };
         let prop_type = match structural {
             Some(structural) if !unread_kinds.is_empty() => structural.prop_type.clone(),
             Some(_) | None => declared_order(prop.prop_type.clone(), written, structural.map(|s| &**s), resolver),
         };
-        unread += usize::from(!unread_kinds.is_empty());
         let merged = ParsedProp::new(
             prop.name.clone(),
             prop_type,
@@ -612,7 +684,7 @@ fn replace_props<'a>(
                 _semantic: prop.clone(),
                 _structural: structural.cloned(),
                 merged: merged.clone(),
-                unread: !unread_kinds.is_empty(),
+                unread: was_unread,
             },
         );
         placed.push((prop.name.clone(), merged));
@@ -679,8 +751,11 @@ pub fn merge_semantic_with(output: &mut ExtractionOutput, outcome: SemanticOutco
     output.diagnostics.extend(diagnostics);
     output.diagnostics.extend(syntax.diagnostics);
 
+    merged_keys.sort();
+    if !resolver.falls_back() {
+        degrade_unanswered(output, &merged_keys);
+    }
     if !merged_keys.is_empty() {
-        merged_keys.sort();
         let mut provenance = Diagnostic::new(
             DiagnosticSeverity::Info,
             DiagnosticCode::SemanticBackend,
@@ -691,7 +766,10 @@ pub fn merge_semantic_with(output: &mut ExtractionOutput, outcome: SemanticOutco
     }
     if !unread_keys.is_empty() {
         unread_keys.sort();
-        output.diagnostics.push(unread_diagnostic(unread_props, unread_keys));
+        output.diagnostics.push(match resolver.falls_back() {
+            true => unread_diagnostic(unread_props, unread_keys),
+            false => unread_without_fallback(unread_props, unread_keys),
+        });
     }
 
     let mut by_reason: BTreeMap<String, Vec<String>> = BTreeMap::new();

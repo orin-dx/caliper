@@ -142,6 +142,11 @@ pub struct ExtractArgs {
     /// member order come from the source's syntax alone
     #[arg(long, hide = true, conflicts_with = "no_checker")]
     pub no_resolver_facts: bool,
+
+    /// Test-only (ADR 0026's S7b gate): `--no-resolver-facts`, and no structural fallback: a type the checker cannot
+    /// read stays opaque, and a component it did not answer for has opaque props
+    #[arg(long, hide = true, conflicts_with = "no_checker")]
+    pub no_structural_fallback: bool,
 }
 
 /// `--semantic-timeout-ms` when not given: ADR 0026's proposed 10 s. A hung checker is caught that fast, and it bounds

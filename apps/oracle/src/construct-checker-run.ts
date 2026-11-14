@@ -41,29 +41,22 @@ export interface Row {
   fallback: string | null
 }
 
-/** Where a row's answer leans on the structural fallback, as the merge reports it (ADR 0026, S7b): null when the checker
- * answered for the component and its prop kept the checker's type; `kept structural result: <reason>` for a component
- * the checker did not answer for (the reason its diagnostic gives); `kept structural type: <kinds>` for a prop whose
- * checker type had an unread part (`opaque` with these `degradedBy` kinds) where the structural type had none, so the
- * merge kept the structural type and marked it. The facts `--no-resolver-facts` already turns off (a default, union
- * member order) are not counted: the lane runs with it. */
-export function fallbackCause({
-  answered,
-  keptReason,
-  unreadComponent,
-  prop,
-}: {
-  answered: boolean
-  keptReason?: string
-  unreadComponent: boolean
-  prop?: { type: unknown; degradedBy?: unknown }
-}): string | null {
-  if (!answered) return `kept structural result: ${keptReason ?? 'not asked'}`
-  if (!unreadComponent || prop === undefined) return null
-  const kinds = (Array.isArray(prop.degradedBy) ? prop.degradedBy : []).filter((kind) => kind !== 'truncated')
-  // A kept structural type holds no `opaque` part (else the merge keeps the checker's), yet carries the checker's kinds.
-  if (kinds.length === 0 || JSON.stringify(prop.type).includes('"kind":"opaque"')) return null
-  return `kept structural type: ${kinds.join(', ')}`
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+/** How a row leans on the structural fallback (ADR 0026, S7b): null when the row reads the same with the fallback off
+ * (`extract --no-structural-fallback`) as on, else what changed when it went: `no checker answer` (the component's
+ * props became opaque), `checker could not read: <kinds>` (the checker's own `opaque` type replaced the structural one),
+ * `structural <facts>` (a description or tags only the structural pass had), else `type: <verdict with it off>`. */
+export function fallbackCause(on: LaneRow, off: LaneRow | undefined): string | null {
+  if (off === undefined || !off.answered) return 'no checker answer'
+  const changed = [...new Set([...on.facts, ...off.facts])].filter(
+    (fact) => on.facts.includes(fact) !== off.facts.includes(fact),
+  )
+  if (same(on.type, off.type) && same(on.degradedBy, off.degradedBy) && changed.length === 0) return null
+  const kinds = (Array.isArray(off.degradedBy) ? off.degradedBy : []).filter((kind) => kind !== 'truncated')
+  if (!same(on.type, off.type) && kinds.length > 0) return `checker could not read: ${kinds.join(', ')}`
+  if (changed.length > 0) return `structural ${changed.join(', ')}`
+  return `type: ${off.verdict}`
 }
 
 export interface LaneRun {
@@ -116,25 +109,32 @@ export function runCheckerLane(bin: string): LaneRun {
   // and the syntax alone to them.
   const checked = extract(bin, ['--no-resolver-facts'])
   const elapsedMs = Math.round(performance.now() - started)
+  // The same run with the structural fallback off (S7b): the fallback-off column.
+  const off = new Map(laneRows(extract(bin, ['--no-structural-fallback'])).map((row) => [row.id, row]))
 
   const backendProblem = (checked.diagnostics ?? []).find((d: any) =>
     String(d.message).includes('checker backend unavailable'),
   )?.message
+  const rows: Row[] = laneRows(checked).map((row) =>
+    Object.assign(row, { fallback: fallbackCause(row, off.get(row.id)) }),
+  )
+  return { elapsedMs, rows, backendProblem }
+}
 
+/** A row as one run states it, before the fallback-off column. */
+type LaneRow = Omit<Row, 'fallback'>
+
+/** Every row's verdict in one `extract` output. */
+function laneRows(checked: any): LaneRow[] {
   /** The component keys the checker answered for, from the provenance diagnostic the merge writes. */
   const answered = new Set<string>()
-  /** The components the merge kept a structural prop type for, and those it kept whole, with the reason. */
-  const unread = new Set<string>()
-  const kept = new Map<string, string>()
   for (const diagnostic of checked.diagnostics ?? []) {
-    const message = String(diagnostic.message)
-    // `affects` is a list of component keys, or the id of one in `nameLists` (the canonical JSON shares repeated lists).
-    const affects: string[] =
-      (typeof diagnostic.affects === 'string' ? checked.nameLists[diagnostic.affects] : diagnostic.affects) ?? []
-    if (message.includes('resolved by the TypeScript checker')) for (const key of affects) answered.add(key)
-    if (message.includes('keep their structural type')) for (const key of affects) unread.add(key)
-    const keptResult = message.match(/kept their structural result: (.*)$/s)
-    if (keptResult) for (const key of affects) kept.set(key, keptResult[1]!)
+    if (String(diagnostic.message).includes('resolved by the TypeScript checker')) {
+      // `affects` is a list of component keys, or the id of one in `nameLists` (the canonical JSON shares repeated lists).
+      const affects =
+        typeof diagnostic.affects === 'string' ? checked.nameLists[diagnostic.affects] : diagnostic.affects
+      for (const key of affects ?? []) answered.add(key)
+    }
   }
 
   const byRow = new Map<string, { key: string; prop: any }>()
@@ -146,29 +146,20 @@ export function runCheckerLane(bin: string): LaneRun {
   }
 
   const structural = structuralExpectations().rows
-  const rows: Row[] = []
-  for (const fixture of listFixtures(suiteDir)) {
+  return listFixtures(suiteDir).map((fixture) => {
     const golden: Golden = JSON.parse(readFileSync(fixture.golden, 'utf8'))
     const found = byRow.get(rowKey(realpathSync(fixture.file), fixture.exportPath))
-    const isAnswered = found !== undefined && answered.has(found.key)
-    rows.push({
+    return {
       id: fixture.id,
       verdict: rowVerdict(found?.prop, golden),
       structural: structural[fixture.id]?.verdicts ?? [],
-      answered: isAnswered,
+      answered: found !== undefined && answered.has(found.key),
       type: found?.prop?.type,
       degradedBy: found?.prop?.degradedBy,
       golden: golden.text,
       facts: factDifferences(found?.prop, golden, suiteDir),
-      fallback: fallbackCause({
-        answered: isAnswered,
-        keptReason: found && kept.get(found.key),
-        unreadComponent: found !== undefined && unread.has(found.key),
-        prop: found?.prop,
-      }),
-    })
-  }
-  return { elapsedMs, rows, backendProblem }
+    }
+  })
 }
 
 /** The worst verdict an expectation allows, as a rank in ROW_VERDICTS (higher is worse). */
