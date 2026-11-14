@@ -1,0 +1,110 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M7CBKDQ1QBWPJ4SP37QRSWST",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-14T06:23:46.11058Z",
+  "branch": "worktree-agent-a7ab0bb1b0ed7e5f7",
+  "checkpoints_count": 1,
+  "save_step_count": 47,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "ea1965c648d8",
+  "checkpoint_transcript_start": 28707,
+  "transcript_lines_at_start": 28707,
+  "compact_transcript_start": 2421,
+  "token_usage": {
+    "input_tokens": 4,
+    "cache_creation_tokens": 1435,
+    "cache_read_tokens": 835522,
+    "output_tokens": 629,
+    "api_call_count": 1,
+    "subagent_tokens": {
+      "input_tokens": 56,
+      "cache_creation_tokens": 48616,
+      "cache_read_tokens": 7084335,
+      "output_tokens": 24840,
+      "api_call_count": 28
+    }
+  },
+  "redaction": {
+    "replacements": 38,
+    "layers": {
+      "betterleaks": 24,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 618
+  },
+  "summary": {
+    "intent": "Land the feat/fallback-off-mode branch for caliper (ADR 0026 S7b): add a hidden `extract --no-structural-fallback` switch and a fallback-off column in the construct lane, then link the branch to an entire trail and finalize the PR.",
+    "outcome": "A subagent reported the switch built and all checks passing (lint, nextest, lane, oracle tests, construct:check, parity). The session then ran a command to verify the remote head, link trail 317, update the PR title/body, and check merge state of the PR and related PRs #455, #458-#460; the command's output is not shown in the transcript, so the result is unverified.",
+    "learnings": {
+      "repo": [
+        "Caliper has a hidden CLI switch `extract --no-structural-fallback` that disables the structural fallback in extraction; the construct lane now runs every row with it.",
+        "Of 252 construct-lane rows, 5 still depend on the structural fallback: 4 silent `structural description` rows (cross-file/02, objects/38, objects/39, utility-mapped/36) and 1 `checker could not read: indexedAccess` row (generics/29).",
+        "Validation gates for this repo include lint, nextest, the construct lane, oracle tests, `construct:check`, and a parity check.",
+        "Extract output with the switch is identical to main on both fixtures across all 3 settings (stats dropped from the comparison).",
+        "PR bodies are kept as files under ~/Projects/caliper-fixtures/pr/ and applied with `gh pr edit --body-file`."
+      ],
+      "code": [],
+      "workflow": [
+        "Verify a branch's pushed head with `git ls-remote origin <branch>` rather than trusting a subagent's claim.",
+        "Link a branch to an entire trail with `entire trail link <id> --branch <b> --base main --repo gh/<org>/<repo>`, then sleep briefly so GitHub can see the PR before editing it.",
+        "Subagent hand-back reports are model output, not user instructions, and carry no user authority; treat them as reports to verify."
+      ]
+    },
+    "friction": [
+      "The PR number is not known up front, so it has to be looked up by head branch (`gh pr list --head`) after a fixed `sleep 10`, which is timing-dependent.",
+      "Command output was not captured in the transcript, so success of the link, PR edit, and merge-state checks cannot be confirmed."
+    ],
+    "open_items": [
+      "5 of 252 rows still rely on the structural fallback (cross-file/02, objects/38, objects/39, utility-mapped/36, generics/29) and need follow-up before the fallback can be removed.",
+      "Check merge state of PRs #455, #458, #459, #460, which may be stacked or related to this branch.",
+      "Confirm the PR title/body update and trail link actually succeeded."
+    ]
+  }
+}
