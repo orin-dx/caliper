@@ -17,58 +17,13 @@ import { logger } from 'storybook/internal/node-logger'
 import type { DocgenMiddleware, DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { type ExtractArgTypes, loadExtractArgTypes, toArgTypes } from './arg-types.js'
 import type { CaliperStorybookOptions } from './index.js'
+import { Background } from './background.js'
 import { channel, type Link, type ToDevServer, type ToProvider } from './live.js'
 import { DocgenSession, type SessionBinding } from './session.js'
+import { ResolverFailureError, type StoryFile, noComponent, storyFor, tagLists } from './story.js'
 import { assertValidOptions } from './validate.js'
 
 type Subcomponent = NonNullable<DocgenPayload['subcomponents']>[string]
-
-/**
- * How long a component answered with its structural props waits for the checker's answer to replace them. The checker
- * answers a story someone opened before any background work, so only a checker still starting (seconds on a large
- * project) comes near this; past it, the next request asks again.
- */
-const CHECKER_WAIT_MS = 60_000
-
-interface StoryFile {
-  csf: CsfFile
-  storyPath: string
-  importPath: string
-}
-
-/**
- * `csf`'s story file as the resolver reads it, with `meta.component` being `expression`. The file is parsed again with
- * the expression appended as a statement, so every node has source text for the resolver to report an expression it
- * cannot follow, and every statement stays: the resolver follows the story's imports and local bindings
- * (`const parts = { Item }`) as it does for the written meta, whichever form the meta takes (`export default`,
- * `export { meta as default }`, a CSF factory's `preview.meta()`).
- */
-function storyFor(csf: CsfFile, storyPath: string, expression: string): CsfFile {
-  const code = `${csf.editor.toString()}\n;(${expression})\n`
-  const parsed = loadCsf(code, { fileName: storyPath, makeTitle: () => 'caliper-docgen' }).parse()
-  const statement = parsed.program.body.at(-1)
-  if (statement?.type !== 'ExpressionStatement') throw new Error(`no expression to resolve for ${expression}`)
-  // The parsed file stands in for the written one, with only its component swapped.
-  return Object.create(parsed, { _metaAnnotations: { value: { component: statement.expression } } })
-}
-
-/** The resolver threw instead of answering: a defect to hand to the next provider, not a fact about one subcomponent. */
-class ResolverFailureError extends Error {
-  override name = 'ResolverFailureError'
-}
-
-/** caliper keeps one value per JSDoc tag; Storybook lists every value. */
-function tagLists(tags: Record<string, string>): Record<string, string[]> | undefined {
-  const entries = Object.entries(tags)
-  return entries.length > 0 ? Object.fromEntries(entries.map(([tag, value]) => [tag, [value]])) : undefined
-}
-
-/** Says there is no component `name` in `path`, and which ones the file does have. */
-function noComponent(session: DocgenSession, name: string, path: string): string {
-  const names = session.namesIn(path)
-  const choice = names.length > 0 ? `; its components are ${names.join(', ')}` : ''
-  return `caliper-docgen found no component ${name} in ${path}${choice}`
-}
 
 export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
@@ -204,12 +159,17 @@ export function createDocgenProvider(
    * is none. The caller has brought the session up to date for this request. A component answered with structural
    * props because the checker had not answered in time goes in `awaiting`, whether it is answered or handed on.
    */
-  async function component(
-    csf: CsfFile,
-    storyPath: string,
-    awaiting: string[],
-    name?: string,
-  ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
+  async function component({
+    csf,
+    storyPath,
+    awaiting,
+    name,
+  }: {
+    csf: CsfFile
+    storyPath: string
+    awaiting: string[]
+    name?: string
+  }): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
     const target = name ? storyFor(csf, storyPath, name) : csf
     const session = await getSession()
     const { key, path } = locate(session, target, storyPath)
@@ -235,7 +195,7 @@ export function createDocgenProvider(
     awaiting: string[],
   ): Promise<Subcomponent> {
     try {
-      const { path, doc } = await component(csf, storyPath, awaiting, componentName)
+      const { path, doc } = await component({ csf, storyPath, awaiting, name: componentName })
       const { description, summary, jsDocTags } = extractComponentDescription(
         undefined,
         doc.description || undefined,
@@ -265,7 +225,7 @@ export function createDocgenProvider(
     const { csf, storyPath } = file
     // One look at the files for the story and its subcomponents: they are all answered from the same moment.
     await freshSession()
-    const { doc } = await component(csf, storyPath, awaiting)
+    const { doc } = await component({ csf, storyPath, awaiting })
     const { description, summary, jsDocTags } = extractComponentDescription(
       extractDescription(csf._metaStatement, csf.editor) || undefined,
       doc.description || undefined,
@@ -289,84 +249,24 @@ export function createDocgenProvider(
     }
   }
 
-  // Replacing a structural answer (ADR 0022). An answer that went out with structural props because the checker had
-  // not answered in time is watched until the checker has answered every component in it; then the dev server, if the
-  // browser shows that component, has the docgen service ask again, and this provider answers from the checker's kept
-  // answer. Said once per component and revision of the files, so an answer the checker could not improve (its answer
-  // refused for an edit made meanwhile) is not asked for again until the files change.
-
-  /** The components being watched. */
-  const watching = new Set<string>()
-  /** The revision each component's structural answer was last said to be replaced at. */
-  const replaced = new Map<string, number>()
-
-  async function watch(componentId: string, awaiting: string[]): Promise<void> {
-    if (awaiting.length === 0 || watching.has(componentId)) return
-    watching.add(componentId)
-    try {
-      const session = await getSession()
-      const { revision } = session
-      if (replaced.get(componentId) === revision) return
-      if (!(await session.checkerSettled(awaiting, CHECKER_WAIT_MS))) return
-      // An edit since the answer drops the checker's answers; the request that sees the edit answers it.
-      if (session.revision !== revision) return
-      replaced.set(componentId, revision)
-      link.post({ type: 'answered', componentId })
-    } catch (error) {
-      logger.debug(`[caliper-docgen] ${componentId}: ${(error as Error).message}; the next request asks again`)
-    } finally {
-      watching.delete(componentId)
-    }
-  }
-
-  // The prefetch beyond the opening story: the dev server names the stories after the one on screen, and their
-  // components are resolved in the background, one story at a time, the checker's answers included. A newer list
-  // replaces what is still queued.
-  let queue: IndexEntry[] = []
-  let prefetching = false
-
-  async function drain(): Promise<void> {
-    if (prefetching) return
-    prefetching = true
-    try {
-      while (queue.length > 0) {
-        const entry = queue.shift()!
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- one story at a time, so a story someone opens waits behind one at most
-          await prefetchStory(entry)
-        } catch (error) {
-          logger.debug(`[caliper-docgen] prefetch of ${entry.importPath} stopped: ${(error as Error).message}`)
-        }
-      }
-    } finally {
-      prefetching = false
-    }
-  }
-
-  /** Resolves the components `entry`'s story file names in the background: `meta.component` and its subcomponents. */
-  async function prefetchStory(entry: IndexEntry): Promise<void> {
+  /** The keys of `meta.component` and the subcomponents `entry`'s story file names; none for a file that is no story. */
+  async function keysOf(entry: IndexEntry): Promise<string[]> {
     const importPath = getStoryImportPathFromEntry(entry)
-    if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return
+    if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return []
     const { csf, storyPath } = await storyFile(entry, importPath)
     await freshSession()
     const session = await getSession()
     const names = [undefined, ...extractDeclaredSubcomponents(csf).map(({ componentName }) => componentName)]
-    const keys = names.flatMap((name) => {
+    return names.flatMap((name) => {
       try {
         return [locate(session, name ? storyFor(csf, storyPath, name) : csf, storyPath).key]
       } catch {
         return []
       }
     })
-    await session.prefetch(keys)
   }
 
-  link.listen((message) => {
-    // Every end of the channel hears every other, another provider's word included.
-    if (message.type !== 'prefetch') return
-    queue = [...message.entries]
-    void drain()
-  })
+  const background = new Background({ session: getSession, keysOf }, link)
 
   return (next) => async (input) => {
     const importPath = getStoryImportPathFromEntry(input.entry)
@@ -378,7 +278,7 @@ export function createDocgenProvider(
       logger.debug(`[caliper-docgen] ${importPath}: ${(error as Error).message}; asking the next docgen provider`)
       return next(input)
     } finally {
-      void watch(getComponentIdFromEntry(input.entry), awaiting)
+      void background.watch(getComponentIdFromEntry(input.entry), awaiting)
     }
   }
 }

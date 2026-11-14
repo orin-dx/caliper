@@ -326,7 +326,7 @@ describe('replacing a structural answer, and the background prefetch', () => {
 
     // Asked again at the same revision, still structural (the checker's answer was refused): not said again.
     await provider({ entry: story('List') })
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((done) => setTimeout(done, 10))
     expect(posted).toHaveLength(1)
 
     // After an edit, a structural answer is watched again.
@@ -345,7 +345,7 @@ describe('replacing a structural answer, and the background prefetch', () => {
     late.settled = Promise.resolve(false)
     const unsettled = linked(late)
     await unsettled.provider({ entry: story('Card') })
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((done) => setTimeout(done, 10))
     expect(answeredFake.settles).toEqual([])
     expect(late.settles).toEqual([['Card']])
     expect([...answered.posted, ...unsettled.posted]).toEqual([])

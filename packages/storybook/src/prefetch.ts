@@ -20,7 +20,9 @@ function componentEntries(index: StoryIndex): IndexEntry[] {
  * Storybook opens when the URL names no story.
  */
 export function openingComponents(index: StoryIndex, count: number): string[] {
-  return componentEntries(index).slice(0, count).map(getComponentIdFromEntry)
+  return componentEntries(index)
+    .slice(0, count)
+    .map((entry) => getComponentIdFromEntry(entry))
 }
 
 /**
@@ -31,7 +33,7 @@ export function neighbours(index: StoryIndex, componentId: string, count: number
   if (count <= 0) return []
   const entries = componentEntries(index)
   const at = entries.findIndex((entry) => getComponentIdFromEntry(entry) === componentId)
-  return at < 0 ? [] : entries.slice(at + 1, at + 1 + count)
+  return at === -1 ? [] : entries.slice(at + 1, at + 1 + count)
 }
 
 /** Where the prefetch reads the stories from and how it asks Storybook's docgen service for one component. */

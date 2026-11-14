@@ -3,6 +3,7 @@ import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
 import { toNapiOptions, type SessionOptions } from './options.js'
 import {
+  awaitsChecker,
   buildLookups,
   diagnosticId,
   exportKey,
@@ -40,15 +41,6 @@ export interface Documentation {
    * `checkerSettled` says it has, asking again gets the checker's.
    */
   awaitsChecker?: true
-}
-
-/** Whether `diagnostic` says the checker had not answered yet and the structural props stand in for its. */
-function awaitsChecker(diagnostic: Diagnostic): boolean {
-  return (
-    diagnostic.code === 'SEMANTIC_BACKEND' &&
-    diagnostic.severity === 'info' &&
-    diagnostic.message.startsWith('the TypeScript checker has not answered yet')
-  )
 }
 
 /**
@@ -281,22 +273,15 @@ export class DocgenSession {
     return documentation
   }
 
-  /**
-   * Resolves `keys` in the background, in that order, the checker's answers included, so a request for one later is
-   * answered from them. Never waits for the checker, which answers every component someone waits for first. A lazy
-   * session only; best effort.
-   */
+  /** Resolves `keys` in the background, in order, the checker's answers included (kept). Lazy only; waits for nobody. */
   async prefetch(keys: string[]): Promise<void> {
     if (!this.lazy || this.sessionId === undefined || keys.length === 0) return
     await this.napi.sessionPrefetch(this.sessionId, keys)
   }
 
-  /**
-   * Waits up to `waitMs` until the checker has answered each of `keys` it was asked for: true when a request for them
-   * now gets the checker's props, unless a file changed since; false at the deadline or without a checker.
-   */
-  async checkerSettled(keys: string[], waitMs: number): Promise<boolean> {
-    if (this.sessionId === undefined) return false
+  /** Waits up to `waitMs` until the checker has answered `keys`: true when asking again gets its props (no edit since). */
+  checkerSettled(keys: string[], waitMs: number): Promise<boolean> {
+    if (this.sessionId === undefined) return Promise.resolve(false)
     return this.napi.sessionCheckerSettled(this.sessionId, keys, waitMs)
   }
 

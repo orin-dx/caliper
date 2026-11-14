@@ -74,12 +74,18 @@ export class DevServer {
   /** Components the checker answered while the browser showed another, to ask again when it comes back. */
   private readonly answeredAway = new Set<string>()
   private readonly count: number
+  private readonly options: DevServerOptions
+  private readonly link: Link<ToProvider, ToDevServer>
+  private readonly extractWith: () => Promise<Extract>
 
   constructor(
-    private readonly options: DevServerOptions,
-    private readonly link: Link<ToProvider, ToDevServer>,
-    private readonly extractWith: () => Promise<Extract> = docgenService,
+    options: DevServerOptions,
+    link: Link<ToProvider, ToDevServer>,
+    extractWith: () => Promise<Extract> = docgenService,
   ) {
+    this.options = options
+    this.link = link
+    this.extractWith = extractWith
     this.count = options.prefetchStories ?? PREFETCH_STORIES
     link.listen((message) => {
       if (message.type !== 'answered') return
@@ -127,16 +133,18 @@ export class DevServer {
     if (componentId === this.open) return
     this.open = componentId
     if (this.answeredAway.delete(componentId)) void this.extract(componentId)
-    void this.prefetchAfter(componentId).catch((error: unknown) => {
-      logger.debug(`[caliper-docgen] prefetch after ${componentId} stopped: ${(error as Error).message}`)
-    })
+    void this.prefetchAfter(componentId)
   }
 
-  /** Has the provider resolve the `prefetchStories - 1` components after `componentId` in the background. */
+  /** Has the provider resolve the `prefetchStories - 1` components after `componentId` in the background. Best effort. */
   private async prefetchAfter(componentId: string): Promise<void> {
     if (this.count <= 1) return
-    const entries = neighbours(await this.index(), componentId, this.count - 1)
-    if (entries.length > 0) this.link.post({ type: 'prefetch', entries })
+    try {
+      const entries = neighbours(await this.index(), componentId, this.count - 1)
+      if (entries.length > 0) this.link.post({ type: 'prefetch', entries })
+    } catch (error) {
+      logger.debug(`[caliper-docgen] prefetch after ${componentId} stopped: ${(error as Error).message}`)
+    }
   }
 }
 

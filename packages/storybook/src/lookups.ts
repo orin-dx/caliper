@@ -55,6 +55,15 @@ export function incompleteMessages(diagnostics: Diagnostic[]): string[] {
   return [...new Set(diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').map((d) => d.message))]
 }
 
+/** Whether `diagnostic` says the checker had not answered yet and the structural props stand in for its. */
+export function awaitsChecker(diagnostic: Diagnostic): boolean {
+  return (
+    diagnostic.code === 'SEMANTIC_BACKEND' &&
+    diagnostic.severity === 'info' &&
+    diagnostic.message.startsWith('the TypeScript checker has not answered yet')
+  )
+}
+
 export function diagnosticId(diagnostic: Diagnostic): string {
   return JSON.stringify(diagnostic)
 }

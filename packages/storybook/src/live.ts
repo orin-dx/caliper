@@ -37,7 +37,7 @@ export function channel<Out, In>(): Link<Out, In> {
   return {
     post: (message) => port.postMessage(message),
     listen: (receive) => {
-      port.onmessage = (event) => receive((event as MessageEvent<In>).data)
+      port.addEventListener('message', (event) => receive((event as MessageEvent<In>).data))
     },
   }
 }
