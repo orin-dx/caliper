@@ -9,12 +9,16 @@
 //   CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker
 //
 // A row the checker did not answer for (it kept the structural result) is listed apart: its verdict says nothing about
-// the checker. `--json <file>` also writes every row with the type each side gave.
+// the checker. The last section is the fallback-off column (ADR 0026, S7b): each row passes with the structural
+// fallback off or leans on it, grouped by cause, which is the S7c to S7e worklist; a row's `fallback` entry in
+// checker-expectations.json holds its cause, and the gate fails when the run and the entry disagree. `--json <file>` also
+// writes every row with the type each side gave and its fallback cause.
 import { existsSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import {
   againstStructural,
   checkerExpectations,
+  fallbackWorklist,
   laneFailures,
   runCheckerLane,
   structuralExpectations,
@@ -70,6 +74,16 @@ for (const row of rows.filter((r) => r.facts.length > 0)) console.log(`  ${row.i
 console.log('')
 console.log('Rows that kept their structural result (no checker verdict):')
 for (const row of structuralRows) console.log(`  ${row.id}: ${row.verdict}`)
+console.log('')
+const worklist = fallbackWorklist(rows)
+const leaning = [...worklist.values()].reduce((sum, ids) => sum + ids.length, 0)
+console.log(
+  `Fallback off (ADR 0026, S7b): ${rows.length - leaning} rows pass with the structural fallback off, ${leaning} lean on it (the S7c to S7e worklist, by cause):`,
+)
+for (const [cause, ids] of worklist) {
+  console.log(`  ${cause} (${ids.length}):`)
+  for (const id of ids) console.log(`    ${id}`)
+}
 
 if (jsonOut) writeFileSync(jsonOut, JSON.stringify({ elapsedMs, rows }, null, 2))
 

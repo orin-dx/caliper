@@ -190,6 +190,12 @@ class RecallIsNotComparedAcrossReferences(unittest.TestCase):
         self.assertEqual(weekly.changes(now, before), ['antd: time 100 -> 200'])
         self.assertFalse(weekly.same_reference(now, before))
 
+    def test_records_made_before_the_export_alias_rule_are_not_compared(self):
+        # Version 3 pairs an aliased export (`export { A as B }`); a version 2 record has a smaller denominator.
+        self.assertGreaterEqual(weekly.REFERENCE_VERSION, 3)
+        self.assertFalse(weekly.same_reference(record(weekly.REFERENCE_VERSION, 0.5), record(2, 1.0)))
+        self.assertEqual(weekly.changes(record(weekly.REFERENCE_VERSION, 0.5), record(2, 1.0)), [])
+
     def test_a_record_without_a_version_is_version_one(self):
         self.assertTrue(weekly.same_reference(record(1), record()))
         self.assertFalse(weekly.same_reference(record(weekly.REFERENCE_VERSION), record()))

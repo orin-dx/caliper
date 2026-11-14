@@ -34,16 +34,10 @@ pub(super) fn discover_files(
     let found = std::sync::Mutex::new((Vec::new(), invalid_pattern_diagnostics(&invalid)));
 
     for dir in src_dirs {
-        // If the user explicitly points at a node_modules path, respect it.
-        let dir_is_in_node_modules = in_node_modules(dir);
-
         // Walking from the canonical root makes every entry's path canonical except a symlink itself (the walker
         // doesn't follow symlinked directories), so only those pay for `canonicalize` below.
-        let root = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
-        let walker = ignore::WalkBuilder::new(root.as_std_path())
-            .hidden(false)
-            .git_ignore(!dir_is_in_node_modules)
-            .build_parallel();
+        let (root, dir_is_in_node_modules) = source_root(dir);
+        let walker = walk_builder(&root, dir_is_in_node_modules).build_parallel();
         walker.run(|| {
             let (found, root) = (&found, &root);
             Box::new(move |result| {
@@ -81,10 +75,8 @@ pub(super) fn discover_dirs(
     let extra_excludes = &extra_excludes;
     let (mut dirs, mut configs) = (Vec::new(), Vec::new());
     for dir in src_dirs {
-        let dir_is_in_node_modules = in_node_modules(dir);
-        let root = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
-        let walker =
-            ignore::WalkBuilder::new(root.as_std_path()).hidden(false).git_ignore(!dir_is_in_node_modules).build();
+        let (root, dir_is_in_node_modules) = source_root(dir);
+        let walker = walk_builder(&root, dir_is_in_node_modules).build();
         for entry in walker.flatten() {
             let Ok(path) = Utf8PathBuf::from_path_buf(entry.path().to_owned()) else { continue };
             let relative = path.strip_prefix(&root).unwrap_or(&path);
@@ -112,6 +104,39 @@ pub(super) fn discover_dirs(
     configs.sort();
     configs.dedup();
     (dirs, configs)
+}
+
+/// A configured source directory as every discovery question sees it: its canonical path, which the walk starts from,
+/// and whether the directory as configured is inside `node_modules` (a user who points at one means it, so ignore files
+/// and the `node_modules` exclusion do not apply). The flag comes from the configured path, not where a symlink leads.
+fn source_root(dir: &Utf8Path) -> (Utf8PathBuf, bool) {
+    (crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.to_owned()), in_node_modules(dir))
+}
+
+/// The one walk every discovery question goes through: hidden files are kept, and `.gitignore` (with the other ignore
+/// files the walker reads) applies unless the source directory is itself inside `node_modules`.
+fn walk_builder(root: &Utf8Path, dir_is_in_node_modules: bool) -> ignore::WalkBuilder {
+    let mut builder = ignore::WalkBuilder::new(root.as_std_path());
+    builder.hidden(false).git_ignore(!dir_is_in_node_modules);
+    builder
+}
+
+/// Whether the walk from `root` reaches the file `path` (below `root`) or leaves it out as ignored. It walks only the
+/// directories on the way to `path`, so each ignore file between `root` and the file applies exactly as in a full walk
+/// and the cost is one directory listing per level. A path that does not exist cannot be listed and is taken as
+/// reached: ignore rules are not consulted for a deleted file, and dropping one that was never discovered is harmless.
+fn reached_by_walk(root: &Utf8Path, path: &Utf8Path, dir_is_in_node_modules: bool) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else { return false };
+    if std::fs::symlink_metadata(path).is_err() {
+        return true;
+    }
+    let on_the_way = path.as_std_path().to_owned();
+    walk_builder(root, dir_is_in_node_modules)
+        .max_depth(Some(relative.components().count()))
+        .filter_entry(move |entry| on_the_way.starts_with(entry.path()))
+        .build()
+        .flatten()
+        .any(|entry| entry.path() == path.as_std_path())
 }
 
 /// One walked entry: a source file to keep, a diagnostic, or `None` to skip it.
@@ -232,19 +257,30 @@ fn invalid_pattern_diagnostics(invalid: &[(String, ignore::Error)]) -> Vec<Diagn
         .collect()
 }
 
-/// Whether discovery would include `path`: TypeScript, under a source directory, and not excluded. Watch mode asks
+/// Whether discovery would include `path`: TypeScript, under a source directory, not excluded and not ignored by the
+/// walk's ignore files (see [`walk_builder`]), or already discovered. Watch mode asks
 /// this of every changed path so an edit to an excluded file (a story, a test) never adds a component. A path that no
 /// longer exists was a file, and its parent directories are tested as [`excluded`] tests them during discovery.
-pub(super) fn is_source_file(path: &Utf8Path, src_dirs: &[Utf8PathBuf], extra_excludes: &[String]) -> bool {
+pub(super) fn is_source_file(
+    path: &Utf8Path,
+    src_dirs: &[Utf8PathBuf],
+    extra_excludes: &[String],
+    discovered: &rustc_hash::FxHashSet<Utf8PathBuf>,
+) -> bool {
     if !crate::extractor::is_typescript(path.as_std_path()) || path.is_dir() {
         return false;
     }
+    // A file discovery already reported stays one: it may have been reached through a symlink whose canonical target
+    // the walk would skip, and the watcher only has the canonical path.
+    if discovered.contains(path) {
+        return true;
+    }
     let (extra_excludes, _) = compile_excludes(extra_excludes);
     src_dirs.iter().any(|dir| {
-        let dir = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
-        path.strip_prefix(&dir).is_ok_and(|relative| {
-            !excluded(relative.as_std_path(), EntryKind::File, in_node_modules(&dir), &extra_excludes)
-        })
+        let (dir, in_nm) = source_root(dir);
+        path.strip_prefix(&dir)
+            .is_ok_and(|relative| !excluded(relative.as_std_path(), EntryKind::File, in_nm, &extra_excludes))
+            && reached_by_walk(&dir, path, in_nm)
     })
 }
 

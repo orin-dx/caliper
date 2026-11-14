@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "dense",
+          "size"
+        ],
+        "index": false,
+        "alias": "Options"
+      }
+    ],
+    "alias": "Options"
+  },
+  "text": "Options | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "cross-file/03-imported-interface.tsx"
+    },
+    "order": null
+  }
+}

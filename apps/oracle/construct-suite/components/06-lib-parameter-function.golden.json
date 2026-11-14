@@ -1,0 +1,83 @@
+{
+  "checker": {
+    "k": "function",
+    "params": [
+      {
+        "optional": false,
+        "rest": false,
+        "type": {
+          "k": "object",
+          "fields": [
+            "aborted",
+            "addEventListener",
+            "dispatchEvent",
+            "onabort",
+            "reason",
+            "removeEventListener",
+            "throwIfAborted"
+          ],
+          "index": false,
+          "alias": "AbortSignal"
+        }
+      },
+      {
+        "optional": false,
+        "rest": false,
+        "type": {
+          "k": "union",
+          "members": [
+            {
+              "k": "prim",
+              "name": "undefined"
+            },
+            {
+              "k": "object",
+              "fields": [
+                "body",
+                "cache",
+                "credentials",
+                "headers",
+                "integrity",
+                "keepalive",
+                "method",
+                "mode",
+                "priority",
+                "redirect",
+                "referrer",
+                "referrerPolicy",
+                "signal",
+                "window"
+              ],
+              "index": false,
+              "alias": "RequestInit"
+            }
+          ],
+          "alias": "RequestInit"
+        }
+      }
+    ],
+    "returns": {
+      "k": "object",
+      "fields": [
+        "__@toStringTag",
+        "catch",
+        "finally",
+        "then"
+      ],
+      "index": false,
+      "alias": "Promise"
+    }
+  },
+  "text": "(signal: AbortSignal, init?: RequestInit | undefined) => Promise<Response>",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "components/06-lib-parameter-function.tsx"
+    },
+    "order": null
+  }
+}

@@ -36,6 +36,27 @@ export interface Row {
   golden: string
   /** The facts that differ from the golden's (`factDifferences`). */
   facts: FactName[]
+  /** Null when the row passes with the structural fallback off (the checker and oxc's syntax alone gave its prop);
+   * otherwise what the structural answer still supplies (`fallbackCause`). */
+  fallback: string | null
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+/** How a row leans on the structural fallback (ADR 0026, S7b): null when the row reads the same with the fallback off
+ * (`extract --no-structural-fallback`) as on, else what changed when it went: `no checker answer` (the component's
+ * props became opaque), `checker could not read: <kinds>` (the checker's own `opaque` type replaced the structural one),
+ * `structural <facts>` (a description or tags only the structural pass had), else `type: <verdict with it off>`. */
+export function fallbackCause(on: LaneRow, off: LaneRow | undefined): string | null {
+  if (off === undefined || !off.answered) return 'no checker answer'
+  const changed = [...new Set([...on.facts, ...off.facts])].filter(
+    (fact) => on.facts.includes(fact) !== off.facts.includes(fact),
+  )
+  if (same(on.type, off.type) && same(on.degradedBy, off.degradedBy) && changed.length === 0) return null
+  const kinds = (Array.isArray(off.degradedBy) ? off.degradedBy : []).filter((kind) => kind !== 'truncated')
+  if (!same(on.type, off.type) && kinds.length > 0) return `checker could not read: ${kinds.join(', ')}`
+  if (changed.length > 0) return `structural ${changed.join(', ')}`
+  return `type: ${off.verdict}`
 }
 
 export interface LaneRun {
@@ -88,11 +109,23 @@ export function runCheckerLane(bin: string): LaneRun {
   // and the syntax alone to them.
   const checked = extract(bin, ['--no-resolver-facts'])
   const elapsedMs = Math.round(performance.now() - started)
+  // The same run with the structural fallback off (S7b): the fallback-off column.
+  const off = new Map(laneRows(extract(bin, ['--no-structural-fallback'])).map((row) => [row.id, row]))
 
   const backendProblem = (checked.diagnostics ?? []).find((d: any) =>
     String(d.message).includes('checker backend unavailable'),
   )?.message
+  const rows: Row[] = laneRows(checked).map((row) =>
+    Object.assign(row, { fallback: fallbackCause(row, off.get(row.id)) }),
+  )
+  return { elapsedMs, rows, backendProblem }
+}
 
+/** A row as one run states it, before the fallback-off column. */
+type LaneRow = Omit<Row, 'fallback'>
+
+/** Every row's verdict in one `extract` output. */
+function laneRows(checked: any): LaneRow[] {
   /** The component keys the checker answered for, from the provenance diagnostic the merge writes. */
   const answered = new Set<string>()
   for (const diagnostic of checked.diagnostics ?? []) {
@@ -113,11 +146,10 @@ export function runCheckerLane(bin: string): LaneRun {
   }
 
   const structural = structuralExpectations().rows
-  const rows: Row[] = []
-  for (const fixture of listFixtures(suiteDir)) {
+  return listFixtures(suiteDir).map((fixture) => {
     const golden: Golden = JSON.parse(readFileSync(fixture.golden, 'utf8'))
     const found = byRow.get(rowKey(realpathSync(fixture.file), fixture.exportPath))
-    rows.push({
+    return {
       id: fixture.id,
       verdict: rowVerdict(found?.prop, golden),
       structural: structural[fixture.id]?.verdicts ?? [],
@@ -126,9 +158,8 @@ export function runCheckerLane(bin: string): LaneRun {
       degradedBy: found?.prop?.degradedBy,
       golden: golden.text,
       facts: factDifferences(found?.prop, golden, suiteDir),
-    })
-  }
-  return { elapsedMs, rows, backendProblem }
+    }
+  })
 }
 
 /** The worst verdict an expectation allows, as a rank in ROW_VERDICTS (higher is worse). */
@@ -186,6 +217,29 @@ export function laneFailures(run: LaneRun, expectations: Expectations): string[]
     const failure = expectation && expectationFailure(row.id, row.verdict, expectation)
     if (failure) failures.push(failure)
     if (expectation) failures.push(...factFailures(row.id, row.facts, expectation))
+    const drift = expectation && fallbackFailure(row.id, row.fallback, expectation)
+    if (drift) failures.push(drift)
   }
   return failures
+}
+
+/** Null when the row's `fallback` entry says what the run found: absent for a row that passes with the fallback off,
+ * the cause for one that leans on it. Otherwise what moved: an unlisted dependence is a regression, a listed one that
+ * went is worklist progress to record by removing the entry. */
+export function fallbackFailure(id: string, cause: string | null, row: Expectation): string | null {
+  if (cause === null && row.fallback === undefined) return null
+  if (cause === null) return `${id}: passes with the structural fallback off now: remove its "fallback" entry`
+  if (row.fallback !== cause) {
+    return `${id}: leans on the structural fallback (${cause}); "fallback" says ${row.fallback === undefined ? 'nothing' : `"${row.fallback}"`}`
+  }
+  return null
+}
+
+/** The rows that lean on the structural fallback, by cause: the S7c to S7e worklist. */
+export function fallbackWorklist(rows: Row[]): Map<string, string[]> {
+  const byCause = new Map<string, string[]>()
+  for (const row of rows) {
+    if (row.fallback !== null) byCause.set(row.fallback, [...(byCause.get(row.fallback) ?? []), row.id])
+  }
+  return byCause
 }

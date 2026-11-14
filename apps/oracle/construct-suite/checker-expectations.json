@@ -1,5 +1,19 @@
 {
   "rows": {
+    "components/01-forwardref-call": {"verdicts":["identical","spelled"]},
+    "components/02-memo-call": {"verdicts":["identical","spelled"]},
+    "components/03-factory": {"verdicts":["identical","spelled"]},
+    "components/04-lowercase-helper": {"verdicts":["identical","spelled"]},
+    "components/05-default-keyed-export#Row": {"verdicts":["identical","spelled"]},
+    "components/06-lib-parameter-function": {"verdicts":["identical","spelled"]},
+    "components/07-lib-parameters-of": {"verdicts":["identical","spelled"]},
+    "components/08-hook-typed-props": {"verdicts":["identical","spelled"]},
+    "cross-file/01-imported-alias": {"verdicts":["identical","spelled"]},
+    "cross-file/02-extends-across-files": {"verdicts":["identical","spelled"],"fallback":"structural description"},
+    "cross-file/03-imported-interface": {"verdicts":["identical","spelled"]},
+    "cross-file/04-reexported-alias": {"verdicts":["identical","spelled"]},
+    "cross-file/05-local-shadow": {"verdicts":["identical","spelled"]},
+    "cross-file/06-type-parameter-shadow": {"verdicts":["identical","spelled"]},
     "exports/01-default-and-named": {"verdicts":["identical","spelled"]},
     "exports/02-renamed-export#RowImpl": {"verdicts":["identical","spelled"]},
     "exports/03-attached-to-default#Item": {"verdicts":["identical","spelled"]},
@@ -42,7 +56,7 @@
     "generics/26-intersection-generic-aliases": {"verdicts":["identical","spelled"]},
     "generics/27-intersection-in-generic-alias": {"verdicts":["identical","spelled"]},
     "generics/28-conditional-type": {"verdicts":["identical","spelled"]},
-    "generics/29-utility-types-generic": {"verdicts":["identical","spelled"]},
+    "generics/29-utility-types-generic": {"verdicts":["identical","spelled"],"fallback":"checker could not read: indexedAccess"},
     "generics/30-indexed-access": {"verdicts":["identical","spelled"]},
     "generics/31-generic-render-prop": {"verdicts":["identical","spelled"]},
     "generics/32-promise-array-generic": {"verdicts":["identical","spelled"]},
@@ -116,8 +130,8 @@
     "objects/35-empty-object": {"verdicts":["identical","spelled"]},
     "objects/36-object-keyword": {"verdicts":["identical","spelled"]},
     "objects/37-react-member": {"verdicts":["identical","spelled"]},
-    "objects/38-jsdoc-tags": {"verdicts":["identical","spelled"]},
-    "objects/39-inherited-member": {"verdicts":["identical","spelled"]},
+    "objects/38-jsdoc-tags": {"verdicts":["identical","spelled"],"fallback":"structural description"},
+    "objects/39-inherited-member": {"verdicts":["identical","spelled"],"fallback":"structural description"},
     "objects/40-type-literal-member": {"verdicts":["identical","spelled"]},
     "objects/41-destructured-default": {"verdicts":["identical","spelled"]},
     "objects/42-default-props": {"verdicts":["identical","spelled"]},
@@ -237,6 +251,6 @@
     "utility-mapped/33-alias-chain-utilities": {"verdicts":["identical","spelled"]},
     "utility-mapped/34-template-literal-unions": {"verdicts":["identical","spelled"]},
     "utility-mapped/35-template-literal-intrinsic": {"verdicts":["identical","spelled"]},
-    "utility-mapped/36-picked-member": {"verdicts":["identical","spelled"]}
+    "utility-mapped/36-picked-member": {"verdicts":["identical","spelled"],"fallback":"structural description"}
   }
 }

@@ -436,6 +436,83 @@ mod tests {
         assert!(kept(&root, &cache).is_none());
     }
 
+    /// The root files handed out while the structural pass runs are the ones the finished output gives, in the same
+    /// order: the program the early start opens is the one the run would open, files that share a component name
+    /// (suffixed with their file) and a file that exports nothing included.
+    #[test]
+    fn the_root_files_handed_out_early_are_those_the_finished_output_gives() {
+        let (_dir, root, _cache) = project();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/Button.tsx"), "export function Button(props: { x?: number }) { return null; }\n")
+            .unwrap();
+        std::fs::write(
+            root.join("Alpha.tsx"),
+            "function Hidden(props: { y: string }) { return null; }\nexport const A = 1;\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("Zed.tsx"), "export const Zed = (props: { z: string }) => null;\n").unwrap();
+        let options = PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() };
+        let mut early = None;
+
+        let output = caliper_docgen_core::pipeline::extract_with_early_roots(&options, |roots| early = Some(roots));
+
+        let mut request = SemanticRequest::new(root.clone(), targets_of(&output));
+        request.tsconfig = Some(root.join("tsconfig.json"));
+        let later: Vec<String> = crate::root_files(&request);
+        let early: Vec<String> = early.expect("handed out").iter().map(ToString::to_string).collect();
+        assert!(later.len() >= 4, "{later:?}");
+        assert_eq!(early, later);
+    }
+
+    /// A program opened early gives the answer a run that opens it itself gives, is kept the same way, and is left
+    /// unused (not failed on) when its root files are not the request's.
+    #[test]
+    fn an_early_start_gives_the_answer_a_run_gives_and_a_wrong_one_is_dropped() {
+        let (_dir, root, cache) = project();
+        let timeout = std::time::Duration::from_secs(60);
+        let roots: Vec<Utf8PathBuf> = crate::root_files(&request(&root)).into_iter().map(Utf8PathBuf::from).collect();
+        let fresh = resolve(request(&root));
+
+        let early = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, true);
+        assert_eq!(crate::resolve_cached_early(request(&root), &cache, early), fresh);
+        assert!(kept(&root, &cache).is_some(), "the answer from an early start is kept");
+
+        std::fs::remove_file(cache.join(FILE)).unwrap();
+        let wrong = crate::start_early(root.clone(), None, timeout, &roots[..1], true);
+        assert_eq!(crate::resolve_cached_early(request(&root), &cache, wrong), fresh);
+    }
+
+    /// An early start that did not note what it read cannot feed the kept answer: the answer saved after it would carry
+    /// no questions, and an edit to a file the checker read would not discard it.
+    #[test]
+    fn an_early_start_that_noted_no_reads_does_not_make_a_kept_answer_that_ignores_edits() {
+        let (_dir, root, cache) = project();
+        let timeout = std::time::Duration::from_secs(60);
+        let roots: Vec<Utf8PathBuf> = crate::root_files(&request(&root)).into_iter().map(Utf8PathBuf::from).collect();
+
+        let early = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, false);
+        crate::resolve_cached_early(request(&root), &cache, early);
+        std::fs::write(root.join("types.ts"), "export type Size = 'sm' | 'md' | 'lg';\n").unwrap();
+
+        assert!(kept(&root, &cache).is_none());
+    }
+
+    /// A request that records its calls gets its recording whatever was started early.
+    #[test]
+    fn a_request_that_records_is_recorded_though_a_program_was_opened_early() {
+        let (_dir, root, _cache) = project();
+        let timeout = std::time::Duration::from_secs(60);
+        let roots: Vec<Utf8PathBuf> = crate::root_files(&request(&root)).into_iter().map(Utf8PathBuf::from).collect();
+        let recording = root.parent().unwrap().join("recording.json");
+        let mut recorded = request(&root);
+        recorded.record_to = Some(recording.clone());
+
+        let early = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, false);
+        crate::resolve_early(recorded, early);
+
+        assert!(recording.exists());
+    }
+
     #[test]
     fn a_change_to_the_compiler_options_discards_the_answer() {
         let (_dir, root, cache) = project();

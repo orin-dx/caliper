@@ -39,7 +39,7 @@ SLOWER = 1.10
 RECALL_DROP = 0.02
 # The rules that decide what the reference is: the exclusions and the pairing. Raise it when a change to them moves recall,
 # so that a record is never compared on recall with one made under other rules (a record without it is version 1).
-REFERENCE_VERSION = 2
+REFERENCE_VERSION = 3
 # The universe of the oracle's scores (`oracle.tools`): version 2 counts candidate components only, naming a default export
 # by its declaration; a record without it is version 1, which counted every function the checker takes for a component
 # and named a default export `default`. Version 3 pairs a checker component with Caliper's by file and export name
@@ -220,6 +220,14 @@ def export_source(text, name):
     return None
 
 
+def export_aliases(text, local):
+    """The names `text` exports the local binding `local` under, other than its own (`export { _Card as Card }`)."""
+    names = []
+    for match in re.finditer(r"^export\s*\{([^}]*)\}\s*(?!from)", text or '', re.M):
+        names += [alias for original, alias in re.findall(r'(\w+)\s+as\s+(\w+)', match.group(1)) if original == local]
+    return names
+
+
 def resolve_module(file, module, exists):
     """The file `module` names from `file` (relative paths only), as a path relative to the root."""
     if not module.startswith('.'):
@@ -310,6 +318,11 @@ def pair(comp, root, found_by_file, read, exists, claimed=()):
     found = counterpart(file, local, found_by_file, read, claimed) if local else None
     if found:
         return found, 'display_name'
+    # Caliper names a component exported under another name (`export { _Card as Card }`) by the export name, RDT by the declaration.
+    for alias in export_aliases(read(file), comp['name']):
+        found = counterpart(file, alias, found_by_file, read, claimed)
+        if found:
+            return found, 'export_alias'
     name = norm_name(comp['name'])
     for info in comp['props'].values():
         parent = info.get('parent') or ''
