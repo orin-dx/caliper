@@ -62,12 +62,17 @@ Start work through these commands so their checks run:
 - Bug or review findings: `/guide:fix`. Real feature or shared change: `/guide:build`.
 - Verify or find bugs: `/guide:check`. Commit message: `/guide:ship`.
 
-Pull requests are opened by Entire from the branch's trail, so `/guide:ship` stops at the commit.
+Pull requests are opened by Entire from the branch's trail, so `/guide:ship` stops at the commit: push the branch and create or link its trail (`entire trail create`). Do not open the PR with `gh`.
 
 ## Writing and commits
 
 - Succinct: short sentences, bullets, tables. No backstory, hedging or filler. Banned words are in `docs/adr/README.md`.
-- Changesets become bullets under generated changelog headings. Write one short, consumer-facing paragraph per changeset; start with the outcome, and include an upgrade action or cost when needed. Do not start the body with a heading or list marker.
+- Changesets live in `.changeset/` as one file per consumer-visible topic, with a front matter line per affected package (`cargo/caliper-docgen: patch`, `npm/caliper-docgen: minor`). Changesets become the project's changelog, so write them for the people who use it, not for the implementer.
+  - Open with a bold lead-in naming the change as the user sees it, then one line on its value: what they can now do or what changed for them.
+  - When there is more to say, add short bullets in this order: why it matters, how to adopt it (commands, configuration, migration), and limits they will hit. Use sub-bullets for detail.
+  - Group a longer entry under bold labels such as **Upgrading** or **Scripting**. Do not use `#` headings; the changelog supplies those.
+  - Put a breaking change in its own paragraph starting `**Breaking:**` (old behavior, new behavior, what to do), and a step users must take in one starting `**Action:**`. Never inside a bullet: the release PR lists them under "Read before merging" only as paragraphs.
+  - One idea per bullet. Leave out internals unless the user must know them.
 - Never hard-wrap Markdown, commit messages or PR descriptions: one line per paragraph.
 - Comments: only the non-obvious why, no history (the commit records it). Fill to 120 columns (`.rustfmt.toml`). Rewriting a comment block counts as writing it: re-fill and cut it, don't inherit the old wrapping.
 - Commits: imperative subject, at most one or two sentences of why, no list of what changed, no "This commit...". Skip the body when the subject says it all.
