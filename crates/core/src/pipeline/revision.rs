@@ -508,7 +508,7 @@ impl Revision {
         if self.lazy.is_some() {
             return self.next_lazy(options, changed);
         }
-        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns) {
+        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns, self.source_files()) {
             return None;
         }
         let start = Instant::now();
