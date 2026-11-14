@@ -305,7 +305,14 @@ pub(crate) struct Validated {
     bytes: Vec<u8>,
     at: usize,
     request: u128,
+    reads: Vec<(Question, u128)>,
+    /// When the questions began to be asked: a file whose text changed after this has a modification time after it.
+    asked_at: SystemTime,
 }
+
+/// How far before the questions began a modification time may be and still count as a change since: file systems
+/// record times coarsely.
+const MTIME_SLACK: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The file's header and questions, when it was made by this build and can be read.
 pub(crate) fn read(file: &Utf8Path) -> Option<Read> {
@@ -328,14 +335,38 @@ impl Read {
     /// Asks the disk every question again, now: the answer holds only if each is answered as it was, whatever the disk
     /// said when the file was read.
     pub(crate) fn validate(self) -> Option<Validated> {
-        still_holds(&self.reads).then_some(Validated { bytes: self.bytes, at: self.at, request: self.request })
+        let asked_at = SystemTime::now();
+        let holds = still_holds(&self.reads, |(question, answer)| question.answer(osvfs::fs()) == *answer);
+        holds.then_some(Validated {
+            bytes: self.bytes,
+            at: self.at,
+            request: self.request,
+            reads: self.reads,
+            asked_at,
+        })
     }
 }
 
 impl Validated {
-    /// The answer, when it was made for the request `key` names.
+    /// The answer, when it was made for the request `key` names and the disk still answers as it did when the questions
+    /// were asked. They were asked while the structural pass ran, which may have read a file after an edit that they
+    /// did not see, so what an edit since could have changed is asked again here: every question but a file's text is
+    /// asked again whole (a file or directory that appeared, a listing, a stat), and a file's text only when the file's
+    /// modification time is not older than the questions were (an edit stamps it with the time of the edit).
     pub(crate) fn outcome(self, key: u128) -> Option<SemanticOutcome> {
         if self.request != key {
+            return None;
+        }
+        let fs = osvfs::fs();
+        let since = self.asked_at.checked_sub(MTIME_SLACK).unwrap_or(SystemTime::UNIX_EPOCH);
+        let unchanged = still_holds(&self.reads, |(question, answer)| match question {
+            Question::ReadFile(path) => match fs.stat(path).and_then(|info| info.mod_time) {
+                Some(modified) if modified < since => true,
+                _ => question.answer(fs) == *answer,
+            },
+            _ => question.answer(fs) == *answer,
+        });
+        if !unchanged {
             return None;
         }
         SemanticOutcome::from_bytes(self.bytes.get(self.at..)?).ok()
@@ -343,15 +374,12 @@ impl Validated {
 }
 
 /// Whether the disk answers every question as it did, asked on as many threads as the machine has.
-fn still_holds(reads: &[(Question, u128)]) -> bool {
-    let fs = osvfs::fs();
+fn still_holds(reads: &[(Question, u128)], holds: impl Fn(&(Question, u128)) -> bool + Sync) -> bool {
+    let holds = &holds;
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get()).min(16);
     let chunk = reads.len().div_ceil(threads).max(1);
     std::thread::scope(|scope| {
-        let checks: Vec<_> = reads
-            .chunks(chunk)
-            .map(|part| scope.spawn(move || part.iter().all(|(question, answer)| question.answer(fs) == *answer)))
-            .collect();
+        let checks: Vec<_> = reads.chunks(chunk).map(|part| scope.spawn(move || part.iter().all(holds))).collect();
         checks.into_iter().all(|check| check.join().unwrap_or(false))
     })
 }
@@ -489,6 +517,26 @@ mod tests {
 
         assert!(read.validate().is_none());
         assert!(load(&cache.join(FILE), key).is_none());
+    }
+
+    /// The questions are asked while the structural pass runs, so a file edited after they were asked and before the
+    /// pass read it must still discard the answer: the structural pass would describe the new text and the answer the
+    /// old. The run asks again what could have changed since, once the pass is done and its request is known.
+    #[test]
+    fn a_file_edited_after_the_early_validation_and_before_the_structural_read_discards_the_answer() {
+        let (_dir, root, cache) = project();
+        resolve_cached(request(&root), &cache);
+        let early = crate::validate_kept_early(&cache);
+        while !early.0.as_ref().expect("spawned").is_finished() {
+            std::thread::yield_now();
+        }
+
+        std::fs::write(root.join("types.ts"), "export type Size = 'sm' | 'md' | 'lg';\n").unwrap();
+        let served = crate::resolve_cached_early(request(&root), &cache, Some(early), None);
+
+        assert_eq!(served, resolve(request(&root)));
+        let size = served.components.iter().flat_map(|c| &c.props).find(|p| p.name == "size").unwrap();
+        assert!(format!("{:?}", size.prop_type).contains("md"), "{size:?}");
     }
 
     /// The request is compared after validation, against the one the structural pass made.
