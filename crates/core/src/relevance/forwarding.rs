@@ -13,6 +13,8 @@
 //! subtracted, one before it an overridable default and kept, an attribute valued with an own prop adding nothing,
 //! a spread onto a DOM tag passing nothing.
 
+use std::collections::BTreeSet;
+
 use camino::{Utf8Path, Utf8PathBuf};
 
 use super::{Attribute, Element, Member, SpreadOf, Target};
@@ -41,7 +43,8 @@ pub(crate) trait Lane {
 /// whether the props escape where the syntax cannot follow them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Forwarding {
-    /// The body's elements in source order, for [`Body::elements`](super::Body::elements).
+    /// The body's elements in source order, for [`Body::elements`](super::Body::elements). A component tag that no
+    /// spread of the props reaches is left [`Target::Unresolved`]: `decide` reads a target only through such a spread.
     pub(crate) elements: Vec<Element>,
     /// For [`Body::handed_on`](super::Body::handed_on): the body's silence about a prop is unknown.
     pub(crate) handed_on: bool,
@@ -64,6 +67,11 @@ pub(crate) fn forwarding(component: &ComponentMapping, project: Project<'_>, lan
         .elements
         .iter()
         .map(|element: &JsxElementFact| {
+            let attributes: Vec<Attribute> = element.attributes.iter().map(attribute).collect();
+            // Only a spread of the props reads the target's props; the lane resolves none it does not need.
+            if !matches!(element.tag, JsxTag::Intrinsic(_)) && !attributes.iter().any(Attribute::spreads_props) {
+                return Element { target: Target::Unresolved, attributes };
+            }
             let target = match resolved.iter().find(|(tag, _)| *tag == &element.tag) {
                 Some((_, target)) => target.clone(),
                 None => {
@@ -72,7 +80,7 @@ pub(crate) fn forwarding(component: &ComponentMapping, project: Project<'_>, lan
                     target
                 }
             };
-            Element { target, attributes: element.attributes.iter().map(attribute).collect() }
+            Element { target, attributes }
         })
         .collect();
     Some(Forwarding { elements, handed_on: body.handed_on })
@@ -104,15 +112,16 @@ fn target(file: &Utf8Path, tag: &JsxTag, project: Project<'_>, lane: &impl Lane)
     }
 }
 
-/// The names of the members the props type declares itself and that are not ambient, in member order, each once.
+/// The component's own props: the members its props type reaches that are not ambient (not the layered DOM and ARIA
+/// sets), declared there or inherited from a project type, in member order, each once. Keeping only the members the
+/// props type declares itself would read a target that extends a base as forwarding nothing, and hide what it takes.
 fn own_props(members: &[Member]) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    for member in members.iter().filter(|member| member.own && !member.ambient) {
-        if !names.contains(&member.name) {
-            names.push(member.name.clone());
-        }
-    }
-    names
+    let mut seen = BTreeSet::new();
+    members
+        .iter()
+        .filter(|member| !member.ambient && seen.insert(member.name.as_str()))
+        .map(|member| member.name.clone())
+        .collect()
 }
 
 /// The component mapping the tag `path` (`Button`, `Menu.Item`, `UI.Button`) written in `file` names.

@@ -75,7 +75,15 @@ impl Lane for Fixture {
             Some(ReExportStep::Named { source_specifier, source_name }) => {
                 self.declaration(&file, &source_specifier, &source_name)
             }
-            _ => Some((file, export.to_owned())),
+            // `export * from`: the first module that declares the name, as the resolver walks wildcards.
+            Some(ReExportStep::Wildcards(specifiers)) => specifiers
+                .iter()
+                .filter_map(|specifier| self.declaration(&file, specifier, export))
+                .find(|(declaring, declared)| {
+                    self.imports.local_export(declaring, export).is_some() || declared != export
+                })
+                .or_else(|| Some((file, export.to_owned()))),
+            None => Some((file, export.to_owned())),
         }
     }
 
@@ -153,12 +161,12 @@ fn a_spread_forwards_one_hop_of_the_targets_own_non_ambient_props() {
             .props("inner.tsx", "Inner", inner_members())
             .props("deep.tsx", "Deep", vec![own("depth")]);
     let forwarding = fixture.forwarding("outer.tsx", "Outer");
-    assert_eq!(forwarding.elements[0].target, Target::Component(strings(&["tone", "size", "variant"])));
+    assert_eq!(forwarding.elements[0].target, Target::Component(strings(&["tone", "size", "base", "variant"])));
     let mut members = outer_members();
     members.extend([inherited("depth"), inherited("base"), inherited("onClick")]);
     let shown = fixture.decide("outer.tsx", "Outer", members);
-    assert_eq!(shown.rows, ["label", "tone", "size", "variant"]);
-    assert_eq!(shown.collapsed, ["other", "depth", "base", "onClick"]);
+    assert_eq!(shown.rows, ["label", "tone", "size", "variant", "base"]);
+    assert_eq!(shown.collapsed, ["other", "depth", "onClick"]);
 }
 
 #[test]
@@ -195,7 +203,7 @@ fn the_tag_resolves_by_its_import_not_by_its_name() {
         "Inner",
         inner_members(),
     );
-    let own_props = Target::Component(strings(&["tone", "size", "variant"]));
+    let own_props = Target::Component(strings(&["tone", "size", "base", "variant"]));
     assert_eq!(fixture.forwarding("renamed.tsx", "Outer").elements[0].target, own_props);
     assert_eq!(fixture.forwarding("shadowed.tsx", "Outer").elements[0].target, Target::Unresolved);
 }
@@ -207,7 +215,7 @@ fn a_local_component_resolves_by_its_binding() {
     let fixture = Fixture::new(&[("both.tsx", &source)]).props("both.tsx", "Inner", inner_members());
     assert_eq!(
         fixture.forwarding("both.tsx", "Outer").elements[0].target,
-        Target::Component(strings(&["tone", "size", "variant"]))
+        Target::Component(strings(&["tone", "size", "base", "variant"]))
     );
 }
 
@@ -223,8 +231,40 @@ fn a_tag_resolves_through_a_barrel_and_a_namespace_import() {
     );
     assert_eq!(
         fixture.forwarding("outer.tsx", "Outer").elements[0].target,
-        Target::Component(strings(&["tone", "size", "variant"]))
+        Target::Component(strings(&["tone", "size", "base", "variant"]))
     );
+}
+
+#[test]
+fn a_tag_resolves_through_a_wildcard_barrel() {
+    let barrel = "export * from './other';\nexport * from './inner';\n";
+    let consumer = "import { Inner } from './index';\n\
+                    export function Outer({ label, ...rest }: OuterProps) { return <Inner {...rest} />; }\n";
+    let other = "export function Other(props: OtherProps) { return <div />; }\n";
+    let fixture =
+        Fixture::new(&[("inner.tsx", INNER), ("other.tsx", other), ("index.ts", barrel), ("outer.tsx", consumer)])
+            .props("inner.tsx", "Inner", inner_members());
+    assert_eq!(
+        fixture.forwarding("outer.tsx", "Outer").elements[0].target,
+        Target::Component(strings(&["tone", "size", "base", "variant"]))
+    );
+}
+
+#[test]
+fn a_target_that_only_inherits_its_props_forwards_them() {
+    // `interface ButtonProps extends BaseProps {}`: nothing declared by the props type itself, all of it forwarded.
+    let fixture = Fixture::new(&[("inner.tsx", INNER), ("outer.tsx", &outer("<Inner {...rest} />"))]).props(
+        "inner.tsx",
+        "Inner",
+        vec![inherited("tone"), inherited("size"), ambient("onClick")],
+    );
+    assert_eq!(
+        fixture.forwarding("outer.tsx", "Outer").elements[0].target,
+        Target::Component(strings(&["tone", "size"]))
+    );
+    let shown = fixture.decide("outer.tsx", "Outer", outer_members());
+    assert_eq!(shown.rows, ["label", "tone", "size"]);
+    assert_eq!(shown.collapsed, ["variant", "other"]);
 }
 
 #[test]
@@ -291,6 +331,6 @@ fn the_output_is_deterministic_and_follows_source_and_member_order() {
     let first = fixture.forwarding("outer.tsx", "Outer");
     assert_eq!(first, fixture.forwarding("outer.tsx", "Outer"));
     let targets: Vec<&Target> = first.elements.iter().map(|element| &element.target).collect();
-    let inner = Target::Component(strings(&["tone", "size", "variant"]));
+    let inner = Target::Component(strings(&["tone", "size", "base", "variant"]));
     assert_eq!(targets, [&inner, &Target::Dom, &inner]);
 }
