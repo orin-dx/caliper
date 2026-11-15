@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01QsY9kroYhSM7LoN8CsLTiq",
+  "agent_id": "ac5ebfe0323365da5",
+  "subagent_type": "general-purpose",
+  "task_description": "T2: props-type relevance signals (ADR 0028 wave 1)",
+  "started_at": "2026-11-15T13:28:17.352051-08:00"
+}
