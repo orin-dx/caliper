@@ -95,6 +95,35 @@ impl CollapseInheritedProps {
     }
 }
 
+/// What a merge of the checker's answer needs to decide a collapse of a source only the checker read: the run's mode
+/// and whether it loads dependencies, so a source in `node_modules` is a dependency's exactly when the structural pass
+/// would have loaded it (`CollapseInheritedProps::collapses`'s `dependency`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CollapseContext {
+    /// The run's `collapseInheritedProps`.
+    pub mode: CollapseInheritedProps,
+    /// The run's `loadDependencies`.
+    pub load_dependencies: bool,
+}
+
+impl CollapseContext {
+    /// Collapses nothing the structural answer did not: what a merge whose caller gives no options uses.
+    pub const OFF: Self = Self { mode: CollapseInheritedProps::None, load_dependencies: false };
+
+    /// The run's choices.
+    pub fn of(options: &PipelineOptions) -> Self {
+        Self { mode: options.collapse_inherited_props, load_dependencies: options.load_dependencies }
+    }
+
+    /// Whether a source only the checker read collapses: `declared` is how many members it declares itself, and its
+    /// file is a dependency's when it is in `node_modules` and the run loads dependencies.
+    pub(crate) fn collapses(self, file: &str, type_name: &str, declared: u32) -> bool {
+        let dependency = self.load_dependencies && in_node_modules(file);
+        let declared = usize::try_from(declared).unwrap_or(usize::MAX);
+        (dependency || !in_node_modules(file)) && self.mode.collapses(dependency, file, type_name, declared)
+    }
+}
+
 /// A source declaring more than this many props can collapse: an ambient dependency source (`crate::types::ambient`),
 /// or a project source under [`CollapseInheritedProps::All`]. Storybook's react-component-meta hides a dependency
 /// source contributing more than this many props, whatever it contains; here an API source is hidden only past

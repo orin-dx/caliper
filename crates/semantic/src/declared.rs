@@ -53,6 +53,11 @@ pub(crate) struct Memo {
     symbols: Mutex<FxHashMap<String, DeclaredSymbol>>,
     /// A parent symbol's name when it is an interface, else `None` (a type literal, a class, a module).
     parents: Mutex<FxHashMap<CompactSymbol, Option<String>>>,
+    /// How many members an interface parent declares itself (its declared type's properties whose parent it is), as the
+    /// structural pass counts a source: before an `Omit` or a `Pick`, without what it inherits.
+    members: Mutex<FxHashMap<CompactSymbol, u32>>,
+    /// The same counts by the interface's name and file, as a prop's `parent` names it.
+    sources: Mutex<FxHashMap<(String, String), u32>>,
     /// The program's files by the path a declaration names: the path itself, and lower-cased.
     files: OnceCell<FxHashMap<String, String>>,
 }
@@ -150,6 +155,8 @@ pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Res
 
     let descriptions = memo.descriptions.lock().unwrap_or_else(PoisonError::into_inner);
     let tags = memo.tags.lock().unwrap_or_else(PoisonError::into_inner);
+    let members = memo.members.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut sources = memo.sources.lock().unwrap_or_else(PoisonError::into_inner);
     let mut found = Vec::with_capacity(asked.len());
     for (prop, slots) in asked.iter().zip(&declares) {
         let key = jsdoc_key(prop.property);
@@ -158,6 +165,9 @@ pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Res
             let name = parents.get(parent).cloned().flatten()?;
             let file = declared_in(declaration);
             let file_name = files.and_then(|files| files.get(file)).cloned().unwrap_or_else(|| file.to_string());
+            if let Some(count) = members.get(parent) {
+                sources.insert((name.clone(), file_name.clone()), *count);
+            }
             Some(PropParent { name, file_name })
         });
         // react-docgen-typescript's `parent`: the first declaration's, and only when an interface holds it.
@@ -216,14 +226,52 @@ async fn parent_names(
     let requests =
         unseen.iter().map(|(_, symbol)| ("getParentOfSymbolForChecker", Asking::Symbol { symbol })).collect();
     let answers = rpc.batch(requests).await?;
-    let mut seen = memo.parents.lock().unwrap_or_else(PoisonError::into_inner);
-    for ((parent, _), answer) in unseen.into_iter().zip(answers) {
-        let symbol: Option<SymbolInfo> = decode(&answer)?;
-        let name = symbol.filter(|symbol| symbol.flags & flag::SYMBOL_INTERFACE != 0).map(|symbol| symbol.name);
-        seen.insert(parent.clone(), name.clone());
-        known.insert(parent, name);
+    let mut interfaces: Vec<(CompactSymbol, SymbolRef)> = Vec::new();
+    {
+        let mut seen = memo.parents.lock().unwrap_or_else(PoisonError::into_inner);
+        for ((parent, _), answer) in unseen.into_iter().zip(answers) {
+            let symbol: Option<SymbolInfo> = decode(&answer)?;
+            let symbol = symbol.filter(|symbol| symbol.flags & flag::SYMBOL_INTERFACE != 0);
+            let name = symbol.as_ref().map(|symbol| symbol.name.clone());
+            if let Some(symbol) = symbol {
+                interfaces.push((parent.clone(), symbol.reference));
+            }
+            seen.insert(parent.clone(), name.clone());
+            known.insert(parent, name);
+        }
     }
+    count_members(rpc, memo, &interfaces).await?;
     Ok(known)
+}
+
+/// How many members each of `interfaces` declares itself, kept in `memo`: two round trips for all of them, once per
+/// interface per snapshot. Its declared type's properties include what it inherits; the ones it declares are those
+/// whose parent it is.
+async fn count_members(rpc: &Rpc, memo: &Memo, interfaces: &[(CompactSymbol, SymbolRef)]) -> Result<(), CallError> {
+    if interfaces.is_empty() {
+        return Ok(());
+    }
+    let requests =
+        interfaces.iter().map(|(_, symbol)| ("getDeclaredTypeOfSymbol", Asking::Symbol { symbol })).collect();
+    let types: Vec<crate::rpc::TypeInfo> =
+        rpc.batch(requests).await?.iter().map(|answer| decode(answer)).collect::<Result<_, _>>()?;
+    let requests = types.iter().map(|info| ("getPropertiesOfType", Asking::Type { type_id: info.id })).collect();
+    let answers = rpc.batch(requests).await?;
+    let mut members = memo.members.lock().unwrap_or_else(PoisonError::into_inner);
+    for ((parent, _), answer) in interfaces.iter().zip(answers) {
+        let properties: Vec<SymbolInfo> = decode(&answer)?;
+        let own = properties.iter().filter(|property| property.parent.as_ref() == Some(parent)).count();
+        members.insert(parent.clone(), u32::try_from(own).unwrap_or(u32::MAX));
+    }
+    Ok(())
+}
+
+impl Memo {
+    /// How many members the interface `parent` names declares itself, when the checker named it as a prop's parent.
+    pub(crate) fn source_size(&self, parent: &PropParent) -> Option<u32> {
+        let sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
+        sources.get(&(parent.name.clone(), parent.file_name.clone())).copied()
+    }
 }
 
 /// The program's files, by their own path and by its lower-cased form, the first file of a lower-cased form winning.

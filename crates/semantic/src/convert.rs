@@ -611,6 +611,25 @@ impl Converter {
         self.convert_all(infos, &Cx::default()).await
     }
 
+    /// Each interface that declares one of `props`, with how many members it declares itself, in the order the props
+    /// first name it: what the merge decides a collapse of a source the structural pass did not read by
+    /// (`caliper_docgen_core::types::semantic::DeclaredSource`). `@types/react`'s are left out.
+    pub(crate) fn sources_of(
+        &self,
+        props: &[Arc<SemanticProp>],
+    ) -> Vec<caliper_docgen_core::types::semantic::DeclaredSource> {
+        let mut sources: Vec<caliper_docgen_core::types::semantic::DeclaredSource> = Vec::new();
+        for parent in props.iter().filter(|prop| !prop.react_declared).filter_map(|prop| prop.parent.as_ref()) {
+            if sources.iter().any(|source| source.parent == *parent) {
+                continue;
+            }
+            if let Some(declared) = self.state.declared.source_size(parent) {
+                sources.push(caliper_docgen_core::types::semantic::DeclaredSource { parent: parent.clone(), declared });
+            }
+        }
+        sources
+    }
+
     /// Where each prop of `asked` is declared and what its JSDoc says ([`crate::declared`]).
     pub(crate) async fn declared(&self, asked: &[crate::declared::Asked<'_>]) -> Result<Vec<Declared>, CallError> {
         crate::declared::declared(&self.rpc, &self.state.declared, asked).await

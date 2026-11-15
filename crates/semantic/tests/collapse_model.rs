@@ -4,14 +4,19 @@
 //! size (each side of the 30-prop ambient and the 200-prop thresholds) and wrapper (none, `Omit`, `Pick`) is resolved
 //! by the structural lane alone and by the checker lane (the structural answer with the checker's merged over it).
 //! Both must give each component the same inheritance layers, and, wherever the structural lane can read the source,
-//! the same props. The collapse decision has one owner, the structural resolver; the checker's merge follows its layers.
+//! the same props. A fourth origin is a package source only the checker can see: a package component's props reached
+//! through `PropsOf<typeof Widget>` (an `infer` conditional, as `ComponentProps` is), which the structural lane does not follow; there the checker supplies the
+//! source's declared member count and the layers must be what the structural lane would give (the one decision,
+//! `CollapseInheritedProps::collapses`, asked with that count). Where both lanes see a source, the checker's declared
+//! count is the structural one.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::ExtractionOutput;
-use caliper_docgen_core::types::semantic::merge_semantic;
+use caliper_docgen_core::types::options::CollapseContext;
+use caliper_docgen_core::types::semantic::merge_semantic_in;
 use caliper_docgen_semantic::{SemanticRequest, resolve, targets_of};
 use camino::Utf8PathBuf;
 
@@ -43,7 +48,16 @@ fn project() -> (tempfile::TempDir, Utf8PathBuf) {
         SOURCES
             .iter()
             .filter(|source| source.3 == package)
-            .map(|(name, prefix, count, _)| format!("export interface {name} {{ {}}}\n", members(prefix, *count)))
+            .map(|(name, prefix, count, _)| {
+                let mut text = format!("export interface {name} {{ {}}}\n", members(prefix, *count));
+                if package {
+                    text.push_str(&format!(
+                        "export interface Widget{name}Props extends {name} {{ w?: boolean }}\n\
+                         export declare function Widget{name}(props: Widget{name}Props): null;\n"
+                    ));
+                }
+                text
+            })
             .collect()
     };
     std::fs::write(pkg.join("index.d.ts"), declare(true)).unwrap();
@@ -53,10 +67,17 @@ fn project() -> (tempfile::TempDir, Utf8PathBuf) {
         r#"{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "preserve", "strict": true, "skipLibCheck": true, "noEmit": true, "types": [] } }"#,
     )
     .unwrap();
-    let mut components = String::new();
+    // A conditional type the structural lane does not evaluate, as `ComponentProps<typeof X>` is for it.
+    let mut components = String::from("type PropsOf<T> = T extends (props: infer P) => unknown ? P : never;\n");
     for (name, prefix, _, package) in SOURCES {
         let from = if *package { "pkg" } else { "./sources" };
         components.push_str(&format!("import type {{ {name} }} from '{from}';\n"));
+        if *package {
+            components.push_str(&format!("import {{ Widget{name} }} from 'pkg';\n"));
+            components.push_str(&format!(
+                "export function Only{name}(props: PropsOf<typeof Widget{name}>) {{ return null; }}\n"
+            ));
+        }
         components.push_str(&format!("interface {name}Props extends {name} {{ own?: boolean }}\n"));
         components.push_str(&format!("export function With{name}(props: {name}Props) {{ return null; }}\n"));
         components.push_str(&format!(
@@ -74,7 +95,10 @@ fn project() -> (tempfile::TempDir, Utf8PathBuf) {
 type Layers = BTreeSet<(String, String, u32, Vec<String>)>;
 
 fn layers(output: &ExtractionOutput, key: &str) -> Layers {
-    output.components[key]
+    output
+        .components
+        .get(key)
+        .unwrap_or_else(|| panic!("{key} was not extracted"))
         .inheritance
         .iter()
         .map(|layer| (layer.type_name.clone(), layer.file_name.clone(), layer.total_props, layer.omitted.clone()))
@@ -107,8 +131,16 @@ fn the_structural_and_the_checker_lane_give_the_same_layers_and_props() {
                 request.request_timeout = Duration::from_secs(60);
                 let outcome = resolve(request);
                 assert_eq!(outcome.fallbacks, [], "the checker answers every component");
+                // Where both lanes see a source, the checker's declared count is the one the source declares.
+                for component in &outcome.components {
+                    for source in &component.sources {
+                        if let Some((_, _, count, _)) = SOURCES.iter().find(|s| s.0 == source.parent.name) {
+                            assert_eq!(source.declared as usize, *count, "declared count of {}", source.parent.name);
+                        }
+                    }
+                }
                 let mut checker = structural.clone();
-                merge_semantic(&mut checker, outcome);
+                merge_semantic_in(&mut checker, outcome, Default::default(), CollapseContext::of(&options));
 
                 for (name, _, _, package) in SOURCES {
                     for key in [format!("With{name}"), format!("Omit{name}"), format!("Pick{name}")] {
@@ -120,9 +152,34 @@ fn the_structural_and_the_checker_lane_give_the_same_layers_and_props() {
                         }
                         checked += 1;
                     }
+                    if !package {
+                        continue;
+                    }
+                    // Only the checker sees this source: the layers are the ones the rule gives a loaded dependency's
+                    // source of this declared size, the same the structural lane gives `With{name}`.
+                    let key = format!("Only{name}");
+                    let case = format!("{key} load={load_dependencies} {collapse:?} {html_attributes:?}");
+                    let (_, _, count, _) = SOURCES.iter().find(|s| s.0 == *name).unwrap();
+                    let ambient = name.ends_with("DOMEvents") || name.ends_with("DOMAttributes");
+                    let threshold = if ambient { 30 } else { 200 };
+                    let collapses = load_dependencies && collapse != CollapseInheritedProps::None && *count > threshold;
+                    let pkg = root.join("node_modules/pkg/index.d.ts").to_string();
+                    let expected: Layers = if collapses {
+                        [(name.to_string(), pkg, u32::try_from(*count).unwrap(), Vec::new())].into()
+                    } else {
+                        Layers::new()
+                    };
+                    assert_eq!(layers(&checker, &key), expected, "layers of {case}");
+                    if load_dependencies {
+                        assert_eq!(layers(&checker, &key), layers(&checker, &format!("With{name}")), "{case}");
+                    }
+                    let listed = props(&checker, &key);
+                    assert!(listed.contains("w"), "{case}: {listed:?}");
+                    assert_eq!(listed.len(), if collapses { 1 } else { count + 1 }, "props of {case}");
+                    checked += 1;
                 }
             }
         }
     }
-    assert_eq!(checked, 2 * 3 * 2 * SOURCES.len() * 3);
+    assert_eq!(checked, 2 * 3 * 2 * (SOURCES.len() * 3 + 4));
 }
