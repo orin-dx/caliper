@@ -169,7 +169,9 @@ fn apply_semantic_backend(
         caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
         return;
     };
-    let mut targets = caliper_docgen_semantic::targets_of(output);
+    let cx = caliper_docgen_core::types::options::CollapseContext::of(options);
+    // The merge below is asked with the same `cx` over this `output`, so the props it leaves to a layer go unconverted.
+    let mut targets = caliper_docgen_semantic::targets_collapsing(output, cx);
     if let Some(key) = only {
         targets.retain(|target| target.key == key);
     }

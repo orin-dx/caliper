@@ -711,8 +711,20 @@ impl Converter {
     /// `Pick`) to what it applies to. A React type is found by where it is declared, as [`Origin::react_terminal`]
     /// finds React's terminals, and is not looked into. `None` when a type on the way has bases the checker cannot be
     /// asked for ([`Self::named_bases`]): the list would not be the answer, and an empty one would say there are none.
-    pub(crate) async fn composes(&self, props_type: &TypeInfo) -> Result<Option<Vec<String>>, CallError> {
+    ///
+    /// The same walk finds the props each lib `Pick` on the way selects (the second of the pair), each name once: they
+    /// reach the component by name (`SemanticComponent::picked`). A type whose bases cannot be asked for is not looked
+    /// into, for either. A `Pick` that is the whole body of a project alias (`type P = Pick<Base, "a">`) is not found:
+    /// the checker names the type by the project alias (TypeScript keeps the outermost alias), and the mapped type it
+    /// is cannot tell a `Pick` from an `Omit`, which the lib writes as a `Pick`. Where the structural pass reads the
+    /// base it lists those props itself, and the merge follows it; only a base it cannot read is decided here alone.
+    pub(crate) async fn composes(
+        &self,
+        props_type: &TypeInfo,
+    ) -> Result<(Option<Vec<String>>, Vec<String>), CallError> {
         let mut names: Vec<String> = Vec::new();
+        let mut picked: Vec<String> = Vec::new();
+        let mut known = true;
         let mut seen: Vec<u64> = Vec::new();
         let mut pending = vec![props_type.clone()];
         while let Some(info) = pending.pop() {
@@ -729,6 +741,13 @@ impl Converter {
                     continue;
                 }
                 if origin.alias && origin.in_lib() && UTILITIES.contains(&origin.name.as_str()) {
+                    if origin.name == "Pick" {
+                        for property in self.rpc.properties(info.id).await? {
+                            if !picked.contains(&property.name) {
+                                picked.push(property.name);
+                            }
+                        }
+                    }
                     pending.extend(self.rpc.alias_type_arguments(info.id).await?.into_iter().take(1));
                     continue;
                 }
@@ -736,13 +755,16 @@ impl Converter {
             let parts = if info.flags & flag::INTERSECTION != 0 {
                 self.parts(info.id, Parts::Members).await?
             } else {
-                let Some(bases) = self.named_bases(&info).await? else { return Ok(None) };
+                let Some(bases) = self.named_bases(&info).await? else {
+                    known = false;
+                    continue;
+                };
                 bases
             };
             // Last first onto the stack, so they are taken in the order the type names them.
             pending.extend(parts.into_iter().rev());
         }
-        Ok(Some(names))
+        Ok((known.then_some(names), picked))
     }
 
     /// The base types of `info` for a traversal that wants their names and not their arguments. The checker states the

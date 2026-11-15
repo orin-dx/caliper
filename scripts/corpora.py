@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -108,23 +109,46 @@ def measure_child(args):
     return time.perf_counter() - start, rss_mib(usage.ru_maxrss), os.waitstatus_to_exitcode(status)
 
 
-def run_once(args, stdout=subprocess.DEVNULL):
+class RunFailed(RuntimeError):
+    """A measured command that did not finish well. `code` is its exit status (negative for a signal, 127 when it cannot
+    be started, None for a timeout or a helper that wrote nothing) and `tail` the last 20 lines of its stderr."""
+
+    def __init__(self, message, code=None, tail=''):
+        super().__init__(message)
+        self.code = code
+        self.tail = '\n'.join(tail.strip().splitlines()[-20:])
+
+
+def run_once(args, stdout=subprocess.DEVNULL, timeout=None):
     """Wall seconds and peak RSS in MiB of one process, measured by a small helper process so that this process's own
-    memory never leaks into the number. A helper that fails, a result it did not write and a command that cannot run or
-    exits non-zero are each a RuntimeError saying what happened, with the end of the helper's stderr."""
+    memory never leaks into the number. A helper that fails, a result it did not write, a command that cannot run, that
+    exits non-zero or dies of a signal, and one that runs past `timeout` seconds (it and its helper are killed) are each
+    a RunFailed saying what happened, with the end of the helper's stderr."""
     command = ' '.join(args)
     with tempfile.NamedTemporaryFile('r', suffix='.json') as result:
         helper = [sys.executable, '-I', os.path.abspath(__file__), 'measure', result.name, '--'] + list(args)
-        done = subprocess.run(helper, stdout=stdout, stderr=subprocess.PIPE, text=True, errors='replace')
-        detail = done.stderr.strip()[-500:]
-        if done.returncode != 0:
-            raise RuntimeError(f'the measuring helper failed (exit {done.returncode}) running {command}: {detail}')
+        # Its own session, so that a timeout can kill the measured command with it, not only the helper.
+        process = subprocess.Popen(helper, stdout=stdout, stderr=subprocess.PIPE, text=True, errors='replace',
+                                   start_new_session=True)
+        try:
+            _, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _, stderr = process.communicate()
+            raise RunFailed(f'{command} ran past its {timeout} s timeout and was killed', tail=stderr) from None
+        detail = stderr.strip()[-500:]
+        if process.returncode != 0:
+            raise RunFailed(f'the measuring helper failed (exit {process.returncode}) running {command}: {detail}',
+                            process.returncode, stderr)
         try:
             seconds, rss, code = json.load(result)
         except ValueError as error:
-            raise RuntimeError(f'the measuring helper wrote no result for {command}: {error}') from error
+            raise RunFailed(f'the measuring helper wrote no result for {command}: {error}', tail=stderr) from error
     if code != 0:
-        raise RuntimeError(f'{command} exited with {code}' + (f': {detail}' if detail else ''))
+        raise RunFailed(f'{command} exited with {code}' + (f': {detail}' if detail else ''), code, stderr)
     return seconds, rss
 
 

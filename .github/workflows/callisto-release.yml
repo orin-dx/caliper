@@ -126,6 +126,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: never
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -146,6 +147,22 @@ jobs:
           release_branch: callisto/version-packages
         env:
           GH_TOKEN: ${{ github.token }}
+      # A pull request opened or updated with `github.token` starts no `pull_request` run, so the release PR would get
+      # no CI at all, the corpora budget gate included. `workflow_dispatch` is the event `github.token` may start. Once
+      # per head commit: this workflow also runs daily and on every push to main.
+      - name: Run CI on the release PR's head commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --state open --base main --json headRefName,headRefOid,headRepositoryOwner \
+            --jq '[.[] | select((.headRefName | startswith("callisto/version-packages")) and .headRepositoryOwner.login == "'"${GITHUB_REPOSITORY_OWNER}"'")] | first // empty')
+          [ -n "$pr" ] || exit 0
+          ref=$(jq -r .headRefName <<<"$pr")
+          sha=$(jq -r .headRefOid <<<"$pr")
+          ran=$(gh run list --workflow ci.yml --event workflow_dispatch --commit "$sha" --json databaseId --jq length)
+          [ "$ran" = 0 ] || exit 0
+          gh workflow run ci.yml --ref "$ref"
 
   plan:
     name: Derive release intent from the merged release commit
