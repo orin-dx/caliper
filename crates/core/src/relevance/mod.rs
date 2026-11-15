@@ -3,15 +3,65 @@
 //! [`decide`] is the one place the rules are combined: it takes the [`Evidence`] each lane gathers for the members a
 //! component's props type reaches and says, for each member, whether it is a typed row, a name in its collapsed
 //! layer's `used` list, left in that layer, or decided as today because the body says nothing. It is pure and total:
-//! no I/O, no name lists, and its output follows the order of the members it is given. Nothing calls it yet; the
-//! lanes are wired after the collapse PR merges (ADR 0028, slice T7).
-#![cfg_attr(not(test), expect(dead_code, reason = "wired into both lanes by ADR 0028 slice T7"))]
+//! no I/O, no name lists, and its output follows the order of the members it is given.
+//!
+//! Both lanes reach it through [`annotate`] (ADR 0028, slice T7): the structural resolver after it resolves a
+//! component, the checker's merges after they replace its props. The inputs are the same for both: the
+//! lane-independent [`Inputs`] gathered once by the resolver, and the members the entry's props and layers reach
+//! ([`props_type::members`]). Story `args` are absent evidence: stories files are not discovered.
 
-mod call_sites;
-mod forwarding;
-mod props_type;
+pub(crate) mod call_sites;
+pub(crate) mod forwarding;
+pub(crate) mod props_type;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::types::output::{ComponentEntry, Relevance};
+
+/// The evidence about one component that does not depend on the lane, gathered once by the structural resolver.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Inputs {
+    /// What the props type writes itself.
+    pub(crate) props_type: props_type::PropsType,
+    /// What the component's body does with its props; `None` when it has no function of its own.
+    pub(crate) body: Option<Body>,
+    /// The props consumers pass at its JSX call sites.
+    pub(crate) call_sites: CallSites,
+}
+
+/// Decides where each member of `entry`'s props goes, from its [`Inputs`] and the members its listed props and layers
+/// reach, and writes [`ComponentEntry::relevance`]. Every lane calls it after it last changes the props or layers, so
+/// the decision is one function of the same inputs. Without inputs the relevance is empty: unknown, never guessed.
+pub(crate) fn annotate(entry: &mut ComponentEntry) {
+    let Some(inputs) = entry.relevance_evidence.0.clone() else {
+        entry.relevance.clear();
+        return;
+    };
+    let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
+    let members = props_type::members(&inputs.props_type, rows, &entry.inheritance, crate::types::ambient::is_dom_file);
+    let evidence =
+        Evidence { members, body: inputs.body.clone(), call_sites: inputs.call_sites.clone(), story_args: Vec::new() };
+    let listed = |name: &str| entry.props.contains_key(name) || entry.notable_inherited.contains_key(name);
+    entry.relevance = relevance_of(&decide(&evidence), listed);
+}
+
+/// The relevance of each listed name, and of each unlisted one evidence puts forward.
+fn relevance_of(shown: &Shown, listed: impl Fn(&str) -> bool) -> BTreeMap<String, Relevance> {
+    let lists = [
+        (&shown.rows, Relevance::Row),
+        (&shown.used, Relevance::Used),
+        (&shown.collapsed, Relevance::Collapsed),
+        (&shown.as_today, Relevance::AsToday),
+    ];
+    let mut relevance = BTreeMap::new();
+    for (names, placed) in lists {
+        let forward = matches!(placed, Relevance::Row | Relevance::Used);
+        for name in names.iter().filter(|name| forward || listed(name)) {
+            relevance.entry(name.clone()).or_insert(placed);
+        }
+    }
+    relevance
+}
 
 /// Everything known about the members one component's props type reaches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

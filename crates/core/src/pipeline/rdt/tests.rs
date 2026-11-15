@@ -26,6 +26,8 @@ fn entry(name: &str, props: &[(&str, &Arc<ParsedProp>)], notable: &[(&str, &Arc<
         detected_by: DetectionRule::FunctionDeclaration,
         exported: true,
         exports: vec![],
+        relevance: Default::default(),
+        relevance_evidence: Default::default(),
     }
 }
 

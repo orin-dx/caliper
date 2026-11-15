@@ -65,6 +65,8 @@ fn component(name: &str, props: &[ParsedProp], notable: &[ParsedProp]) -> Compon
         detected_by: DetectionRule::FunctionDeclaration,
         exported: true,
         exports: Vec::new(),
+        relevance: Default::default(),
+        relevance_evidence: Default::default(),
     }
 }
 

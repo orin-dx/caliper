@@ -38,6 +38,8 @@ fn output() -> ExtractionOutput {
         detected_by: DetectionRule::FunctionDeclaration,
         exported: true,
         exports: vec![ComponentExport::named(name)],
+        relevance: Default::default(),
+        relevance_evidence: Default::default(),
     };
     ExtractionOutput {
         components: BTreeMap::from([

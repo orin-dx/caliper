@@ -191,7 +191,15 @@ export interface ComponentEntry {
   exported: boolean
   /** How its module exports it, in source order; `exported` is whether there are any. */
   exports: ComponentExport[]
+  /**
+   * Where relevance evidence puts each listed prop, and each member of a collapsed layer it puts forward (ADR 0028).
+   * A member left out stays in its layer.
+   */
+  relevance: Record<string, Relevance>
 }
+
+/** Where relevance evidence puts a member (ADR 0028): a typed row, a `used` name in its layer, left in its layer, or, with incomplete evidence, as without evidence. */
+export type Relevance = 'row' | 'used' | 'collapsed' | 'asToday'
 
 /**
  * One way a module exports a component: `Card` for `export function Card` and for `export { _Card as Card }`,

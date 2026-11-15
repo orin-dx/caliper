@@ -19,7 +19,9 @@ pub(crate) mod interned;
 /// Version 6 writes `bigint` as `{ "kind": "bigint" }`, where version 5 wrote `{ "kind": "named", "name": "bigint" }`.
 /// Version 7 gives each component `exports`, the names its module exports it under (ADR 0027): a reader of version 6
 /// has no way to tell which export a component is, and joined on the display name instead.
-pub const SCHEMA_VERSION: u32 = 7;
+/// Version 8 gives each component `relevance`, where evidence puts each of its props (ADR 0028): a reader of version 7
+/// would show every listed prop alike, and miss the members of a collapsed layer evidence puts forward.
+pub const SCHEMA_VERSION: u32 = 8;
 
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
@@ -133,7 +135,35 @@ pub struct ComponentEntry {
     /// TypeScript checker asks for the component by these, and a reader of the canonical JSON finds the component by
     /// file and export instead of by display name.
     pub exports: Vec<crate::types::ComponentExport>,
+    /// Where relevance puts each prop (ADR 0028, decided by one function for both lanes): every listed prop (`props`
+    /// and `notableInherited`), and each member of a collapsed layer that evidence puts forward (a row or a `used`
+    /// name). A member left out is left in its layer. Empty when the component's evidence was not gathered. It does not
+    /// change which props are listed or collapsed.
+    pub relevance: BTreeMap<String, Relevance>,
+    /// The evidence about the component that does not depend on the lane (its props type's syntax, its body, its call
+    /// sites), kept so a lane that replaces the props decides `relevance` again from the same inputs. Never written.
+    #[serde(skip)]
+    pub relevance_evidence: RelevanceEvidence,
 }
+
+/// Where relevance puts one member of a component's props (ADR 0028, section A).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Relevance {
+    /// Evidence shows it as a typed row: declared by the props type itself, picked, overriding, required, defaulted,
+    /// passed by consumers at the floor, or forwarded or read when not ambient.
+    Row,
+    /// An ambient member the body reads: named in its collapsed layer, not a typed row.
+    Used,
+    /// Complete evidence gives it no signal: it belongs in its collapsed layer.
+    Collapsed,
+    /// No signal, and the body's evidence is incomplete or absent: listed or collapsed as without evidence.
+    AsToday,
+}
+
+/// The lane-independent evidence of [`ComponentEntry::relevance_evidence`]; opaque outside the crate.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RelevanceEvidence(pub(crate) Option<Arc<crate::relevance::Inputs>>);
 
 impl ComponentEntry {
     /// Shortcut: the HTML element this component renders as, if any.

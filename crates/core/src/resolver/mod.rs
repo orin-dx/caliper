@@ -37,6 +37,7 @@ mod named;
 mod precedence;
 mod primitives;
 mod react;
+pub(crate) mod relevance_inputs;
 mod substitute;
 mod template;
 
@@ -287,6 +288,8 @@ pub struct ResolutionContext {
     /// Positions in `global.component_mappings` by component name (`component_mapping`), built on first use and shared
     /// by the contexts derived from this one, which have the same `global`.
     mapping_index: Arc<std::sync::OnceLock<FxHashMap<CompactString, Vec<usize>>>>,
+    /// Every component's call-site counts (ADR 0028), built on first use and shared like `mapping_index`.
+    pub(crate) relevance_sites: Arc<std::sync::OnceLock<relevance_inputs::ProjectSites>>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
     /// `resolve_cva_variant_props` (VariantProps<typeof X>) can do an O(1)
@@ -396,6 +399,7 @@ impl ResolutionContext {
             tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
             mapping_index: Default::default(),
+            relevance_sites: Default::default(),
             enum_bare_index: Arc::new(enum_bare_index),
             const_array_bare_index: Arc::new(const_array_bare_index),
             html_attributes: options.html_attributes,
@@ -558,6 +562,7 @@ impl ResolutionContext {
             props_reads: Default::default(),
             extra_builtins: self.extra_builtins.clone(),
             mapping_index: self.mapping_index.clone(),
+            relevance_sites: self.relevance_sites.clone(),
             enum_bare_index: self.enum_bare_index.clone(),
             const_array_bare_index: self.const_array_bare_index.clone(),
             html_attributes: self.html_attributes,
@@ -957,6 +962,8 @@ fn unpublished_entry(mapping: &ComponentMapping) -> ComponentEntry {
         detected_by: mapping.rule,
         exported: mapping.exported(),
         exports: mapping.exports.clone(),
+        relevance: Default::default(),
+        relevance_evidence: Default::default(),
     }
 }
 
@@ -1122,6 +1129,8 @@ pub(crate) fn resolve_component_shared(
             detected_by: mapping.rule,
             exported: mapping.exported(),
             exports: mapping.exports.clone(),
+            relevance: Default::default(),
+            relevance_evidence: Default::default(),
         },
         ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics },
     )

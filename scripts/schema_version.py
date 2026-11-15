@@ -1,6 +1,6 @@
 """The canonical JSON schema version these scripts read (ADR 0017). A test compares it with Rust's SCHEMA_VERSION."""
 
-SUPPORTED_SCHEMA_VERSION = 7
+SUPPORTED_SCHEMA_VERSION = 8
 
 
 def check(document, who):

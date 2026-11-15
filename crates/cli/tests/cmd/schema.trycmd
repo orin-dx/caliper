@@ -121,7 +121,7 @@ $ caliper-docgen schema
     "schemaVersion": {
       "description": "The shape of this JSON (ADR 0017). A reader checks it equals the version it was written for",
       "type": "integer",
-      "const": 7
+      "const": 8
     },
     "components": {
       "type": "object",
@@ -234,6 +234,19 @@ $ caliper-docgen schema
             "type": "array",
             "items": {
               "$ref": "#/definitions/componentExport"
+            }
+          },
+          "relevance": {
+            "description": "Where relevance evidence puts each listed prop, and each member of a collapsed layer it puts forward (ADR 0028): `row` a typed row, `used` an ambient member named in its layer, `collapsed` left in its layer, `asToday` no signal with incomplete evidence. A member left out stays in its layer",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "row",
+                "used",
+                "collapsed",
+                "asToday"
+              ]
             }
           }
         }

@@ -393,6 +393,10 @@ pub struct GlobalSourceData {
     /// Type parameter defaults across all files — see `SourceData::type_param_defaults`.
     /// Key: "${absolute_file_path}:${name}"
     pub type_param_defaults: FxHashMap<String, Vec<Option<CollectedType>>>,
+
+    /// The JSX each file writes outside every component body (`SourceData::jsx_usages`), for call-site evidence
+    /// (ADR 0028). Files that write none have no entry.
+    pub(crate) jsx_usages: FxHashMap<Utf8PathBuf, Vec<crate::types::collected::JsxUsage>>,
 }
 
 impl GlobalSourceData {
@@ -424,6 +428,9 @@ impl GlobalSourceData {
         self.import_map.insert(file_path.to_owned(), data.imports);
         self.re_export_map.insert(file_path.to_owned(), data.exports);
         self.component_mappings.extend(data.component_mappings);
+        if !data.jsx_usages.is_empty() {
+            self.jsx_usages.insert(file_path.to_owned(), data.jsx_usages);
+        }
     }
 
     /// Remove all entries contributed by `file_path`. Called before re-merging an updated file.
@@ -442,6 +449,7 @@ impl GlobalSourceData {
         self.import_map.remove(file_path);
         self.re_export_map.remove(file_path);
         self.component_mappings.retain(|m| m.file_path != file_path);
+        self.jsx_usages.remove(file_path);
     }
 }
 

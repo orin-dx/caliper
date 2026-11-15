@@ -117,6 +117,11 @@ fn schema_value() -> serde_json::Value {
                             "description": "How its module exports it, in source order (ADR 0027). `exported` is whether there are any",
                             "type": "array",
                             "items": { "$ref": "#/definitions/componentExport" }
+                        },
+                        "relevance": {
+                            "description": "Where relevance evidence puts each listed prop, and each member of a collapsed layer it puts forward (ADR 0028): `row` a typed row, `used` an ambient member named in its layer, `collapsed` left in its layer, `asToday` no signal with incomplete evidence. A member left out stays in its layer",
+                            "type": "object",
+                            "additionalProperties": { "type": "string", "enum": ["row", "used", "collapsed", "asToday"] }
                         }
                     }
                 }
@@ -351,6 +356,8 @@ mod tests {
                     caliper_docgen_core::types::ComponentExport::named("default"),
                     caliper_docgen_core::types::ComponentExport::named("default").member("Item"),
                 ],
+                relevance: Default::default(),
+                relevance_evidence: Default::default(),
             },
         );
 

@@ -407,8 +407,10 @@ impl Serialize for InternedComponent<'_> {
             detected_by,
             exported,
             exports,
+            relevance,
+            relevance_evidence: _,
         } = self.entry;
-        let mut out = serializer.serialize_struct("ComponentEntry", 13)?;
+        let mut out = serializer.serialize_struct("ComponentEntry", 14)?;
         out.serialize_field("displayName", display_name)?;
         out.serialize_field("filePath", file_path)?;
         out.serialize_field("description", description)?;
@@ -425,6 +427,7 @@ impl Serialize for InternedComponent<'_> {
         out.serialize_field("detectedBy", detected_by)?;
         out.serialize_field("exported", exported)?;
         out.serialize_field("exports", exports)?;
+        out.serialize_field("relevance", relevance)?;
         out.end()
     }
 }

@@ -371,6 +371,7 @@ fn apply_props(
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
     move_notable(entry, &notable);
+    crate::relevance::annotate(entry);
     merged
 }
 

@@ -268,7 +268,10 @@ pub(super) fn resolve_guarded(
                     panic!("simulated resolve-phase panic (test-only sentinel)");
                 }
 
-                crate::resolver::resolve_component_tracked(mapping, ctx)
+                let (mut entry, diagnostics, deps) = crate::resolver::resolve_component_tracked(mapping, ctx);
+                entry.relevance_evidence = crate::resolver::relevance_inputs::evidence(mapping, ctx);
+                crate::relevance::annotate(&mut entry);
+                (entry, diagnostics, deps)
             })
             .unwrap_or_else(|diag| {
                 let stub = ComponentEntry {
@@ -285,6 +288,8 @@ pub(super) fn resolve_guarded(
                     detected_by: mapping.rule,
                     exported: mapping.exported(),
                     exports: mapping.exports.clone(),
+                    relevance: Default::default(),
+                    relevance_evidence: Default::default(),
                 };
                 // A panicked resolution re-runs on any edit to its own file.
                 let mut deps = crate::resolver::Dependencies::default();

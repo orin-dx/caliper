@@ -41,6 +41,7 @@ pub(crate) struct FileUsages<'a> {
 }
 
 /// The `args` one stories file sets (`extractor::story_args`), with the tag-like path its meta's `component` names.
+#[cfg_attr(not(test), expect(dead_code, reason = "stories files are not discovered; story args stay absent evidence"))]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FileStories<'a> {
     /// The stories file.
@@ -91,6 +92,7 @@ pub(crate) fn count<'a>(
 
 /// The `args` keys set in stories for each of `components`, parallel to it and sorted: every key counts, with no floor.
 /// A stories file whose `component` does not resolve gives nothing.
+#[cfg_attr(not(test), expect(dead_code, reason = "stories files are not discovered; story args stay absent evidence"))]
 pub(crate) fn story_args<'a>(
     components: &'a [ComponentMapping],
     stories: &[FileStories<'a>],
@@ -108,6 +110,7 @@ pub(crate) fn story_args<'a>(
 
 impl CallSites {
     /// The props passed at the floor: at 20% or more of the sites, and at two at least.
+    #[cfg_attr(not(test), expect(dead_code, reason = "decide applies the floor itself"))]
     pub(crate) fn used(&self) -> Vec<&str> {
         self.passed.iter().filter(|(_, count)| self.at_floor(*count)).map(|(name, _)| name.as_str()).collect()
     }

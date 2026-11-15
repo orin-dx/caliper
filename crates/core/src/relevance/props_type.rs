@@ -40,6 +40,12 @@ pub(crate) struct PropsType {
 }
 
 impl PropsType {
+    /// The members the props type writes itself, as a lane hands a forwarding target's props to `forwarding`: own and
+    /// not ambient, in name order. Read from the syntax, so the same in both lanes.
+    pub(crate) fn own_members(&self) -> Vec<Member> {
+        self.own.iter().map(|name| Member { name: name.clone(), own: true, ..Member::default() }).collect()
+    }
+
     /// Reads the props type of `mapping`, finding each name it writes with `lookup`. A base it extends or intersects
     /// is not entered: its members are inherited, and the lanes report them.
     pub(crate) fn read<'a>(mapping: &ComponentMapping, lookup: impl Fn(&str) -> Option<Declaration<'a>>) -> Self {

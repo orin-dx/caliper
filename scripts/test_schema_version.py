@@ -36,7 +36,7 @@ class SupportedVersion(unittest.TestCase):
         self.assertEqual(schema_version.SUPPORTED_SCHEMA_VERSION, 7)
         with self.assertRaises(SystemExit) as raised:
             schema_version.check({'schemaVersion': 6, 'components': {}}, 'weekly')
-        self.assertIn('has schema version 6, and this script reads version 7.', str(raised.exception))
+        self.assertIn('has schema version 6, and this script reads version 8.', str(raised.exception))
 
     def test_output_without_a_version_is_version_1(self):
         with self.assertRaises(SystemExit) as raised:
