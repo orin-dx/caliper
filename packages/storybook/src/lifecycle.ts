@@ -37,6 +37,36 @@
 // 4. No refresh for a component no client shows; it is refreshed once a client comes back to it.
 // 5. Never a watch for a key at a revision it is already watched at, and at most two per key and revision: a key
 //    that settled and comes back pending (its checker stopped, or its answer was not kept) is watched once more.
+// 6. The service finally holds, per component, the payload of the newest request: extractions finish in any order,
+//    and `Completions` (below) keeps a late older one from overwriting a newer one. Only kept completions are
+//    `answer` events, so the reducer sees answers in request order.
+
+/**
+ * Which completion of an extraction the service keeps: the one owner of that decision. Storybook stores whatever an
+ * extraction returns, in the order extractions finish, so an older one (an async fallback provider, a slow structural
+ * pass) finishing after a newer refresh would overwrite it, and the lifecycle, told nothing is pending any more, would
+ * never refresh it again. So each request is stamped with a version when it starts; a completion older than the newest
+ * one that already completed returns that newest payload instead (the store only moves forward) and is not announced.
+ * One payload per component is held, the same the service holds.
+ */
+export class Completions<Payload> {
+  private latest = 0
+  private readonly newest = new Map<string, { version: number; payload: Payload }>()
+
+  /** The version of a request starting now. */
+  start(): number {
+    this.latest += 1
+    return this.latest
+  }
+
+  /** What the service should store for `component`'s request of `version`, and whether to announce it as an answer. */
+  complete(id: string, version: number, payload: Payload): { payload: Payload; announce: boolean } {
+    const newest = this.newest.get(id)
+    if (newest && newest.version > version) return { payload: newest.payload, announce: false }
+    this.newest.set(id, { version, payload })
+    return { payload, announce: true }
+  }
+}
 
 /** One watch's keys at one revision. */
 interface Keys {
@@ -65,10 +95,12 @@ export interface State {
   components: Map<string, ComponentState>
   /** The last answer's sequence number. */
   seq: number
+  /** The newest revision of the files the session was seen at. */
+  revision: number
 }
 
 export type Event =
-  | { type: 'answer'; provider: string; component: string; revision: number; pending: string[] }
+  | { type: 'answer'; provider: string; component: string; revision: number; pending: string[]; revisionNow: number }
   | { type: 'settled'; component: string; revision: number; keys: string[]; ok: boolean; revisionNow: number }
   | { type: 'selected'; client: string; component: string }
   | { type: 'closed'; client: string }
@@ -79,7 +111,7 @@ export type Effect =
   | { type: 'prefetchAfter'; component: string }
 
 export function initialState(): State {
-  return { clients: new Map(), components: new Map(), seq: 0 }
+  return { clients: new Map(), components: new Map(), seq: 0, revision: 0 }
 }
 
 const none = (): Keys => ({ revision: -1, keys: new Set() })
@@ -186,5 +218,15 @@ export function step(state: State, event: Event): Effect[] {
       break
     }
   }
+  // Superseded by an edit: an answer of older files than the session has seen is asked again, once a client shows it.
+  if (event.type === 'answer' || event.type === 'settled') catchUp(state, event.revisionNow, effects)
   return effects
+}
+
+/** Records that the session has seen `revision`, and refreshes every answer older than the newest revision seen. */
+function catchUp(state: State, revision: number, effects: Effect[]): void {
+  state.revision = Math.max(state.revision, revision)
+  for (const [id, entry] of state.components) {
+    if (entry.shown && entry.shown.revision < state.revision) refresh(state, id, effects)
+  }
 }

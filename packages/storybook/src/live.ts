@@ -18,7 +18,7 @@ export type ToProvider =
 /** What a provider tells the dev server. */
 export type ToDevServer =
   /** It answered for `component` at `revision`, with these keys still awaiting the checker; the service stores it. */
-  | { type: 'answer'; provider: string; component: string; revision: number; pending: string[] }
+  | { type: 'answer'; provider: string; component: string; revision: number; pending: string[]; revisionNow: number }
   /** The checker settled `keys` (`ok`: it answered) watched at `revision`; the files are at `revisionNow`. */
   | { type: 'settled'; component: string; revision: number; keys: string[]; ok: boolean; revisionNow: number }
 

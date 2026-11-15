@@ -321,16 +321,49 @@ describe('the provider as an adapter of the answer lifecycle', () => {
       const { provider, posted } = linked(fake, { lazy })
       expect(await provider({ entry: story('List') })).toEqual(NEXT)
       expect(posted).toEqual([
-        { type: 'answer', provider: expect.any(String), component: 'list', revision: 1, pending: ['ListItem', 'List'] },
+        {
+          type: 'answer',
+          provider: expect.any(String),
+          component: 'list',
+          revision: 1,
+          pending: ['ListItem', 'List'],
+          revisionNow: 1,
+        },
       ])
     }
+  })
+
+  it('keeps the newest completion when an older async fallback finishes after a newer request', async () => {
+    const fake = binding()
+    fake.output.diagnostics = [warning(['Card'])]
+    fake.pending.add('Card')
+    const posted: ToDevServer[] = []
+    const link: Link<ToDevServer, ToProvider> = { post: (message) => posted.push(message), listen: () => {} }
+    let finishFallback: (payload: DocgenPayload) => void = () => {}
+    const fallback = new Promise<DocgenPayload>((done) => {
+      finishFallback = done
+    })
+    const provider = createDocgenProvider({}, fake, link)(() => fallback)
+    // The first request is handed on to a slow provider; the checker answers before it returns.
+    const older = provider({ entry: story('Card') })
+    await vi.waitFor(() => expect(fake.resolved).toContain('Card'))
+    fake.output.diagnostics = []
+    fake.pending.clear()
+    const newer = await provider({ entry: story('Card') })
+    expect(Object.keys(newer!.argTypes!)).toEqual(['title'])
+    finishFallback(NEXT)
+    // What the service stores from the older request is the newer payload; only the newer one is announced.
+    expect(await older).toEqual(newer)
+    expect(posted).toEqual([
+      { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [], revisionNow: 1 },
+    ])
   })
 
   it('reports an answer with nothing pending, so the lifecycle knows the structural answer was replaced', async () => {
     const { provider, posted } = linked(binding())
     await provider({ entry: story('Card') })
     expect(posted).toEqual([
-      { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [] },
+      { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [], revisionNow: 1 },
     ])
   })
 

@@ -42,9 +42,19 @@ export class Background {
     })
   }
 
-  /** Tells the dev server what this provider answered for `component`, the service storing it. */
-  answered(component: string, revision: number, pending: string[]): void {
-    this.link.post({ type: 'answer', provider: this.id, component, revision, pending })
+  /**
+   * Tells the dev server what this provider answered for a component, the service storing it, with the revision the
+   * session has seen by now: an edit seen while the extraction ran makes the answer stale.
+   */
+  async answered(answer: { component: string; revision: number; pending: string[] }): Promise<void> {
+    let revisionNow = answer.revision
+    try {
+      const session = await this.host.session()
+      revisionNow = Math.max(revisionNow, session.revision)
+    } catch {
+      // The answer's own revision stands.
+    }
+    this.link.post({ type: 'answer', provider: this.id, ...answer, revisionNow })
   }
 
   private async watch({ component, revision, keys }: { component: string; revision: number; keys: string[] }) {
@@ -83,4 +93,19 @@ export class Background {
     const session = await this.host.session()
     await session.prefetch(keys)
   }
+}
+/** `attempt`'s result, else the next provider's (`fallback`), each awaited here, so either has settled on return. */
+export async function settle<T>(attempt: () => Promise<T>, fallback: () => Promise<T>, importPath: string): Promise<T> {
+  try {
+    return await attempt()
+  } catch (error) {
+    logger.debug(`[caliper-docgen] ${importPath}: ${(error as Error).message}; asking the next docgen provider`)
+    return await fallback()
+  }
+}
+
+/** What one request answered, for the answer lifecycle: the keys still awaiting the checker, and the revision. */
+export interface Answered {
+  pending: string[]
+  revision: number
 }

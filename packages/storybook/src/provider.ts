@@ -17,19 +17,14 @@ import { logger } from 'storybook/internal/node-logger'
 import type { DocgenMiddleware, DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { type ExtractArgTypes, loadExtractArgTypes, toArgTypes } from './arg-types.js'
 import type { CaliperStorybookOptions } from './index.js'
-import { Background } from './background.js'
+import { type Answered, Background, settle } from './background.js'
+import { Completions } from './lifecycle.js'
 import { channel, type Link, type ToDevServer, type ToProvider } from './live.js'
 import { DocgenSession, type SessionBinding } from './session.js'
 import { ResolverFailureError, type StoryFile, noComponent, storyFor, tagLists } from './story.js'
 import { assertValidOptions } from './validate.js'
 
 type Subcomponent = NonNullable<DocgenPayload['subcomponents']>[string]
-
-/** What one request answered, for the answer lifecycle: the keys still awaiting the checker, and the revision. */
-interface Answered {
-  pending: string[]
-  revision: number
-}
 
 export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
@@ -276,18 +271,23 @@ export function createDocgenProvider(
   }
 
   const background = new Background({ session: getSession, keysOf }, link)
+  const completions = new Completions<DocgenPayload | undefined>()
 
   return (next) => async (input) => {
     const importPath = getStoryImportPathFromEntry(input.entry)
     if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return next(input)
+    const id = getComponentIdFromEntry(input.entry)
+    const version = completions.start()
     const answered: Answered = { pending: [], revision: 0 }
-    try {
-      return await document(input.entry, importPath, answered)
-    } catch (error) {
-      logger.debug(`[caliper-docgen] ${importPath}: ${(error as Error).message}; asking the next docgen provider`)
-      return next(input)
-    } finally {
-      background.answered(getComponentIdFromEntry(input.entry), answered.revision, answered.pending)
-    }
+    // Settled before anything is announced: a fallback may finish after a newer request for the component.
+    const payload = await settle(
+      () => document(input.entry, importPath, answered),
+      () => next(input),
+      importPath,
+    )
+    // What the service stores is what this returns, so a late older completion returns the newest payload instead.
+    const kept = completions.complete(id, version, payload)
+    if (kept.announce) await background.answered({ component: id, ...answered })
+    return kept.payload
   }
 }

@@ -160,6 +160,7 @@ describe('the dev server as an adapter of the answer lifecycle', () => {
     component,
     revision,
     pending,
+    revisionNow: revision,
   })
   const settled = (component: string, keys: string[], revision = 1): ToDevServer => ({
     type: 'settled',

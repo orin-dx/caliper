@@ -3,7 +3,7 @@
 // Named sequences replay the review findings the reducer replaced spot fixes for.
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { type Event, initialState, step } from '../../src/lifecycle.js'
+import { Completions, type Event, initialState, step } from '../../src/lifecycle.js'
 import { DocgenSession } from '../../src/session.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
@@ -31,6 +31,9 @@ interface Stored {
 /** The world the lifecycle runs in, with the adapters' behaviour: what the reducer cannot see, it is told by events. */
 class World {
   readonly state = initialState()
+  readonly completions = new Completions<Stored>()
+  /** The newest request's version per component. */
+  readonly requested = new Map<string, number>()
   /** The files' revision on disk, and the one the session last looked at. */
   disk = 0
   revision = 0
@@ -86,9 +89,28 @@ class World {
         pending.push(key)
       }
     }
-    this.history.set(component, [...(this.history.get(component) ?? []), { seq: 0, revision: this.revision, checker }])
-    this.stored.set(component, { seq: 0, revision: this.revision, checker })
-    this.dispatch({ type: 'answer', provider: 'p', component, revision: this.revision, pending })
+    // The extraction finishes later, in any order with the others (a slow pass, an async fallback provider).
+    const version = this.completions.start()
+    this.requested.set(component, version)
+    const made: Stored = { seq: version, revision: this.revision, checker }
+    this.tasks.push(() => this.finish(component, made, pending))
+  }
+
+  /** An extraction finishes: the service stores what the provider returns, which `Completions` decides. */
+  private finish(component: string, made: Stored, pending: string[]): void {
+    const kept = this.completions.complete(component, made.seq, made)
+    this.history.set(component, [...(this.history.get(component) ?? []), kept.payload])
+    this.stored.set(component, kept.payload)
+    if (kept.announce) {
+      this.dispatch({
+        type: 'answer',
+        provider: 'p',
+        component,
+        revision: made.revision,
+        pending,
+        revisionNow: this.revision,
+      })
+    }
   }
 
   /** A checker request ends: kept when it answered and no look dropped it since; a failure is not kept. */
@@ -176,6 +198,11 @@ class World {
     for (const each of this.refreshes) if (!each.visible) broken.push(`4: ${each.component} refreshed unseen`)
     // 5. At most two watches per key and revision.
     for (const [at, count] of this.watchCount) if (count > 2) broken.push(`5: ${at} watched ${count} times`)
+    // 6. The service holds the newest request's payload, however the extractions finished.
+    for (const [component, version] of this.requested) {
+      const held = this.stored.get(component)?.seq
+      if (held !== version) broken.push(`6: ${component} holds request ${held}, the newest is ${version}`)
+    }
     return broken
   }
 }
@@ -234,6 +261,19 @@ describe('the answer lifecycle, named regressions', () => {
     world.quiesce()
     expect(world.violations()).toEqual([])
     expect(world.refreshes.map(({ component }) => component)).toEqual(['b', 'a'])
+  })
+
+  it('an older extraction (an async fallback) finishing after a newer one: the service keeps the newer', () => {
+    const world = new World()
+    world.select('tab-1', 'b')
+    world.run(0) // the first extraction starts; it finishes later
+    world.edit()
+    world.answer('b') // a newer extraction starts after the edit
+    world.run(1) // and finishes first
+    world.run(0) // then the older one finishes
+    expect(world.stored.get('b')!.seq).toBe(world.requested.get('b'))
+    world.quiesce()
+    expect(world.violations()).toEqual([])
   })
 
   it('the opening story answered before any client: refreshed once a client shows it', () => {
