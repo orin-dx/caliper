@@ -66,7 +66,7 @@ fn semantic_prop(name: &str, description: &str, required: bool) -> Arc<SemanticP
 }
 
 fn button(props: Vec<Arc<SemanticProp>>) -> SemanticComponent {
-    SemanticComponent { key: "Button".to_string(), props, composes: Some(Vec::new()) }
+    SemanticComponent { key: "Button".to_string(), props, composes: Some(Vec::new()), picked: Vec::new() }
 }
 
 #[test]
@@ -512,6 +512,7 @@ fn merged_props_that_come_out_equal_are_one_allocation() {
         key: "Card".to_string(),
         props: vec![semantic_prop("tone", "", true)],
         composes: Some(Vec::new()),
+        picked: Vec::new(),
     };
     let tone_on_button = button(vec![semantic_prop("tone", "", true)]);
 
@@ -534,6 +535,7 @@ fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_fil
         key: "Card~2".to_string(),
         props: vec![semantic_prop("tone", "", true)],
         composes: Some(Vec::new()),
+        picked: Vec::new(),
     };
     let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string() };
     merge_semantic(
@@ -618,7 +620,12 @@ fn one_checker_prop_over_different_structural_props_merges_into_each_its_own() {
     out.components.insert("First".to_string(), entry("First", shared.clone()));
     out.components.insert("Second".to_string(), entry("Second", shared));
     let label = semantic_prop("label", "", false);
-    let answer = |key: &str| SemanticComponent { key: key.to_string(), props: vec![label.clone()], composes: None };
+    let answer = |key: &str| SemanticComponent {
+        key: key.to_string(),
+        props: vec![label.clone()],
+        composes: None,
+        picked: Vec::new(),
+    };
     let outcome = SemanticOutcome {
         components: vec![button(vec![label.clone()]), answer("Card"), answer("First"), answer("Second")],
         ..Default::default()
@@ -707,6 +714,7 @@ fn with_no_fallback_the_checker_is_asked_for_every_description() {
         exports: Vec::new(),
         described: ["label".to_string()].into_iter().collect(),
         react_wanted: None,
+        layering: None,
     };
     for (resolver, asked_for_label) in
         [(ResolverFacts::Used, false), (ResolverFacts::Off, false), (ResolverFacts::NoFallback, true)]
@@ -851,9 +859,9 @@ fn following_the_layers_twice_gives_the_same_props_and_layers() {
     let entry = out.components.get_mut("Button").unwrap();
     let mut props = vec![semantic_prop("label", "", false)];
     props.extend(from_source("on", 31, "GlobalDOMEvents", DOM));
-    let (once, _) = layer_checker_props(entry, props.iter().collect(), LOADED);
+    let (once, _) = layer_checker_props(entry, props.iter().collect(), &[], LOADED);
     let layers = entry.inheritance.clone();
-    let (twice, _) = layer_checker_props(entry, once.clone(), LOADED);
+    let (twice, _) = layer_checker_props(entry, once.clone(), &[], LOADED);
     assert_eq!(once, twice);
     assert_eq!(entry.inheritance, layers);
     assert_eq!(once.iter().map(|prop| prop.name.as_str()).collect::<Vec<_>>(), ["label"]);

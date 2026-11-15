@@ -110,8 +110,8 @@ pub(super) fn resolve_type_alias_chain(
 
         CollectedTypeAlias::Partial { base, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
-            // Make all props optional.
-            for prop in chain.props.iter_mut().filter(|prop| prop.required) {
+            // Make all props optional, a collapsed source's notable ones too.
+            for prop in chain.props.iter_mut().chain(chain.notable.iter_mut()).filter(|prop| prop.required) {
                 Arc::make_mut(prop).required = false;
             }
             chain
@@ -119,8 +119,8 @@ pub(super) fn resolve_type_alias_chain(
 
         CollectedTypeAlias::Required { base, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
-            // Make all props required.
-            for prop in chain.props.iter_mut().filter(|prop| !prop.required) {
+            // Make all props required, a collapsed source's notable ones too.
+            for prop in chain.props.iter_mut().chain(chain.notable.iter_mut()).filter(|prop| !prop.required) {
                 Arc::make_mut(prop).required = true;
             }
             chain

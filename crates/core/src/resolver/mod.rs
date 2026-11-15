@@ -1104,12 +1104,16 @@ pub(crate) fn resolve_component_shared(
             );
         }
     }
-    // A collapsed source's notable props (collapse); the only non-HTML layers.
+    // A collapsed source's notable props (collapse); the only non-HTML layers. Each is the component's prop as one it
+    // lists is, so a destructuring default reaches it too (`Box({ className = "base" }: BoxProps)`).
+    let mut collapsed_notable: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for prop in &chain.notable {
         if !props.contains_key(&prop.name) && !notable_inherited.contains_key(&prop.name) {
-            notable_inherited.insert(prop.name.clone(), prop.clone());
+            collapsed_notable.entry(prop.name.clone()).or_insert_with(|| prop.clone());
         }
     }
+    apply_param_defaults(mapping, &mut collapsed_notable, ctx);
+    notable_inherited.extend(collapsed_notable);
 
     // Detect discriminated union if applicable.
     let discriminant_prop = chain.discriminant_prop;

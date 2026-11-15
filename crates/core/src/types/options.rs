@@ -39,7 +39,7 @@ impl HtmlAttributeMode {
 /// A component's own props type is always expanded. A dependency source collapses when it is ambient (DOM and ARIA
 /// attributes, style systems) and declares more than 30 props; a dependency's own API is listed unless it declares more
 /// than 200 props. By default a project source declaring more than 200 props collapses too.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CollapseInheritedProps {
     /// Large ambient sources declared in a loaded dependency (`load_dependencies`), a dependency's sources of more than
@@ -71,10 +71,11 @@ impl CollapseInheritedProps {
     /// read anywhere. `reaching` is the number of distinct
     /// members of the source that reach the component after `Omit` and `Pick` (a member reached through two paths counts
     /// once). For a plain `extends` it is what the source declares. A `Pick` names its keys on purpose, so the props it
-    /// picks are listed however large the source. The structural resolver counts the members a source declares less
-    /// the keys the `Omit`s around it take (`ResolveState::omitted`, so only that source is affected); the checker's
-    /// merge counts the props of its answer whose `parent` is the
-    /// source, which are exactly the members that reach (`crate::types::semantic::layer_checker_props`).
+    /// picks are listed however large the source: neither lane asks about them. The structural resolver expands what a
+    /// `Pick` applies to, and counts the members a source declares less the keys the `Omit`s around it take
+    /// (`ResolveState::omitted`, so only that source is affected); the checker's merge counts the props of its answer
+    /// whose `parent` is the source, which are exactly the members that reach, less the ones a `Pick` selects
+    /// (`SemanticComponent::picked`, `crate::types::semantic::layer_checker_props`).
     ///
     /// - A dependency source collapses when it is ambient (`crate::types::ambient`: DOM and ARIA attributes, style
     ///   systems) and past [`COLLAPSE_THRESHOLD`] props, or when it is not ambient but past [`LARGE_API_SOURCE`] props.
@@ -105,7 +106,7 @@ impl CollapseInheritedProps {
 /// What a merge of the checker's answer needs to decide a collapse of a source only the checker read: the run's mode
 /// and whether it loads dependencies, so a source in `node_modules` is a dependency's exactly when the structural pass
 /// would have loaded it (`CollapseInheritedProps::collapses`'s `dependency`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CollapseContext {
     /// The run's `collapseInheritedProps`.
     pub mode: CollapseInheritedProps,

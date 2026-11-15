@@ -368,7 +368,7 @@ pub struct DefaultValue {
 
 /// Where a prop was declared — enables RDT propFilter compatibility.
 /// The canonical RDT pattern: `prop => !prop.parent.fileName.includes('node_modules')`
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PropParent {
     /// Name of the interface/type alias that declared this prop

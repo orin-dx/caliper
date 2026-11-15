@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Tests for the weekly record's helpers, on small fixtures. Run: python3 scripts/test_weekly.py"""
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -418,6 +420,86 @@ class PeakRss(unittest.TestCase):
     def test_failure_is_an_error(self):
         with self.assertRaises(RuntimeError):
             corpora.run_once([sys.executable, '-c', 'raise SystemExit(3)'])
+
+
+
+class FailedCorpora(unittest.TestCase):
+    """A child that exits non-zero, dies of a signal or hangs fails its corpus, not the run: the record (--out) is written
+    after every corpus, the failure keeps the exit status and the end of the stderr, and the next corpus still runs."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+
+    def fake(self, name, body):
+        path = os.path.join(self.dir.name, name)
+        with open(path, 'w') as f:
+            f.write('#!/bin/sh\n' + body + '\n')
+        os.chmod(path, 0o755)
+        return path
+
+    def test_a_child_that_exits_137_is_a_step_failure_with_its_stderr_tail(self):
+        binary = self.fake('oom', 'i=1; while [ $i -le 30 ]; do echo "line $i" >&2; i=$((i + 1)); done; exit 137')
+        with self.assertRaises(weekly.StepFailed) as raised:
+            weekly.step('mantine Caliper run 1', [binary])
+        self.assertEqual((raised.exception.step, raised.exception.code), ('mantine Caliper run 1', 137))
+        self.assertEqual(raised.exception.tail.splitlines(), [f'line {i}' for i in range(11, 31)])
+
+    def test_a_child_killed_by_a_signal_has_a_negative_exit_status(self):
+        binary = self.fake('killed', 'kill -9 $$')
+        with self.assertRaises(weekly.StepFailed) as raised:
+            weekly.step('antd Caliper run 1', [binary])
+        self.assertEqual(raised.exception.code, -9)
+
+    def test_a_child_that_sleeps_past_the_timeout_is_killed(self):
+        binary = self.fake('sleeper', 'sleep 60')
+        start = time.monotonic()
+        with self.assertRaises(weekly.StepFailed) as raised:
+            weekly.step('chakra Caliper run 1', [binary], timeout=0.5)
+        self.assertLess(time.monotonic() - start, 20)
+        self.assertIsNone(raised.exception.code)
+        self.assertIn('timeout', str(raised.exception))
+
+    def test_every_step_logs_its_exit_status_and_wall_time(self):
+        with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+            weekly.step('antd Caliper run 1', [sys.executable, '-c', 'pass'])
+            with self.assertRaises(weekly.StepFailed):
+                weekly.step('antd Caliper run 2', [sys.executable, '-c', 'raise SystemExit(3)'])
+        self.assertRegex(err.getvalue(), r'antd Caliper run 1: exit 0 after \d+\.\d s')
+        self.assertRegex(err.getvalue(), r'antd Caliper run 2: exit 3 after \d+\.\d s')
+
+    def test_a_failed_corpus_is_recorded_the_run_goes_on_and_the_record_is_written_after_each(self):
+        binaries = {'mantine': self.fake('bad', 'echo boom >&2; exit 137'), 'antd': self.fake('good', 'exit 0')}
+        out = os.path.join(self.dir.name, 'weekly.json')
+        on_disk = {}
+
+        def measure(args, corpus, work):
+            name = corpus['name']
+            if os.path.exists(out):
+                with open(out) as f:
+                    on_disk[name] = json.load(f)
+            weekly.step(f'{name} Caliper', [binaries[name]])
+            return {'caliper': {'ms': 1, 'rss_mib': 1}}
+
+        args = mock.Mock(corpus=['mantine', 'antd'], out=out, runs=1)
+        with mock.patch.object(weekly, 'measure', measure):
+            record = weekly.measure_all(args, self.dir.name, 'caliper 0')
+        self.assertEqual(list(record['corpora']), ['antd'])
+        failed = record['failed']['mantine']
+        self.assertEqual((failed['step'], failed['exit'], failed['stderr_tail']), ('mantine Caliper', 137, ['boom']))
+        # Before the second corpus ran, the file already held the first one's failure.
+        self.assertEqual(list(on_disk['antd']['failed']), ['mantine'])
+        with open(out) as f:
+            self.assertEqual(json.load(f), record)
+        self.assertEqual(len(weekly.failures(record)), 1)
+        self.assertIn('mantine: failed at mantine Caliper, exit 137', weekly.failures(record)[0])
+
+    def test_a_budget_breach_names_the_corpus_the_metric_the_value_and_the_limit(self):
+        record = {'corpora': {'antd': {'caliper': {'ms': 900, 'rss_mib': 40}}, 'mantine': {'caliper': {'ms': 1, 'rss_mib': 1}}}}
+        tiny = {'antd': {'ms': 100, 'rss_mib': 50}, 'mantine': {'ms': 100, 'rss_mib': 50}}
+        self.assertEqual(weekly.budget_breaches(record, tiny),
+                         ["antd: a whole run's time is 900 ms, over the 100 ms budget"])
+        self.assertEqual(weekly.budget_breaches(record), [])
 
 
 if __name__ == '__main__':
