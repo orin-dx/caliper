@@ -38,12 +38,17 @@ pub struct HeapBudget {
 }
 
 impl HeapBudget {
-    /// The budget of this machine: half its physical memory, at most [`MAX_HEAP_BUDGET`] (that, where the memory
-    /// cannot be read). Half, because the heap is not all the process holds (the checker's arenas, the structural
-    /// result, the JSON being written, and in the binding the host's own heap), and a run past the machine's memory
-    /// swaps until it is killed rather than finishing.
+    /// The budget of this machine: 60% of the memory this process may use, at most [`MAX_HEAP_BUDGET`] (that, where
+    /// the memory cannot be read). The memory is the physical memory, or on Linux the memory limit of the process's
+    /// cgroup (a container's, a CI job's) when that is lower. 60%, because the heap is not all the process holds (the
+    /// checker's arenas, the structural result, the JSON being written, and in the binding the host's own heap), and a
+    /// run past that memory swaps or is killed rather than finishing.
     pub fn machine() -> Self {
-        Self::new(physical_memory().map_or(MAX_HEAP_BUDGET, |bytes| (bytes / 2).min(MAX_HEAP_BUDGET)))
+        let usable = match (physical_memory(), cgroup_limit()) {
+            (Some(physical), Some(limit)) => Some(physical.min(limit)),
+            (physical, limit) => physical.or(limit),
+        };
+        Self::new(usable.map_or(MAX_HEAP_BUDGET, |bytes| (bytes / 10 * 6).min(MAX_HEAP_BUDGET)))
     }
 
     /// A budget of `bytes` of mimalloc's committed heap.
@@ -89,6 +94,63 @@ fn physical_memory() -> Option<u64> {
 #[cfg(not(unix))]
 fn physical_memory() -> Option<u64> {
     None
+}
+
+/// The lowest memory limit of the cgroups this process is in, from its own (`/proc/self/cgroup`) up to the root, in
+/// bytes; none when no limit is set or nothing can be read.
+#[cfg(target_os = "linux")]
+fn cgroup_limit() -> Option<u64> {
+    let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    limit_files(&own)
+        .iter()
+        .filter_map(|file| std::fs::read_to_string(file).ok())
+        .filter_map(|text| parse_limit(&text))
+        .min()
+}
+
+/// Only Linux has cgroups.
+#[cfg(not(target_os = "linux"))]
+fn cgroup_limit() -> Option<u64> {
+    None
+}
+
+/// The files that hold the memory limits of the cgroups `/proc/self/cgroup` lists, each cgroup's and every
+/// ancestor's: cgroup v2's `memory.max` (the `0::` line) under `/sys/fs/cgroup`, and cgroup v1's
+/// `memory.limit_in_bytes` (the line whose controllers include `memory`) under `/sys/fs/cgroup/memory`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn limit_files(own: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    for line in own.lines() {
+        let mut fields = line.splitn(3, ':');
+        let (Some(_), Some(controllers), Some(path)) = (fields.next(), fields.next(), fields.next()) else { continue };
+        let (root, file) = match controllers {
+            "" => ("/sys/fs/cgroup", "memory.max"),
+            _ if controllers.split(',').any(|controller| controller == "memory") => {
+                ("/sys/fs/cgroup/memory", "memory.limit_in_bytes")
+            }
+            _ => continue,
+        };
+        let mut dir = path.trim_end_matches('/');
+        loop {
+            files.push(format!("{root}{dir}/{file}"));
+            match dir.rfind('/') {
+                Some(parent) => dir = &dir[..parent],
+                None => break,
+            }
+            if dir.is_empty() {
+                files.push(format!("{root}/{file}"));
+                break;
+            }
+        }
+    }
+    files
+}
+
+/// A cgroup memory limit file's bytes; none for no limit: `max` (v2), or a value past 2^60 (v1 writes about 2^63 for
+/// no limit).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_limit(text: &str) -> Option<u64> {
+    text.trim().parse::<u64>().ok().filter(|bytes| *bytes < 1 << 60)
 }
 
 tokio::task_local! {
@@ -180,11 +242,57 @@ impl Watch {
             ),
         )
         .with_help(
-            "The budget is half the machine's memory, at most 8 GiB. A type that expands to millions of members, \
+            "The budget is 60% of the memory this process may use (the machine's, or its cgroup limit on Linux), at most 8 GiB. A type that expands to millions of members, \
              such as a style system declared in the project's own source, is the usual cause; `--no-checker` gives \
              the structural result for every component.",
         );
         diagnostic.affects = left;
         Some(diagnostic)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cgroup v2 process (a container, a systemd unit) reads `memory.max` in its own cgroup and every ancestor's.
+    #[test]
+    fn a_v2_cgroup_reads_memory_max_up_to_the_root() {
+        assert_eq!(
+            limit_files("0::/system.slice/docker-1.scope\n"),
+            [
+                "/sys/fs/cgroup/system.slice/docker-1.scope/memory.max",
+                "/sys/fs/cgroup/system.slice/memory.max",
+                "/sys/fs/cgroup/memory.max",
+            ]
+        );
+        // Inside a container's own namespace the cgroup is the root.
+        assert_eq!(limit_files("0::/\n"), ["/sys/fs/cgroup/memory.max"]);
+    }
+
+    /// A cgroup v1 process reads `memory.limit_in_bytes` of the hierarchy whose controllers include `memory`, and no
+    /// other hierarchy's.
+    #[test]
+    fn a_v1_cgroup_reads_the_memory_hierarchy_only() {
+        let own = "12:cpu,cpuacct:/docker/abc\n11:memory:/docker/abc\n1:name=systemd:/docker/abc\n";
+        assert_eq!(
+            limit_files(own),
+            [
+                "/sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes",
+                "/sys/fs/cgroup/memory/docker/memory.limit_in_bytes",
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            ]
+        );
+        assert!(limit_files("garbage\n\n").is_empty());
+    }
+
+    /// A limit is a byte count; `max` and v1's near-2^63 value mean no limit, and anything unreadable is none.
+    #[test]
+    fn a_limit_file_gives_bytes_or_no_limit() {
+        assert_eq!(parse_limit("4294967296\n"), Some(4 << 30));
+        assert_eq!(parse_limit("max\n"), None);
+        assert_eq!(parse_limit("9223372036854771712\n"), None);
+        assert_eq!(parse_limit(""), None);
+        assert_eq!(parse_limit("-1"), None);
     }
 }
