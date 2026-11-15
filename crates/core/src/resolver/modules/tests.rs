@@ -162,23 +162,38 @@ fn the_referenced_project_that_includes_a_file_governs_it() {
 }
 
 #[test]
-fn a_bare_specifier_resolves_against_an_inherited_base_url_before_node_modules() {
+fn base_url_is_not_an_input_of_resolution_and_paths_are_relative_to_their_tsconfig() {
     let (_tmp, root) = project(&[
         ("tsconfig.json", r#"{ "extends": "./base.json" }"#),
-        ("base.json", r#"{ "compilerOptions": { "baseUrl": "." } }"#),
+        ("base.json", r#"{ "compilerOptions": { "baseUrl": "other", "paths": { "@l/*": ["lib/*"] } } }"#),
         ("lib/index.ts", "export {};\n"),
         ("src/a.ts", ""),
-        ("node_modules/lib/package.json", r#"{ "types": "index.d.ts" }"#),
-        ("node_modules/lib/index.d.ts", "export {};\n"),
-        ("node_modules/other/package.json", r#"{ "types": "index.d.ts" }"#),
-        ("node_modules/other/index.d.ts", "export {};\n"),
     ]);
     let resolvers = ModuleResolvers::new(&PipelineOptions::default());
     let importer = root.join("src/a.ts");
 
-    assert_eq!(file_of(resolvers.resolve("lib/index", &importer)), Some(root.join("lib/index.ts")));
-    assert_eq!(file_of(resolvers.resolve("other", &importer)), Some(root.join("node_modules/other/index.d.ts")));
-    assert_eq!(file_of(resolvers.resolve("missing", &importer)), None);
+    // TypeScript 7: `baseUrl` ("other" here) makes nothing a module, and a `paths` entry is relative to the tsconfig.
+    assert_eq!(file_of(resolvers.resolve("index", &importer)), None);
+    assert_eq!(file_of(resolvers.resolve("@l/index", &importer)), Some(root.join("lib/index.ts")));
+}
+
+#[test]
+fn a_paths_mapping_into_node_modules_wins_over_a_local_file_of_the_same_name() {
+    let (_tmp, root) = project(&[
+        (
+            "tsconfig.json",
+            r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "foo": ["node_modules/special/index.d.ts"] } } }"#,
+        ),
+        ("foo.ts", "export {};\n"),
+        ("node_modules/special/index.d.ts", "export {};\n"),
+        ("src/a.ts", ""),
+    ]);
+    let resolvers = ModuleResolvers::new(&PipelineOptions::default());
+
+    assert_eq!(
+        file_of(resolvers.resolve("foo", &root.join("src/a.ts"))),
+        Some(root.join("node_modules/special/index.d.ts"))
+    );
 }
 
 #[test]

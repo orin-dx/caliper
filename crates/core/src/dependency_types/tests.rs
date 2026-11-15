@@ -1518,6 +1518,239 @@ fn the_root_tsconfigs_custom_conditions_change_what_the_next_run_reads_from_the_
     assert_eq!(cached, cold);
 }
 
+/// One input of resolution perturbed between two runs that share a cache directory.
+struct Perturbation {
+    name: &'static str,
+    files: Vec<(&'static str, String)>,
+    edits: Vec<(&'static str, String)>,
+    /// A symlink `(link, first target, second target)` the edit repoints.
+    link: Option<(&'static str, &'static str, &'static str)>,
+    /// Whether the edit changes the output at all; a cell that cannot would prove nothing.
+    changes_output: bool,
+}
+
+fn perturbations() -> Vec<Perturbation> {
+    let json = |text: &str| text.to_owned();
+    let conds = |list: &[&str]| conditions_config(list).to_owned();
+    let package = |prefix: &'static str| -> Vec<(&'static str, String)> {
+        let name = |file: &'static str| -> &'static str { Box::leak(format!("{prefix}/{file}").into_boxed_str()) };
+        vec![
+            (
+                name("package.json"),
+                json(
+                    r#"{ "name": "cond-pkg", "version": "1.0.0", "exports": { ".": { "source": "./src/index.ts", "types": "./dist/index.d.ts" } } }"#,
+                ),
+            ),
+            (name("src/index.ts"), json("export interface CondProps { fromSource: string }\n")),
+            (name("dist/index.d.ts"), json("export interface CondProps { fromDist: string }\n")),
+        ]
+    };
+    let direct = (
+        "src/Cond.tsx",
+        json("import type { CondProps } from 'cond-pkg';\nexport function Cond(props: CondProps) { return null; }\n"),
+    );
+    let nested: Vec<(&'static str, String)> = OUTER
+        .iter()
+        .filter(|(name, _)| !name.starts_with("node_modules/cond-pkg"))
+        .map(|(name, body)| (*name, (*body).to_owned()))
+        .collect();
+    let app = |list: &[&str]| {
+        let list = list.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+        format!("{{ \"compilerOptions\": {{ \"customConditions\": [{list}] }}, \"include\": [\"src\"] }}\n")
+    };
+    let solution = json(r#"{ "files": [], "references": [{ "path": "./tsconfig.app.json" }] }"#);
+    let extending = json(r#"{ "extends": "./base.json" }"#);
+    let alias = |target: &str| {
+        format!(
+            "{{ \"compilerOptions\": {{ \"baseUrl\": \".\", \"paths\": {{ \"@lib/*\": [\"node_modules/cond-pkg/{target}/*\"] }} }} }}\n"
+        )
+    };
+    let base_url = |base: &str| {
+        format!("{{ \"compilerOptions\": {{ \"baseUrl\": \"{base}\", \"paths\": {{ \"@l/*\": [\"lib/*\"] }} }} }}\n")
+    };
+    let with = |parts: &[Vec<(&'static str, String)>]| parts.concat();
+    vec![
+        Perturbation {
+            name: "root customConditions",
+            files: with(&[
+                vec![("tsconfig.json", conds(&["source"])), direct.clone()],
+                package("node_modules/cond-pkg"),
+            ]),
+            edits: vec![("tsconfig.json", conds(&[]))],
+            link: None,
+            changes_output: true,
+        },
+        Perturbation {
+            name: "extended customConditions",
+            files: with(&[
+                vec![("tsconfig.json", extending.clone()), ("base.json", conds(&["source"])), direct.clone()],
+                package("node_modules/cond-pkg"),
+            ]),
+            edits: vec![("base.json", conds(&[]))],
+            link: None,
+            changes_output: true,
+        },
+        Perturbation {
+            name: "nested root customConditions",
+            files: with(&[
+                vec![("tsconfig.json", conds(&["source"]))],
+                nested.clone(),
+                package("node_modules/cond-pkg"),
+            ]),
+            edits: vec![("tsconfig.json", conds(&[]))],
+            link: None,
+            changes_output: true,
+        },
+        Perturbation {
+            name: "nested extended customConditions",
+            files: with(&[
+                vec![("tsconfig.json", extending.clone()), ("base.json", conds(&["source"]))],
+                nested.clone(),
+                package("node_modules/cond-pkg"),
+            ]),
+            edits: vec![("base.json", conds(&[]))],
+            link: None,
+            changes_output: true,
+        },
+        Perturbation {
+            name: "nested referenced project options",
+            files: with(&[
+                vec![("tsconfig.json", solution.clone()), ("tsconfig.app.json", app(&["source"]))],
+                nested.clone(),
+                package("node_modules/cond-pkg"),
+            ]),
+            edits: vec![("tsconfig.app.json", app(&[]))],
+            link: None,
+            changes_output: false,
+        },
+        Perturbation {
+            name: "referenced project options",
+            files: with(&[
+                vec![("tsconfig.json", solution), ("tsconfig.app.json", app(&["source"])), direct.clone()],
+                package("node_modules/cond-pkg"),
+            ]),
+            edits: vec![("tsconfig.app.json", app(&[]))],
+            link: None,
+            changes_output: true,
+        },
+        Perturbation {
+            name: "extended paths",
+            files: with(&[
+                vec![
+                    ("tsconfig.json", extending.clone()),
+                    ("base.json", alias("src")),
+                    (
+                        "src/Cond.tsx",
+                        json(
+                            "import type { CondProps } from '@lib/index';\nexport function Cond(props: CondProps) { return null; }\n",
+                        ),
+                    ),
+                ],
+                package("node_modules/cond-pkg"),
+            ]),
+            edits: vec![("base.json", alias("dist"))],
+            link: None,
+            changes_output: true,
+        },
+        Perturbation {
+            name: "extended baseUrl (TypeScript 7: paths do not read it)",
+            files: vec![
+                ("tsconfig.json", extending),
+                ("base.json", base_url("lib")),
+                (
+                    "src/Cond.tsx",
+                    json(
+                        "import type { CondProps } from '@l/index';\nexport function Cond(props: CondProps) { return null; }\n",
+                    ),
+                ),
+                ("lib/index.ts", json("export interface CondProps { fromLib: string }\n")),
+                ("other/index.ts", json("export interface CondProps { fromOther: string }\n")),
+            ],
+            edits: vec![("base.json", base_url("other"))],
+            link: None,
+            // `baseUrl` is not an input of resolution (a `paths` entry is relative to the tsconfig), so the output is
+            // the same and the warm run must say so.
+            changes_output: false,
+        },
+        Perturbation {
+            name: "dependency package.json exports",
+            files: with(&[vec![("tsconfig.json", conds(&[])), direct.clone()], package("node_modules/cond-pkg")]),
+            edits: vec![(
+                "node_modules/cond-pkg/package.json",
+                json(
+                    r#"{ "name": "cond-pkg", "version": "1.0.1", "exports": { ".": { "types": "./src/index.ts" } } }"#,
+                ),
+            )],
+            link: None,
+            changes_output: true,
+        },
+        Perturbation {
+            name: "symlink target swap",
+            files: with(&[
+                vec![("tsconfig.json", conds(&[])), direct],
+                package("pkgs/v1"),
+                package("pkgs/v2"),
+                vec![("pkgs/v2/dist/index.d.ts", json("export interface CondProps { fromV2: string }\n"))],
+            ]),
+            edits: Vec::new(),
+            link: Some(("node_modules/cond-pkg", "../pkgs/v1", "../pkgs/v2")),
+            changes_output: true,
+        },
+    ]
+}
+
+/// The standing form of the cross-run property: whatever input of resolution changes between two runs that share a
+/// cache directory, the second run answers what a cold run of the changed tree answers. Persisted state keyed to the
+/// inputs of a resolver (the dependency index's fingerprint) is what this guards; a single-run diff cannot see it. The
+/// checker's own kept answer is covered in `crates/semantic`.
+#[cfg(unix)]
+#[test]
+fn a_warm_run_after_any_resolution_input_changes_equals_a_cold_run() {
+    for cell in perturbations() {
+        let files: Vec<(&str, &str)> = cell.files.iter().map(|(name, body)| (*name, body.as_str())).collect();
+        let (_tmp, root) = project(&files);
+        let link = |target: &str| {
+            let Some((path, ..)) = cell.link else { return };
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            if path.is_symlink() {
+                std::fs::remove_file(&path).unwrap();
+            }
+            std::os::unix::fs::symlink(target, path).unwrap();
+        };
+        if let Some((_, first, _)) = cell.link {
+            link(first);
+        }
+        let first = canonical(&extract(&options(&root, true)));
+        // A real edit moves the modification time; the effective inputs are what must not depend on it.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        for (name, body) in &cell.edits {
+            std::fs::write(root.join(name), body).unwrap();
+        }
+        if let Some((_, _, second)) = cell.link {
+            link(second);
+        }
+        let warm = canonical(&extract(&options(&root, true)));
+        let cold =
+            canonical(&extract(&PipelineOptions { cache_dir: Some(root.join("cold-cache")), ..options(&root, true) }));
+
+        assert_eq!(warm, cold, "{}: the warm run is stale", cell.name);
+        assert_eq!(
+            first != cold,
+            cell.changes_output,
+            "{}: the edit does not change the output as expected",
+            cell.name
+        );
+    }
+}
+
+/// An output as JSON without the run's own statistics.
+fn canonical(output: &crate::types::ExtractionOutput) -> serde_json::Value {
+    let mut value = serde_json::to_value(output).unwrap();
+    value.as_object_mut().unwrap().remove("stats");
+    value
+}
+
 fn conditions_config(conditions: &[&str]) -> &'static str {
     let list = conditions.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
     Box::leak(format!("{{ \"compilerOptions\": {{ \"customConditions\": [{list}] }} }}\n").into_boxed_str())

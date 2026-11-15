@@ -157,11 +157,6 @@ impl ModuleResolvers {
         // A region is entered by one thread at a time; the lock above makes that wait explicit.
         let _scope = self.region.enter();
         let tsconfig = governing_tsconfig(&mut state, self.configured.as_deref(), &from_file);
-        let base_url = tsconfig
-            .as_deref()
-            .and_then(|path| parsed_config(&mut state.configs, path).options)
-            .map(|options| options.base_url.clone())
-            .unwrap_or_default();
         let resolver = match state.resolvers.get(&tsconfig) {
             Some(resolver) => resolver,
             None => {
@@ -181,26 +176,14 @@ impl ModuleResolvers {
         } else {
             (ModuleKind::ES_NEXT, ModuleKind::COMMON_JS)
         };
-        let attempt = |specifier: &str| {
-            [first, second].into_iter().find_map(|mode| {
-                let (module, _) = resolver.resolve_module_name(specifier, from_file.as_str(), mode, None).ok()?;
-                module.is_resolved().then(|| Utf8PathBuf::from(module.resolved_file_name))
-            })
-        };
-        let mut found = attempt(specifier);
-        // TypeScript 7 no longer resolves a bare specifier against `baseUrl` (only `paths` read it), which TypeScript 6
-        // and the resolver this replaced did, after `paths` and before `node_modules`: `lib/index` with `baseUrl: "."`
-        // is `./lib/index`. A specifier `paths` mapped is a project file, and one `node_modules` answered is not.
-        let bare = !specifier.starts_with('.') && !specifier.starts_with('/');
-        if bare
-            && !base_url.is_empty()
-            && found.as_ref().is_none_or(|path| crate::dependency_types::in_node_modules(path.as_str()))
-        {
-            found = attempt(&format!("{}/{specifier}", base_url.trim_end_matches('/'))).or(found);
-        }
+        // Like TypeScript 7 and the linked checker, `baseUrl` is not an input: a bare specifier is not resolved against
+        // it, and a `paths` entry is relative to its tsconfig. TypeScript 6 and the resolver this replaced read it.
+        let found = [first, second].into_iter().find_map(|mode| {
+            let (module, _) = resolver.resolve_module_name(specifier, from_file.as_str(), mode, None).ok()?;
+            module.is_resolved().then(|| Utf8PathBuf::from(module.resolved_file_name))
+        })?;
         // tsrs keeps a symlink in the path it returns, and writes it with forward slashes; discovery, the declaration
         // index and every comparison between files use the real path.
-        let found = found?;
         Some(crate::canonical_path::canonicalize(&found).unwrap_or(found))
     }
 }
