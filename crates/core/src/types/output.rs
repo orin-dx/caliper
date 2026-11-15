@@ -1622,7 +1622,8 @@ pub enum SignatureKind {
 /// The limit a [`PropType::Truncated`] type was cut at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TruncationLimit {
-    /// The type is nested deeper than the converter expands.
+    /// The type is nested deeper than the converter expands, or its expansion, every type inside it counted, is larger
+    /// than the converter keeps (more than 256 KiB of JSON).
     Depth,
     /// The type has more members than the converter lists.
     Members {
