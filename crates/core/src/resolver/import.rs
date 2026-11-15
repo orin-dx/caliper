@@ -246,9 +246,10 @@ pub(super) fn resolve_import_specifier(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Utf8PathBuf> {
     super::deps::record_module_resolution();
-    let from_dir = from_file.parent()?;
-    // Every file of a directory shares its nearest tsconfig, so the directory is as good a key as the file.
-    let key = (Box::from(from_dir.as_str()), Box::from(specifier));
+    from_file.parent()?;
+    // Every file of a directory shares its nearest tsconfig and its resolution mode, so the directory is as good a key
+    // as the file (`resolution_scope`).
+    let key = (Box::from(super::modules::resolution_scope(from_file)), Box::from(specifier));
     let resolution = match ctx.module_resolutions.get(&key) {
         Some(cached) => cached.clone(),
         None => {

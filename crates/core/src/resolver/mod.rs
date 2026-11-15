@@ -45,7 +45,7 @@ mod template;
 pub(crate) use import::ModuleResolution;
 #[cfg(test)]
 pub(crate) use import::{follow_reexports_call_count, reset_follow_reexports_call_count};
-pub(crate) use modules::ModuleResolvers;
+pub(crate) use modules::{ModuleResolvers, resolution_scope};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

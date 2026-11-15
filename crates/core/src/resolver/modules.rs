@@ -9,7 +9,7 @@
 use std::sync::{LazyLock, Mutex, PoisonError};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tsrs_core::arena::Region;
 use tsrs_core::{CompilerOptions, ModuleKind, ModuleResolutionKind, P};
 use tsrs_module::{DefaultResolver, ResolutionHost, ResolverOptions, new_resolver};
@@ -61,23 +61,62 @@ pub(crate) struct ModuleResolvers {
 
 #[derive(Default)]
 struct State {
-    resolvers: FxHashMap<Option<Utf8PathBuf>, ConfigResolver>,
+    resolvers: FxHashMap<Option<Utf8PathBuf>, DefaultResolver<'static>>,
+    configs: FxHashMap<Utf8PathBuf, ParsedConfig>,
     /// The nearest tsconfig of a directory.
     nearest: FxHashMap<Box<str>, Option<Utf8PathBuf>>,
+    /// The tsconfig governing a file.
+    governing: FxHashMap<Box<str>, Option<Utf8PathBuf>>,
 }
 
-struct ConfigResolver {
-    resolver: DefaultResolver<'static>,
+/// A tsconfig as `tsrs_tsoptions` reads it.
+struct ParsedConfig {
+    options: Option<P<CompilerOptions>>,
     /// Why the tsconfig could not be read or parsed, if it could not.
     error: Option<String>,
+    /// The files its `files`/`include` select: which project of a solution-style config a file belongs to.
+    files: FxHashSet<String>,
+    references: Vec<Utf8PathBuf>,
+}
+
+/// `path` made absolute against the working directory: tsrs resolves absolute paths only, and takes a relative one
+/// as relative to `/`.
+fn absolute(path: &Utf8Path) -> Utf8PathBuf {
+    if path.is_absolute() {
+        return path.to_owned();
+    }
+    std::path::absolute(path)
+        .ok()
+        .and_then(|path| Utf8PathBuf::from_path_buf(path).ok())
+        .unwrap_or_else(|| path.to_owned())
+}
+
+/// What a module resolution cache keyed by directory must also key on: a `.cts` importer resolves with `require`
+/// conditions where every other importer resolves with `import`, so it gets a key of its own.
+pub(crate) fn resolution_scope(from_file: &Utf8Path) -> &str {
+    if is_commonjs_importer(from_file) { from_file.as_str() } else { from_file.parent().map_or("", Utf8Path::as_str) }
+}
+
+fn is_commonjs_importer(file: &Utf8Path) -> bool {
+    file.as_str().ends_with(".cts")
 }
 
 impl ModuleResolvers {
     /// Starts from a fresh view of the disk: the file-system cache of an earlier run is dropped.
     pub(crate) fn new(options: &PipelineOptions) -> Self {
         FILE_SYSTEM.clear_cache();
+        Self::without_invalidation(options)
+    }
+
+    /// `new` minus the cache clear, to show in a test that the clear is what makes a revision see an edit.
+    #[cfg(test)]
+    pub(crate) fn keeping_file_system_cache(options: &PipelineOptions) -> Self {
+        Self::without_invalidation(options)
+    }
+
+    fn without_invalidation(options: &PipelineOptions) -> Self {
         ModuleResolvers {
-            configured: options.tsconfig_path.clone(),
+            configured: options.tsconfig_path.as_deref().map(absolute),
             state: Mutex::default(),
             region: Region::new_scratch(1 << 20),
         }
@@ -103,70 +142,133 @@ impl ModuleResolvers {
         self.resolve_path(package_name, importing_file).filter(|path| is_declaration_file(path)).map(String::from)
     }
 
-    /// Why the configured or nearest tsconfig of `from_file` could not be used, if it could not.
+    /// Why `tsconfig` could not be used, if it could not.
     pub(crate) fn tsconfig_error(&self, tsconfig: &Utf8Path) -> Option<String> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let _scope = self.region.enter();
-        state
-            .resolvers
-            .entry(Some(tsconfig.to_owned()))
-            .or_insert_with(|| ConfigResolver::new(Some(tsconfig)))
-            .error
-            .clone()
+        parsed_config(&mut state.configs, &absolute(tsconfig)).error.clone()
     }
 
     fn resolve_path(&self, specifier: &str, from_file: &Utf8Path) -> Option<Utf8PathBuf> {
-        // tsrs resolves absolute paths only.
-        let absolute;
-        let from_file = if from_file.is_absolute() {
-            from_file
-        } else {
-            absolute = Utf8PathBuf::from_path_buf(std::path::absolute(from_file).ok()?).ok()?;
-            &absolute
-        };
+        let from_file = absolute(from_file);
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         // A region is entered by one thread at a time; the lock above makes that wait explicit.
         let _scope = self.region.enter();
-        let tsconfig = match &self.configured {
-            Some(path) => Some(path.clone()),
-            None => nearest_tsconfig(&mut state.nearest, from_file.parent()?),
+        let tsconfig = governing_tsconfig(&mut state, self.configured.as_deref(), &from_file);
+        let resolver = match state.resolvers.get(&tsconfig) {
+            Some(resolver) => resolver,
+            None => {
+                let config = tsconfig.as_deref().map(|path| parsed_config(&mut state.configs, path));
+                let options = config_options(tsconfig.as_deref(), config);
+                state
+                    .resolvers
+                    .entry(tsconfig)
+                    .or_insert_with(|| new_resolver(ResolverOptions::new(&HOST, P::new(options))))
+            }
         };
-        let config = state.resolvers.entry(tsconfig).or_insert_with_key(|key| ConfigResolver::new(key.as_deref()));
-        let (module, _) =
-            config.resolver.resolve_module_name(specifier, from_file.as_str(), ModuleKind::ES_NEXT, None).ok()?;
-        module.is_resolved().then(|| Utf8PathBuf::from(module.resolved_file_name))
+        // `import` conditions, as TypeScript's `bundler` resolution applies them to the `import` statements declaration
+        // files are made of; a package that only declares `require` types is found by the second attempt, as it was
+        // when the conditions were listed together.
+        let (first, second) = if is_commonjs_importer(&from_file) {
+            (ModuleKind::COMMON_JS, ModuleKind::ES_NEXT)
+        } else {
+            (ModuleKind::ES_NEXT, ModuleKind::COMMON_JS)
+        };
+        let module = [first, second].into_iter().find_map(|mode| {
+            let (module, _) = resolver.resolve_module_name(specifier, from_file.as_str(), mode, None).ok()?;
+            module.is_resolved().then_some(module)
+        })?;
+        // tsrs keeps a symlink in the path it returns, and writes it with forward slashes; discovery, the declaration
+        // index and every comparison between files use the real path.
+        let found = Utf8PathBuf::from(module.resolved_file_name);
+        Some(crate::canonical_path::canonicalize(&found).unwrap_or(found))
     }
 }
 
-impl ConfigResolver {
-    fn new(tsconfig: Option<&Utf8Path>) -> Self {
-        let mut options = CompilerOptions {
-            module: ModuleKind::ES_NEXT,
-            module_resolution: ModuleResolutionKind::BUNDLER,
-            ..CompilerOptions::default()
-        };
-        let mut error = None;
-        if let Some(path) = tsconfig {
-            let (parsed, errors) = get_parsed_command_line_of_config_file(path.as_str(), None, None, &HOST, None);
-            // Only a file that can't be read or isn't JSON is unusable; the semantic complaints of a config
-            // (`include` matching nothing, a misspelled option) leave its resolution options intact.
-            let syntax_errors = parsed
-                .as_ref()
-                .and_then(|parsed| parsed.config_file)
-                .map_or(&[][..], |file| file.source_file.diagnostics());
-            error = errors.iter().chain(syntax_errors).next().map(|e| e.localize());
-            if let Some(config) = parsed.and_then(|parsed| parsed.parsed_config.compiler_options) {
-                options.config_file_path = path.to_string();
-                options.base_url.clone_from(&config.base_url);
-                options.paths.clone_from(&config.paths);
-                options.paths_base_path.clone_from(&config.paths_base_path);
-                options.custom_conditions.clone_from(&config.custom_conditions);
-            } else if error.is_none() {
-                error = Some("unreadable".to_owned());
-            }
-        }
-        ConfigResolver { resolver: new_resolver(ResolverOptions::new(&HOST, P::new(options))), error }
+/// The tsconfig that governs `file`: the configured or nearest one, or, when that is a solution-style config that
+/// references other projects and does not include the file itself, the first referenced project that does.
+fn governing_tsconfig(state: &mut State, configured: Option<&Utf8Path>, file: &Utf8Path) -> Option<Utf8PathBuf> {
+    if let Some(known) = state.governing.get(file.as_str()) {
+        return known.clone();
     }
+    let mut found = match configured {
+        Some(path) => Some(path.to_owned()),
+        None => nearest_tsconfig(&mut state.nearest, file.parent()?),
+    };
+    // Bounds a chain of references.
+    for _ in 0..8 {
+        let Some(current) = found.clone() else { break };
+        let config = parsed_config(&mut state.configs, &current);
+        if config.files.contains(file.as_str()) {
+            break;
+        }
+        let references = config.references.clone();
+        let Some(next) = references
+            .into_iter()
+            .find(|reference| parsed_config(&mut state.configs, reference).files.contains(file.as_str()))
+        else {
+            break;
+        };
+        found = Some(next);
+    }
+    state.governing.insert(Box::from(file.as_str()), found.clone());
+    found
+}
+
+fn parsed_config<'a>(configs: &'a mut FxHashMap<Utf8PathBuf, ParsedConfig>, path: &Utf8Path) -> &'a ParsedConfig {
+    configs.entry(path.to_owned()).or_insert_with(|| ParsedConfig::read(path))
+}
+
+impl ParsedConfig {
+    fn read(path: &Utf8Path) -> Self {
+        let (parsed, errors) = get_parsed_command_line_of_config_file(path.as_str(), None, None, &HOST, None);
+        // Only a file that can't be read or isn't JSON is unusable; the semantic complaints of a config
+        // (`include` matching nothing, a misspelled option) leave its resolution options intact.
+        let syntax_errors = parsed
+            .as_ref()
+            .and_then(|parsed| parsed.config_file)
+            .map_or(&[][..], |file| file.source_file.diagnostics());
+        let mut error = errors.iter().chain(syntax_errors).next().map(|e| e.localize());
+        let Some(parsed) = parsed else {
+            return ParsedConfig {
+                options: None,
+                error: error.or_else(|| Some("unreadable".to_owned())),
+                files: FxHashSet::default(),
+                references: Vec::new(),
+            };
+        };
+        let options = parsed.parsed_config.compiler_options;
+        if options.is_none() && error.is_none() {
+            error = Some("unreadable".to_owned());
+        }
+        let references = parsed
+            .parsed_config
+            .project_references
+            .iter()
+            .map(|reference| {
+                let reference = Utf8PathBuf::from(&reference.path);
+                if reference.extension() == Some("json") { reference } else { reference.join("tsconfig.json") }
+            })
+            .collect();
+        ParsedConfig { options, error, files: parsed.parsed_config.file_names.iter().cloned().collect(), references }
+    }
+}
+
+/// `bundler` resolution with what a tsconfig contributes to resolving: `baseUrl`, `paths` and `customConditions`.
+fn config_options(path: Option<&Utf8Path>, config: Option<&ParsedConfig>) -> CompilerOptions {
+    let mut options = CompilerOptions {
+        module: ModuleKind::ES_NEXT,
+        module_resolution: ModuleResolutionKind::BUNDLER,
+        ..CompilerOptions::default()
+    };
+    if let Some(config) = config.and_then(|config| config.options) {
+        options.config_file_path = path.map(Utf8Path::to_string).unwrap_or_default();
+        options.base_url.clone_from(&config.base_url);
+        options.paths.clone_from(&config.paths);
+        options.paths_base_path.clone_from(&config.paths_base_path);
+        options.custom_conditions.clone_from(&config.custom_conditions);
+    }
+    options
 }
 
 /// The nearest `tsconfig.json` in `dir` or above it. Every file of a directory shares one.

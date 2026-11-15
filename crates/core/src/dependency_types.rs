@@ -478,7 +478,7 @@ impl Loader<'_> {
     /// Resolve `specifier` as imported by `from_file`, the way the resolver will.
     fn resolve(&self, from_file: &Utf8Path, specifier: &str) -> Result<Utf8PathBuf, Unresolved> {
         let dir = from_file.parent().map_or("", Utf8Path::as_str);
-        let key = (Box::from(dir), Box::from(specifier));
+        let key = (Box::from(crate::resolver::resolution_scope(from_file)), Box::from(specifier));
         if let Some(found) = self.resolutions.get(&key) {
             return found.clone();
         }
