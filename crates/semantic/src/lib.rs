@@ -612,8 +612,8 @@ async fn answer_file(
             "semantic component answered"
         );
         match answered {
-            Ok(Answer::Props(component::Props { props, composes })) => {
-                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes });
+            Ok(Answer::Props(component::Props { props, composes, picked })) => {
+                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes, picked });
             }
             Ok(Answer::Fallback(reason)) => outcome.fallbacks.push(fallback_of(target, &reason)),
             Ok(Answer::Instantiate(instantiation)) => generic.push((target.clone(), instantiation)),
