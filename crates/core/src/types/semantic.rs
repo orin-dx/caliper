@@ -397,9 +397,11 @@ fn apply_props(
 ///
 /// 1. A prop a collapsed layer names (`InheritedLayer::members`) is left to it, unless the structural answer lists the
 ///    prop itself (the component declares it again).
-/// 2. A source only the checker read becomes a collapsed layer when the owner collapses it: `totalProps` is its declared
-///    count, `members` its props in the answer. Its notable props move to `notableInherited`, as the structural
-///    resolver keeps a collapsed source's notable members.
+/// 2. A source only the checker read becomes a collapsed layer when the owner collapses it, asked with the members
+///    that reach the component: the props of the answer whose `parent` is the source, after any `Omit` or `Pick`, each
+///    name once (the structural resolver counts the same). `members` are those props and `totalProps` their number,
+///    what the layer holds. Its notable props move to `notableInherited`, as the structural resolver keeps a collapsed
+///    source's notable members.
 ///
 /// Applying it again to the entry it changed gives the same props and layers: a layer made here is then a layer of the
 /// entry, which the first rule follows.
@@ -416,28 +418,34 @@ pub(crate) fn layer_checker_props<'a>(
                 .iter()
                 .any(|layer| layer.type_name == source.parent.name && layer.file_name == source.parent.file_name)
     };
-    let collapsing: Vec<&DeclaredSource> = sources
-        .iter()
-        .filter(|source| unread(source) && cx.collapses(&source.parent.file_name, &source.parent.name, source.declared))
-        .collect();
+    let reaching = |source: &DeclaredSource| -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for prop in props.iter().filter(|prop| !prop.react_declared && prop.parent.as_ref() == Some(&source.parent)) {
+            if !names.contains(&prop.name) {
+                names.push(prop.name.clone());
+            }
+        }
+        names
+    };
     let mut notable = Vec::new();
-    for source in collapsing {
-        let members: Vec<String> = props
-            .iter()
-            .filter(|prop| !prop.react_declared && prop.parent.as_ref() == Some(&source.parent))
-            .map(|prop| prop.name.clone())
-            .collect();
-        let notable_names = crate::react_types::notable_html_attrs("");
+    let notable_names = crate::react_types::notable_html_attrs("");
+    let mut layers = Vec::new();
+    for source in sources.iter().filter(|source| unread(source)) {
+        let members = reaching(source);
+        if !cx.collapses(&source.parent.file_name, &source.parent.name, members.len()) {
+            continue;
+        }
         notable.extend(members.iter().filter(|name| notable_names.contains(&name.as_str())).cloned());
-        entry.inheritance.push(InheritedLayer {
+        layers.push(InheritedLayer {
             type_name: source.parent.name.clone(),
             file_name: source.parent.file_name.clone(),
             omitted: Vec::new(),
             html_element: None,
-            total_props: source.declared,
+            total_props: u32::try_from(members.len()).unwrap_or(u32::MAX),
             members,
         });
     }
+    entry.inheritance.extend(layers);
     let layered: rustc_hash::FxHashSet<&str> =
         entry.inheritance.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
     if layered.is_empty() {

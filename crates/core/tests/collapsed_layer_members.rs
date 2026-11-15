@@ -89,16 +89,15 @@ fn with_collapse_off_every_prop_is_listed_and_no_layer_has_members() {
 }
 
 #[test]
-fn an_omitted_prop_is_not_a_member_of_the_layer_it_was_omitted_from() {
+fn an_omit_that_leaves_a_source_at_its_threshold_lists_what_reaches() {
+    // `Big` declares 31; `Omit<Big, 'p0'>` lets 30 reach the component, which is not past the threshold (30): listed.
     let output = run(CollapseInheritedProps::All);
-    let layer = &output.components["WithOmit"].inheritance[0];
-    assert_eq!(layer.type_name, "Big");
+    let entry = &output.components["WithOmit"];
+    assert!(entry.inheritance.iter().all(|layer| layer.members.is_empty()));
     let mut expected: Vec<String> = names("p").into_iter().filter(|name| name != "p0").collect();
+    expected.push("own".to_string());
     expected.sort();
-    let mut members = layer.members.clone();
-    members.sort();
-    assert_eq!(members, expected);
-    assert_eq!(layer.total_props, 30);
+    assert_eq!(props(&output, "WithOmit"), expected);
 }
 
 #[test]

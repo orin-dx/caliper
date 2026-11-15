@@ -63,11 +63,16 @@ impl CollapseInheritedProps {
         }
     }
 
-    /// Whether an inherited source of type `type_name` in `file`, declaring `declared` props, is recorded as a layer of
-    /// names instead of listed prop by prop. `dependency` says the file is a loaded dependency's. The one owner of the
-    /// decision: the structural resolver asks it with the props a source declares (before any `Omit`), and the checker's
-    /// merge only follows the layers it made (`crate::types::semantic::layer_checker_props`). A component's own props
-    /// type is never asked.
+    /// Whether an inherited source of type `type_name` in `file`, of which `reaching` props reach the component, is
+    /// recorded as a layer of names instead of listed prop by prop. `dependency` says the file is a loaded dependency's.
+    /// A component's own props type is never asked.
+    ///
+    /// The one owner of the decision, and both lanes give it the same input: `reaching` is the number of distinct
+    /// members of the source that reach the component after `Omit` and `Pick` (a member reached through two paths counts
+    /// once). For a plain `extends` it is what the source declares. A `Pick` names its keys on purpose, so the props it
+    /// picks are listed however large the source. The structural resolver counts what it reads (the members it holds,
+    /// less what an `Omit` takes; `alias.rs`); the checker's merge counts the props of its answer whose `parent` is the
+    /// source, which are exactly the members that reach (`crate::types::semantic::layer_checker_props`).
     ///
     /// - A dependency source collapses when it is ambient (`crate::types::ambient`: DOM and ARIA attributes, style
     ///   systems) and past [`COLLAPSE_THRESHOLD`] props, or when it is not ambient but past [`LARGE_API_SOURCE`] props.
@@ -80,7 +85,7 @@ impl CollapseInheritedProps {
     /// - A file in `node_modules` that is not a dependency's (`@types/react`, TypeScript's libraries) never collapses:
     ///   React's attributes follow `htmlAttributes`.
     /// - Under [`Self::None`] nothing collapses.
-    pub(crate) fn collapses(self, dependency: bool, file: &str, type_name: &str, declared: usize) -> bool {
+    pub(crate) fn collapses(self, dependency: bool, file: &str, type_name: &str, reaching: usize) -> bool {
         let project_threshold = match self {
             Self::None => return false,
             Self::Dependencies => LARGE_API_SOURCE,
@@ -88,9 +93,9 @@ impl CollapseInheritedProps {
         };
         if dependency {
             let ambient = crate::types::ambient::is_ambient_source(file, type_name);
-            declared > if ambient { COLLAPSE_THRESHOLD } else { LARGE_API_SOURCE }
+            reaching > if ambient { COLLAPSE_THRESHOLD } else { LARGE_API_SOURCE }
         } else {
-            declared > project_threshold && !in_node_modules(file)
+            reaching > project_threshold && !in_node_modules(file)
         }
     }
 }
@@ -115,12 +120,12 @@ impl CollapseContext {
         Self { mode: options.collapse_inherited_props, load_dependencies: options.load_dependencies }
     }
 
-    /// Whether a source only the checker read collapses: `declared` is how many members it declares itself, and its
-    /// file is a dependency's when it is in `node_modules` and the run loads dependencies.
-    pub(crate) fn collapses(self, file: &str, type_name: &str, declared: u32) -> bool {
+    /// Whether a source only the checker read collapses: `reaching` of its members reach the component
+    /// ([`CollapseInheritedProps::collapses`]), and its file is a dependency's when it is in `node_modules` and the run
+    /// loads dependencies.
+    pub(crate) fn collapses(self, file: &str, type_name: &str, reaching: usize) -> bool {
         let dependency = self.load_dependencies && in_node_modules(file);
-        let declared = usize::try_from(declared).unwrap_or(usize::MAX);
-        (dependency || !in_node_modules(file)) && self.mode.collapses(dependency, file, type_name, declared)
+        (dependency || !in_node_modules(file)) && self.mode.collapses(dependency, file, type_name, reaching)
     }
 }
 

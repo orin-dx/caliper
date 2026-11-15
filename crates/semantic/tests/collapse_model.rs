@@ -183,3 +183,79 @@ fn the_structural_and_the_checker_lane_give_the_same_layers_and_props() {
     }
     assert_eq!(checked, 2 * 3 * 2 * (SOURCES.len() * 3 + 4));
 }
+
+/// A 700-member source reached through `Pick` and `Omit`: it collapses by the members that reach the component, in the
+/// structural lane (`Huge` imported) and in the checker lane alone (`PropsOf<typeof WidgetHuge>`). `Pick` of 2 is listed;
+/// `Omit` of 1 collapses (699 reach); `Omit` of 600 is listed (100); 200 reaching is listed and 201 collapses; the same
+/// interface reached twice counts once.
+#[test]
+fn a_source_collapses_by_the_members_that_reach_the_component() {
+    let dir = tempfile::Builder::new().prefix("CollapseReach").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    let pkg = root.join("node_modules/pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("package.json"), r#"{ "name": "pkg", "version": "1.0.0", "types": "index.d.ts" }"#)
+        .unwrap();
+    std::fs::write(
+        pkg.join("index.d.ts"),
+        format!(
+            "export interface Huge {{ {}}}\nexport interface WidgetHugeProps extends Huge {{ w?: boolean }}\n\
+             export declare function WidgetHuge(props: WidgetHugeProps): null;\n",
+            members("h", 700)
+        ),
+    )
+    .unwrap();
+    let keys = |range: std::ops::Range<usize>| range.map(|i| format!("'h{i}'")).collect::<Vec<_>>().join(" | ");
+    // (component, wrapper of `S`, members that reach)
+    let cases: Vec<(&str, String, usize)> = vec![
+        ("Pick2", format!("Pick<S, {}>", keys(0..2)), 2),
+        ("Omit1", format!("Omit<S, {}>", keys(0..1)), 699),
+        ("Omit600", format!("Omit<S, {}>", keys(0..600)), 100),
+        ("Leaves200", format!("Omit<S, {}>", keys(0..500)), 200),
+        ("Leaves201", format!("Omit<S, {}>", keys(0..499)), 201),
+        ("Twice", "S & Omit<S, 'h0'>".to_string(), 700),
+    ];
+    let mut text = String::from(
+        "import type { Huge } from 'pkg';\nimport { WidgetHuge } from 'pkg';\n\
+         type PropsOf<T> = T extends (props: infer P) => unknown ? P : never;\ntype Seen = PropsOf<typeof WidgetHuge>;\n",
+    );
+    for (name, wrapper, _) in &cases {
+        let structural = wrapper.replace('S', "Huge");
+        let checker_only = wrapper.replace('S', "Seen");
+        text.push_str(&format!("export function Struct{name}(props: {structural}) {{ return null; }}\n"));
+        text.push_str(&format!("export function Only{name}(props: {checker_only}) {{ return null; }}\n"));
+    }
+    std::fs::write(root.join("Components.tsx"), text).unwrap();
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "preserve", "strict": true, "skipLibCheck": true, "noEmit": true, "types": [] } }"#,
+    )
+    .unwrap();
+    let options = PipelineOptions { src_dirs: vec![root.clone()], use_cache: false, ..PipelineOptions::default() };
+    let structural = extract(&options);
+    let mut request = SemanticRequest::new(root.clone(), targets_of(&structural));
+    request.request_timeout = Duration::from_secs(60);
+    let outcome = resolve(request);
+    let mut checker = structural.clone();
+    merge_semantic_in(&mut checker, outcome, Default::default(), CollapseContext::of(&options));
+
+    for (name, _, reaching) in &cases {
+        let collapses = *reaching > 200;
+        for (lane, output, key) in [
+            ("structural", &structural, format!("Struct{name}")),
+            ("checker", &checker, format!("Struct{name}")),
+            ("checker only", &checker, format!("Only{name}")),
+        ] {
+            let entry = &output.components[&key];
+            let huge: Vec<_> = entry.inheritance.iter().filter(|layer| layer.type_name == "Huge").collect();
+            let listed = entry.props.keys().filter(|prop| prop.starts_with('h')).count();
+            if collapses {
+                assert_eq!(huge.len(), 1, "{lane} {key}: one Huge layer");
+                assert_eq!(huge[0].total_props as usize, *reaching, "{lane} {key}: what the layer holds");
+            } else {
+                assert!(huge.is_empty(), "{lane} {key}: no Huge layer");
+                assert_eq!(listed, *reaching, "{lane} {key}: listed");
+            }
+        }
+    }
+}

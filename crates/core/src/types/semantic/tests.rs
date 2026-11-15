@@ -788,33 +788,33 @@ const LOADED: CollapseContext =
     CollapseContext { mode: crate::types::options::CollapseInheritedProps::Dependencies, load_dependencies: true };
 
 #[test]
-fn a_source_only_the_checker_read_collapses_by_its_declared_count_and_only_when_asked() {
-    // The structural answer did not reach `GlobalDOMEvents`; the checker read it and counted 31 members declared. The
-    // answer holds only 3 of them (an `Omit` took the rest): the declared count decides, as the structural pass would.
-    let run = |cx: CollapseContext, declared: u32| {
+fn a_source_only_the_checker_read_collapses_by_the_members_that_reach_and_only_when_asked() {
+    // The structural answer did not reach `GlobalDOMEvents` (declared 700 here); the checker's answer holds `reaching`
+    // of its members, after an `Omit` or a `Pick`. Those decide, as in the structural pass.
+    let run = |cx: CollapseContext, reaching: usize| {
         let mut out = output();
         let mut props = vec![semantic_prop("label", "", false)];
-        props.extend(from_source("on", 3, "GlobalDOMEvents", DOM));
+        props.extend(from_source("on", reaching, "GlobalDOMEvents", DOM));
+        // The same member reached through a second path counts once.
+        props.push(props[1].clone());
         let mut component = button(props);
-        component.sources = vec![source("GlobalDOMEvents", DOM, declared)];
-        merge_semantic_in(
-            &mut out,
-            SemanticOutcome { components: vec![component], ..Default::default() },
-            ResolverFacts::Used,
-            cx,
-        );
+        component.sources = vec![source("GlobalDOMEvents", DOM, 700)];
+        let outcome = SemanticOutcome { components: vec![component], ..Default::default() };
+        merge_semantic_in(&mut out, outcome, ResolverFacts::Used, cx);
         let entry = &out.components["Button"];
         (
             entry.props.len(),
             entry.inheritance.iter().map(|layer| (layer.total_props, layer.members.len())).collect::<Vec<_>>(),
         )
     };
-    assert_eq!(run(LOADED, 31), (1, vec![(31, 3)]));
-    assert_eq!(run(LOADED, 30), (4, vec![]));
+    assert_eq!(run(LOADED, 31), (1, vec![(31, 31)]));
+    // A `Pick` of 2 of 700, or an `Omit` that leaves 30: listed.
+    assert_eq!(run(LOADED, 2), (3, vec![]));
+    assert_eq!(run(LOADED, 30), (31, vec![]));
     // Not loaded: a source in `node_modules` the run does not load is never collapsed, as in the structural pass.
-    assert_eq!(run(CollapseContext { load_dependencies: false, ..LOADED }, 31), (4, vec![]));
+    assert_eq!(run(CollapseContext { load_dependencies: false, ..LOADED }, 31), (32, vec![]));
     // `merge_semantic` and `merge_semantic_with` take no options and collapse nothing the structural answer did not.
-    assert_eq!(run(CollapseContext::OFF, 31), (4, vec![]));
+    assert_eq!(run(CollapseContext::OFF, 31), (32, vec![]));
 }
 
 #[test]

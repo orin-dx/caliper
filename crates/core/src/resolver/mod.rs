@@ -613,6 +613,31 @@ impl ResolutionContext {
     }
 }
 
+/// `layers` with each collapsed source once: a source reached through two paths (`Big & Omit<Big, "a">`) holds the
+/// members that reach through either, and omits only what every path omits. A member counts once, as the collapse
+/// decision counts it (`CollapseInheritedProps::collapses`).
+fn one_layer_per_collapsed_source(layers: Vec<InheritedLayer>) -> Vec<InheritedLayer> {
+    let mut merged: Vec<InheritedLayer> = Vec::with_capacity(layers.len());
+    for layer in layers {
+        let same = merged.iter_mut().find(|seen| {
+            !seen.members.is_empty() && seen.type_name == layer.type_name && seen.file_name == layer.file_name
+        });
+        match same {
+            Some(seen) if !layer.members.is_empty() => {
+                for member in layer.members {
+                    if !seen.members.contains(&member) {
+                        seen.members.push(member);
+                    }
+                }
+                seen.omitted.retain(|key| layer.omitted.contains(key) && !seen.members.contains(key));
+                seen.total_props = u32::try_from(seen.members.len()).unwrap_or(u32::MAX);
+            }
+            _ => merged.push(layer),
+        }
+    }
+    merged
+}
+
 /// Whether `global` declares an interface, or an object-literal alias, of more than `LARGE_API_SOURCE` members: a
 /// project source the default mode collapses.
 fn declares_large_source(global: &GlobalSourceData) -> bool {
@@ -1079,7 +1104,7 @@ pub(crate) fn resolve_component_shared(
             file_path: mapping.file_path.clone(),
             description: mapping.description.clone(),
             props,
-            inheritance: chain.inheritance,
+            inheritance: one_layer_per_collapsed_source(chain.inheritance),
             notable_inherited,
             discriminant_prop,
             composes: chain.composes,
