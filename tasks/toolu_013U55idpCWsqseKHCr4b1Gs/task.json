@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_013U55idpCWsqseKHCr4b1Gs",
+  "agent_id": "a7d3baa5ada6c9af5",
+  "subagent_type": "general-purpose",
+  "task_description": "Slice 1: collapse large sources by default",
+  "token_usage": {
+    "input_tokens": 238,
+    "cache_creation_tokens": 257805,
+    "cache_read_tokens": 18666447,
+    "output_tokens": 98253,
+    "api_call_count": 118
+  },
+  "started_at": "2026-11-15T11:36:00.894326-08:00",
+  "completed_at": "2026-11-15T12:01:02.157304-08:00"
+}

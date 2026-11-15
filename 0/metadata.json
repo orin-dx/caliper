@@ -1,0 +1,253 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7GD8HM39GNVWWSHR513GZ4P",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-15T20:09:51.094256Z",
+  "branch": "feat/jsx-evidence-in-extractor",
+  "checkpoints_count": 4,
+  "save_step_count": 139,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "32b80c8f3c00",
+  "checkpoint_transcript_start": 34580,
+  "transcript_lines_at_start": 34580,
+  "compact_transcript_start": 2868,
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 25884,
+    "cache_read_tokens": 5313050,
+    "output_tokens": 11768,
+    "api_call_count": 8,
+    "subagent_tokens": {
+      "input_tokens": 262,
+      "cache_creation_tokens": 358812,
+      "cache_read_tokens": 15525520,
+      "output_tokens": 129572,
+      "api_call_count": 129
+    }
+  },
+  "redaction": {
+    "replacements": 44,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 16,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01E1bbmNAMP8hCsSwMjA4jo8",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cbafcfcae4bb",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 33843,
+        "end": 33844,
+        "entry_ids": [
+          "f50c7fad-b443-40e3-8eef-9e5526ae3b09"
+        ],
+        "tool_use_id": "toolu_01E1bbmNAMP8hCsSwMjA4jo8"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01E1bbmNAMP8hCsSwMjA4jo8"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01PZUXZot9rzn5ctVrEdE8hH",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cbafcfcae4bb",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 33881,
+        "end": 33882,
+        "entry_ids": [
+          "12522b73-57eb-4f38-b121-9b9287199762"
+        ],
+        "tool_use_id": "toolu_01PZUXZot9rzn5ctVrEdE8hH"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01PZUXZot9rzn5ctVrEdE8hH"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01E2WcwryHFpiLiy1uUJYRSh",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "32b80c8f3c00",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 34663,
+        "end": 34664,
+        "entry_ids": [
+          "0b9ced43-cd66-4bb1-8d90-44cffea7cdbf"
+        ],
+        "tool_use_id": "toolu_01E2WcwryHFpiLiy1uUJYRSh"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01E2WcwryHFpiLiy1uUJYRSh"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 710
+  },
+  "summary": {
+    "intent": "Reduce the size and cost of Caliper's component prop output (collapse large inherited prop sources by default, based on relevance evidence), and the user asked whether a checker-parsing queue with batched async resolution would be a better way to keep memory low and speed high.",
+    "outcome": "A relevance baseline was measured and slice 1 (collapse sources over 200 props) was committed locally as 1bb9bb9f but not pushed. Code review found the collapse decision is made in two lanes with different inputs, so the worker was sent back to unify it. The queue idea was answered with a design (priority classes, snapshot batching, memory admission control) to fold into T0 as a scheduler section.",
+    "learnings": {
+      "repo": [
+        "Collapse of inherited prop sources is decided in two places: the structural resolver and the checker lane (semantic.rs). They use different inputs, so the lanes can produce different layers and props for the same options. This is the same shape of bug as #455 and #459.",
+        "Slice 1 rule: any source over 200 props collapses by default, project sources included, using member count only and no names. The addon default changed from 'none' to 'dependencies'.",
+        "Slice 1 corpus effects: Chakra Button argTypes went from about 1,141 to 146. chakra-only went from 6.26 to 2.43 MB, gate-large from 8.75 to 4.94 MB, and shadcn from 6.15 to 5.53 MB (97 components changed). Spectrum, Mantine and antd are byte-identical to main.",
+        "Relevance baseline: shadcn coverage is only 0.43 mean because its components are thin wrappers (visible median 3), so most consumer-passed props sit in the collapsed HTML layer. Mantine, Spectrum and antd have coverage of 0.86 to 0.96.",
+        "className is 243 of 404 hidden-used pairs on shadcn. 49 to 76% of hidden-used props across corpora are strictly DOM/ARIA (className, style, id, aria-*, data-*, on*).",
+        "A 'show what consumers pass' rule costs about 1 extra row per component, or 0.3 to 0.8 with a 20% frequency floor. The proposed T0 design is a short `used` list on the collapsed layer instead of full rows.",
+        "The addon already has a prefetch queue (the dev server posts a list that replaces the previous one, and the provider drains it one story at a time). The CLI runs one batch in a single snapshot. There is no priority, cancel or memory limit.",
+        "The arena guard only reads the checker's arenas, so it cannot enforce a memory budget on the converter's heap."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/types/semantic.rs",
+          "line": 400,
+          "finding": "The checker lane decides 'dependency' with in_node_modules, while the structural lane uses is_dependency_file (actually loaded). With --no-load-dependencies the lanes disagree."
+        },
+        {
+          "path": "crates/core/src/types/semantic.rs",
+          "line": 417,
+          "finding": "The checker lane measures source size after checker_prop_used filtering and parent grouping, while the structural lane uses the declared count. The threshold is decided on different numbers, total_props is wrong, and omitted is always empty."
+        },
+        {
+          "path": "crates/core/src/types/semantic.rs",
+          "line": 420,
+          "finding": "notable_html_attrs are kept as top-level props but are also pushed into the collapsed layer's members, so they are double-counted."
+        },
+        {
+          "path": "crates/core/src/types/semantic.rs",
+          "line": 816,
+          "finding": "merge_semantic_with, and so merge_semantic, silently uses CollapseInheritedProps::default() (Dependencies), a behavior change for library callers who passed no options."
+        },
+        {
+          "path": "crates/core/src/resolver/mod.rs",
+          "line": 578,
+          "finding": "can_collapse now returns true for Dependencies even with nothing loaded, so expand_all and chain-splitting may run on every extract. This needs a performance measurement."
+        },
+        {
+          "path": "scripts/weekly.py",
+          "line": 116,
+          "finding": "The oracle and parity helpers (caliper_components, caliper_layer_members, oracle) lost --collapse-inherited-props none, which may change recall and oracle measurements."
+        },
+        {
+          "path": "packages/storybook/src/provider.ts",
+          "line": 47,
+          "finding": "The addon default change to 'dependencies' removes Controls rows and argTypes for props in collapsed sources, and stories' args for them show as undocumented."
+        }
+      ],
+      "workflow": [
+        "Review a subagent's work against the actual commit before pushing, and run the code-review skill on it. It caught real defects before the external reviewer did.",
+        "When review findings cluster around one root cause (one decision with two owners), stop patching individually and name the pattern. Then require a single decision function and a model test over a cross-product of inputs that fails first.",
+        "Subagent reports are unverified claims, so treat their numbers as unverified until checked.",
+        "Delegated workers get a tool-call cap, commit locally and do not push, so the lead can gate the push."
+      ]
+    },
+    "friction": [
+      "The slice-1 worker implemented the collapse rule in two lanes with divergent inputs, and this was caught only at review.",
+      "The Chakra checker run was skipped in the baseline, so Chakra numbers are --no-checker only.",
+      "The Spectrum and antd hidden-prop shares rest on small samples (12 and 35 pairs).",
+      "'Hidden' relies on assuming @types/react contents, because collapsed layers carry no member names.",
+      "The code reviewer read the diff only and ran no checks or tests, so some findings need measurement to confirm."
+    ],
+    "open_items": [
+      "Slice 1 rework: single collapse-decision function, a model test across lanes, and fixes for the double-counted notable attrs, the merge_semantic default, watch-mode idempotency, and the weekly.py helpers. Then push, link to trail 405 and publish the PR body.",
+      "Measure --no-checker before and after on gate-large and Chakra to see whether the chain-splitting path now runs when nothing can collapse.",
+      "Slice 2: the converter should not build props in collapsed layers.",
+      "T1 (JSX usage evidence recording) is still running.",
+      "T0 output contract: a `used` list on collapsed layers based on consumer frequency, plus a scheduler section (priority, batching, memory admission control, streaming results), pending the user's call on whether to do a design pass now or after slice 1.",
+      "Chakra Button is still 146 rows, which is more than a useful Controls panel, and the relevance work is meant to address that.",
+      "Spectrum's roughly 100 checker-only props per component are unchanged, and the addon session path was not measured.",
+      "The Chakra corpus 'before' measurement and the Chakra checker baseline were not run.",
+      "#468 (the 0.11.1 hotfix) is in CI and unwatched.",
+      "The Controls and args regression for collapsed sources must be stated plainly in the changeset and PR body, with a test."
+    ]
+  }
+}

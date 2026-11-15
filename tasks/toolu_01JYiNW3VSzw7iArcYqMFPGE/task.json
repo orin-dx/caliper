@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01JYiNW3VSzw7iArcYqMFPGE",
+  "agent_id": "a802489ba95b2c78a",
+  "subagent_type": "general-purpose",
+  "task_description": "T5: call-site relevance baseline",
+  "token_usage": {
+    "input_tokens": 94,
+    "cache_creation_tokens": 135007,
+    "cache_read_tokens": 3750642,
+    "output_tokens": 46321,
+    "api_call_count": 47
+  },
+  "started_at": "2026-11-15T11:49:30.95168-08:00",
+  "completed_at": "2026-11-15T11:59:13.747325-08:00"
+}
