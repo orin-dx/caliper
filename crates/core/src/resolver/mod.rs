@@ -322,6 +322,9 @@ pub struct ResolutionContext {
     /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
     pub(crate) react_types: Option<Arc<crate::named_type_index::NamedTypeIndex>>,
     pub(crate) collapse_inherited_props: crate::types::options::CollapseInheritedProps,
+    /// Whether the project declares a source of more than `LARGE_API_SOURCE` props, which the default mode collapses
+    /// with no dependency loaded (`can_collapse`). Read once from `global`.
+    pub(crate) large_project_source: bool,
 }
 
 impl ResolutionContext {
@@ -383,6 +386,7 @@ impl ResolutionContext {
                 .or_insert_with(|| CompactString::from(key.as_str()));
         }
 
+        let large_project_source = declares_large_source(&global);
         Self {
             import_map: Arc::new(ImportResolutionMap::build(&global)),
             named_types,
@@ -408,6 +412,7 @@ impl ResolutionContext {
             dependencies: None,
             react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
+            large_project_source,
         }
     }
 
@@ -565,6 +570,7 @@ impl ResolutionContext {
             dependencies: layer,
             react_types: self.react_types.clone(),
             collapse_inherited_props: self.collapse_inherited_props,
+            large_project_source: self.large_project_source,
         }
     }
 
@@ -573,12 +579,13 @@ impl ResolutionContext {
         self.dependencies.as_ref().is_some_and(|layer| layer.is_dependency_file(file))
     }
 
-    /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains. A project
-    /// source past `LARGE_API_SOURCE` collapses in the default mode too, so it can with no dependency loaded.
+    /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains. In the
+    /// default mode that is a loaded dependency, or a project source past `LARGE_API_SOURCE` props.
     pub(crate) fn can_collapse(&self) -> bool {
         use crate::types::options::CollapseInheritedProps;
         match self.collapse_inherited_props {
-            CollapseInheritedProps::Dependencies | CollapseInheritedProps::All => true,
+            CollapseInheritedProps::Dependencies => self.dependencies.is_some() || self.large_project_source,
+            CollapseInheritedProps::All => true,
             CollapseInheritedProps::None => false,
         }
     }
@@ -604,6 +611,17 @@ impl ResolutionContext {
                 declared,
             )
     }
+}
+
+/// Whether `global` declares an interface, or an object-literal alias, of more than `LARGE_API_SOURCE` members: a
+/// project source the default mode collapses.
+fn declares_large_source(global: &GlobalSourceData) -> bool {
+    use crate::types::options::LARGE_API_SOURCE;
+    global.interfaces.values().any(|interface| interface.props.len() > LARGE_API_SOURCE)
+        || global.type_aliases.values().any(|alias| {
+            matches!(alias, CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. }
+                if fields.len() > LARGE_API_SOURCE)
+        })
 }
 
 /// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing

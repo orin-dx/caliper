@@ -82,6 +82,27 @@ describe('createDocgenProvider', () => {
     })
   })
 
+  it('gives a prop inside a collapsed inheritance layer no Controls row (by design until relevance from stories)', async () => {
+    // By default a large inherited source is one layer of names: its props are not in the docgen props, so Controls
+    // has no row for them and a story's `args` naming one shows it as undocumented. A later slice adds the props
+    // stories and call sites use; `collapseInheritedProps: 'none'` lists every one today.
+    const layer = {
+      typeName: 'GlobalDOMEvents',
+      fileName: '/p/node_modules/@react-types/shared/src/dom.d.ts',
+      omitted: [],
+      htmlElement: null,
+      totalProps: 60,
+      members: ['onPointerMove'],
+    }
+    const fake = new FakeBinding({
+      components: { Button: { ...entry('Button', join(components, 'Button.tsx')), inheritance: [layer] } },
+    })
+    fake.docs = { Button: rdtDoc('Button', ['label']) }
+    const { payload } = await request(fake, story('Button'))
+    expect(payload).toMatchObject({ argTypes: { label: labelArgType } })
+    expect(Object.keys((payload as { argTypes: object }).argTypes)).toEqual(['label'])
+  })
+
   it("documents a default import as its file's component", async () => {
     const { payload } = await request(binding(), story('Card'))
     expect(payload?.name).toBe('Card')

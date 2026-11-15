@@ -17,10 +17,9 @@ mod syntax;
 use crate::extractor::written::WrittenMember;
 use crate::types::collected::ComponentExport;
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, Superseded};
-use crate::types::options::CollapseInheritedProps;
 use crate::types::output::{
-    ComponentEntry, DefaultValue, ExtractionOutput, InheritedLayer, OpaqueDetail, OpaqueReason, ParsedProp, PropParent,
-    PropType, TRUNCATED_KIND,
+    ComponentEntry, DefaultValue, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropParent, PropType,
+    TRUNCATED_KIND,
 };
 use order::Placed;
 use syntax::SourceSyntax;
@@ -346,8 +345,7 @@ impl ResolverFacts {
 
 /// Replaces `entry`'s props and `composes` with the checker's, keeping a description or tags only the structural pass
 /// has, for the whole-project merge. Facts are read as [`merge_semantic_props`] reads them, from `syntax` and as
-/// `resolver` allows. The checker's props are laid out in the layers `collapse` gives ([`layer_checker_props`]).
-#[allow(clippy::too_many_arguments)]
+/// `resolver` allows. The checker's props follow the structural answer's collapsed layers ([`layer_checker_props`]).
 fn apply_props(
     entry: &mut ComponentEntry,
     semantic: &SemanticComponent,
@@ -355,7 +353,6 @@ fn apply_props(
     memo: &mut MergeMemo,
     syntax: &SourceSyntax,
     resolver: ResolverFacts,
-    collapse: CollapseInheritedProps,
 ) -> MergedProps {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers. A component
     // with no layer has nowhere to leave them: a context's `Provider` (`value`, `children`) or a `th`/`td` attribute
@@ -367,74 +364,32 @@ fn apply_props(
         .iter()
         .filter(|prop| !prop.react_declared || (!layered && entry.props.contains_key(&prop.name)))
         .collect();
-    let own = layer_checker_props(entry, own, collapse);
+    let own = layer_checker_props(entry, own);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     replace_props(entry, own.into_iter(), &merge, shared, memo)
 }
 
-/// The checker's `props` for `entry`, without the ones an inherited source collapsed into a layer holds, so the
-/// checker's answer has the shape the structural answer has ([`CollapseInheritedProps::collapses`] decides for both):
+/// The checker's `props` for `entry` without those a collapsed inheritance layer of the structural answer holds
+/// (`InheritedLayer::members`), unless the structural answer lists the prop itself (the component declares it again).
 ///
-/// 1. A prop a collapsed structural layer names (`InheritedLayer::members`) is left to that layer, unless the
-///    structural answer lists it as a prop (the component declares it again).
-/// 2. The rest are grouped by the source that declares them (`parent`). A source the structural answer did not resolve
-///    (no structural prop and no layer has it as its source) becomes a collapsed layer when the rule collapses it, with
-///    the props of the answer it declares as its members and their count as its size; a source in `node_modules` is a
-///    dependency's. `@types/react`'s props are left to `htmlAttributes` and are not grouped, and the notable ones
-///    (`react_types::notable_html_attrs`) stay listed as props.
-///
-/// Under [`CollapseInheritedProps::None`] every prop stays.
+/// The collapse decision has one owner, the structural resolver (`CollapseInheritedProps::collapses`, from the props a
+/// source declares and whether its file is a loaded dependency's); the checker's answer only follows the layers it made,
+/// so both lanes give a component the same layers and, where the structural lane reads the source, the same props. A
+/// collapsed source's notable props are the structural answer's `notableInherited`, so they are not listed again. The
+/// result depends on `entry`'s layers and props alone, which this does not change: applying it again gives the same.
 pub(crate) fn layer_checker_props<'a>(
-    entry: &mut ComponentEntry,
+    entry: &ComponentEntry,
     props: Vec<&'a Arc<SemanticProp>>,
-    collapse: CollapseInheritedProps,
 ) -> Vec<&'a Arc<SemanticProp>> {
-    if collapse == CollapseInheritedProps::None {
-        return props;
-    }
     let layered: rustc_hash::FxHashSet<&str> =
         entry.inheritance.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
-    let props: Vec<&'a Arc<SemanticProp>> = props
+    if layered.is_empty() {
+        return props;
+    }
+    props
         .into_iter()
         .filter(|prop| entry.props.contains_key(&prop.name) || !layered.contains(prop.name.as_str()))
-        .collect();
-
-    // Sources in the order the answer first names them, each with the props it declares.
-    let mut sources: Vec<(&'a PropParent, Vec<&'a str>)> = Vec::new();
-    for prop in &props {
-        let Some(parent) = prop.parent.as_ref().filter(|_| !prop.react_declared) else { continue };
-        match sources.iter_mut().find(|(source, _)| *source == parent) {
-            Some((_, names)) => names.push(&prop.name),
-            None => sources.push((parent, vec![&prop.name])),
-        }
-    }
-    let resolved = |source: &PropParent| {
-        entry.props.values().any(|prop| prop.parent.as_ref() == Some(source))
-            || entry
-                .inheritance
-                .iter()
-                .any(|layer| layer.type_name == source.name && layer.file_name == source.file_name)
-    };
-    let notable = crate::react_types::notable_html_attrs("");
-    let mut collapsed: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
-    let mut layers = Vec::new();
-    for (source, names) in sources {
-        let dependency = crate::types::options::in_node_modules(&source.file_name);
-        if resolved(source) || !collapse.collapses(dependency, &source.file_name, &source.name, names.len()) {
-            continue;
-        }
-        collapsed.extend(names.iter().copied().filter(|name| !notable.contains(name)));
-        layers.push(InheritedLayer {
-            type_name: source.name.clone(),
-            file_name: source.file_name.clone(),
-            omitted: Vec::new(),
-            html_element: None,
-            total_props: u32::try_from(names.len()).unwrap_or(u32::MAX),
-            members: names.into_iter().map(str::to_owned).collect(),
-        });
-    }
-    entry.inheritance.extend(layers);
-    props.into_iter().filter(|prop| !collapsed.contains(prop.name.as_str())).collect()
+        .collect()
 }
 
 /// What one merged prop was made from, by identity: the checker's prop, the structural prop of the same name, the
@@ -814,17 +769,6 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
 /// [`merge_semantic`], taking the facts the checker does not supply from the structural answer only as `resolver`
 /// allows.
 pub fn merge_semantic_with(output: &mut ExtractionOutput, outcome: SemanticOutcome, resolver: ResolverFacts) {
-    merge_semantic_collapsing(output, outcome, resolver, CollapseInheritedProps::default());
-}
-
-/// [`merge_semantic_with`], laying out the checker's props in the layers `collapse` gives the structural answer
-/// (`layer_checker_props`): the run's `collapseInheritedProps`.
-pub fn merge_semantic_collapsing(
-    output: &mut ExtractionOutput,
-    outcome: SemanticOutcome,
-    resolver: ResolverFacts,
-    collapse: CollapseInheritedProps,
-) {
     let SemanticOutcome { components, fallbacks, diagnostics } = outcome;
     let syntax = SourceSyntax::read(
         components
@@ -837,7 +781,7 @@ pub fn merge_semantic_collapsing(
     let mut memo = MergeMemo::default();
     for semantic in components {
         let Some(entry) = output.components.get_mut(&semantic.key) else { continue };
-        let unread = apply_props(entry, &semantic, &mut shared, &mut memo, &syntax, resolver, collapse).unread;
+        let unread = apply_props(entry, &semantic, &mut shared, &mut memo, &syntax, resolver).unread;
         if unread > 0 {
             unread_props += unread;
             unread_keys.push(semantic.key.clone());

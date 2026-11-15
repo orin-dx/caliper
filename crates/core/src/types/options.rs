@@ -64,9 +64,10 @@ impl CollapseInheritedProps {
     }
 
     /// Whether an inherited source of type `type_name` in `file`, declaring `declared` props, is recorded as a layer of
-    /// names instead of listed prop by prop. `dependency` says the file is a dependency's. Both lanes decide by it: the
-    /// structural resolver with the props a source declares, and the checker's merge with the props of its answer a
-    /// source declares (`crate::types::semantic::layer_checker_props`). A component's own props type is never asked.
+    /// names instead of listed prop by prop. `dependency` says the file is a loaded dependency's. The one owner of the
+    /// decision: the structural resolver asks it with the props a source declares (before any `Omit`), and the checker's
+    /// merge only follows the layers it made (`crate::types::semantic::layer_checker_props`). A component's own props
+    /// type is never asked.
     ///
     /// - A dependency source collapses when it is ambient (`crate::types::ambient`: DOM and ARIA attributes, style
     ///   systems) and past [`COLLAPSE_THRESHOLD`] props, or when it is not ambient but past [`LARGE_API_SOURCE`] props.
