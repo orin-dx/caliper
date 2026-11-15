@@ -162,6 +162,46 @@ fn the_referenced_project_that_includes_a_file_governs_it() {
 }
 
 #[test]
+fn a_bare_specifier_resolves_against_an_inherited_base_url_before_node_modules() {
+    let (_tmp, root) = project(&[
+        ("tsconfig.json", r#"{ "extends": "./base.json" }"#),
+        ("base.json", r#"{ "compilerOptions": { "baseUrl": "." } }"#),
+        ("lib/index.ts", "export {};\n"),
+        ("src/a.ts", ""),
+        ("node_modules/lib/package.json", r#"{ "types": "index.d.ts" }"#),
+        ("node_modules/lib/index.d.ts", "export {};\n"),
+        ("node_modules/other/package.json", r#"{ "types": "index.d.ts" }"#),
+        ("node_modules/other/index.d.ts", "export {};\n"),
+    ]);
+    let resolvers = ModuleResolvers::new(&PipelineOptions::default());
+    let importer = root.join("src/a.ts");
+
+    assert_eq!(file_of(resolvers.resolve("lib/index", &importer)), Some(root.join("lib/index.ts")));
+    assert_eq!(file_of(resolvers.resolve("other", &importer)), Some(root.join("node_modules/other/index.d.ts")));
+    assert_eq!(file_of(resolvers.resolve("missing", &importer)), None);
+}
+
+#[test]
+fn the_inputs_text_covers_the_extends_chain_and_the_references() {
+    let (_tmp, root) = project(&[
+        ("tsconfig.json", r#"{ "extends": "./base.json", "references": [{ "path": "./app" }] }"#),
+        ("base.json", r#"{ "compilerOptions": { "customConditions": ["source"] } }"#),
+        ("app/tsconfig.json", r#"{ "compilerOptions": { "paths": { "@a/*": ["./*"] } } }"#),
+    ]);
+    let before = effective_inputs(Some(&root.join("tsconfig.json")));
+
+    std::fs::write(root.join("base.json"), r#"{ "compilerOptions": { "customConditions": [] } }"#).unwrap();
+    let after_base = effective_inputs(Some(&root.join("tsconfig.json")));
+    std::fs::write(root.join("app/tsconfig.json"), r#"{ "compilerOptions": { "paths": { "@b/*": ["./*"] } } }"#)
+        .unwrap();
+    let after_reference = effective_inputs(Some(&root.join("tsconfig.json")));
+
+    assert_ne!(before, after_base);
+    assert_ne!(after_base, after_reference);
+    assert_eq!(after_reference, effective_inputs(Some(&root.join("tsconfig.json"))));
+}
+
+#[test]
 fn without_clearing_the_file_system_cache_a_new_file_stays_invisible() {
     // The control for `resolvers_made_after_an_edit_see_it`: it passes because `new` drops the cache. Without that,
     // the next revision would answer from the first one's view of the disk.

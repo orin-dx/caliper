@@ -1461,3 +1461,64 @@ fn index_temp_files_are_unique_per_write() {
     assert_eq!(names.len(), 100);
     assert!(names.iter().all(|name| name.parent() == path.parent() && name != path));
 }
+
+// ── cross-run: what the persisted index keeps is keyed to every input of resolution ──────────────────────────────────
+
+const OUTER: &[(&str, &str)] = &[
+    ("node_modules/outer/package.json", r#"{ "name": "outer", "version": "1.0.0", "types": "index.d.ts" }"#),
+    ("node_modules/outer/index.d.ts", "export type { CondProps } from 'cond-pkg';\n"),
+    (
+        "node_modules/cond-pkg/package.json",
+        r#"{ "name": "cond-pkg", "version": "1.0.0", "exports": { ".": { "source": "./src/index.ts", "types": "./dist/index.d.ts" } } }"#,
+    ),
+    ("node_modules/cond-pkg/src/index.ts", "export interface CondProps { fromSource: string }\n"),
+    ("node_modules/cond-pkg/dist/index.d.ts", "export interface CondProps { fromDist: string }\n"),
+    (
+        "src/Cond.tsx",
+        "import type { CondProps } from 'outer';\nexport function Cond(props: CondProps) { return null; }\n",
+    ),
+];
+
+type PropTypes = Vec<(String, String)>;
+
+/// Run 1 writes the cache; `edits` change the tree; run 2 reads the cache. Returns run 2 and a cold run of the edited
+/// tree with a cache of its own: the two must be the same.
+fn rerun_after(files: &[(&str, &str)], edits: &[(&str, &str)]) -> (PropTypes, PropTypes) {
+    let (_tmp, root) = project(files);
+    let _first = extract(&options(&root, true));
+    // A real edit moves the modification time; the effective options are what must not depend on it.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    for (name, body) in edits {
+        std::fs::write(root.join(name), body).unwrap();
+    }
+    let cached = extract(&options(&root, true));
+    let cold = extract(&PipelineOptions { cache_dir: Some(root.join("cold-cache")), ..options(&root, true) });
+    (prop_types(&cached, "Cond"), prop_types(&cold, "Cond"))
+}
+
+#[test]
+fn an_extended_tsconfigs_custom_conditions_change_what_the_next_run_reads_from_the_index() {
+    let files = [
+        &[("tsconfig.json", "{ \"extends\": \"./base.json\" }\n"), ("base.json", conditions_config(&["source"]))][..],
+        OUTER,
+    ]
+    .concat();
+    let (cached, cold) = rerun_after(&files, &[("base.json", conditions_config(&[]))]);
+
+    assert_eq!(cold, [("fromDist".into(), "string".into())]);
+    assert_eq!(cached, cold);
+}
+
+#[test]
+fn the_root_tsconfigs_custom_conditions_change_what_the_next_run_reads_from_the_index() {
+    let files = [&[("tsconfig.json", conditions_config(&["source"]))][..], OUTER].concat();
+    let (cached, cold) = rerun_after(&files, &[("tsconfig.json", conditions_config(&[]))]);
+
+    assert_eq!(cold, [("fromDist".into(), "string".into())]);
+    assert_eq!(cached, cold);
+}
+
+fn conditions_config(conditions: &[&str]) -> &'static str {
+    let list = conditions.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+    Box::leak(format!("{{ \"compilerOptions\": {{ \"customConditions\": [{list}] }} }}\n").into_boxed_str())
+}

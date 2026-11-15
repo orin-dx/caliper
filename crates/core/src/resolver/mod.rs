@@ -637,20 +637,13 @@ pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
 /// on Chakra, Mantine and MUI declares 75 (`docs/measurement.md`, "Collapse by relevance").
 pub(crate) const LARGE_API_SOURCE: usize = 200;
 
-/// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
-/// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index.
+/// Changes whenever the options could change what a specifier resolves to: the resolution-relevant options of the
+/// governing tsconfig after `extends`, every config file of its `extends` chain and `references` (modification time and
+/// size), and the build. Keys the dependency loader's persisted index.
 pub(crate) fn resolution_fingerprint(options: &PipelineOptions) -> u64 {
-    let tsconfig = governing_tsconfig(options);
-    let tsconfig_mtime = tsconfig
-        .as_ref()
-        .and_then(|path| std::fs::metadata(path).ok()?.modified().ok())
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|age| age.as_nanos());
     let text = format!(
-        "{:?}|{:?}|{:?}|{}",
-        "tsrs_module:bundler",
-        tsconfig,
-        tsconfig_mtime,
+        "{}|{}",
+        modules::effective_inputs(governing_tsconfig(options).as_deref()),
         env!("CALIPER_SOURCE_FINGERPRINT"),
     );
     text.bytes()

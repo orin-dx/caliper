@@ -77,6 +77,8 @@ struct ParsedConfig {
     /// The files its `files`/`include` select: which project of a solution-style config a file belongs to.
     files: FxHashSet<String>,
     references: Vec<Utf8PathBuf>,
+    /// The config files it extends, directly and through the chain.
+    extended: Vec<Utf8PathBuf>,
 }
 
 /// `path` made absolute against the working directory: tsrs resolves absolute paths only, and takes a relative one
@@ -155,6 +157,11 @@ impl ModuleResolvers {
         // A region is entered by one thread at a time; the lock above makes that wait explicit.
         let _scope = self.region.enter();
         let tsconfig = governing_tsconfig(&mut state, self.configured.as_deref(), &from_file);
+        let base_url = tsconfig
+            .as_deref()
+            .and_then(|path| parsed_config(&mut state.configs, path).options)
+            .map(|options| options.base_url.clone())
+            .unwrap_or_default();
         let resolver = match state.resolvers.get(&tsconfig) {
             Some(resolver) => resolver,
             None => {
@@ -174,13 +181,26 @@ impl ModuleResolvers {
         } else {
             (ModuleKind::ES_NEXT, ModuleKind::COMMON_JS)
         };
-        let module = [first, second].into_iter().find_map(|mode| {
-            let (module, _) = resolver.resolve_module_name(specifier, from_file.as_str(), mode, None).ok()?;
-            module.is_resolved().then_some(module)
-        })?;
+        let attempt = |specifier: &str| {
+            [first, second].into_iter().find_map(|mode| {
+                let (module, _) = resolver.resolve_module_name(specifier, from_file.as_str(), mode, None).ok()?;
+                module.is_resolved().then(|| Utf8PathBuf::from(module.resolved_file_name))
+            })
+        };
+        let mut found = attempt(specifier);
+        // TypeScript 7 no longer resolves a bare specifier against `baseUrl` (only `paths` read it), which TypeScript 6
+        // and the resolver this replaced did, after `paths` and before `node_modules`: `lib/index` with `baseUrl: "."`
+        // is `./lib/index`. A specifier `paths` mapped is a project file, and one `node_modules` answered is not.
+        let bare = !specifier.starts_with('.') && !specifier.starts_with('/');
+        if bare
+            && !base_url.is_empty()
+            && found.as_ref().is_none_or(|path| crate::dependency_types::in_node_modules(path.as_str()))
+        {
+            found = attempt(&format!("{}/{specifier}", base_url.trim_end_matches('/'))).or(found);
+        }
         // tsrs keeps a symlink in the path it returns, and writes it with forward slashes; discovery, the declaration
         // index and every comparison between files use the real path.
-        let found = Utf8PathBuf::from(module.resolved_file_name);
+        let found = found?;
         Some(crate::canonical_path::canonicalize(&found).unwrap_or(found))
     }
 }
@@ -235,6 +255,7 @@ impl ParsedConfig {
                 error: error.or_else(|| Some("unreadable".to_owned())),
                 files: FxHashSet::default(),
                 references: Vec::new(),
+                extended: Vec::new(),
             };
         };
         let options = parsed.parsed_config.compiler_options;
@@ -250,9 +271,71 @@ impl ParsedConfig {
                 if reference.extension() == Some("json") { reference } else { reference.join("tsconfig.json") }
             })
             .collect();
-        ParsedConfig { options, error, files: parsed.parsed_config.file_names.iter().cloned().collect(), references }
+        let extended = parsed.config_file.map_or_else(Vec::new, |file| {
+            let files = file.extended_source_files.lock().unwrap_or_else(PoisonError::into_inner);
+            files.iter().map(Utf8PathBuf::from).collect()
+        });
+        ParsedConfig {
+            options,
+            error,
+            files: parsed.parsed_config.file_names.iter().cloned().collect(),
+            references,
+            extended,
+        }
     }
 }
+
+/// What resolution reads from the tsconfig `root` governs, as text: every config file of its `extends` chain and
+/// `references` (path, modification time, size) and the resolution-relevant compiler options after `extends` of each.
+/// It names the answers a persisted cache may keep: any change to one of them changes the text. The root file's own
+/// modification time says nothing about the files it extends.
+pub(crate) fn effective_inputs(root: Option<&Utf8Path>) -> String {
+    let Some(root) = root else { return "no tsconfig".to_owned() };
+    FILE_SYSTEM.clear_cache();
+    // Declared before `configs`, so it is freed after the options that live in it.
+    let region = Region::new_scratch(1 << 20);
+    let _scope = region.enter();
+    let mut configs = FxHashMap::default();
+    let mut seen: std::collections::BTreeSet<Utf8PathBuf> = std::collections::BTreeSet::new();
+    let mut pending = vec![absolute(root)];
+    let mut text = String::new();
+    // Bounds a cycle of references.
+    while let Some(path) = pending.pop() {
+        if seen.len() >= 64 || !seen.insert(path.clone()) {
+            continue;
+        }
+        let config = parsed_config(&mut configs, &path);
+        pending.extend(config.extended.iter().cloned());
+        pending.extend(config.references.iter().cloned());
+        let stamp = std::fs::metadata(&path).ok().map(|meta| {
+            let mtime = meta.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok());
+            (mtime.map(|age| age.as_nanos()), meta.len())
+        });
+        let options = config.options.map(|options| {
+            format!(
+                "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+                options.custom_conditions,
+                options.paths,
+                options.base_url,
+                options.paths_base_path,
+                options.root_dirs,
+                options.module_suffixes,
+                options.module_resolution,
+                options.resolve_json_module,
+                options.resolve_package_json_exports,
+                options.resolve_package_json_imports,
+            )
+        });
+        text.push_str(&format!("{path}|{stamp:?}|{options:?}|{:?}\n", config.error));
+    }
+    // Sorted by path, so the text does not depend on the order the chain was walked in.
+    let mut lines: Vec<&str> = text.lines().collect();
+    lines.sort_unstable();
+    format!("{}|tsrs_module {}", lines.join("\n"), TSRS_PIN)
+}
+
+/// The `tsrs_*` version the resolver is built from (the workspace pins it exactly).
+const TSRS_PIN: &str = "0.24.0";
 
 /// `bundler` resolution with what a tsconfig contributes to resolving: `baseUrl`, `paths` and `customConditions`.
 fn config_options(path: Option<&Utf8Path>, config: Option<&ParsedConfig>) -> CompilerOptions {
