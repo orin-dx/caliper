@@ -1,0 +1,25 @@
+{
+  "tool_use_id": "toolu_015VB9bd34CwFxpPUtcsaDwH",
+  "agent_id": "a3ac6569b940686b1",
+  "subagent_type": "general-purpose",
+  "task_description": "Slice 2: skip converting collapsed-layer props",
+  "files": [
+    ".changeset/skip-converting-collapsed-layer-props.md",
+    "crates/core/src/pipeline/semantic_hook.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/examples/gate_harness.rs",
+    "crates/semantic/src/component.rs",
+    "crates/semantic/src/kept.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/tests/collapse_model.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 158,
+    "cache_creation_tokens": 184273,
+    "cache_read_tokens": 11016167,
+    "output_tokens": 60630,
+    "api_call_count": 79
+  },
+  "started_at": "2026-11-15T12:58:31.806548-08:00",
+  "completed_at": "2026-11-15T13:10:13.998436-08:00"
+}
