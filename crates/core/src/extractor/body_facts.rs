@@ -81,9 +81,12 @@ pub(super) fn attach<'a>(program: &'a Program<'a>, mappings: &mut [ComponentMapp
         };
         let Some(holders) = functions.get(&(span.start, span.end)) else { continue };
         let (facts, usages_of_nested) = Reader::new(scoping, nodes).facts_of(&function);
-        for &(key, at) in holders {
+        for &(key, _) in holders {
             found.entry(key).or_insert_with(|| facts.clone());
-            nested.push((at, usages_of_nested.clone()));
+        }
+        // Once per function, where the first mapping holding it was reached.
+        if let Some(at) = holders.iter().map(|&(_, at)| at).min() {
+            nested.push((at, usages_of_nested));
         }
     }
     nested.sort_by_key(|(at, _)| *at);
@@ -245,15 +248,26 @@ impl<'s, 'a> Reader<'s, 'a> {
             elements: Vec::new(),
             nested_usages: Vec::new(),
         };
+        // The parameters too: a default or a computed key can hold JSX (`{ icon = <Icon /> }`).
         match function {
             ComponentFn::Function(function) => {
+                elements.tags = tag_symbols(self.scoping, |tags| {
+                    tags.visit_formal_parameters(&function.params);
+                    if let Some(body) = &function.body {
+                        tags.visit_function_body(body);
+                    }
+                });
+                elements.visit_formal_parameters(&function.params);
                 if let Some(body) = &function.body {
-                    elements.tags = tag_symbols(self.scoping, |tags| tags.visit_function_body(body));
                     elements.visit_function_body(body);
                 }
             }
             ComponentFn::Arrow(arrow) => {
-                elements.tags = tag_symbols(self.scoping, |tags| tags.visit_arrow_function_body(&arrow.body));
+                elements.tags = tag_symbols(self.scoping, |tags| {
+                    tags.visit_formal_parameters(&arrow.params);
+                    tags.visit_arrow_function_body(&arrow.body);
+                });
+                elements.visit_formal_parameters(&arrow.params);
                 elements.visit_arrow_function_body(&arrow.body);
             }
         }
@@ -301,6 +315,8 @@ impl<'s, 'a> Reader<'s, 'a> {
             if let BindingPattern::BindingIdentifier(id) = &property.value
                 && let Some(symbol) = id.symbol_id.get()
                 && !self.scoping.symbol_is_mutated(symbol)
+                // `var a` or `function a` beside `{ a }` is the same symbol, given another value.
+                && self.scoping.symbol_redeclarations(symbol).is_empty()
             {
                 self.locals.insert(symbol, key.clone());
             }
@@ -309,9 +325,7 @@ impl<'s, 'a> Reader<'s, 'a> {
         if let Some(rest) = &object.rest {
             match &rest.argument {
                 BindingPattern::BindingIdentifier(id) => {
-                    if self.facts.rest.is_none() {
-                        self.facts.rest = Some(id.name.to_string());
-                    }
+                    self.facts.rests.push(id.name.to_string());
                     if let Some(symbol) = id.symbol_id.get() {
                         self.track(symbol, SpreadOf::Rest);
                     }
@@ -409,7 +423,8 @@ impl<'s, 'a> Reader<'s, 'a> {
     fn is_read(&self, member: NodeId) -> bool {
         let (parent, child) = self.through_wrappers(member);
         let (parent, child) = match self.nodes.kind(parent) {
-            AstKind::ChainExpression(chain) => (self.through_wrappers(self.nodes.parent_id(parent)).0, chain.span),
+            // `props?.x`: the chain is what is called, written or deleted (`delete props?.x`, `(props?.f)()`).
+            AstKind::ChainExpression(_) => self.through_wrappers(parent),
             _ => (parent, child),
         };
         match self.nodes.kind(parent) {

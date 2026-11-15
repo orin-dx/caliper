@@ -1810,8 +1810,9 @@ pub(crate) struct BodyFacts {
     /// parameter or the body), and the keys of member reads on it or a rest binding (`props.x`, `props?.['x']`,
     /// `rest.x`). Complete only when `handed_on` is false: a handed-on object can be read anywhere.
     pub(crate) reads: Vec<std::string::String>,
-    /// The first rest binding destructured from the props object (`...rest`).
-    pub(crate) rest: Option<std::string::String>,
+    /// Every rest binding destructured from the props object or from another rest binding (`...rest`), in the order
+    /// they are reached.
+    pub(crate) rests: Vec<std::string::String>,
     /// Every JSX element the body writes, in source order, nested components' excepted.
     pub(crate) elements: Vec<JsxElementFact>,
     /// Whether the props object or a rest binding is used in any way other than a member read with a literal key, a

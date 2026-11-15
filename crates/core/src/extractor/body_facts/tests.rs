@@ -45,7 +45,7 @@ fn destructuring_reads_renamed_defaulted_nested_keys_and_the_rest_binding() {
         "C",
     );
     assert_eq!(reads(&facts), ["tone", "size", "style"]);
-    assert_eq!(facts.rest.as_deref(), Some("rest"));
+    assert_eq!(facts.rests, ["rest"]);
     assert_eq!(
         facts.elements,
         [intrinsic(
@@ -73,7 +73,7 @@ fn member_reads_of_the_props_identifier_are_reads_anywhere_in_the_body() {
         "C",
     );
     assert_eq!(reads(&facts), ["label", "onPress", "title"]);
-    assert_eq!(facts.rest, None);
+    assert_eq!(facts.rests, Vec::<String>::new());
     assert_eq!(
         facts.elements,
         [intrinsic("button", vec![named("title", Some("title")), named("aria-label", None), named("onClick", None)])]
@@ -93,7 +93,7 @@ fn the_three_safe_uses_read_keys_and_do_not_hand_the_props_on() {
         "C",
     );
     assert_eq!(reads(&facts), ["a", "b", "tone", "size", "c", "extra"]);
-    assert_eq!(facts.rest.as_deref(), Some("r"));
+    assert_eq!(facts.rests, ["r"]);
     assert_eq!(
         facts.elements,
         [intrinsic("div", vec![named("data-x", Some("extra")), JsxAttributeFact::Spread(SpreadOf::Rest)])]
@@ -384,7 +384,7 @@ fn a_named_function_expression_binds_its_own_name() {
 }
 
 #[test]
-fn every_rest_binding_is_the_props_object_and_the_first_is_named() {
+fn every_rest_binding_is_the_props_object_and_is_named() {
     let facts = facts(
         "export function C(props: P) {\n\
            const { a, ...r1 } = props; const { b, ...r2 } = r1;\n\
@@ -393,7 +393,7 @@ fn every_rest_binding_is_the_props_object_and_the_first_is_named() {
         "C",
     );
     assert_eq!(reads(&facts), ["a", "b", "z"]);
-    assert_eq!(facts.rest.as_deref(), Some("r1"));
+    assert_eq!(facts.rests, ["r1", "r2"]);
     assert_eq!(
         facts.elements,
         [intrinsic("div", vec![JsxAttributeFact::Spread(SpreadOf::Rest), named("data-z", Some("z"))])]
@@ -471,4 +471,79 @@ fn a_nested_component_is_found_by_symbol_not_by_name() {
         facts.elements,
         [intrinsic("li", vec![JsxAttributeFact::Spread(SpreadOf::Props)]), component("Row", vec![])]
     );
+}
+
+#[test]
+fn deleting_or_calling_through_an_optional_chain_hands_the_props_object_on() {
+    let uses = ["delete props.x", "delete props?.x", "delete rest?.x", "(props?.f)()", "(rest?.f)()", "props?.f()"];
+    for used in uses {
+        let source =
+            format!("export function C(props: P) {{ const {{ a, ...rest }} = props; {used}; return <div /> }}");
+        assert!(facts(&source, "C").handed_on, "`{used}` hands the props object on");
+    }
+    let read = facts("export function C(props: P) { const x = props?.x; return <div /> }", "C");
+    assert!(!read.handed_on);
+}
+
+#[test]
+fn an_optional_chain_as_an_assignment_target_hands_the_props_object_on() {
+    // Not valid JavaScript; the parser recovers, and the classification must stay conservative.
+    let data = parse("export function C(props: P) { props?.x = 1; return <div /> }");
+    if let Some(body) = data.component_mappings.first().and_then(|mapping| mapping.body.clone()) {
+        assert!(body.handed_on);
+    }
+}
+
+#[test]
+fn a_function_held_by_two_mappings_files_its_nested_elements_once() {
+    let source = "export const A = function B(props: P) { const Row = () => <li />; return <Row /> };";
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, source, oxc_span::SourceType::tsx()).parse();
+    let start = |text: &str| u32::try_from(source.find(text).unwrap()).unwrap();
+    let declarator = (start("A ="), start(" };") + 2);
+    let function = (start("function B"), start(" };") + 2);
+    let mapping = |name: &str, (from, to): (u32, u32)| {
+        ComponentMapping::new(
+            name.to_owned(),
+            crate::types::TypeName::default(),
+            camino::Utf8PathBuf::from("/p/c.tsx"),
+            from,
+            to,
+            crate::types::DetectionRule::FunctionDeclaration,
+        )
+    };
+    let mut mappings = vec![mapping("A", declarator), mapping("B", function)];
+    let usages = attach(&parsed.program, &mut mappings, true);
+    assert_eq!(usages, [usage(JsxTag::Intrinsic("li".into()))]);
+    assert!(mappings.iter().all(|mapping| mapping.body.is_some()));
+}
+
+#[test]
+fn a_destructured_name_redeclared_by_var_is_not_the_prop() {
+    let param = facts("export function C({ a }: P) { var a = compute(); return <X a={a} /> }", "C");
+    assert_eq!(param.elements, [component("X", vec![named("a", None)])]);
+    let body = facts("export function C(props: P) { var { a } = props; var a = other; return <X a={a} /> }", "C");
+    assert_eq!(body.elements, [component("X", vec![named("a", None)])]);
+}
+
+#[test]
+fn rest_bindings_in_different_scopes_are_all_recorded() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const { a, ...r1 } = props;\n\
+           const f = () => { const { b, ...r2 } = props; return <i {...r2} /> };\n\
+           return <b {...r1}>{f()}</b>\n\
+         }",
+        "C",
+    );
+    assert_eq!(facts.rests, ["r1", "r2"]);
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn jsx_in_a_parameter_default_is_the_components() {
+    let data = parse("export const C = ({ icon = <Icon size=\"sm\" /> }: P) => <span>{icon}</span>;");
+    let facts = data.component_mappings[0].body.clone().unwrap();
+    assert_eq!(facts.elements, [component("Icon", vec![named("size", None)]), intrinsic("span", vec![])]);
+    assert_eq!(data.jsx_usages, []);
 }
