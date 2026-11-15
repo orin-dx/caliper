@@ -1806,15 +1806,17 @@ pub struct ComponentMapping {
 /// only: no judgement of relevance or forwarding is made where they are collected.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct BodyFacts {
-    /// The props the function reads, in first-read order: the keys its first parameter destructures (renamed,
-    /// defaulted or nested alike), then `props.x` and `props['x']` on a first parameter that is an identifier.
+    /// The props the function reads, in first-read order: the keys destructured from the props object (in the
+    /// parameter or the body), and the keys of member reads on it or a rest binding (`props.x`, `props?.['x']`,
+    /// `rest.x`). Complete only when `handed_on` is false: a handed-on object can be read anywhere.
     pub(crate) reads: Vec<std::string::String>,
-    /// The rest binding of a destructured first parameter (`...rest`).
+    /// The first rest binding destructured from the props object (`...rest`).
     pub(crate) rest: Option<std::string::String>,
     /// Every JSX element the body writes, in source order, nested components' excepted.
     pub(crate) elements: Vec<JsxElementFact>,
-    /// Whether the props object or the rest binding is passed whole as a call argument (`useX(props)`), or the props
-    /// object is spread whole into JSX (`{...props}`).
+    /// Whether the props object or a rest binding is used in any way other than a member read with a literal key, a
+    /// destructuring, or a JSX spread of a rest binding: passed to a call, stored, returned, spread whole into JSX
+    /// (`{...props}`) and so on (`extractor::body_facts`). When it is, `reads` is a lower bound.
     pub(crate) handed_on: bool,
 }
 

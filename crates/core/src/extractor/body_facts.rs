@@ -4,9 +4,28 @@
 //! emitted.
 //!
 //! The function is the one a mapping's declaration holds, through the wrapper calls the extractor unwraps (`memo`,
-//! `forwardRef`, a factory's first argument). A component the body declares and renders as a JSX tag
-//! (`const Item = () => <li/>; return <Item/>`) is a component of its own: its body is not read. Elements built with
-//! `createElement` are not recorded.
+//! `forwardRef`, a factory's first argument). Elements built with `createElement` are not recorded.
+//!
+//! # Conservative by construction
+//!
+//! Names are resolved by scope: a parameter, a `let`/`const`/`class`/`function` declaration or a `catch` binding of
+//! the same name in an inner scope is another binding, and its uses are not the component's. Every use of the props
+//! object (the first parameter, its rest binding, and a rest binding destructured from either) is classified by the
+//! node it sits in, and only three are safe:
+//!
+//! - the object of a member read with a static or string-literal key (`props.x`, `props?.['x']`): `x` is read;
+//! - the initializer of an object destructuring (`const { a, b = 1, ...r } = props`) or the right side of a
+//!   destructuring assignment: its keys are read, and a rest binding is the props object again;
+//! - a JSX spread attribute (`{...props}`): recorded as a spread.
+//!
+//! Any other use (a call argument, `new`, an attribute value, an object or array literal, a `return`, a computed key,
+//! an assignment, `typeof`, a type query) hands the object on, so `reads` is complete only when `handed_on` is false.
+//! A `var` is not taken to shadow, and a name the resolver cannot place counts as the component's: an error here
+//! only ever adds reads or hand-offs.
+//!
+//! A function or class the body declares and renders as a JSX tag (`const Item = () => <li/>; return <Item/>`) is a
+//! component of its own: its uses of the props object still count, but its elements are the file's
+//! ([`JsxUsage`]), not the parent's.
 
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
@@ -20,8 +39,9 @@ use crate::types::collected::{
 };
 
 /// Records on each mapping the facts of the function its declaration holds, and returns the file's other JSX elements:
-/// those outside every function a mapping is given facts of (pages, stories, helpers, module-level JSX). A mapping with
-/// no function of its own (a class, an alias of another component, a declaration without a body) gets none.
+/// those outside every function a mapping is given facts of (pages, stories, helpers, module-level JSX, class
+/// components) and those of components nested in one. A mapping with no function of its own (a class, an alias of
+/// another component, a declaration without a body) gets none.
 pub(super) fn attach(program: &Program<'_>, mappings: &mut [ComponentMapping], jsx: bool) -> Vec<JsxUsage> {
     if mappings.is_empty() && !jsx {
         return Vec::new();
@@ -57,7 +77,7 @@ fn unwrap<'b, 'a>(expr: &'b Expression<'a>) -> Option<ComponentFn<'b, 'a>> {
 }
 
 /// Finds the nodes that start and end where a mapping does, reads the function each holds, and collects the JSX
-/// elements outside all of them.
+/// elements no component's facts hold.
 struct Finder {
     wanted: FxHashSet<(u32, u32)>,
     found: FxHashMap<(u32, u32), BodyFacts>,
@@ -71,7 +91,11 @@ impl Finder {
     fn record(&mut self, span: oxc_span::Span, function: Option<ComponentFn<'_, '_>>) -> bool {
         let key = (span.start, span.end);
         let Some(function) = function.filter(|_| self.wanted.contains(&key)) else { return false };
-        self.found.entry(key).or_insert_with(|| facts_of(&function));
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.found.entry(key) {
+            let (facts, nested) = facts_of(&function);
+            entry.insert(facts);
+            self.usages.extend(nested);
+        }
         true
     }
 
@@ -105,45 +129,47 @@ impl<'a> Visit<'a> for Finder {
 
     fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
         if self.owned == 0 {
-            let attributes = it
-                .attributes
-                .iter()
-                .map(|attribute| match attribute {
-                    JSXAttributeItem::Attribute(attribute) => JsxUsageAttribute::Named(attribute_name(&attribute.name)),
-                    JSXAttributeItem::SpreadAttribute(_) => JsxUsageAttribute::Spread,
-                })
-                .collect();
-            self.usages.push(JsxUsage { tag: tag_of(&it.name), attributes });
+            self.usages.push(usage_of(it));
         }
         walk::walk_jsx_opening_element(self, it);
     }
 }
 
-fn facts_of(function: &ComponentFn<'_, '_>) -> BodyFacts {
-    let params = match function {
-        ComponentFn::Function(function) => &*function.params,
-        ComponentFn::Arrow(arrow) => &*arrow.params,
-    };
+fn usage_of(it: &JSXOpeningElement<'_>) -> JsxUsage {
+    let attributes = it
+        .attributes
+        .iter()
+        .map(|attribute| match attribute {
+            JSXAttributeItem::Attribute(attribute) => JsxUsageAttribute::Named(attribute_name(&attribute.name)),
+            JSXAttributeItem::SpreadAttribute(_) => JsxUsageAttribute::Spread,
+        })
+        .collect();
+    JsxUsage { tag: tag_of(&it.name), attributes }
+}
+
+/// The facts of a component function, and the elements of the components nested in it.
+fn facts_of(function: &ComponentFn<'_, '_>) -> (BodyFacts, Vec<JsxUsage>) {
     let mut reader = BodyReader::default();
-    if let Some(first) = params.items.first() {
-        reader.read_param(&first.pattern);
-    }
     let mut tags = TagNames::default();
     match function {
         ComponentFn::Function(function) => {
+            reader.enter_params(&function.params, true);
             if let Some(body) = &function.body {
                 tags.visit_function_body(body);
                 reader.nested_components = tags.names;
+                reader.declare_statements(&body.statements);
                 reader.visit_function_body(body);
             }
         }
         ComponentFn::Arrow(arrow) => {
+            reader.enter_params(&arrow.params, true);
             tags.visit_arrow_function_body(&arrow.body);
             reader.nested_components = tags.names;
+            reader.declare_statements(arrow_statements(arrow));
             reader.visit_arrow_function_body(&arrow.body);
         }
     }
-    reader.facts
+    (reader.facts, reader.nested_usages)
 }
 
 /// The names a body uses as a component tag (`<Item/>`): a function or class the body declares under one of them is a
@@ -161,50 +187,186 @@ impl<'a> Visit<'a> for TagNames<'a> {
     }
 }
 
+/// What a name in scope is bound to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Bound {
+    /// The props object: the first parameter.
+    Props,
+    /// The props object less some keys: a rest binding destructured from it.
+    Rest,
+    /// The value of one prop: a name destructured from the props object under this key.
+    Prop(String),
+    /// Anything else: a binding that shadows an outer one of the same name.
+    Other,
+}
+
 #[derive(Default)]
 struct BodyReader<'a> {
     facts: BodyFacts,
-    /// The first parameter, when it is a plain identifier (`props`).
-    props: Option<&'a str>,
-    /// The rest binding of a destructured first parameter (`...rest`).
-    rest: Option<&'a str>,
-    /// Each local name a destructured first parameter binds, to the prop it binds (`{ tone: t }` binds `t` to `tone`).
-    locals: FxHashMap<&'a str, String>,
-    /// The functions and classes the body declares and renders as a tag: their bodies are not this component's.
+    /// The scopes from the component function's inward, each with the names it binds.
+    scopes: Vec<FxHashMap<&'a str, Bound>>,
+    /// The functions and classes the body declares and renders as a tag: components of their own.
     nested_components: FxHashSet<&'a str>,
+    /// How many nested components enclose the current node.
+    nested: u32,
+    /// The elements of the nested components.
+    nested_usages: Vec<JsxUsage>,
+}
+
+/// The names a binding pattern binds.
+fn bound_names<'a>(pattern: &BindingPattern<'a>, out: &mut Vec<&'a str>) {
+    match pattern {
+        BindingPattern::BindingIdentifier(id) => out.push(id.name.as_str()),
+        BindingPattern::AssignmentPattern(assignment) => bound_names(&assignment.left, out),
+        BindingPattern::ObjectPattern(object) => {
+            for property in &object.properties {
+                bound_names(&property.value, out);
+            }
+            if let Some(rest) = &object.rest {
+                bound_names(&rest.argument, out);
+            }
+        }
+        BindingPattern::ArrayPattern(array) => {
+            for element in array.elements.iter().flatten() {
+                bound_names(element, out);
+            }
+            if let Some(rest) = &array.rest {
+                bound_names(&rest.argument, out);
+            }
+        }
+    }
 }
 
 impl<'a> BodyReader<'a> {
-    fn read_param(&mut self, pattern: &BindingPattern<'a>) {
-        match pattern {
-            BindingPattern::BindingIdentifier(id) => self.props = Some(id.name.as_str()),
-            // `function C({ a } = {})`.
-            BindingPattern::AssignmentPattern(assignment) => self.read_param(&assignment.left),
-            BindingPattern::ObjectPattern(object) => {
-                for property in &object.properties {
-                    let Some(key) = property.key.static_name() else { continue };
-                    let prop = js_text::property_name(&key);
-                    let local = match &property.value {
-                        BindingPattern::BindingIdentifier(id) => Some(id),
-                        BindingPattern::AssignmentPattern(assignment) => match &assignment.left {
-                            BindingPattern::BindingIdentifier(id) => Some(id),
-                            _ => None,
-                        },
-                        BindingPattern::ObjectPattern(_) | BindingPattern::ArrayPattern(_) => None,
-                    };
-                    if let Some(local) = local {
-                        self.locals.insert(local.name.as_str(), prop.clone());
-                    }
-                    self.read(prop);
-                }
-                if let Some(rest) = &object.rest
-                    && let BindingPattern::BindingIdentifier(id) = &rest.argument
-                {
-                    self.rest = Some(id.name.as_str());
-                    self.facts.rest = Some(id.name.to_string());
-                }
+    /// Binds `name` in the innermost scope; the component function's scope is always open while its body is read.
+    fn bind(&mut self, name: &'a str, bound: Bound) {
+        if self.scopes.is_empty() {
+            self.scopes.push(FxHashMap::default());
+        }
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name, bound);
+        }
+    }
+
+    fn shadow(&mut self, pattern: &BindingPattern<'a>) {
+        let mut names = Vec::new();
+        bound_names(pattern, &mut names);
+        for name in names {
+            self.bind(name, Bound::Other);
+        }
+    }
+
+    /// Opens a function's scope with its parameters. The component's own first parameter is the props object.
+    fn enter_params(&mut self, params: &FormalParameters<'a>, component: bool) {
+        self.scopes.push(FxHashMap::default());
+        for (index, param) in params.items.iter().enumerate() {
+            if component && index == 0 {
+                self.bind_props_param(&param.pattern);
+            } else {
+                self.shadow(&param.pattern);
             }
-            BindingPattern::ArrayPattern(_) => {}
+        }
+        if let Some(rest) = &params.rest {
+            self.shadow(&rest.rest.argument);
+        }
+    }
+
+    fn bind_props_param(&mut self, pattern: &BindingPattern<'a>) {
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => self.bind(id.name.as_str(), Bound::Props),
+            // `function C({ a } = {})`.
+            BindingPattern::AssignmentPattern(assignment) => self.bind_props_param(&assignment.left),
+            BindingPattern::ObjectPattern(object) => self.destructure(object),
+            // An array pattern reads indices of the props object, which says nothing about its keys.
+            BindingPattern::ArrayPattern(_) => {
+                self.facts.handed_on = true;
+                self.shadow(pattern);
+            }
+        }
+    }
+
+    /// An object pattern destructured from the props object: each key is read, a name bound to a key is that prop's
+    /// value, and a rest binding is the props object again. Default values are walked by the caller's visit.
+    fn destructure(&mut self, object: &ObjectPattern<'a>) {
+        for property in &object.properties {
+            let Some(key) = property.key.static_name().map(|key| js_text::property_name(&key)) else {
+                // `{ [k]: v }` reads a key the syntax does not name.
+                self.facts.handed_on = true;
+                self.shadow(&property.value);
+                continue;
+            };
+            let local = match &property.value {
+                BindingPattern::AssignmentPattern(assignment) => &assignment.left,
+                value => value,
+            };
+            match local {
+                BindingPattern::BindingIdentifier(id) => self.bind(id.name.as_str(), Bound::Prop(key.clone())),
+                nested => self.shadow(nested),
+            }
+            self.read(key);
+        }
+        if let Some(rest) = &object.rest {
+            match &rest.argument {
+                BindingPattern::BindingIdentifier(id) => {
+                    self.bind(id.name.as_str(), Bound::Rest);
+                    if self.facts.rest.is_none() {
+                        self.facts.rest = Some(id.name.to_string());
+                    }
+                }
+                other => self.shadow(other),
+            }
+        }
+    }
+
+    /// Binds, as shadows, what the statements of a scope declare: `let`, `const`, `using`, `class` and `function`.
+    /// A `var` belongs to the function and can redeclare a parameter, so it is not taken to shadow.
+    fn declare_statements(&mut self, statements: &[Statement<'a>]) {
+        for statement in statements {
+            match statement {
+                Statement::VariableDeclaration(declaration) if declaration.kind != VariableDeclarationKind::Var => {
+                    for declarator in &declaration.declarations {
+                        self.shadow(&declarator.id);
+                    }
+                }
+                Statement::FunctionDeclaration(function) => {
+                    if let Some(id) = &function.id {
+                        self.bind(id.name.as_str(), Bound::Other);
+                    }
+                }
+                Statement::ClassDeclaration(class) => {
+                    if let Some(id) = &class.id {
+                        self.bind(id.name.as_str(), Bound::Other);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn scoped(&mut self, statements: &[Statement<'a>], walk: impl FnOnce(&mut Self)) {
+        self.scopes.push(FxHashMap::default());
+        self.declare_statements(statements);
+        walk(self);
+        self.scopes.pop();
+    }
+
+    fn lookup(&self, name: &str) -> Option<&Bound> {
+        self.scopes.iter().rev().find_map(|scope| scope.get(name))
+    }
+
+    /// What the props object an identifier is: `Props` or `Rest`, or `None` for anything else.
+    fn whole(&self, name: &str) -> Option<SpreadOf> {
+        match self.lookup(name) {
+            Some(Bound::Props) => Some(SpreadOf::Props),
+            Some(Bound::Rest) => Some(SpreadOf::Rest),
+            _ => None,
+        }
+    }
+
+    fn whole_expr(&self, expr: &Expression<'_>) -> Option<SpreadOf> {
+        match expr {
+            Expression::Identifier(id) => self.whole(id.name.as_str()),
+            _ => None,
         }
     }
 
@@ -214,29 +376,32 @@ impl<'a> BodyReader<'a> {
         }
     }
 
-    fn is_props(&self, name: &str) -> bool {
-        self.props == Some(name)
-    }
-
-    fn is_props_or_rest(&self, name: &str) -> bool {
-        self.props == Some(name) || self.rest == Some(name)
-    }
-
-    /// The prop a member read of `object` names: `props.x`, `props['x']`, or the same on the rest binding when
-    /// `rest_too`.
-    fn member_prop(&self, expr: &Expression<'_>, rest_too: bool) -> Option<String> {
-        let (object, name) = match expr {
-            Expression::StaticMemberExpression(member) => (&member.object, member.property.name.to_string()),
-            Expression::ComputedMemberExpression(member) => match &member.expression {
-                Expression::StringLiteral(key) => (&member.object, js_text::lossy(key.value).into_owned()),
-                _ => return None,
+    /// The prop a member read names, when its object is the props object: `props.x`, `props?.['x']`, `rest.x`.
+    fn member_prop(&self, expr: &Expression<'_>) -> Option<String> {
+        match expr {
+            Expression::StaticMemberExpression(member) if self.whole_expr(&member.object).is_some() => {
+                Some(member.property.name.to_string())
+            }
+            Expression::ComputedMemberExpression(member) if self.whole_expr(&member.object).is_some() => {
+                match &member.expression {
+                    Expression::StringLiteral(key) => Some(js_text::lossy(key.value).into_owned()),
+                    _ => None,
+                }
+            }
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::StaticMemberExpression(member) if self.whole_expr(&member.object).is_some() => {
+                    Some(member.property.name.to_string())
+                }
+                ChainElement::ComputedMemberExpression(member) if self.whole_expr(&member.object).is_some() => {
+                    match &member.expression {
+                        Expression::StringLiteral(key) => Some(js_text::lossy(key.value).into_owned()),
+                        _ => None,
+                    }
+                }
+                _ => None,
             },
-            _ => return None,
-        };
-        let Expression::Identifier(object) = object else { return None };
-        let name_matches =
-            if rest_too { self.is_props_or_rest(object.name.as_str()) } else { self.is_props(object.name.as_str()) };
-        name_matches.then_some(name)
+            _ => None,
+        }
     }
 
     /// The prop an attribute's value is, when it is exactly one: a destructured name, `props.x` or `rest.x`.
@@ -244,17 +409,22 @@ impl<'a> BodyReader<'a> {
         let Some(JSXAttributeValue::ExpressionContainer(container)) = value else { return None };
         let expr = container.expression.as_expression()?;
         match expr {
-            Expression::Identifier(id) => self.locals.get(id.name.as_str()).cloned(),
-            _ => self.member_prop(expr, true),
+            Expression::Identifier(id) => match self.lookup(id.name.as_str()) {
+                Some(Bound::Prop(key)) => Some(key.clone()),
+                _ => None,
+            },
+            _ => self.member_prop(expr),
         }
     }
 
-    fn spread_of(&self, argument: &Expression<'_>) -> SpreadOf {
-        match argument {
-            Expression::Identifier(id) if self.is_props(id.name.as_str()) => SpreadOf::Props,
-            Expression::Identifier(id) if self.rest == Some(id.name.as_str()) => SpreadOf::Rest,
-            _ => SpreadOf::Other,
-        }
+    fn in_nested(&mut self, nested: bool, walk: impl FnOnce(&mut Self)) {
+        self.nested += u32::from(nested);
+        walk(self);
+        self.nested -= u32::from(nested);
+    }
+
+    fn is_nested_component(&self, id: Option<&BindingIdentifier<'_>>) -> bool {
+        id.is_some_and(|id| self.nested_components.contains(id.name.as_str()))
     }
 }
 
@@ -297,318 +467,209 @@ fn attribute_name(name: &JSXAttributeName<'_>) -> String {
 }
 
 impl<'a> Visit<'a> for BodyReader<'a> {
-    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        if let BindingPattern::BindingIdentifier(id) = &it.id
-            && self.nested_components.contains(id.name.as_str())
-        {
-            return;
+    /// The fallback: a use of the props object that no safe form below took hands it on.
+    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
+        if self.whole(it.name.as_str()).is_some() {
+            self.facts.handed_on = true;
         }
-        walk::walk_variable_declarator(self, it);
-    }
-
-    fn visit_function(&mut self, it: &Function<'a>, flags: ScopeFlags) {
-        if it.is_declaration() && it.id.as_ref().is_some_and(|id| self.nested_components.contains(id.name.as_str())) {
-            return;
-        }
-        walk::walk_function(self, it, flags);
-    }
-
-    fn visit_class(&mut self, it: &Class<'a>) {
-        if it.is_declaration() && it.id.as_ref().is_some_and(|id| self.nested_components.contains(id.name.as_str())) {
-            return;
-        }
-        walk::walk_class(self, it);
-    }
-
-    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
-        let attributes = it
-            .attributes
-            .iter()
-            .map(|attribute| match attribute {
-                JSXAttributeItem::Attribute(attribute) => JsxAttributeFact::Named {
-                    name: attribute_name(&attribute.name),
-                    prop: self.value_prop(attribute.value.as_ref()),
-                },
-                JSXAttributeItem::SpreadAttribute(spread) => {
-                    let of = self.spread_of(&spread.argument);
-                    if of == SpreadOf::Props {
-                        self.facts.handed_on = true;
-                    }
-                    JsxAttributeFact::Spread(of)
-                }
-            })
-            .collect();
-        self.facts.elements.push(JsxElementFact { tag: tag_of(&it.name), attributes });
-        walk::walk_jsx_opening_element(self, it);
     }
 
     fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
-        if let Expression::Identifier(object) = &it.object
-            && self.is_props(object.name.as_str())
-        {
+        if self.whole_expr(&it.object).is_some() {
             self.read(it.property.name.to_string());
+            return;
         }
         walk::walk_static_member_expression(self, it);
     }
 
     fn visit_computed_member_expression(&mut self, it: &ComputedMemberExpression<'a>) {
-        if let (Expression::Identifier(object), Expression::StringLiteral(key)) = (&it.object, &it.expression)
-            && self.is_props(object.name.as_str())
+        if self.whole_expr(&it.object).is_some()
+            && let Expression::StringLiteral(key) = &it.expression
         {
             self.read(js_text::lossy(key.value).into_owned());
+            return;
         }
         walk::walk_computed_member_expression(self, it);
     }
 
-    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if it.arguments.iter().any(|argument| {
-            matches!(argument.as_expression(), Some(Expression::Identifier(id)) if self.is_props_or_rest(id.name.as_str()))
-        }) {
-            self.facts.handed_on = true;
+    fn visit_jsx_member_expression(&mut self, it: &JSXMemberExpression<'a>) {
+        if let JSXMemberExpressionObject::IdentifierReference(object) = &it.object
+            && self.whole(object.name.as_str()).is_some()
+        {
+            self.read(it.property.name.to_string());
+            return;
         }
-        walk::walk_call_expression(self, it);
+        walk::walk_jsx_member_expression(self, it);
     }
+
+    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
+        if let (BindingPattern::ObjectPattern(object), Some(init)) = (&it.id, &it.init)
+            && self.whole_expr(init).is_some()
+        {
+            self.destructure(object);
+            // Default values and computed keys, not the initializer: it is the props object, taken apart.
+            self.visit_binding_pattern(&it.id);
+            return;
+        }
+        let nested = matches!(&it.id, BindingPattern::BindingIdentifier(id) if self.is_nested_component(Some(id)))
+            && it.init.as_ref().is_some_and(|init| {
+                unwrap(init).is_some() || matches!(peel_expr(init), Expression::ClassExpression(_))
+            });
+        self.in_nested(nested, |reader| walk::walk_variable_declarator(reader, it));
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        if let AssignmentTarget::ObjectAssignmentTarget(object) = &it.left
+            && self.whole_expr(&it.right).is_some()
+        {
+            for property in &object.properties {
+                match property {
+                    AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(property) => {
+                        self.read(property.binding.name.to_string());
+                    }
+                    AssignmentTargetProperty::AssignmentTargetPropertyProperty(property) => {
+                        match property.name.static_name() {
+                            Some(key) => self.read(js_text::property_name(&key)),
+                            None => self.facts.handed_on = true,
+                        }
+                    }
+                }
+            }
+            // The rest target is an existing binding the props object is copied into: not followed.
+            if object.rest.is_some() {
+                self.facts.handed_on = true;
+            }
+            self.visit_assignment_target(&it.left);
+            return;
+        }
+        walk::walk_assignment_expression(self, it);
+    }
+
+    fn visit_function(&mut self, it: &Function<'a>, flags: ScopeFlags) {
+        let nested = it.is_declaration() && self.is_nested_component(it.id.as_ref());
+        self.in_nested(nested, |reader| {
+            reader.enter_params(&it.params, false);
+            if let Some(body) = &it.body {
+                reader.declare_statements(&body.statements);
+            }
+            walk::walk_function(reader, it, flags);
+            reader.scopes.pop();
+        });
+    }
+
+    fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
+        self.enter_params(&it.params, false);
+        self.declare_statements(arrow_statements(it));
+        walk::walk_arrow_function_expression(self, it);
+        self.scopes.pop();
+    }
+
+    fn visit_class(&mut self, it: &Class<'a>) {
+        let nested = it.is_declaration() && self.is_nested_component(it.id.as_ref());
+        self.in_nested(nested, |reader| walk::walk_class(reader, it));
+    }
+
+    fn visit_block_statement(&mut self, it: &BlockStatement<'a>) {
+        self.scoped(&it.body, |reader| walk::walk_block_statement(reader, it));
+    }
+
+    fn visit_static_block(&mut self, it: &StaticBlock<'a>) {
+        self.scoped(&it.body, |reader| walk::walk_static_block(reader, it));
+    }
+
+    fn visit_switch_statement(&mut self, it: &SwitchStatement<'a>) {
+        self.scopes.push(FxHashMap::default());
+        for case in &it.cases {
+            self.declare_statements(&case.consequent);
+        }
+        walk::walk_switch_statement(self, it);
+        self.scopes.pop();
+    }
+
+    fn visit_catch_clause(&mut self, it: &CatchClause<'a>) {
+        self.scopes.push(FxHashMap::default());
+        if let Some(param) = &it.param {
+            self.shadow(&param.pattern);
+        }
+        walk::walk_catch_clause(self, it);
+        self.scopes.pop();
+    }
+
+    fn visit_for_statement(&mut self, it: &ForStatement<'a>) {
+        self.scopes.push(FxHashMap::default());
+        if let Some(ForStatementInit::VariableDeclaration(declaration)) = &it.init
+            && declaration.kind != VariableDeclarationKind::Var
+        {
+            for declarator in &declaration.declarations {
+                self.shadow(&declarator.id);
+            }
+        }
+        walk::walk_for_statement(self, it);
+        self.scopes.pop();
+    }
+
+    fn visit_for_of_statement(&mut self, it: &ForOfStatement<'a>) {
+        self.scopes.push(FxHashMap::default());
+        if let ForStatementLeft::VariableDeclaration(declaration) = &it.left
+            && declaration.kind != VariableDeclarationKind::Var
+        {
+            for declarator in &declaration.declarations {
+                self.shadow(&declarator.id);
+            }
+        }
+        walk::walk_for_of_statement(self, it);
+        self.scopes.pop();
+    }
+
+    fn visit_for_in_statement(&mut self, it: &ForInStatement<'a>) {
+        self.scopes.push(FxHashMap::default());
+        if let ForStatementLeft::VariableDeclaration(declaration) = &it.left
+            && declaration.kind != VariableDeclarationKind::Var
+        {
+            for declarator in &declaration.declarations {
+                self.shadow(&declarator.id);
+            }
+        }
+        walk::walk_for_in_statement(self, it);
+        self.scopes.pop();
+    }
+
+    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+        if self.nested > 0 {
+            self.nested_usages.push(usage_of(it));
+        } else {
+            let attributes = it
+                .attributes
+                .iter()
+                .map(|attribute| match attribute {
+                    JSXAttributeItem::Attribute(attribute) => JsxAttributeFact::Named {
+                        name: attribute_name(&attribute.name),
+                        prop: self.value_prop(attribute.value.as_ref()),
+                    },
+                    JSXAttributeItem::SpreadAttribute(spread) => {
+                        JsxAttributeFact::Spread(self.whole_expr(&spread.argument).unwrap_or(SpreadOf::Other))
+                    }
+                })
+                .collect();
+            self.facts.elements.push(JsxElementFact { tag: tag_of(&it.name), attributes });
+        }
+        walk::walk_jsx_opening_element(self, it);
+    }
+
+    fn visit_jsx_spread_attribute(&mut self, it: &JSXSpreadAttribute<'a>) {
+        match self.whole_expr(&it.argument) {
+            // Spreading the whole props object passes every prop on.
+            Some(SpreadOf::Props) => self.facts.handed_on = true,
+            Some(SpreadOf::Rest | SpreadOf::Other) => {}
+            None => walk::walk_jsx_spread_attribute(self, it),
+        }
+    }
+}
+
+/// The statements of an arrow's block body; none for an expression body.
+fn arrow_statements<'b, 'a>(arrow: &'b ArrowFunctionExpression<'a>) -> &'b [Statement<'a>] {
+    arrow.body.as_function_body().map_or(&[], |body| &body.statements)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::extractor::parse_file;
-
-    fn body_of(source: &str, component: &str) -> Option<BodyFacts> {
-        let data = parse_file(camino::Utf8Path::new("/p/c.tsx"), source);
-        let mapping = data.component_mappings.iter().find(|mapping| mapping.component_name == component);
-        mapping.unwrap_or_else(|| panic!("no component {component}")).body.clone()
-    }
-
-    fn facts(source: &str, component: &str) -> BodyFacts {
-        body_of(source, component).expect("the component has a function body")
-    }
-
-    fn named(name: &str, prop: Option<&str>) -> JsxAttributeFact {
-        JsxAttributeFact::Named { name: name.into(), prop: prop.map(Into::into) }
-    }
-
-    fn intrinsic(tag: &str, attributes: Vec<JsxAttributeFact>) -> JsxElementFact {
-        JsxElementFact { tag: JsxTag::Intrinsic(tag.into()), attributes }
-    }
-
-    fn component(tag: &str, attributes: Vec<JsxAttributeFact>) -> JsxElementFact {
-        JsxElementFact { tag: JsxTag::Identifier(tag.into()), attributes }
-    }
-
-    fn reads(facts: &BodyFacts) -> Vec<&str> {
-        facts.reads.iter().map(String::as_str).collect()
-    }
-
-    #[test]
-    fn destructuring_reads_renamed_defaulted_nested_keys_and_the_rest_binding() {
-        let facts = facts(
-            "export function C({ tone: t, size = 'md', style: { color }, ...rest }: P) {\n\
-               return <div data-tone={t} data-size={size} data-color={color} {...rest} />\n\
-             }",
-            "C",
-        );
-        assert_eq!(reads(&facts), ["tone", "size", "style"]);
-        assert_eq!(facts.rest.as_deref(), Some("rest"));
-        assert_eq!(
-            facts.elements,
-            [intrinsic(
-                "div",
-                vec![
-                    named("data-tone", Some("tone")),
-                    named("data-size", Some("size")),
-                    named("data-color", None),
-                    JsxAttributeFact::Spread(SpreadOf::Rest),
-                ]
-            )]
-        );
-        assert!(!facts.handed_on);
-    }
-
-    #[test]
-    fn member_reads_of_the_props_identifier_are_reads_anywhere_in_the_body() {
-        let facts = facts(
-            "export function C(props: P) {\n\
-               const label = props.label;\n\
-               const onClick = () => props['onPress']?.();\n\
-               return <button title={props.title} aria-label={label} onClick={onClick} />\n\
-             }",
-            "C",
-        );
-        assert_eq!(reads(&facts), ["label", "onPress", "title"]);
-        assert_eq!(facts.rest, None);
-        assert_eq!(
-            facts.elements,
-            [intrinsic(
-                "button",
-                vec![named("title", Some("title")), named("aria-label", None), named("onClick", None)]
-            )]
-        );
-    }
-
-    #[test]
-    fn attributes_keep_their_order_around_a_spread_and_the_spread_says_what_it_spreads() {
-        let facts = facts(
-            "export const C = ({ id, ...rest }: P) => (\n\
-               <section>\n\
-                 <input id={id} {...rest} type=\"text\" />\n\
-                 <Field {...rest} id={rest.id} />\n\
-                 <span {...other} />\n\
-               </section>\n\
-             )",
-            "C",
-        );
-        assert_eq!(
-            facts.elements,
-            [
-                intrinsic("section", vec![]),
-                intrinsic(
-                    "input",
-                    vec![named("id", Some("id")), JsxAttributeFact::Spread(SpreadOf::Rest), named("type", None)]
-                ),
-                component("Field", vec![JsxAttributeFact::Spread(SpreadOf::Rest), named("id", Some("id"))]),
-                intrinsic("span", vec![JsxAttributeFact::Spread(SpreadOf::Other)]),
-            ]
-        );
-        assert!(!facts.handed_on);
-    }
-
-    #[test]
-    fn spreading_the_whole_props_object_or_passing_it_to_a_call_hands_it_on() {
-        let spread = facts("export function C(props: P) { return <Inner {...props} /> }", "C");
-        assert_eq!(spread.elements, [component("Inner", vec![JsxAttributeFact::Spread(SpreadOf::Props)])]);
-        assert!(spread.handed_on);
-
-        let hook = facts("export function C(props: P) { const state = useX(props); return <div /> }", "C");
-        assert!(hook.handed_on);
-
-        let rest = facts("export function C({ a, ...rest }: P) { useY(rest); return <div /> }", "C");
-        assert!(rest.handed_on);
-
-        let neither = facts("export function C(props: P) { useX(props.a); return <div {...props.b} /> }", "C");
-        assert!(!neither.handed_on);
-        assert_eq!(neither.elements, [intrinsic("div", vec![JsxAttributeFact::Spread(SpreadOf::Other)])]);
-    }
-
-    #[test]
-    fn tags_follow_the_jsx_rule_not_a_list_of_names() {
-        let facts = facts(
-            "export function C(props: P) {\n\
-               return <><chakra.button /><Menu.Item.Label /><my-element /><svg:path /><Box /><div /></>\n\
-             }",
-            "C",
-        );
-        let tags: Vec<&JsxTag> = facts.elements.iter().map(|element| &element.tag).collect();
-        assert_eq!(
-            tags,
-            [
-                &JsxTag::Member("chakra.button".into()),
-                &JsxTag::Member("Menu.Item.Label".into()),
-                &JsxTag::Intrinsic("my-element".into()),
-                &JsxTag::Intrinsic("svg:path".into()),
-                &JsxTag::Identifier("Box".into()),
-                &JsxTag::Intrinsic("div".into()),
-            ]
-        );
-    }
-
-    #[test]
-    fn forward_ref_and_memo_wrapped_functions_are_read_through_the_wrapper() {
-        let source = "import { forwardRef, memo } from 'react';\n\
-             export const A = forwardRef<HTMLButtonElement, P>(function A({ size }, ref) {\n\
-               return <button ref={ref} data-size={size} />\n\
-             });\n\
-             export const B = memo(forwardRef((props: P, ref) => <a ref={ref} href={props.href} />));\n\
-             export const M = memo(function M({ label }: P) { return <span>{label}</span> });";
-        let a = facts(source, "A");
-        assert_eq!(reads(&a), ["size"]);
-        assert_eq!(a.elements, [intrinsic("button", vec![named("ref", None), named("data-size", Some("size"))])]);
-        let b = facts(source, "B");
-        assert_eq!(reads(&b), ["href"]);
-        assert_eq!(b.elements, [intrinsic("a", vec![named("ref", None), named("href", Some("href"))])]);
-        let m = facts(source, "M");
-        assert_eq!(reads(&m), ["label"]);
-        assert_eq!(m.elements, [intrinsic("span", vec![])]);
-    }
-
-    #[test]
-    fn every_return_branch_and_both_sides_of_a_conditional_are_recorded() {
-        let facts = facts(
-            "export function C({ href, open }: P) {\n\
-               if (href) return <a href={href} />;\n\
-               return open ? <Dialog open={open} /> : (open === false && <span />);\n\
-             }",
-            "C",
-        );
-        assert_eq!(
-            facts.elements,
-            [
-                intrinsic("a", vec![named("href", Some("href"))]),
-                component("Dialog", vec![named("open", Some("open"))]),
-                intrinsic("span", vec![]),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_nested_component_rendered_as_a_tag_keeps_its_elements_and_callbacks_do_not() {
-        let facts = facts(
-            "export function C({ items }: P) {\n\
-               const Row = ({ item }: { item: string }) => <li data-item={item} />;\n\
-               function Empty() { return <em /> }\n\
-               return items.length ? <ul>{items.map((item) => <Row item={item} />)}</ul> : <Empty />;\n\
-             }",
-            "C",
-        );
-        assert_eq!(
-            facts.elements,
-            [intrinsic("ul", vec![]), component("Row", vec![named("item", None)]), component("Empty", vec![])]
-        );
-    }
-
-    #[test]
-    fn create_element_calls_record_no_elements() {
-        let facts = facts(
-            "import React from 'react';\n\
-             export function C({ onPress }: P): React.ReactElement {\n\
-               return React.createElement('button', { onClick: onPress });\n\
-             }",
-            "C",
-        );
-        assert_eq!(reads(&facts), ["onPress"]);
-        assert_eq!(facts.elements, []);
-        assert!(!facts.handed_on);
-    }
-
-    #[test]
-    fn jsx_outside_every_component_body_is_a_usage_of_the_file() {
-        let data = parse_file(
-            camino::Utf8Path::new("/p/c.stories.tsx"),
-            "export function C(props: P) { return <div {...props} /> }\n\
-             export const icon = <svg:g><Icon.Star size=\"sm\" {...rest} /></svg:g>;\n\
-             export const Primary = { render: (args) => <C {...args} tone=\"loud\" /> };",
-        );
-        assert_eq!(
-            data.jsx_usages,
-            [
-                JsxUsage { tag: JsxTag::Intrinsic("svg:g".into()), attributes: vec![] },
-                JsxUsage {
-                    tag: JsxTag::Member("Icon.Star".into()),
-                    attributes: vec![JsxUsageAttribute::Named("size".into()), JsxUsageAttribute::Spread],
-                },
-                JsxUsage {
-                    tag: JsxTag::Identifier("C".into()),
-                    attributes: vec![JsxUsageAttribute::Spread, JsxUsageAttribute::Named("tone".into())],
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn a_component_with_no_function_of_its_own_has_no_body_facts() {
-        let source = "import { Component } from 'react';\n\
-             export class K extends Component<P> { render() { return <div /> } }";
-        assert_eq!(body_of(source, "K"), None);
-    }
-}
+mod tests;
