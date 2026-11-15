@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_018SPhZNVPMcj2YsmPsPWvnQ",
+  "agent_id": "a5489ad4a77f3f63b",
+  "subagent_type": "general-purpose",
+  "task_description": "Live upgrade in real Storybook",
+  "token_usage": {
+    "input_tokens": 60,
+    "cache_creation_tokens": 70733,
+    "cache_read_tokens": 1546874,
+    "output_tokens": 12755,
+    "api_call_count": 28
+  },
+  "started_at": "2026-11-14T22:45:05.340656-08:00",
+  "completed_at": "2026-11-14T22:49:13.506605-08:00"
+}
