@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_018VMTfaoWqqzNUEMzdMoZ7D",
+  "agent_id": "a503200db488240ba",
+  "subagent_type": "general-purpose",
+  "task_description": "F1: factory own props (ADR 0028 wave 1)",
+  "token_usage": {
+    "input_tokens": 238,
+    "cache_creation_tokens": 253365,
+    "cache_read_tokens": 19939881,
+    "output_tokens": 65550,
+    "api_call_count": 119
+  },
+  "started_at": "2026-11-15T13:40:43.329168-08:00",
+  "completed_at": "2026-11-15T14:06:08.781866-08:00"
+}
