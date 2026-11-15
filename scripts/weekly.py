@@ -13,10 +13,15 @@ reader of Caliper's output answers against the checker (scripts/agent_eval.py).
 --previous FILE compares with an earlier record (the last green run's artifact) and writes --issue FILE for the workflow
 to open or update one issue with, when a wrong type is above the gate or rises, a reader's question is answered
 silent-wrong, or a whole run is over a budget (scripts/headline.py). Drift in time, memory and recall against RDT is
-listed in the summary, not alarmed on. Nothing here fails a pull request.
+listed in the summary, not alarmed on.
+
+Every measured command's exit status and wall time go to stderr, and --out is written after each corpus. A corpus whose
+command exits non-zero, dies of a signal or runs past STEP_TIMEOUT is recorded under `failed` (step, exit status, last
+20 lines of stderr) and the next corpus still runs; the exit status is 1 at the end if any failed. --enforce-budgets
+also exits 1 when a whole run is over its corpus's budget: the `corpora-budget` job of the release pull request.
 
 Usage: scripts/weekly.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR] [--runs N] [--oracle] [--agent-eval]
-                         [--previous FILE] [--baseline-failed] [--out FILE] [--markdown FILE] [--issue FILE]
+                         [--previous FILE] [--baseline-failed] [--enforce-budgets] [--out FILE] [--markdown FILE] [--issue FILE]
 """
 import argparse
 import json
@@ -26,6 +31,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 
 import agent_eval
 import corpora
@@ -49,6 +55,55 @@ REFERENCE_VERSION = 3
 # `--no-checker`, so the oracle's props and verdicts are not the same measurement. Raise it when a change moves what the
 # oracle counts.
 UNIVERSE_VERSION = 5
+# No single measured command runs longer than this (seconds): a hung one is killed and its corpus recorded as failed.
+STEP_TIMEOUT = 2400
+
+
+class StepFailed(Exception):
+    """A command of one corpus's measurement that did not finish well: `step` names it, `code` is its exit status
+    (negative for a signal, None for a timeout) and `tail` the last 20 lines of its stderr."""
+
+    def __init__(self, step, message, code=None, tail=''):
+        super().__init__(message)
+        self.step = step
+        self.code = code
+        self.tail = tail
+
+
+def log(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+def step(label, command, stdout=subprocess.DEVNULL, timeout=None):
+    """`run_once` of one measured command, logging its exit status and wall time to stderr; a command that fails is a
+    StepFailed naming `label`."""
+    start = time.monotonic()
+    try:
+        result = run_once(command, stdout=stdout, timeout=STEP_TIMEOUT if timeout is None else timeout)
+    except corpora.RunFailed as error:
+        log(f'{label}: exit {error.code if error.code is not None else "none"} after {time.monotonic() - start:.1f} s: {error}')
+        raise StepFailed(label, str(error), error.code, error.tail) from error
+    log(f'{label}: exit 0 after {time.monotonic() - start:.1f} s')
+    return result
+
+
+def capture(label, command, timeout=None):
+    """The stdout of a command that must succeed, logged like `step`."""
+    start = time.monotonic()
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, errors='replace',
+                              timeout=STEP_TIMEOUT if timeout is None else timeout)
+    except subprocess.TimeoutExpired as error:
+        log(f'{label}: timed out after {time.monotonic() - start:.1f} s')
+        raise StepFailed(label, f'{label} ran past its {error.timeout} s timeout and was killed') from error
+    except OSError as error:
+        log(f'{label}: cannot run: {error}')
+        raise StepFailed(label, f'{label}: cannot run: {error}', 127) from error
+    log(f'{label}: exit {done.returncode} after {time.monotonic() - start:.1f} s')
+    if done.returncode != 0:
+        raise StepFailed(label, f'{label} exited with {done.returncode}', done.returncode,
+                         '\n'.join(done.stderr.strip().splitlines()[-20:]))
+    return done.stdout
 
 
 def norm_name(name):
@@ -81,14 +136,14 @@ def program_inputs(name, src, out_dir):
     return list_file, tsconfig
 
 
-def tool_run(command, out):
+def tool_run(command, out, label='tool'):
     """One whole run of a Node tool that writes its components to `out`: wall ms, peak RSS MiB and the components."""
-    seconds, rss = run_once(command)
+    seconds, rss = step(label, command)
     with open(out) as f:
         return {'ms': round(seconds * 1000), 'rss_mib': round(rss)}, json.load(f)['components']
 
 
-def caliper_run(binary, src, runs):
+def caliper_run(binary, src, runs, label='Caliper'):
     """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
     loaded, `--collapse-inherited-props dependencies` pinned: the addon's default), and the JSON's size. The checker answers, as
     it does by default (docs/measurement.md). The parse caches are warm (a warm-up run fills them), but each timed run
@@ -97,34 +152,34 @@ def caliper_run(binary, src, runs):
     with tempfile.TemporaryDirectory() as cache, tempfile.TemporaryFile() as out:
         command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'dependencies',
                    '--cache-dir', cache]
-        run_once(command, stdout=out)
+        step(f'{label} warm-up', command, stdout=out)
         size = out.tell()
         kept = os.path.join(cache, 'checker-answers.msgpack')
         samples = []
         for _ in range(runs):
             if os.path.exists(kept):
                 os.remove(kept)
-            samples.append(run_once(command))
-        reruns = [run_once(command) for _ in range(runs)]
+            samples.append(step(f'{label} run {len(samples) + 1}', command))
+        reruns = [step(f'{label} rerun {i + 1}', command) for i in range(runs)]
     return {'ms': round(statistics.median(s for s, _ in samples) * 1000), 'rss_mib': round(max(r for _, r in samples)),
             'json_mb': round(size / 2**20, 2), 'rerun_ms': round(statistics.median(s for s, _ in reruns) * 1000)}
 
 
-def caliper_components(binary, src, root):
+def caliper_components(binary, src, root, label='Caliper components'):
     """Caliper's components in RDT's format, as (file, name) -> prop names."""
     command = [binary, 'extract', '--src', src, '--format', 'rdt', '--html-attributes', 'full', '--include-unexported',
                '--quiet', '--load-dependencies', '--collapse-inherited-props', 'none']
-    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
+    out = capture(label, command)
     return {(relative(c['filePath'], root), norm_name(c['displayName'])): set(c['props'])
             for c in json.loads(out[out.index('{'):]).values()}
 
 
-def caliper_layer_members(binary, src, root):
+def caliper_layer_members(binary, src, root, label='Caliper layers'):
     """The props Caliper's collapsed inheritance layers hold, as (file, name) -> prop names: the output names them in a
     layer instead of listing them as props, and the canonical JSON is the one that carries the layers."""
     command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
                '--load-dependencies', '--collapse-inherited-props', 'none']
-    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
+    out = capture(label, command)
     document = schema_version.check(json.loads(out[out.index('{'):]), 'weekly')
     lists = document.get('nameLists', {})
     members = {}
@@ -513,26 +568,28 @@ def measure(args, corpus, work):
     root = os.path.join(os.path.abspath(args.corpora), corpus['clone'])
     src = corpora.ready(corpus, os.path.abspath(args.corpora), sparse=False)
     if not src:
-        sys.exit(f"{corpus['name']}: not installed; run `scripts/corpora.py setup` first")
+        raise StepFailed('setup', f"{corpus['name']}: not installed; run `scripts/corpora.py setup` first")
     list_file, tsconfig = program_inputs(corpus['name'], src, work)
     print(f"{corpus['name']}: RDT", file=sys.stderr, flush=True)
     rdt_out = os.path.join(work, f"{corpus['name']}.rdt.json")
     rdt, rdt_components = tool_run(['node', '--max-old-space-size=8192', os.path.join(ROOT, 'scripts', 'rdt.mjs'),
-                                    list_file, tsconfig, rdt_out], rdt_out)
+                                    list_file, tsconfig, rdt_out], rdt_out,
+                                   f"{corpus['name']} RDT")
     print(f"{corpus['name']}: react-docgen", file=sys.stderr, flush=True)
     rdg_out = os.path.join(work, f"{corpus['name']}.rdg.json")
-    rdg, rdg_components = tool_run(['node', os.path.join(ROOT, 'scripts', 'rdg.mjs'), list_file, rdg_out], rdg_out)
+    rdg, rdg_components = tool_run(['node', os.path.join(ROOT, 'scripts', 'rdg.mjs'), list_file, rdg_out], rdg_out,
+                                   f"{corpus['name']} react-docgen")
     print(f"{corpus['name']}: Caliper", file=sys.stderr, flush=True)
     found = {(relative(c['file'], root), norm_name(c['name'])): set(c['props']) for c in rdg_components}
-    caliper_found = caliper_components(args.bin, src, root)
+    caliper_found = caliper_components(args.bin, src, root, f"{corpus['name']} Caliper components")
     items, counts = reference(rdt_components, caliper_found, root)
     entry = {
         'commit': corpus['commit'],
-        'caliper': caliper_run(args.bin, src, args.runs),
+        'caliper': caliper_run(args.bin, src, args.runs, f"{corpus['name']} Caliper"),
         'rdt': rdt,
         'react_docgen': rdg,
         'reference': counts,
-        'recall': {'caliper': recall(items, caliper_found, caliper_layer_members(args.bin, src, root)),
+        'recall': {'caliper': recall(items, caliper_found, caliper_layer_members(args.bin, src, root, f"{corpus['name']} Caliper layers")),
                    'react_docgen': recall(items, found)},
     }
     if args.oracle:
@@ -732,6 +789,44 @@ def errors(record):
             if isinstance(entry.get(part), dict) and 'error' in entry[part]]
 
 
+def failures(record):
+    """What a corpus that did not finish left behind (`record['failed']`), as issue lines."""
+    return [f"{name}: failed at {f['step']}" + (f", exit {f['exit']}" if f['exit'] is not None else '') + f": {f['error'][:200]}"
+            for name, f in record.get('failed', {}).items()]
+
+
+def budget_breaches(record, budgets=None):
+    """The budgets (scripts/headline.py) a whole run of a measured corpus is over, one line each."""
+    return [line for name, entry in record['corpora'].items() for line in headline.over_budget(name, entry, budgets)]
+
+
+def save(record, path):
+    """Write the record so far, whole or not at all: a run that is killed later leaves this one behind."""
+    if path:
+        with open(path + '.tmp', 'w') as f:
+            f.write(json.dumps(record, indent=2) + '\n')
+        os.replace(path + '.tmp', path)
+
+
+def measure_all(args, work, version):
+    """Every selected corpus, in order. The record (`--out`) is written after each one, and a corpus whose command fails,
+    is killed or runs past its timeout is recorded under `failed` with the step, the exit status and the end of its
+    stderr, while the next corpus still runs."""
+    record = {'caliper': version, 'runs': args.runs, 'reference_version': REFERENCE_VERSION, 'corpora': {}, 'failed': {}}
+    for corpus in selected(args.corpus):
+        name = corpus['name']
+        try:
+            record['corpora'][name] = measure(args, corpus, work)
+        except (StepFailed, OSError, ValueError, KeyError) as error:
+            # A tool that exits 0 and writes no or broken output fails its corpus too, not the run.
+            failure = error if isinstance(error, StepFailed) else StepFailed('measure', f'{type(error).__name__}: {error}')
+            log(f'{name}: FAILED at {failure.step}: {failure}')
+            record['failed'][name] = {'step': failure.step, 'exit': failure.code, 'error': str(failure)[:500],
+                                      'stderr_tail': failure.tail.splitlines()}
+        save(record, args.out)
+    return record
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--bin', required=True)
@@ -744,6 +839,8 @@ def main():
     parser.add_argument('--previous')
     parser.add_argument('--baseline-failed', action='store_true', help='the download of --previous failed: say so and open the issue')
     parser.add_argument('--out')
+    parser.add_argument('--enforce-budgets', action='store_true',
+                        help='exit 1 when a whole run is over its corpus budget (the release gate; the weekly opens an issue)')
     parser.add_argument('--markdown')
     parser.add_argument('--issue')
     args = parser.parse_args()
@@ -751,12 +848,11 @@ def main():
     work = os.path.abspath(args.work)
     os.makedirs(work, exist_ok=True)
     version = subprocess.run([args.bin, '--version'], capture_output=True, text=True).stdout.strip()
-    record = {'caliper': version, 'runs': args.runs, 'reference_version': REFERENCE_VERSION,
-              'corpora': {c['name']: measure(args, c, work) for c in selected(args.corpus)}}
+    record = measure_all(args, work, version)
     reference_changed = None
     if previous and not same_reference(record, previous):
         reference_changed = previous.get('reference_version', 1)
-    notes = findings(record, previous) + errors(record)
+    notes = findings(record, previous) + errors(record) + failures(record)
     table = markdown(record, notes, reference_changed, changes(record, previous), baseline=bool(previous),
                      baseline_failed=args.baseline_failed)
     issue_notes = notes + ([BASELINE_FAILED] if args.baseline_failed else [])
@@ -767,6 +863,13 @@ def main():
         if path and content:
             with open(path, 'w') as f:
                 f.write(content)
+    breaches = budget_breaches(record) if args.enforce_budgets else []
+    for line in breaches:
+        print(f'::error::over budget: {line}', file=sys.stderr)
+    for line in failures(record):
+        print(f'::error::{line}', file=sys.stderr)
+    if breaches or record['failed']:
+        sys.exit(1)
 
 
 if __name__ == '__main__':
