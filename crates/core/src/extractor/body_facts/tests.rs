@@ -1,0 +1,549 @@
+use super::*;
+use crate::extractor::parse_file;
+use crate::types::collected::SourceData;
+
+fn parse(source: &str) -> SourceData {
+    parse_file(camino::Utf8Path::new("/p/c.tsx"), source)
+}
+
+fn body_of(source: &str, component: &str) -> Option<BodyFacts> {
+    let data = parse(source);
+    let mapping = data.component_mappings.iter().find(|mapping| mapping.component_name == component);
+    mapping.unwrap_or_else(|| panic!("no component {component}")).body.clone()
+}
+
+fn facts(source: &str, component: &str) -> BodyFacts {
+    body_of(source, component).expect("the component has a function body")
+}
+
+fn named(name: &str, prop: Option<&str>) -> JsxAttributeFact {
+    JsxAttributeFact::Named { name: name.into(), prop: prop.map(Into::into) }
+}
+
+fn intrinsic(tag: &str, attributes: Vec<JsxAttributeFact>) -> JsxElementFact {
+    JsxElementFact { tag: JsxTag::Intrinsic(tag.into()), attributes }
+}
+
+fn component(tag: &str, attributes: Vec<JsxAttributeFact>) -> JsxElementFact {
+    JsxElementFact { tag: JsxTag::Identifier(tag.into()), attributes }
+}
+
+fn usage(tag: JsxTag) -> JsxUsage {
+    JsxUsage { tag, attributes: vec![] }
+}
+
+fn reads(facts: &BodyFacts) -> Vec<&str> {
+    facts.reads.iter().map(String::as_str).collect()
+}
+
+#[test]
+fn destructuring_reads_renamed_defaulted_nested_keys_and_the_rest_binding() {
+    let facts = facts(
+        "export function C({ tone: t, size = 'md', style: { color }, ...rest }: P) {\n\
+           return <div data-tone={t} data-size={size} data-color={color} {...rest} />\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["tone", "size", "style"]);
+    assert_eq!(facts.rests, ["rest"]);
+    assert_eq!(
+        facts.elements,
+        [intrinsic(
+            "div",
+            vec![
+                named("data-tone", Some("tone")),
+                // A defaulted name is the prop or its default, not the prop.
+                named("data-size", None),
+                named("data-color", None),
+                JsxAttributeFact::Spread(SpreadOf::Rest),
+            ]
+        )]
+    );
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn member_reads_of_the_props_identifier_are_reads_anywhere_in_the_body() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const label = props.label;\n\
+           const onClick = () => use(props['onPress']);\n\
+           return <button title={props.title} aria-label={label} onClick={onClick} />\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["label", "onPress", "title"]);
+    assert_eq!(facts.rests, Vec::<String>::new());
+    assert_eq!(
+        facts.elements,
+        [intrinsic("button", vec![named("title", Some("title")), named("aria-label", None), named("onClick", None)])]
+    );
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn the_three_safe_uses_read_keys_and_do_not_hand_the_props_on() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const a = props?.a; const b = props?.['b'];\n\
+           const { tone, size = 1, ...r } = props;\n\
+           let c; ({ c } = props);\n\
+           return <div data-x={r.extra} {...r} />\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["a", "b", "tone", "size", "c", "extra"]);
+    assert_eq!(facts.rests, ["r"]);
+    assert_eq!(
+        facts.elements,
+        [intrinsic("div", vec![named("data-x", Some("extra")), JsxAttributeFact::Spread(SpreadOf::Rest)])]
+    );
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn every_other_use_of_the_props_object_hands_it_on() {
+    let uses = [
+        "useX(props)",
+        "new Store(props)",
+        "<Child p={props} />",
+        "({ value: props })",
+        "({ props })",
+        "({ ...props })",
+        "[props]",
+        "useMemo(() => 1, [props])",
+        "props[key]",
+        "typeof props",
+        "const copy = props",
+        "const [first] = props",
+        "useY(rest)",
+        "({ ...rest })",
+    ];
+    for used in uses {
+        let source =
+            format!("export function C(props: P) {{ const {{ a, ...rest }} = props; {used}; return <div /> }}");
+        assert!(facts(&source, "C").handed_on, "`{used}` hands the props object on");
+    }
+    let returned = facts("export function C(props: P) { if (props.a) return <i />; return props }", "C");
+    assert!(returned.handed_on);
+    let spread = facts("export function C(props: P) { return <Inner {...props} /> }", "C");
+    assert_eq!(spread.elements, [component("Inner", vec![JsxAttributeFact::Spread(SpreadOf::Props)])]);
+    assert!(spread.handed_on);
+}
+
+#[test]
+fn a_shadowing_parameter_or_local_is_another_binding() {
+    let callback = facts(
+        "export const C = ({ tone, items }: P) => (\n\
+           <ul>{items.map((tone) => <i data-x={tone} />)}</ul>\n\
+         )",
+        "C",
+    );
+    assert_eq!(callback.elements[1], intrinsic("i", vec![named("data-x", None)]));
+
+    let shadowed = facts(
+        "export function C(props: P) {\n\
+           const list = props.list.map((props) => <b {...props} />);\n\
+           { const props = other; use(props); }\n\
+           try { x() } catch (props) { use(props) }\n\
+           return <ul>{list}</ul>\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&shadowed), ["list"]);
+    assert_eq!(shadowed.elements[0], intrinsic("b", vec![JsxAttributeFact::Spread(SpreadOf::Other)]));
+    assert!(!shadowed.handed_on);
+}
+
+#[test]
+fn a_rest_member_is_a_read_and_the_attribute_names_the_same_prop() {
+    let facts = facts("export const C = ({ a, ...rest }: P) => <b data-x={rest.x} data-y={rest['y']} />", "C");
+    assert_eq!(reads(&facts), ["a", "x", "y"]);
+    assert_eq!(facts.elements, [intrinsic("b", vec![named("data-x", Some("x")), named("data-y", Some("y"))])]);
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn a_tag_taken_from_a_prop_is_read_not_skipped() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const Tag = props.as ?? 'div';\n\
+           const Icon = props.icon;\n\
+           return <Tag><Icon /><props.Slot /></Tag>\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["as", "icon", "Slot"]);
+    assert!(!facts.handed_on);
+    assert_eq!(facts.elements.len(), 3);
+}
+
+#[test]
+fn attributes_keep_their_order_around_a_spread_and_the_spread_says_what_it_spreads() {
+    let facts = facts(
+        "export const C = ({ id, ...rest }: P) => (\n\
+           <section>\n\
+             <input id={id} {...rest} type=\"text\" />\n\
+             <Field {...rest} id={rest.id} />\n\
+             <span {...other} />\n\
+           </section>\n\
+         )",
+        "C",
+    );
+    assert_eq!(
+        facts.elements,
+        [
+            intrinsic("section", vec![]),
+            intrinsic(
+                "input",
+                vec![named("id", Some("id")), JsxAttributeFact::Spread(SpreadOf::Rest), named("type", None)]
+            ),
+            component("Field", vec![JsxAttributeFact::Spread(SpreadOf::Rest), named("id", Some("id"))]),
+            intrinsic("span", vec![JsxAttributeFact::Spread(SpreadOf::Other)]),
+        ]
+    );
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn a_member_of_the_props_object_spread_is_not_a_hand_off() {
+    let facts = facts("export function C(props: P) { useX(props.a); return <div {...props.b} /> }", "C");
+    assert!(!facts.handed_on);
+    assert_eq!(reads(&facts), ["a", "b"]);
+    assert_eq!(facts.elements, [intrinsic("div", vec![JsxAttributeFact::Spread(SpreadOf::Other)])]);
+}
+
+#[test]
+fn tags_follow_the_jsx_rule_not_a_list_of_names() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           return <><chakra.button /><Menu.Item.Label /><my-element /><svg:path /><Box /><div /></>\n\
+         }",
+        "C",
+    );
+    let tags: Vec<&JsxTag> = facts.elements.iter().map(|element| &element.tag).collect();
+    assert_eq!(
+        tags,
+        [
+            &JsxTag::Member("chakra.button".into()),
+            &JsxTag::Member("Menu.Item.Label".into()),
+            &JsxTag::Intrinsic("my-element".into()),
+            &JsxTag::Intrinsic("svg:path".into()),
+            &JsxTag::Identifier("Box".into()),
+            &JsxTag::Intrinsic("div".into()),
+        ]
+    );
+}
+
+#[test]
+fn forward_ref_and_memo_wrapped_functions_are_read_through_the_wrapper() {
+    let source = "import { forwardRef, memo } from 'react';\n\
+         export const A = forwardRef<HTMLButtonElement, P>(function A({ size }, ref) {\n\
+           return <button ref={ref} data-size={size} />\n\
+         });\n\
+         export const B = memo(forwardRef((props: P, ref) => <a ref={ref} href={props.href} />));\n\
+         export const M = memo(function M({ label }: P) { return <span>{label}</span> });";
+    let a = facts(source, "A");
+    assert_eq!(reads(&a), ["size"]);
+    assert_eq!(a.elements, [intrinsic("button", vec![named("ref", None), named("data-size", Some("size"))])]);
+    let b = facts(source, "B");
+    assert_eq!(reads(&b), ["href"]);
+    assert_eq!(b.elements, [intrinsic("a", vec![named("ref", None), named("href", Some("href"))])]);
+    let m = facts(source, "M");
+    assert_eq!(reads(&m), ["label"]);
+    assert_eq!(m.elements, [intrinsic("span", vec![])]);
+}
+
+#[test]
+fn every_return_branch_and_both_sides_of_a_conditional_are_recorded() {
+    let facts = facts(
+        "export function C({ href, open }: P) {\n\
+           if (href) return <a href={href} />;\n\
+           return open ? <Dialog open={open} /> : (open === false && <span />);\n\
+         }",
+        "C",
+    );
+    assert_eq!(
+        facts.elements,
+        [
+            intrinsic("a", vec![named("href", Some("href"))]),
+            component("Dialog", vec![named("open", Some("open"))]),
+            intrinsic("span", vec![]),
+        ]
+    );
+}
+
+#[test]
+fn a_nested_component_keeps_its_props_uses_and_its_elements_go_to_the_file() {
+    let data = parse(
+        "export function C(props: P) {\n\
+           const Row = ({ item }: { item: string }) => <li data-item={item} title={props.label} />;\n\
+           function Empty() { return <em /> }\n\
+           return props.items.length ? <ul>{props.items.map((item) => <Row item={item} />)}</ul> : <Empty />;\n\
+         }",
+    );
+    let facts = data.component_mappings[0].body.clone().unwrap();
+    assert_eq!(
+        facts.elements,
+        [intrinsic("ul", vec![]), component("Row", vec![named("item", None)]), component("Empty", vec![])]
+    );
+    assert_eq!(reads(&facts), ["label", "items"]);
+    let tags: Vec<&JsxTag> = data.jsx_usages.iter().map(|usage| &usage.tag).collect();
+    assert_eq!(tags, [&JsxTag::Intrinsic("li".into()), &JsxTag::Intrinsic("em".into())]);
+}
+
+#[test]
+fn a_class_components_elements_go_to_the_file() {
+    let data = parse(
+        "import { Component } from 'react';\n\
+         export class K extends Component<P> { render() { return <div /> } }",
+    );
+    assert_eq!(data.component_mappings.iter().find(|m| m.component_name == "K").unwrap().body, None);
+    assert_eq!(data.jsx_usages, [usage(JsxTag::Intrinsic("div".into()))]);
+}
+
+#[test]
+fn create_element_calls_record_no_elements() {
+    let facts = facts(
+        "import React from 'react';\n\
+         export function C({ onPress }: P): React.ReactElement {\n\
+           return React.createElement('button', { onClick: onPress });\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["onPress"]);
+    assert_eq!(facts.elements, []);
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn jsx_outside_every_component_body_is_a_usage_of_the_file() {
+    let data = parse_file(
+        camino::Utf8Path::new("/p/c.stories.tsx"),
+        "export function C(props: P) { return <div {...props} /> }\n\
+         export const icon = <svg:g><Icon.Star size=\"sm\" {...rest} /></svg:g>;\n\
+         export const Primary = { render: (args) => <C {...args} tone=\"loud\" /> };",
+    );
+    assert_eq!(
+        data.jsx_usages,
+        [
+            usage(JsxTag::Intrinsic("svg:g".into())),
+            JsxUsage {
+                tag: JsxTag::Member("Icon.Star".into()),
+                attributes: vec![JsxUsageAttribute::Named("size".into()), JsxUsageAttribute::Spread],
+            },
+            JsxUsage {
+                tag: JsxTag::Identifier("C".into()),
+                attributes: vec![JsxUsageAttribute::Spread, JsxUsageAttribute::Named("tone".into())],
+            },
+        ]
+    );
+}
+
+#[test]
+fn parameter_defaults_and_computed_keys_are_references_too() {
+    let read = facts("export function C(props: P, { x = props.b } = {}) { return <div /> }", "C");
+    assert_eq!(reads(&read), ["b"]);
+    assert!(!read.handed_on);
+    let handed = facts("export function C(props: P, store = use(props)) { return <div /> }", "C");
+    assert!(handed.handed_on);
+    let key = facts("export function C(props: P) { const { [props.k]: v } = other; return <div /> }", "C");
+    assert_eq!(reads(&key), ["k"]);
+}
+
+#[test]
+fn a_body_declaration_does_not_capture_a_parameter_default() {
+    // The default is evaluated in the parameters' scope: `props` there is the parameter, whatever the body declares.
+    let facts = facts("export function C(props: P, d = use(props)) { const use = 1; return <div /> }", "C");
+    assert!(facts.handed_on);
+}
+
+#[test]
+fn a_var_in_a_nested_function_is_another_binding() {
+    let facts = facts(
+        "export function C({ size }: P) {\n\
+           const f = () => { var size = 2; return <i data-s={size} /> };\n\
+           return <b data-s={size}>{f()}</b>\n\
+         }",
+        "C",
+    );
+    assert_eq!(
+        facts.elements,
+        [intrinsic("i", vec![named("data-s", None)]), intrinsic("b", vec![named("data-s", Some("size"))])]
+    );
+}
+
+#[test]
+fn a_named_function_expression_binds_its_own_name() {
+    let facts = facts(
+        "export function C(props: P) { const g = function props() { return props.x }; return <div>{g()}</div> }",
+        "C",
+    );
+    assert_eq!(facts.reads, Vec::<String>::new());
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn every_rest_binding_is_the_props_object_and_is_named() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const { a, ...r1 } = props; const { b, ...r2 } = r1;\n\
+           return <div {...r2} data-z={r2.z} />\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["a", "b", "z"]);
+    assert_eq!(facts.rests, ["r1", "r2"]);
+    assert_eq!(
+        facts.elements,
+        [intrinsic("div", vec![JsxAttributeFact::Spread(SpreadOf::Rest), named("data-z", Some("z"))])]
+    );
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn a_switch_discriminant_is_outside_the_case_bindings() {
+    let facts = facts(
+        "export function C(props: P) { switch (props.kind) { case 'a': const props = 1; return <i /> } return null }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["kind"]);
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn typescript_wrappers_around_the_props_object_are_seen_through() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const x = props!.x; const y = (props as P).y;\n\
+           const { a } = props as P; const { b } = props satisfies P;\n\
+           return <div />\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["x", "y", "a", "b"]);
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn a_method_call_a_write_or_a_delete_through_the_props_object_hands_it_on() {
+    let uses = [
+        "props.onClick()",
+        "props.onClick?.()",
+        "props.hasOwnProperty('a')",
+        "props.x = 1",
+        "delete props.x",
+        "props.n++",
+    ];
+    for used in uses {
+        let source = format!("export function C(props: P) {{ {used}; return <div /> }}");
+        assert!(facts(&source, "C").handed_on, "`{used}` hands the props object on");
+    }
+}
+
+#[test]
+fn a_reassigned_or_defaulted_local_is_not_the_prop() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           let { a } = props; a = f(a);\n\
+           const { b = 5, c } = props;\n\
+           return <i data-a={a} data-b={b} data-c={c} />\n\
+         }",
+        "C",
+    );
+    assert_eq!(
+        facts.elements,
+        [intrinsic("i", vec![named("data-a", None), named("data-b", None), named("data-c", Some("c"))])]
+    );
+}
+
+#[test]
+fn a_nested_component_is_found_by_symbol_not_by_name() {
+    let facts = facts(
+        "import { Row } from './row';\n\
+         export function C(props: P) {\n\
+           { const Row = memoize(() => <li {...props} />); use(Row); }\n\
+           return <Row />\n\
+         }",
+        "C",
+    );
+    assert_eq!(
+        facts.elements,
+        [intrinsic("li", vec![JsxAttributeFact::Spread(SpreadOf::Props)]), component("Row", vec![])]
+    );
+}
+
+#[test]
+fn deleting_or_calling_through_an_optional_chain_hands_the_props_object_on() {
+    let uses = ["delete props.x", "delete props?.x", "delete rest?.x", "(props?.f)()", "(rest?.f)()", "props?.f()"];
+    for used in uses {
+        let source =
+            format!("export function C(props: P) {{ const {{ a, ...rest }} = props; {used}; return <div /> }}");
+        assert!(facts(&source, "C").handed_on, "`{used}` hands the props object on");
+    }
+    let read = facts("export function C(props: P) { const x = props?.x; return <div /> }", "C");
+    assert!(!read.handed_on);
+}
+
+#[test]
+fn an_optional_chain_as_an_assignment_target_hands_the_props_object_on() {
+    // Not valid JavaScript; the parser recovers, and the classification must stay conservative.
+    let data = parse("export function C(props: P) { props?.x = 1; return <div /> }");
+    if let Some(body) = data.component_mappings.first().and_then(|mapping| mapping.body.clone()) {
+        assert!(body.handed_on);
+    }
+}
+
+#[test]
+fn a_function_held_by_two_mappings_files_its_nested_elements_once() {
+    let source = "export const A = function B(props: P) { const Row = () => <li />; return <Row /> };";
+    let allocator = oxc_allocator::Allocator::default();
+    let parsed = oxc_parser::Parser::new(&allocator, source, oxc_span::SourceType::tsx()).parse();
+    let start = |text: &str| u32::try_from(source.find(text).unwrap()).unwrap();
+    let declarator = (start("A ="), start(" };") + 2);
+    let function = (start("function B"), start(" };") + 2);
+    let mapping = |name: &str, (from, to): (u32, u32)| {
+        ComponentMapping::new(
+            name.to_owned(),
+            crate::types::TypeName::default(),
+            camino::Utf8PathBuf::from("/p/c.tsx"),
+            from,
+            to,
+            crate::types::DetectionRule::FunctionDeclaration,
+        )
+    };
+    let mut mappings = vec![mapping("A", declarator), mapping("B", function)];
+    let usages = attach(&parsed.program, &mut mappings, true);
+    assert_eq!(usages, [usage(JsxTag::Intrinsic("li".into()))]);
+    assert!(mappings.iter().all(|mapping| mapping.body.is_some()));
+}
+
+#[test]
+fn a_destructured_name_redeclared_by_var_is_not_the_prop() {
+    let param = facts("export function C({ a }: P) { var a = compute(); return <X a={a} /> }", "C");
+    assert_eq!(param.elements, [component("X", vec![named("a", None)])]);
+    let body = facts("export function C(props: P) { var { a } = props; var a = other; return <X a={a} /> }", "C");
+    assert_eq!(body.elements, [component("X", vec![named("a", None)])]);
+}
+
+#[test]
+fn rest_bindings_in_different_scopes_are_all_recorded() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const { a, ...r1 } = props;\n\
+           const f = () => { const { b, ...r2 } = props; return <i {...r2} /> };\n\
+           return <b {...r1}>{f()}</b>\n\
+         }",
+        "C",
+    );
+    assert_eq!(facts.rests, ["r1", "r2"]);
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn jsx_in_a_parameter_default_is_the_components() {
+    let data = parse("export const C = ({ icon = <Icon size=\"sm\" /> }: P) => <span>{icon}</span>;");
+    let facts = data.component_mappings[0].body.clone().unwrap();
+    assert_eq!(facts.elements, [component("Icon", vec![named("size", None)]), intrinsic("span", vec![])]);
+    assert_eq!(data.jsx_usages, []);
+}

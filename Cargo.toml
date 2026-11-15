@@ -43,6 +43,7 @@ let_underscore_must_use = "deny"
 # OXC — all main crates move in lockstep; resolver has separate versioning
 oxc_allocator     = "0.157"
 oxc_parser        = "0.157"
+oxc_semantic      = "0.157"
 oxc_ast           = "0.157"
 oxc_ast_visit     = "0.157"
 oxc_span          = "0.157"
