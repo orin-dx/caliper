@@ -465,4 +465,44 @@ describe('the provider as an adapter of the answer lifecycle', () => {
     say({ type: 'prefetch', provider: undefined, entries: [story('Button')] })
     await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card'], ['Button']]))
   })
+
+  it('a replaced prefetch cancels the queued requests', async () => {
+    const fake = binding()
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'prefetch', provider: id, entries: [story('List'), story('Card')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card']]))
+    expect(fake.cancelled).toEqual([])
+    // The client navigated away: what the old list asked for is dropped, and the new list is asked for.
+    say({ type: 'prefetch', provider: id, entries: [story('Button')] })
+    await vi.waitFor(() => expect(fake.prefetched.at(-1)).toEqual(['Button']))
+    expect(fake.cancelled).toEqual([['List', 'ListItem', 'Card']])
+    // An empty list, as for a client that shows the last story, cancels too.
+    say({ type: 'prefetch', provider: id, entries: [] })
+    await vi.waitFor(() => expect(fake.cancelled).toEqual([['List', 'ListItem', 'Card'], ['Button']]))
+  })
+
+  it('asks again for the prefetched components after an edit dropped them', async () => {
+    const fake = binding()
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'prefetch', provider: id, entries: [story('List')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem']]))
+    // An edit: the next request sees revision 2, and the binding dropped the queued neighbour requests.
+    fake.updates.push({})
+    await provider({ entry: story('Card') })
+    await vi.waitFor(() =>
+      expect(fake.prefetched).toEqual([
+        ['List', 'ListItem'],
+        ['List', 'ListItem'],
+      ]),
+    )
+    // No edit since: asked once more only.
+    await provider({ entry: story('Card') })
+    await new Promise((settled) => setTimeout(settled, 10))
+    expect(fake.prefetched).toHaveLength(2)
+    expect(fake.cancelled).toEqual([])
+  })
 })

@@ -24,6 +24,7 @@ export type SessionBinding = Pick<
   | 'ensureFresh'
   | 'sessionComponentAnswers'
   | 'sessionPrefetch'
+  | 'sessionCancel'
   | 'sessionCheckerSettled'
   | 'closeSession'
 >
@@ -260,10 +261,19 @@ export class DocgenSession {
     return { doc, degradedBy: incompleteMessages(diagnostics), awaitsChecker, revision }
   }
 
-  /** Resolves `keys` in the background, in order, the checker's answers included (kept). Lazy only; waits for nobody. */
+  /**
+   * Resolves `keys` in the background, in order, the checker's answers included (kept), asked at the neighbour class:
+   * after the component a story shows. Lazy only; waits for nobody.
+   */
   async prefetch(keys: string[]): Promise<void> {
     if (!this.lazy || this.sessionId === undefined || keys.length === 0) return
     await this.napi.sessionPrefetch(this.sessionId, keys)
+  }
+
+  /** Drops the checker's queued requests for `keys` that nobody waits for: the client no longer shows them. */
+  cancel(keys: string[]): void {
+    if (!this.lazy || this.sessionId === undefined || keys.length === 0) return
+    this.napi.sessionCancel(this.sessionId, keys)
   }
 
   /** Waits up to `waitMs` until the checker has answered `keys`: true when asking again gets its props (no edit since). */

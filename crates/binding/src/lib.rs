@@ -501,10 +501,11 @@ pub fn session_component_toon(session_id: u32, key: String) -> napi::Result<Opti
 }
 
 /// Resolves the components under `keys` in the background, without returning them: a request for one later is
-/// answered from what this resolved. With the checker on (the default) it asks the checker for each at background
-/// priority, after any component someone waits for, and does not wait for it; the answers are kept for the requests
-/// that follow. Runs off the calling thread and returns how many of the keys it resolved. An eager session and an
-/// unknown session resolve nothing.
+/// answered from what this resolved. These are the components of the stories next to the one shown: with the checker
+/// on (the default) it asks the checker for each at neighbour priority, after any component someone waits for and
+/// before warm-up and fill work, and does not wait for it; the answers are kept for the requests that follow. Runs off
+/// the calling thread and returns how many of the keys it resolved. An eager session and an unknown session resolve
+/// nothing. `sessionCancel` drops these requests once the client no longer shows the stories.
 #[napi]
 pub async fn session_prefetch(session_id: u32, keys: Vec<String>) -> napi::Result<u32> {
     tokio::task::spawn_blocking(move || {
@@ -513,7 +514,7 @@ pub async fn session_prefetch(session_id: u32, keys: Vec<String>) -> napi::Resul
             if !session.is_lazy() {
                 return 0;
             }
-            session.components_in_background(&keys).into_iter().flatten().count() as u32
+            session.components_as_neighbours(&keys).into_iter().flatten().count() as u32
         }) {
             Ok(resolved) => Ok(resolved),
             Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
@@ -521,6 +522,20 @@ pub async fn session_prefetch(session_id: u32, keys: Vec<String>) -> napi::Resul
     })
     .await
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
+}
+
+/// Tells the checker that the client no longer shows the components under `keys` (it navigated away, which replaced
+/// what `sessionPrefetch` asked for): a request for one of them that nobody waits for and that the checker has not
+/// started is dropped before it is converted. A request someone waits for, and one already being converted, is
+/// answered and kept. Does nothing without the checker, and for an unknown or closed session.
+#[napi]
+pub fn session_cancel(session_id: u32, keys: Vec<String>) {
+    caliper_docgen_core::panic_guard::contain_panic("session_cancel", move || {
+        if let Some(session) = SESSIONS.get(&session_id).map(|session| session.clone()) {
+            session.cancel_components(&keys);
+        }
+    })
+    .ok();
 }
 
 /// Waits up to `waitMs` until the checker has no request in flight for any of `keys`, for a host that showed a
