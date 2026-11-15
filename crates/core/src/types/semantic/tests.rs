@@ -712,6 +712,7 @@ fn with_no_fallback_the_checker_is_asked_for_every_description() {
         exports: Vec::new(),
         described: ["label".to_string()].into_iter().collect(),
         react_wanted: None,
+        layering: None,
     };
     for (resolver, asked_for_label) in
         [(ResolverFacts::Used, false), (ResolverFacts::Off, false), (ResolverFacts::NoFallback, true)]

@@ -27,9 +27,9 @@ use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::options::CollapseContext;
 use crate::types::semantic::{
-    Delivery, MergedProps, Priority, PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome, SemanticProp,
-    SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, drop_superseded, merge_semantic_props,
-    unread_diagnostic,
+    Delivery, Layering, MergedProps, Priority, PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome,
+    SemanticProp, SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, drop_superseded,
+    merge_semantic_props, unread_diagnostic,
 };
 
 /// What one request of the checker made of a component: the component it found, if any, and what the checker said
@@ -195,9 +195,13 @@ impl SemanticHook {
         cx: CollapseContext,
         priority: Priority,
     ) -> ComponentAnswer {
+        // The checker converts only the props this merge keeps, decided from the structural answer and `cx`: an answer
+        // is kept and joined for those too, so another structural answer is never merged with props left unconverted.
+        let layering = Layering::of(&answer.entry, cx);
         let stamp = std::fs::read(&answer.entry.file_path).map(|bytes| {
             let mut hasher = FxHasher::default();
             bytes.hash(&mut hasher);
+            layering.hash(&mut hasher);
             hasher.finish()
         });
         let cache_key = stamp.ok().map(|stamp| (answer.key.clone(), stamp));
@@ -210,7 +214,7 @@ impl SemanticHook {
             }
             Found::Joined(pending) => pending,
             Found::Asking(pending) => {
-                self.ask(&answer, mode, &pending, cache_key, generation);
+                self.ask(target_of(&answer, mode, layering), &pending, cache_key, generation);
                 pending
             }
         };
@@ -268,33 +272,12 @@ impl SemanticHook {
         (Found::Asking(pending), generation)
     }
 
-    /// Asks the checker for `answer`'s component. Its outcome settles `pending` for every caller waiting on it and is
+    /// Asks the checker about `target`. Its outcome settles `pending` for every caller waiting on it and is
     /// kept for the next request, unless the cache was invalidated since `generation`. Called without the cache's lock,
     /// since a provider may deliver at once.
-    fn ask(
-        &self,
-        answer: &ComponentAnswer,
-        mode: HtmlAttributeMode,
-        pending: &Arc<Pending>,
-        key: Option<(String, u64)>,
-        generation: u64,
-    ) {
-        let target = SemanticTarget {
-            key: answer.key.clone(),
-            file_path: answer.entry.file_path.clone(),
-            display_name: answer.entry.display_name.clone(),
-            exports: answer.entry.exports.clone(),
-            described: answer
-                .entry
-                .props
-                .values()
-                .filter(|prop| !prop.description.is_empty())
-                .map(|prop| prop.name.clone())
-                .collect(),
-            react_wanted: react_props_wanted(mode, &answer.entry.props),
-        };
+    fn ask(&self, target: SemanticTarget, pending: &Arc<Pending>, key: Option<(String, u64)>, generation: u64) {
         let answers = self.answers.clone();
-        let asked = answer.key.clone();
+        let asked = target.key.clone();
         let settling = pending.clone();
         let delivery = Delivery::new(move |outcome| {
             let mut settled = match outcome {
@@ -371,6 +354,26 @@ impl SemanticHook {
         if unread > 0 {
             answer.diagnostics.push(unread_diagnostic(unread, vec![answer.key.clone()]));
         }
+    }
+}
+
+/// What the checker is asked about `answer`'s component: its props under `mode`, converted only where the merge with
+/// `layering` keeps them.
+fn target_of(answer: &ComponentAnswer, mode: HtmlAttributeMode, layering: Layering) -> SemanticTarget {
+    SemanticTarget {
+        key: answer.key.clone(),
+        file_path: answer.entry.file_path.clone(),
+        display_name: answer.entry.display_name.clone(),
+        exports: answer.entry.exports.clone(),
+        described: answer
+            .entry
+            .props
+            .values()
+            .filter(|prop| !prop.description.is_empty())
+            .map(|prop| prop.name.clone())
+            .collect(),
+        react_wanted: react_props_wanted(mode, &answer.entry.props),
+        layering: Some(layering),
     }
 }
 

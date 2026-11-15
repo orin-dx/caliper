@@ -52,6 +52,23 @@ const MAX_DEPTH: u8 = 5;
 const MAX_FIELDS: [usize; 2] = [100, 40];
 /// The most members a union or intersection lists at the top and below it.
 const MAX_MEMBERS: [usize; 2] = [500, 120];
+/// The most types one converted type holds, itself and every type inside it counted ([`past_size_budget`]): a type with
+/// more is cut with [`TruncationLimit::Depth`] where it is converted, and the memo keeps the cut form. The caps above
+/// bound each object, union and intersection, but not what the project declared itself (see [`is_own`]), so a style
+/// system in the project's own source (Chakra's `SystemStyleObject`: about 700 properties, each a value or an object
+/// of 130 conditions) expanded to 25 MB of JSON per prop and 42 GB of memory for one extract.
+///
+/// What is enforced is this count (18,724 types), not a byte size. It is chosen so that no type under 256 KiB of JSON
+/// is ever cut: a type in the output is a JSON object with at least a `kind` (`{"kind":"any"}`, 14 bytes, is the
+/// smallest), so a type of more than this many types is more than 256 KiB. On real projects a type averages about 40
+/// bytes, so the cut falls near 0.75 MB of JSON: Chakra's largest prop type left whole is 732 KB. The largest prop
+/// type of Mantine's core is 196 KB; Chakra's style props were 25 MB. The cut is reported as a depth truncation, since
+/// a limit kind of its own would change the output schema.
+const MAX_SIZE: usize = 256 * 1024 / MIN_TYPE_BYTES;
+/// The fewest bytes one type takes in the JSON output: `{"kind":"any"}`.
+const MIN_TYPE_BYTES: usize = 14;
+// One type past the budget is more than 256 KiB.
+const _: () = assert!((MAX_SIZE + 1) * MIN_TYPE_BYTES > 256 * 1024);
 /// How many of React's tag names (see [`is_tag`]) a union has to list to be React's `ElementType` (`JSX.IntrinsicElements`
 /// has over 170): the tag names are the one part of it that no declaration identifies.
 const MIN_INTRINSIC_TAGS: usize = 100;
@@ -346,6 +363,79 @@ fn is_own(property: &SymbolInfo) -> bool {
 /// `declarations` entries read `"<node index>.<kind>.<path>"`: the path is lower-cased, as the checker keys files.
 pub(crate) fn declared_in(declaration: &str) -> &str {
     declaration.splitn(3, '.').nth(2).unwrap_or("")
+}
+
+/// Whether `converted` holds more than `budget` types, itself and every type inside it counted. Counted on the tree,
+/// not by serializing it, and only as far as the budget: the walk stops at the first type past it.
+fn past_size_budget(converted: &PropType, budget: usize) -> bool {
+    let mut count = 0usize;
+    let mut pending = vec![converted];
+    while let Some(ty) = pending.pop() {
+        count += 1;
+        if count > budget {
+            return true;
+        }
+        match ty {
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::BigInt
+            | PropType::StringLiteral(_)
+            | PropType::NumberLiteral(_)
+            | PropType::BoolLiteral(_)
+            | PropType::BigIntLiteral(_)
+            | PropType::UniqueSymbol { .. }
+            | PropType::EnumMember { .. }
+            | PropType::Truncated { .. }
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::Ref { .. }
+            | PropType::ElementType
+            | PropType::HtmlAttributes { .. }
+            | PropType::LiteralUnion { .. }
+            | PropType::SxProps
+            | PropType::Opaque(_) => {}
+            PropType::TemplateLiteral(parts) => pending.extend(parts.iter().filter_map(|part| match part {
+                TemplatePart::Text(_) => None,
+                TemplatePart::Type(ty) => Some(ty),
+            })),
+            PropType::Union(members)
+            | PropType::Intersection(members)
+            | PropType::Named { args: members, .. }
+            | PropType::Recursive { args: members, .. } => pending.extend(members),
+            PropType::Array(inner) | PropType::Readonly(inner) => pending.push(inner),
+            PropType::Tuple(elements) => pending.extend(elements.iter().map(|element| &element.element_type)),
+            PropType::Object(fields) => push_fields(fields, &mut pending),
+            PropType::Callable { signatures, fields } => {
+                for signature in signatures {
+                    pending.extend(signature.params.iter().map(|param| &param.param_type));
+                    pending.push(&signature.return_type);
+                }
+                push_fields(fields, &mut pending);
+            }
+            PropType::Function { params, return_type, .. } => {
+                pending.extend(params.iter().map(|param| &param.param_type));
+                pending.push(return_type);
+            }
+        }
+    }
+    false
+}
+
+/// The types of `fields` for [`past_size_budget`]: each field's, and an index signature's key type.
+fn push_fields<'a>(fields: &'a [ObjectField], pending: &mut Vec<&'a PropType>) {
+    for field in fields {
+        pending.push(&field.prop_type);
+        if let Some(key) = &field.index_key {
+            pending.push(key);
+        }
+    }
 }
 
 /// A converted type, with the enclosing instantiations its conversion depended on.
@@ -710,7 +800,11 @@ impl Converter {
             self.state.misses.fetch_add(1, Ordering::Relaxed);
             let frame = Arc::new(Frame::new(cx.enclosing.len()));
             let own = Cx { depth: cx.depth, enclosing: cx.enclosing.clone(), frame: Some(frame.clone()) };
-            let converted = self.uncached(info, &own).await?;
+            let mut converted = self.uncached(info, &own).await?;
+            if past_size_budget(&converted, MAX_SIZE) {
+                let origin = self.origin(info).await?;
+                converted = self.truncated(info, origin.as_ref(), TruncationLimit::Depth).await?;
+            }
             let asked = frame.finish();
             if let Some(parent) = &cx.frame {
                 parent.absorb(&asked, &cx.enclosing);
@@ -1725,6 +1819,67 @@ mod tests {
             symbol.extend(fields);
         }
         serde_json::from_value(symbol).unwrap()
+    }
+
+    /// The size budget holds no type under 256 KiB of JSON: no type takes fewer bytes than [`MIN_TYPE_BYTES`], so a type
+    /// of more than [`MAX_SIZE`] types takes more than 256 KiB.
+    #[test]
+    fn no_type_under_256_kib_of_json_passes_the_size_budget() {
+        let leaves = [
+            PropType::String,
+            PropType::Number,
+            PropType::Boolean,
+            PropType::Null,
+            PropType::Undefined,
+            PropType::Any,
+            PropType::Never,
+            PropType::Unknown,
+            PropType::Void,
+            PropType::BigInt,
+            PropType::ReactNode,
+            PropType::CssProperties,
+            PropType::ElementType,
+            PropType::SxProps,
+        ];
+        let smallest = leaves.iter().map(|leaf| serde_json::to_string(leaf).unwrap().len()).min();
+        assert_eq!(smallest, Some(MIN_TYPE_BYTES));
+
+        // About the smallest type past the budget, a union of that many `any`, is more than 256 KiB; one type fewer fits.
+        let wide = PropType::Union(vec![PropType::Any; MAX_SIZE]);
+        assert!(past_size_budget(&wide, MAX_SIZE));
+        assert!(serde_json::to_string(&wide).unwrap().len() > 256 * 1024);
+        assert!(!past_size_budget(&PropType::Union(vec![PropType::Any; MAX_SIZE - 1]), MAX_SIZE));
+    }
+
+    /// Every type inside a type counts toward its size, wherever it sits: fields and index keys, signatures, arguments,
+    /// tuple elements and template holes.
+    #[test]
+    fn every_type_inside_a_type_counts_toward_its_size() {
+        let field = |prop_type| ObjectField {
+            name: "a".into(),
+            prop_type,
+            required: true,
+            description: String::new(),
+            readonly: false,
+            index_key: Some(Box::new(PropType::String)),
+        };
+        let param = |param_type| FunctionParam { name: None, param_type, optional: false, rest: false };
+        let ty = PropType::Union(vec![
+            PropType::Object(vec![field(PropType::Number)]),
+            PropType::Named {
+                name: "Box".into(),
+                args: vec![PropType::Tuple(vec![TupleElement::required(PropType::Null)])],
+            },
+            PropType::Function {
+                type_params: vec![],
+                params: vec![param(PropType::Any)],
+                return_type: Box::new(PropType::Void),
+            },
+            PropType::TemplateLiteral(vec![TemplatePart::Text("x".into()), TemplatePart::Type(PropType::Number)]),
+        ]);
+        // union, object, number, string, named, tuple, null, function, any, void, template, number
+        assert!(!past_size_budget(&ty, 12));
+        assert!(past_size_budget(&ty, 11));
     }
 
     /// A key borrowed from a property finds the owned key kept for an equal property, read from an answer of its own,
