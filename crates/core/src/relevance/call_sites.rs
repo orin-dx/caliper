@@ -319,6 +319,14 @@ mod tests {
     }
 
     #[test]
+    fn a_tag_an_inner_binding_shadows_is_no_site_of_the_module_component() {
+        let button = component("/b.tsx", "Button", &[ComponentExport::named("Button")]);
+        let usages = sites(3, &JsxTag::Scoped("Button".to_owned()), &["tone"]);
+        let counted = count(&[button], &[FileUsages { file: "/b.tsx".into(), usages: &usages }], nothing);
+        assert_eq!(counted[0], CallSites::default());
+    }
+
+    #[test]
     fn an_anonymous_default_export_resolves_by_its_export() {
         let mut card = component("/card.tsx", "card", &[ComponentExport::named("default")]);
         card.bound = false;
