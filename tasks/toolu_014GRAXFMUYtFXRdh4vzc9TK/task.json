@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_014GRAXFMUYtFXRdh4vzc9TK",
+  "agent_id": "a25603a2ad67615ee",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix checker omissions: Provider and th/td props",
+  "token_usage": {
+    "input_tokens": 212,
+    "cache_creation_tokens": 130849,
+    "cache_read_tokens": 11124666,
+    "output_tokens": 47460,
+    "api_call_count": 106
+  },
+  "started_at": "2026-11-14T17:41:49.778705-08:00",
+  "completed_at": "2026-11-14T18:05:26.530518-08:00"
+}
