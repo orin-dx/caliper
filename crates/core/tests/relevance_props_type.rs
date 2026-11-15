@@ -7,10 +7,18 @@
 
 use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::{ComponentEntry, ExtractionOutput};
+use std::sync::OnceLock;
+
 use camino::Utf8PathBuf;
 use tempfile::TempDir;
 
-fn run() -> ExtractionOutput {
+/// One extraction shared by the tests.
+fn run() -> &'static ExtractionOutput {
+    static OUTPUT: OnceLock<ExtractionOutput> = OnceLock::new();
+    OUTPUT.get_or_init(extract_fixture)
+}
+
+fn extract_fixture() -> ExtractionOutput {
     let fields: String = (0..31).map(|i| format!("p{i}?: string; ")).collect();
     let source = format!(
         "export interface Big {{ size?: string; tone: string; {fields}}}\n\

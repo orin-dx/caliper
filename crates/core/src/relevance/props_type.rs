@@ -60,11 +60,14 @@ impl PropsType {
             }
             Some(Declaration::Alias(alias)) => match alias {
                 CollectedTypeAlias::Pick { keys, .. } => read.keys(keys, &lookup, 0),
-                CollectedTypeAlias::Intersection { members, .. } => {
+                // A union's arms are each the props type (a discriminated union's fields are its own).
+                CollectedTypeAlias::Intersection { members, .. } | CollectedTypeAlias::Union { members, .. } => {
                     members.iter().for_each(|member| read.part(member, &lookup));
                 }
-                CollectedTypeAlias::Passthrough { target, .. } => read.part(target, &lookup),
-                _ => {}
+                CollectedTypeAlias::Passthrough { target: part, .. }
+                | CollectedTypeAlias::Partial { base: part, .. }
+                | CollectedTypeAlias::Required { base: part, .. } => read.part(part, &lookup),
+                CollectedTypeAlias::Omit { .. } | CollectedTypeAlias::LiteralUnion { .. } => {}
             },
             None => {}
         }
@@ -78,7 +81,9 @@ impl PropsType {
             CollectedType::Object(fields) | CollectedType::Callable { fields, .. } => {
                 self.own.extend(fields.iter().map(|field| field.name.clone()));
             }
-            CollectedType::Intersection(parts) => parts.iter().for_each(|part| self.part(part, lookup)),
+            CollectedType::Intersection(parts) | CollectedType::Union(parts) => {
+                parts.iter().for_each(|part| self.part(part, lookup));
+            }
             CollectedType::Named { name, args } => self.pick(name, args, lookup),
             _ => {}
         }
@@ -104,6 +109,9 @@ impl PropsType {
                 }
                 Some(Declaration::Alias(CollectedTypeAlias::Passthrough { target, .. })) => {
                     self.keys(target, lookup, depth + 1);
+                }
+                Some(Declaration::Alias(CollectedTypeAlias::Union { members, .. })) => {
+                    members.iter().for_each(|key| self.keys(key, lookup, depth + 1));
                 }
                 _ => {}
             },
@@ -147,7 +155,8 @@ pub(crate) fn members<'a>(
             default_tag: given.default_tag || prop.default_value.is_some() || prop.tags.contains_key("default"),
             documented: !prop.description.is_empty(),
             literal_union: is_literal_union(&prop.prop_type),
-            ambient: prop.parent.as_ref().is_some_and(|parent| ambient(&parent.file_name)),
+            // The checker states `parent` only for an interface; a declaration in a type literal is still in a file.
+            ambient: prop.parent.iter().chain(&prop.declarations).any(|parent| ambient(&parent.file_name)),
             ..given
         });
     }
@@ -175,9 +184,14 @@ fn member(props_type: &PropsType, name: &str) -> Member {
     }
 }
 
-/// Whether `prop_type` is a union of literals (`null` and `undefined` beside them allowed).
+/// Whether `prop_type` is a union of literals or enum members (`null` and `undefined` beside them allowed), or a
+/// variant union.
 fn is_literal_union(prop_type: &PropType) -> bool {
-    let PropType::Union(members) = prop_type else { return false };
+    let members = match prop_type {
+        PropType::LiteralUnion { .. } => return true,
+        PropType::Union(members) => members,
+        _ => return false,
+    };
     let literal = |member: &PropType| {
         matches!(
             member,
@@ -185,6 +199,7 @@ fn is_literal_union(prop_type: &PropType) -> bool {
                 | PropType::NumberLiteral(_)
                 | PropType::BoolLiteral(_)
                 | PropType::BigIntLiteral(_)
+                | PropType::EnumMember { .. }
         )
     };
     members.iter().any(literal)
@@ -209,7 +224,9 @@ mod tests {
             "export interface Big {{ size?: string; tone: string; {fields}}}\n\
              interface Small {{ need: string; maybe?: string }}\n\
              interface Narrows extends Big {{ size?: 'sm' | 'md' }}\n\
-             type Keys = 'p3' | 'p4';\n\
+             type More = 'p6' | 'p7';\n\
+             type Keys = 'p3' | 'p4' | More;\n\
+             type Either = {{ kind: 'a'; a?: string }} | {{ kind: 'b'; b?: string }};\n\
              interface Picks extends Pick<Big, Keys> {{ x?: string }}\n"
         )
     }
@@ -220,7 +237,8 @@ mod tests {
         export function ByOmit({ p5 = 'x' }: Omit<Big, 'p1'> & { own?: boolean }) { return null; }\n\
         export function ByRequired(props: Small & { own?: boolean }) { return null; }\n\
         export function ByPickAlone(props: Pick<Big, 'tone'>) { return null; }\n\
-        export function ByPickedBase(props: Picks) { return null; }\n";
+        export function ByPickedBase(props: Picks) { return null; }\n\
+        export function ByUnion(props: Either) { return null; }\n";
 
     fn lookup<'a>(data: &'a SourceData, path: &Utf8Path, name: &str) -> Option<Declaration<'a>> {
         let key = format!("{path}:{name}");
@@ -283,7 +301,8 @@ mod tests {
         assert_eq!((names(&omit.picked), names(&omit.own), names(&omit.defaulted)), (vec![], vec!["own"], vec!["p5"]));
         assert_eq!(names(&props_type("ByPickAlone").picked), ["tone"]);
         let base = props_type("ByPickedBase");
-        assert_eq!((names(&base.picked), names(&base.own)), (vec!["p3", "p4"], vec!["x"]));
+        assert_eq!((names(&base.picked), names(&base.own)), (vec!["p3", "p4", "p6", "p7"], vec!["x"]));
+        assert_eq!(names(&props_type("ByUnion").own), ["a", "b", "kind"]);
         let extends = props_type("ByExtends");
         assert_eq!(
             (names(&extends.own), extends.interface.map(|(name, _)| name)),
@@ -387,5 +406,19 @@ mod tests {
         assert!(members[0].documented && members[0].literal_union && !members[0].own, "{members:?}");
         assert_eq!(decided(members).collapsed, ["tone"]);
         assert!(!is_literal_union(&PropType::Union(vec![PropType::String, PropType::StringLiteral("a".into())])));
+        // A declaration in a type literal has no `parent` in the checker lane; its file still says ambient.
+        let react = PropParent { name: "__type".into(), file_name: "/node_modules/@types/react/index.d.ts".into() };
+        let handler = ParsedProp::new(
+            "onClick".into(),
+            PropType::Any,
+            false,
+            None,
+            String::new(),
+            Default::default(),
+            None,
+            vec![react],
+        );
+        let ambient = |file: &str| file.contains("/@types/react/");
+        assert!(super::members(&PropsType::default(), [&handler], &[], ambient)[0].ambient);
     }
 }
