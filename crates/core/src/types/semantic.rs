@@ -174,6 +174,10 @@ pub struct SemanticTarget {
     /// Which props `@types/react` declares the checker reports: `None` for all of them, else only these names. The
     /// session decides from `htmlAttributes` (`react_types::react_props_wanted`); the checker never filters by itself.
     pub react_wanted: Option<rustc_hash::FxHashSet<String>>,
+    /// What the merge of the answer decides its collapsed layers from, when the caller merges it that way: the checker
+    /// then converts only the props the merge keeps, and reports each other one by name and `parent` with
+    /// [`unconverted_type`] ([`Layering::kept`]). `None` converts every prop.
+    pub layering: Option<Layering>,
 }
 
 /// A checker that answers for components as they are asked about, for a long-lived session.
@@ -378,9 +382,10 @@ fn apply_props(
 /// ones to move to `notableInherited` once merged ([`move_notable`]).
 ///
 /// The collapse decision has one owner, [`CollapseInheritedProps::collapses`](crate::types::options::CollapseInheritedProps::collapses),
-/// asked with a source's declared member count. Both lanes supply that count: the structural resolver for the sources
-/// it reads, which are its layers here; the checker (`sources`) for a source the structural answer did not read (no
-/// structural prop and no layer has it as its source), decided by `cx` ([`CollapseContext::collapses`]).
+/// asked with the members of a source that reach the component. The structural resolver decides the sources it reads,
+/// which are its layers here; a source the structural answer did not read (no structural prop and no layer has it as
+/// its source) is decided by `cx` ([`CollapseContext::collapses`]). [`Layering::kept`] makes the same decision from a
+/// [`LayerFacts`] of `entry`, before the answer's types are converted.
 ///
 /// 1. A prop a collapsed layer names (`InheritedLayer::members`) is left to it, unless the structural answer lists the
 ///    prop itself (the component declares it again).
@@ -397,29 +402,165 @@ pub(crate) fn layer_checker_props<'a>(
     props: Vec<&'a Arc<SemanticProp>>,
     cx: CollapseContext,
 ) -> (Vec<&'a Arc<SemanticProp>>, Vec<(String, PropParent)>) {
-    // Each source the answer names (a prop's `parent` is an interface), in the order it first names it, with the
-    // members of it that reach the component, each once.
-    let mut sources: Vec<(&'a PropParent, Vec<String>)> = Vec::new();
-    for prop in props.iter().filter(|prop| !prop.react_declared) {
-        let Some(parent) = prop.parent.as_ref() else { continue };
-        match sources.iter_mut().find(|(source, _)| *source == parent) {
-            Some((_, names)) if !names.contains(&prop.name) => names.push(prop.name.clone()),
-            Some(_) => {}
-            None => sources.push((parent, vec![prop.name.clone()])),
+    let (layers, notable) = checker_sources(
+        &*entry,
+        props.iter().map(|prop| (prop.name.as_str(), prop.parent.as_ref(), prop.react_declared)),
+        cx,
+    );
+    entry.inheritance.extend(layers);
+    let layered: rustc_hash::FxHashSet<&str> =
+        entry.inheritance.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
+    if layered.is_empty() {
+        return (props, notable);
+    }
+    let kept = props
+        .into_iter()
+        .filter(|prop| keeps(&prop.name, &notable, entry.props.contains_key(&prop.name), &layered))
+        .collect();
+    (kept, notable)
+}
+
+/// What the structural answer says of a component that decides which of the checker's props a collapsed layer takes
+/// (the merge's `layer_checker_props`): the props it lists, the source each names (`parent`), and its inheritance layers, their
+/// sources and members. A [`SemanticTarget`] carries it in a [`Layering`], so the checker can leave unconverted what the
+/// merge leaves to a layer.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct LayerFacts {
+    /// The names of the props the structural answer lists.
+    listed: std::collections::BTreeSet<String>,
+    /// The `parent` of each prop it lists, each once.
+    parents: Vec<PropParent>,
+    /// Each inheritance layer's source, by type name and file.
+    sources: Vec<(String, String)>,
+    /// The members of every inheritance layer.
+    members: std::collections::BTreeSet<String>,
+}
+
+impl LayerFacts {
+    /// What `entry`, a structural answer, says.
+    pub fn of(entry: &ComponentEntry) -> Self {
+        let mut parents: Vec<PropParent> = Vec::new();
+        for parent in entry.props.values().filter_map(|prop| prop.parent.as_ref()) {
+            if !parents.contains(parent) {
+                parents.push(parent.clone());
+            }
+        }
+        Self {
+            listed: entry.props.keys().cloned().collect(),
+            parents,
+            sources: entry.inheritance.iter().map(|layer| (layer.type_name.clone(), layer.file_name.clone())).collect(),
+            members: entry.inheritance.iter().flat_map(|layer| layer.members.iter().cloned()).collect(),
         }
     }
-    let unread = |source: &PropParent| {
-        !entry.props.values().any(|prop| prop.parent.as_ref() == Some(source))
-            && !entry
+}
+
+/// What the merge of the checker's answer into a component's structural answer is decided from besides the answer:
+/// that structural answer's [`LayerFacts`] and the run's [`CollapseContext`]. A checker given it converts only the props
+/// the merge keeps ([`Layering::kept`]), so the merge must be asked with the same structural answer and the same context:
+/// otherwise it may keep a prop the checker did not convert ([`unconverted_type`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Layering {
+    /// The structural answer's facts.
+    pub facts: LayerFacts,
+    /// The run's collapse choices.
+    pub cx: CollapseContext,
+}
+
+impl Layering {
+    /// The layering of `entry`, a structural answer, under `cx`.
+    pub fn of(entry: &ComponentEntry, cx: CollapseContext) -> Self {
+        Self { facts: LayerFacts::of(entry), cx }
+    }
+
+    /// Whether the merge can leave any prop to a layer: the structural answer has a layer, or the run collapses.
+    pub fn may_layer(&self) -> bool {
+        !self.facts.members.is_empty() || self.cx.mode != crate::types::options::CollapseInheritedProps::None
+    }
+
+    /// Whether the structural answer lists a prop named `name`: the merge keeps such a prop whatever its source
+    /// ([`Layering::kept`]), so only a prop it does not list can be left to a layer.
+    pub fn lists(&self, name: &str) -> bool {
+        self.facts.listed.contains(name)
+    }
+
+    /// For each prop of a checker's answer, by name, `parent` and whether `@types/react` declares it, in the answer's
+    /// order: whether the merge (`layer_checker_props`) keeps it. The same decision from the same inputs, read from the
+    /// [`LayerFacts`] instead of the entry. An `@types/react` prop is always reported kept: whether the merge sees it at
+    /// all is decided by its own filter first.
+    pub fn kept(&self, props: &[(&str, Option<&PropParent>, bool)]) -> Vec<bool> {
+        let (layers, notable) = checker_sources(&self.facts, props.iter().copied(), self.cx);
+        let layered: rustc_hash::FxHashSet<&str> = self
+            .facts
+            .members
+            .iter()
+            .map(String::as_str)
+            .chain(layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)))
+            .collect();
+        props
+            .iter()
+            .map(|(name, _, react_declared)| {
+                *react_declared || keeps(name, &notable, self.facts.listed.contains(*name), &layered)
+            })
+            .collect()
+    }
+}
+
+/// The type a checker's prop has when the checker did not convert it, because the merge leaves it to a collapsed layer
+/// ([`Layering::kept`]): its name and `parent` are all a layer reads. It is never merged as a prop's type.
+pub fn unconverted_type() -> PropType {
+    degraded_type("unconverted: left to a collapsed layer", OpaqueReason::UnsupportedExpression)
+}
+
+/// What [`checker_sources`] reads of a structural answer.
+trait Structural {
+    /// Whether it read `source`: a prop it lists names it as `parent`, or one of its layers is it.
+    fn reads(&self, source: &PropParent) -> bool;
+}
+
+impl Structural for ComponentEntry {
+    fn reads(&self, source: &PropParent) -> bool {
+        self.props.values().any(|prop| prop.parent.as_ref() == Some(source))
+            || self
                 .inheritance
                 .iter()
                 .any(|layer| layer.type_name == source.name && layer.file_name == source.file_name)
-    };
+    }
+}
+
+impl Structural for LayerFacts {
+    fn reads(&self, source: &PropParent) -> bool {
+        self.parents.contains(source)
+            || self
+                .sources
+                .iter()
+                .any(|(type_name, file_name)| *type_name == source.name && *file_name == source.file_name)
+    }
+}
+
+/// The layers a checker's answer adds to `structural`'s, and the notable props they hold, to move to
+/// `notableInherited` ([`layer_checker_props`]'s second rule). `props` are the answer's, by name, `parent` and whether
+/// `@types/react` declares it, in its order.
+fn checker_sources<'p>(
+    structural: &impl Structural,
+    props: impl Iterator<Item = (&'p str, Option<&'p PropParent>, bool)>,
+    cx: CollapseContext,
+) -> (Vec<InheritedLayer>, Vec<(String, PropParent)>) {
+    // Each source the answer names (a prop's `parent` is an interface), in the order it first names it, with the
+    // members of it that reach the component, each once.
+    let mut sources: Vec<(&'p PropParent, Vec<String>)> = Vec::new();
+    for (name, parent, react_declared) in props {
+        let Some(parent) = parent.filter(|_| !react_declared) else { continue };
+        match sources.iter_mut().find(|(source, _)| *source == parent) {
+            Some((_, names)) if !names.iter().any(|member| member == name) => names.push(name.to_string()),
+            Some(_) => {}
+            None => sources.push((parent, vec![name.to_string()])),
+        }
+    }
     let notable_names = crate::react_types::notable_html_attrs("");
     let mut notable = Vec::new();
     let mut layers = Vec::new();
     for (source, members) in sources {
-        if !unread(source) || !cx.collapses(&source.file_name, &source.name, members.len()) {
+        if structural.reads(source) || !cx.collapses(&source.file_name, &source.name, members.len()) {
             continue;
         }
         notable.extend(
@@ -437,21 +578,13 @@ pub(crate) fn layer_checker_props<'a>(
             members,
         });
     }
-    entry.inheritance.extend(layers);
-    let layered: rustc_hash::FxHashSet<&str> =
-        entry.inheritance.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
-    if layered.is_empty() {
-        return (props, notable);
-    }
-    let kept = props
-        .into_iter()
-        .filter(|prop| {
-            notable.iter().any(|(name, _)| *name == prop.name)
-                || entry.props.contains_key(&prop.name)
-                || !layered.contains(prop.name.as_str())
-        })
-        .collect();
-    (kept, notable)
+    (layers, notable)
+}
+
+/// Whether the merge keeps a checker prop named `name`: a notable member of a layer the answer adds, a prop the
+/// structural answer lists itself (`listed`), or one no layer names (`layered`).
+fn keeps(name: &str, notable: &[(String, PropParent)], listed: bool, layered: &rustc_hash::FxHashSet<&str>) -> bool {
+    notable.iter().any(|(notable, _)| notable == name) || listed || !layered.contains(name)
 }
 
 /// Moves each merged prop `notable` names from `entry`'s props to its `notableInherited`, when it is the collapsed

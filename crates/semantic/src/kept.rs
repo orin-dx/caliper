@@ -274,7 +274,12 @@ pub(crate) fn request_key(request: &SemanticRequest) -> u128 {
         .iter()
         .map(|target| {
             let wanted = target.react_wanted.as_ref().map(sorted);
-            (&target.key, &target.file_path, &target.display_name, &target.exports, sorted(&target.described), wanted)
+            // Which props the answer converted depends on the layering, so it is part of the request.
+            let layering = &target.layering;
+            (
+                (&target.key, &target.file_path, &target.display_name, &target.exports),
+                (sorted(&target.described), wanted, layering),
+            )
         })
         .collect();
     let described = format!("{:?}", (&request.project_root, &request.tsconfig, targets, request.reverse_queries));

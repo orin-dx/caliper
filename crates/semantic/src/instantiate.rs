@@ -269,6 +269,7 @@ mod tests {
             exports: vec![caliper_docgen_core::types::ComponentExport::named("Poly")],
             described: Default::default(),
             react_wanted: None,
+            layering: None,
         };
         let at = |export: &str, element: &str| Instantiation {
             export: export.to_string(),
