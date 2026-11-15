@@ -153,7 +153,8 @@ impl<'c, F: Canonical> Resolver<'c, F> {
     /// The component a tag in `file` is, if it is one that resolves.
     fn tag(&mut self, file: &'c Utf8Path, tag: &'c JsxTag) -> Option<usize> {
         match tag {
-            JsxTag::Intrinsic(_) => None,
+            // A tag bound in an inner scope holds whatever it holds at run time: no module binding to resolve.
+            JsxTag::Intrinsic(_) | JsxTag::Scoped(_) => None,
             JsxTag::Identifier(path) | JsxTag::Member(path) => self.path(file, path),
         }
     }
