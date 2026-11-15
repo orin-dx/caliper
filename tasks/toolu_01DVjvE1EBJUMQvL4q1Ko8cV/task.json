@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01DVjvE1EBJUMQvL4q1Ko8cV",
+  "agent_id": "ac0a74e42436d46d7",
+  "subagent_type": "general-purpose",
+  "task_description": "T6: call-site and story-args evidence (ADR 0028 wave 1)",
+  "token_usage": {
+    "input_tokens": 162,
+    "cache_creation_tokens": 214857,
+    "cache_read_tokens": 11948820,
+    "output_tokens": 68654,
+    "api_call_count": 81
+  },
+  "started_at": "2026-11-15T13:28:17.268539-08:00",
+  "completed_at": "2026-11-15T13:53:27.506182-08:00"
+}
