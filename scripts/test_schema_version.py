@@ -32,8 +32,8 @@ class SupportedVersion(unittest.TestCase):
                          f'agent_eval: the caliper output has schema version 99, and this script reads version '
                          f'{schema_version.SUPPORTED_SCHEMA_VERSION}. Run it with a caliper-docgen binary of the same release.')
 
-    def test_version_6_without_exports_is_not_read_and_version_7_is(self):
-        self.assertEqual(schema_version.SUPPORTED_SCHEMA_VERSION, 7)
+    def test_version_6_without_exports_is_not_read_and_version_8_is(self):
+        self.assertEqual(schema_version.SUPPORTED_SCHEMA_VERSION, 8)
         with self.assertRaises(SystemExit) as raised:
             schema_version.check({'schemaVersion': 6, 'components': {}}, 'weekly')
         self.assertIn('has schema version 6, and this script reads version 8.', str(raised.exception))

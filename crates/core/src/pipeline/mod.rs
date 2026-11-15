@@ -268,9 +268,21 @@ pub(super) fn resolve_guarded(
                     panic!("simulated resolve-phase panic (test-only sentinel)");
                 }
 
-                let (mut entry, diagnostics, deps) = crate::resolver::resolve_component_tracked(mapping, ctx);
-                entry.relevance_evidence = crate::resolver::relevance_inputs::evidence(mapping, ctx);
-                crate::relevance::annotate(&mut entry);
+                crate::resolver::resolve_component_tracked(mapping, ctx)
+            })
+            .map(|(mut entry, mut diagnostics, deps)| {
+                // Relevance is evidence beside the answer: a panic gathering it leaves `relevance` empty (unknown), never
+                // the resolved component lost.
+                let label = format!("relevance:{}", mapping.component_name);
+                match crate::panic_guard::contain_panic(&label, || {
+                    crate::resolver::relevance_inputs::evidence(mapping, ctx)
+                }) {
+                    Ok(evidence) => {
+                        entry.relevance_evidence = evidence;
+                        crate::relevance::annotate(&mut entry);
+                    }
+                    Err(diagnostic) => diagnostics.own.push(diagnostic),
+                }
                 (entry, diagnostics, deps)
             })
             .unwrap_or_else(|diag| {

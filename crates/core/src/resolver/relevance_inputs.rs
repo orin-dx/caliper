@@ -24,6 +24,11 @@ pub(crate) type SiteKey = (Utf8PathBuf, String, u32);
 /// The call-site counts of every component of the project, by [`SiteKey`]; only components with evidence have one.
 pub(crate) type ProjectSites = FxHashMap<SiteKey, CallSites>;
 
+/// The [`SiteKey`] of `mapping`: the one constructor, so a count and its lookup cannot drift apart.
+fn site_key(mapping: &ComponentMapping) -> SiteKey {
+    (mapping.file_path.clone(), mapping.component_name.clone(), mapping.span_start)
+}
+
 /// The relevance evidence of `mapping`.
 pub(crate) fn evidence(mapping: &ComponentMapping, ctx: &ResolutionContext) -> RelevanceEvidence {
     let lane = Resolver { ctx };
@@ -35,7 +40,7 @@ pub(crate) fn evidence(mapping: &ComponentMapping, ctx: &ResolutionContext) -> R
         elements: forwarding.elements,
         handed_on: forwarding.handed_on,
     });
-    let key = (mapping.file_path.clone(), mapping.component_name.clone(), mapping.span_start);
+    let key = site_key(mapping);
     let call_sites = ctx.relevance_sites.get_or_init(|| project_sites(ctx)).get(&key).cloned().unwrap_or_default();
     RelevanceEvidence(Some(Arc::new(Inputs { props_type, body, call_sites })))
 }
@@ -50,9 +55,7 @@ fn project_sites(ctx: &ResolutionContext) -> ProjectSites {
         .into_iter()
         .zip(components)
         .filter(|(sites, _)| sites.sites > 0)
-        .map(|(sites, mapping)| {
-            ((mapping.file_path.clone(), mapping.component_name.clone(), mapping.span_start), sites)
-        })
+        .map(|(sites, mapping)| (site_key(mapping), sites))
         .collect()
 }
 

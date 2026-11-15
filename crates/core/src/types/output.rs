@@ -153,7 +153,8 @@ pub enum Relevance {
     /// Evidence shows it as a typed row: declared by the props type itself, picked, overriding, required, defaulted,
     /// passed by consumers at the floor, or forwarded or read when not ambient.
     Row,
-    /// An ambient member the body reads: named in its collapsed layer, not a typed row.
+    /// An ambient member the body reads: named in its collapsed layer rather than a typed row. A listed prop can carry
+    /// it too: it is listed today (relevance does not change the listed set), and evidence would name it instead.
     Used,
     /// Complete evidence gives it no signal: it belongs in its collapsed layer.
     Collapsed,
