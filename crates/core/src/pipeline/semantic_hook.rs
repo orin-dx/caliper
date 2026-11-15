@@ -6,8 +6,12 @@
 //! place, and its late answer is kept for the next request of the same, unedited component.
 //!
 //! There is one request in flight per component and version of its file: a caller that finds one waits on it instead
-//! of asking again, and a caller someone is waiting for raises a background request it joins to interactive, so a
-//! story asked while its own prefetch runs is answered when the prefetch is.
+//! of asking again, and a caller raises a request it joins to its own class, so a story asked while its own prefetch
+//! runs is answered when the prefetch is.
+//!
+//! A request nobody waits for is cancelled when its answer would not be read: an edit superseded the revision it was
+//! asked at ([`SemanticHook::invalidate`]), or the client no longer shows its component ([`SemanticHook::cancel`]).
+//! A checker drops it before converting it; one already converting it finishes.
 //!
 //! An answer describes the component's props as the checker read them, which depends on every file the component
 //! imports, not only its own. So the session drops every answer when any source file changes
@@ -19,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use super::ComponentAnswer;
 use crate::pipeline::HtmlAttributeMode;
@@ -164,12 +168,13 @@ impl SemanticHook {
         self.wait_empty = wait_empty;
     }
 
-    /// The wait for `answer`. Nobody waits for a background request: its answer is kept for the request that follows.
+    /// The wait for `answer`. Nobody waits for a neighbour or background request: its answer is kept for the request
+    /// that follows.
     /// Someone does for an interactive one, and longer when the structural pass found no props, since there is nothing
     /// to show before the checker answers. Any prop, even a degraded one, is an answer worth showing at the short wait.
     fn wait_for(&self, answer: &ComponentAnswer, priority: Priority) -> Duration {
         match (priority, answer.entry.props.is_empty()) {
-            (Priority::Background, _) => Duration::ZERO,
+            (Priority::Neighbour | Priority::Background, _) => Duration::ZERO,
             (Priority::Interactive, true) => self.wait_empty.max(self.wait),
             (Priority::Interactive, false) => self.wait,
         }
@@ -177,14 +182,28 @@ impl SemanticHook {
 
     /// Forget every answer, refuse the ones still being waited for, and tell the checker what changed: a source file
     /// changed, and the checker's props for any component can depend on it. The next request of each component asks
-    /// the checker again, after it has been told, rather than joining a request asked before the change.
+    /// the checker again, after it has been told, rather than joining a request asked before the change. A request
+    /// nobody waits for is cancelled: its answer, of the superseded revision, would not be kept, so a checker that has
+    /// not started it drops it. One someone waits for is still answered, after the change.
     pub(crate) fn invalidate(&self, change: SourceChange) {
         let mut cache = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
         cache.generation += 1;
         cache.answers.clear();
+        for pending in cache.pending.values() {
+            pending.priority.cancel();
+        }
         cache.pending.clear();
         cache.props = PropInterner::default();
         self.provider.changed(change);
+    }
+
+    /// Cancels the requests in flight for `keys` that nobody waits for: the client no longer shows those components,
+    /// so a checker that has not started them drops them. A later request asks again rather than joining a cancelled
+    /// one; a request someone waits for, or one the checker is already converting, is answered (and kept) as before.
+    pub(crate) fn cancel(&self, keys: &[String]) {
+        let keys: FxHashSet<&str> = keys.iter().map(String::as_str).collect();
+        let mut cache = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
+        cache.pending.retain(|(key, _), pending| !(keys.contains(key.as_str()) && pending.priority.cancel()));
     }
 
     /// `answer` with the checker's props, when it has them within the wait `priority` gives it.
@@ -247,7 +266,7 @@ impl SemanticHook {
         answer
     }
 
-    /// The kept answer for `key`, else the request in flight for it (raised when someone waits for this one), else a
+    /// The kept answer for `key`, else the request in flight for it (raised to `priority` when that goes first), else a
     /// new request this caller makes, registered so the next caller joins it. One lock, so two callers never both ask.
     /// A file that could not be read has no key: its request is neither kept nor joined.
     fn find(&self, key: Option<&(String, u64)>, priority: Priority) -> (Found, u64) {
@@ -258,10 +277,7 @@ impl SemanticHook {
                 return (Found::Cached(cached.clone()), generation);
             }
             if let Some(pending) = cache.pending.get(key) {
-                match priority {
-                    Priority::Interactive => pending.priority.raise(),
-                    Priority::Background => {}
-                }
+                pending.priority.raise_to(priority);
                 return (Found::Joined(pending.clone()), generation);
             }
         }
@@ -456,5 +472,107 @@ mod tests {
         cache.props = PropInterner::default();
         let third = cache.shared(component("C", &["color"]));
         assert!(!Arc::ptr_eq(&first.props[0], &third.props[0]));
+    }
+
+    /// A checker that holds every request with its priority; the test answers one or reads its priority.
+    #[derive(Default)]
+    struct Holding(Mutex<Vec<(String, SharedPriority, Option<Delivery>)>>);
+
+    impl Holding {
+        /// The key, priority now and whether it was cancelled, of every request in the order asked.
+        fn asked(&self) -> Vec<(String, Priority, bool)> {
+            let held = self.0.lock().unwrap();
+            held.iter().map(|(key, priority, _)| (key.clone(), priority.get(), priority.is_cancelled())).collect()
+        }
+
+        fn answer(&self, n: usize) {
+            let (key, delivery) = {
+                let mut held = self.0.lock().unwrap();
+                (held[n].0.clone(), held[n].2.take().unwrap())
+            };
+            let outcome =
+                SemanticOutcome { components: vec![(*component(&key, &["label"])).clone()], ..Default::default() };
+            delivery.deliver(Some(outcome));
+        }
+    }
+
+    impl SemanticProvider for Holding {
+        fn request(&self, targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome> {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let delivery = Delivery::new(move |outcome| {
+                if let Some(outcome) = outcome {
+                    sender.send(outcome).ok();
+                }
+            });
+            self.request_at(targets, SharedPriority::new(Priority::Interactive), delivery);
+            receiver
+        }
+
+        fn request_at(&self, targets: Vec<SemanticTarget>, priority: SharedPriority, delivery: Delivery) {
+            let key = targets.into_iter().next().unwrap().key;
+            self.0.lock().unwrap().push((key, priority, Some(delivery)));
+        }
+    }
+
+    fn session(files: &[(&str, &str)]) -> (tempfile::TempDir, Arc<crate::pipeline::WatchSession>, Arc<Holding>) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        for (name, source) in files {
+            std::fs::write(root.join(name), source).unwrap();
+        }
+        let checker = Arc::new(Holding::default());
+        let options = crate::pipeline::PipelineOptions { src_dirs: vec![root], ..Default::default() };
+        let session =
+            crate::pipeline::WatchSession::lazy(options).with_semantic(checker.clone(), Duration::from_secs(60));
+        drop(session.initialize());
+        (dir, Arc::new(session), checker)
+    }
+
+    const BUTTON: &str = "export function Button(props: { label: string }) { return null; }";
+    const CARD: &str = "export function Card(props: { title: string }) { return null; }";
+
+    /// A prefetch of a story the client navigated away from is cancelled, so the checker drops it before converting it;
+    /// the next request of that component asks again rather than joining it. A prefetch a story joined is waited for
+    /// and is not cancelled. On the base nothing could cancel a request.
+    #[test]
+    fn a_request_for_a_component_nobody_shows_is_dropped_before_conversion() {
+        let (_dir, session, checker) = session(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
+        drop(session.components_as_neighbours(&["Button".to_string(), "Card".to_string()]));
+        let story = {
+            let session = session.clone();
+            std::thread::spawn(move || session.component("Card").unwrap())
+        };
+        while checker.asked()[1].1 != Priority::Interactive {
+            std::thread::yield_now();
+        }
+
+        session.cancel_components(&["Button".to_string(), "Card".to_string()]);
+
+        assert_eq!(
+            checker.asked(),
+            [("Button".to_string(), Priority::Neighbour, true), ("Card".to_string(), Priority::Interactive, false)]
+        );
+        checker.answer(1);
+        assert!(story.join().unwrap().entry.props.contains_key("label"));
+        drop(session.components_as_neighbours(&["Button".to_string()]));
+        assert_eq!(checker.asked().len(), 3, "a cancelled request is not joined");
+        assert_eq!(checker.asked()[2], ("Button".to_string(), Priority::Neighbour, false));
+    }
+
+    /// An edit cancels the requests of the revision before it that nobody waits for: their answers would not be kept.
+    #[test]
+    fn a_request_of_a_superseded_revision_is_dropped() {
+        let (dir, session, checker) = session(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
+        drop(session.components_in_background(&["Button".to_string()]));
+        drop(session.components_as_neighbours(&["Card".to_string()]));
+
+        let file = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(file.join("Card.tsx"), CARD.replace("title", "heading")).unwrap();
+        session.update_file(&file.join("Card.tsx"));
+
+        assert_eq!(
+            checker.asked(),
+            [("Button".to_string(), Priority::Background, true), ("Card".to_string(), Priority::Neighbour, true)]
+        );
     }
 }
