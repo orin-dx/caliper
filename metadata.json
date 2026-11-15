@@ -1,0 +1,56 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7GRGMXAC63T9ABQCN6JXPJH",
+  "strategy": "manual-commit",
+  "branch": "fix/collapse-picked-notable",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".changeset/skip-converting-collapsed-layer-props.md",
+    "crates/cli/src/commands/extract.rs",
+    "crates/core/src/pipeline/semantic_hook.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/examples/gate_harness.rs",
+    "crates/semantic/src/component.rs",
+    "crates/semantic/src/kept.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/tests/collapse_model.rs",
+    "docs/adr/0028-relevance-evidence-and-the-checker-scheduler.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 18,
+    "cache_creation_tokens": 13294,
+    "cache_read_tokens": 1592297,
+    "output_tokens": 2700,
+    "api_call_count": 8,
+    "subagent_tokens": {
+      "input_tokens": 4,
+      "cache_creation_tokens": 4710,
+      "cache_read_tokens": 553373,
+      "output_tokens": 583,
+      "api_call_count": 2
+    }
+  },
+  "redaction": {
+    "replacements": 44,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 16,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
