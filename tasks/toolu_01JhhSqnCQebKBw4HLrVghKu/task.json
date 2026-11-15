@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01JhhSqnCQebKBw4HLrVghKu",
+  "agent_id": "abdd35c983e9e5db8",
+  "subagent_type": "general-purpose",
+  "task_description": "G: corpora budget gate and weekly hardening",
+  "token_usage": {
+    "input_tokens": 122,
+    "cache_creation_tokens": 150121,
+    "cache_read_tokens": 5788376,
+    "output_tokens": 40950,
+    "api_call_count": 61
+  },
+  "started_at": "2026-11-15T13:03:17.806608-08:00",
+  "completed_at": "2026-11-15T13:12:27.978674-08:00"
+}
