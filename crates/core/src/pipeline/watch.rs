@@ -462,9 +462,10 @@ impl WatchSession {
     }
 
     /// [`Self::components`] for work nobody waits for yet: a warm-up, a fill of the components stories name (a prefetch
-    /// of the stories next to the one shown is [`Self::components_as_neighbours`]). With a checker attached, each is asked for at [`Priority::Background`] and not waited for, so the call
-    /// returns the structural answers; the checker answers them after every request someone waits for, and keeps its
-    /// answers for the requests that follow. A request for a component already being asked joins that request.
+    /// of the stories next to the one shown is [`Self::components_as_neighbours`]). With a checker attached, each is
+    /// asked for at [`Priority::Background`] and not waited for, so the call returns the structural answers; the
+    /// checker answers them after every request someone waits for, and keeps its answers for the requests that follow.
+    /// A request for a component already being asked joins that request.
     pub fn components_in_background(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
         self.components_at(keys, Priority::Background)
     }

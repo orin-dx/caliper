@@ -52,6 +52,9 @@ enum Settled {
     Answered { answered: Answered, once: Vec<Diagnostic> },
     /// The checker stopped without answering.
     Stopped,
+    /// The request was cancelled before the checker converted it ([`SharedPriority::cancel`]): not an answer, and not
+    /// a checker that stopped, so a caller reads it as one still on its way.
+    Cancelled,
 }
 
 /// A request in flight. Every caller for the same component and version of its file waits on it instead of asking the
@@ -256,7 +259,7 @@ impl SemanticHook {
                 stopped.affects = vec![answer.key.clone()];
                 answer.diagnostics.push(stopped);
             }
-            None => {
+            Some(Settled::Cancelled) | None => {
                 let mut pending =
                     Diagnostic::new(DiagnosticSeverity::Info, DiagnosticCode::SemanticBackend, CHECKER_PENDING);
                 pending.affects = vec![answer.key.clone()];
@@ -301,6 +304,7 @@ impl SemanticHook {
                     let Read { answered, once } = read_outcome(&asked, outcome);
                     Settled::Answered { answered, once }
                 }
+                None if settling.priority.is_cancelled() => Settled::Cancelled,
                 None => Settled::Stopped,
             };
             if let Some(key) = key {
@@ -557,6 +561,39 @@ mod tests {
         drop(session.components_as_neighbours(&["Button".to_string()]));
         assert_eq!(checker.asked().len(), 3, "a cancelled request is not joined");
         assert_eq!(checker.asked()[2], ("Button".to_string(), Priority::Neighbour, false));
+    }
+
+    /// A checker that drops each request as cancelled the moment it is asked: a cancel that lands between a caller
+    /// registering its request and reading it.
+    struct CancelsAtOnce;
+
+    impl SemanticProvider for CancelsAtOnce {
+        fn request(&self, _targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome> {
+            std::sync::mpsc::channel().1
+        }
+
+        fn request_at(&self, _targets: Vec<SemanticTarget>, priority: SharedPriority, delivery: Delivery) {
+            assert!(priority.cancel());
+            drop(delivery);
+        }
+    }
+
+    /// A cancelled request is not a checker that stopped: its caller is told the answer is still to come, with no
+    /// warning.
+    #[test]
+    fn a_cancelled_request_is_not_reported_as_a_stopped_checker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Button.tsx"), BUTTON).unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let options = crate::pipeline::PipelineOptions { src_dirs: vec![root], ..Default::default() };
+        let session = crate::pipeline::WatchSession::lazy(options)
+            .with_semantic(Arc::new(CancelsAtOnce), Duration::from_secs(60));
+        drop(session.initialize());
+
+        let answer = session.components_as_neighbours(&["Button".to_string()]).remove(0).unwrap();
+
+        let messages: Vec<&str> = answer.diagnostics.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(messages, [CHECKER_PENDING]);
     }
 
     /// An edit cancels the requests of the revision before it that nobody waits for: their answers would not be kept.

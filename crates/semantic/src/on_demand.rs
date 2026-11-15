@@ -162,11 +162,13 @@ struct Queue<T> {
     waiting: VecDeque<(T, SharedPriority, Priority)>,
     /// Requests of the first class taken in a row while one of a lesser class waited.
     streak: u32,
+    /// The first class when the last request was taken: the class `streak` counts.
+    streak_of: Option<Priority>,
 }
 
 impl<T> Default for Queue<T> {
     fn default() -> Self {
-        Self { waiting: VecDeque::new(), streak: 0 }
+        Self { waiting: VecDeque::new(), streak: 0, streak_of: None }
     }
 }
 
@@ -194,15 +196,18 @@ impl<T> Queue<T> {
         self.waiting = kept.into_iter().chain(raised).map(|(item, priority, _, now)| (item, priority, now)).collect();
         let first = self.waiting.iter().map(|(_, _, class)| *class).min()?;
         let lesser_waits = self.waiting.iter().any(|(_, _, class)| *class > first);
-        let starving = lesser_waits && self.streak >= INTERACTIVE_STREAK;
+        // A run counts the answers of one class: a run of interactive answers is not a neighbour's.
+        let starving = lesser_waits && self.streak_of == Some(first) && self.streak >= INTERACTIVE_STREAK;
         let index = match starving {
             true => self.waiting.iter().position(|(_, _, class)| *class > first),
             false => self.waiting.iter().position(|(_, _, class)| *class == first),
         }?;
-        self.streak = match (starving, lesser_waits) {
-            (false, true) => self.streak + 1,
+        self.streak = match (starving, lesser_waits, self.streak_of == Some(first)) {
+            (false, true, true) => self.streak + 1,
+            (false, true, false) => 1,
             _ => 0,
         };
+        self.streak_of = Some(first);
         self.waiting.remove(index).map(|(item, _, _)| item)
     }
 }
@@ -1082,5 +1087,23 @@ mod tests {
         }
 
         assert_eq!(drain(&mut queue), ["story 1", "story 2", "story 3", "story 4", "fill", "story 5", "next story"]);
+    }
+
+    /// A run counts one class: the stories answered before the neighbours do not shorten the neighbours' run.
+    #[test]
+    fn a_run_of_one_class_does_not_count_toward_the_next_classes_run() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill", Priority::Background);
+        for next in ["next 1", "next 2", "next 3", "next 4", "next 5"] {
+            push(&mut queue, next, Priority::Neighbour);
+        }
+        for story in ["story 1", "story 2", "story 3"] {
+            push(&mut queue, story, Priority::Interactive);
+        }
+
+        assert_eq!(
+            drain(&mut queue),
+            ["story 1", "story 2", "story 3", "next 1", "next 2", "next 3", "next 4", "fill", "next 5"]
+        );
     }
 }
