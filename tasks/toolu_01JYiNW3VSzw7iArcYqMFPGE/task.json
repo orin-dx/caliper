@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01JYiNW3VSzw7iArcYqMFPGE",
+  "agent_id": "a802489ba95b2c78a",
+  "subagent_type": "general-purpose",
+  "task_description": "T5: call-site relevance baseline",
+  "started_at": "2026-11-15T11:49:30.95168-08:00"
+}

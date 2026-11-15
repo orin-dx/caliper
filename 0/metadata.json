@@ -1,0 +1,215 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7GCCW9SQJZEEQPGNMEW4JKA",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-15T19:54:44.961443Z",
+  "branch": "feat/collapse-large-sources-by-default",
+  "checkpoints_count": 12,
+  "save_step_count": 135,
+  "files_touched": [
+    "README.md",
+    "crates/binding/src/lib.rs",
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/core/src/types/semantic.rs",
+    "packages/napi/binding.d.ts",
+    "packages/storybook/README.md",
+    "packages/storybook/src/index.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "b1f3b4b3ba19",
+  "checkpoint_transcript_start": 33938,
+  "transcript_lines_at_start": 33938,
+  "compact_transcript_start": 2823,
+  "token_usage": {
+    "input_tokens": 72,
+    "cache_creation_tokens": 104114,
+    "cache_read_tokens": 20330782,
+    "output_tokens": 56587,
+    "api_call_count": 34,
+    "subagent_tokens": {
+      "input_tokens": 336,
+      "cache_creation_tokens": 548838,
+      "cache_read_tokens": 16944395,
+      "output_tokens": 128359,
+      "api_call_count": 168
+    }
+  },
+  "redaction": {
+    "replacements": 44,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 16,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01E1bbmNAMP8hCsSwMjA4jo8",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cbafcfcae4bb",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 33843,
+        "end": 33844,
+        "entry_ids": [
+          "f50c7fad-b443-40e3-8eef-9e5526ae3b09"
+        ],
+        "tool_use_id": "toolu_01E1bbmNAMP8hCsSwMjA4jo8"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01E1bbmNAMP8hCsSwMjA4jo8"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01PZUXZot9rzn5ctVrEdE8hH",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cbafcfcae4bb",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 33881,
+        "end": 33882,
+        "entry_ids": [
+          "12522b73-57eb-4f38-b121-9b9287199762"
+        ],
+        "tool_use_id": "toolu_01PZUXZot9rzn5ctVrEdE8hH"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01PZUXZot9rzn5ctVrEdE8hH"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 706
+  },
+  "summary": {
+    "intent": "Find why the 0.11.0 checker-default release made the Chakra corpus run use up to 42 GB, fix it without losing output quality, and then design a relevance-based collapse of large prop sources so Storybook and agents don't get ~1M props.",
+    "outcome": "A bisect traced the regression to PR #400, and the size-budget fix was pushed as PR #468 (CI pending) after the simple cap restore was found to cut project-declared types. A collapse-by-default slice and two relevance-evidence workers (T1, T5) are running in parallel, and the relevance-evidence plan is recorded on trail 405.",
+    "learnings": {
+      "repo": [
+        "PR #400 (merge 8095b2c8, feat/react-families) changed the field-count cap to count only fields declared outside the project (`is_own`). Chakra's styled-system is project source, so its 706-property style object is never cut, fans out into ~125 props of ~25 MB each, and the run hit 42 GB.",
+        "The docs' old commit 8a294a68 run on today's Chakra corpus takes 9.6 s and 1,072 MiB, so the corpus did not change (same pin fa9696f3) and this is a code regression, not inherent cost.",
+        "Restoring the cap below top level (`cx.depth > 0`) brings Chakra to ~3 s and 1.2 GB. It also cuts project-declared types on Mantine (43 components, 125 props), react-spectrum (58, 153) and antd (9, 18), so it was rejected in favour of the size budget (#468, b45f64bf).",
+        "The size budget cuts only types over ~0.75 MB (7 types in Chakra) and gives identical output to 0.11.0 on six projects, but Chakra still takes 4.5 s and 6.9 GB because each oversized type is built in full before it is cut.",
+        "An oversized `Truncated` type does not cause checker re-asks or a refresh loop: the checker answer is cached per key and file stamp, and `awaits_checker` is true only after a wait timeout.",
+        "tsrs itself is fast: it type-checks the whole Chakra package in 1.3 s and 1.07 GiB. The slowness was the converter, not the checker.",
+        "The 787-component Chakra slice fixture treats the style system as a dependency, so it stays a name. #400's identical-output check and later gates used it and missed the regression, because the real corpus has the style system as project source.",
+        "The memory guard only runs in the on-demand session path and reads only the checker's arenas. The one-shot `extract` path has neither a guard nor a measurement of the converter's heap.",
+        "The addon defaults to `collapseInheritedProps: 'none'`. The relevance collapse in `ambient.rs` (`LARGE_API_SOURCE` = 200) applies only to dependency sources, so the Chakra corpus produced 1,141 Controls rows for one Button.",
+        "`notable_inherited` is currently a curated name list (className, onClick, id, style).",
+        "The census found that the ~1M checker-only props are mostly style-prop sets and DOM event handlers repeated per component, not real misses. antd and Mantine miss 0 props, and shadcn's 6,228 missed props are mostly the same ~60 DOM handlers."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/convert.rs",
+          "line": 665,
+          "end_line": 665,
+          "finding": "Pre-#400 cap logic (at bad5c3cb): objects wider than 100 fields at a prop's top level, or 40 below it, were cut to Truncated, counting the project's own fields."
+        },
+        {
+          "path": "crates/core/src/convert.rs",
+          "line": 1251,
+          "end_line": 1251,
+          "finding": "On main, the same cap counts only fields declared outside the project (`is_own`), which is the source of the Chakra blow-up."
+        }
+      ],
+      "workflow": [
+        "The user pushed back on an unverified diagnosis (\"you've been assuming\") and the assistant switched to bisecting before choosing a fix, which found the real cause.",
+        "Measure the actual product configuration and the real corpus. Slice fixtures and non-default modes (collapse none, `--no-checker`) hid the regression.",
+        "Subagent reports are model output, not user approval. Choices that change defaults or output were put to the user for a go-ahead first.",
+        "Workers are capped on tool calls (30 to 90 calls) and run at most three in parallel. They commit locally without pushing, and the assistant reviews the diff and runs a code review before pushing.",
+        "Plans and owner ideas are written to the trail (405, 404) so they don't live only in the conversation.",
+        "Use the checker as a test oracle for structural-resolver rules: a rule ships only if it raises structural-equals-checker prop counts with no new wrong types."
+      ]
+    },
+    "friction": [
+      "The assistant first said it would have the bisect worker measure the plain cap restore, but hadn't sent the request, and had to correct that later.",
+      "The Chakra corpus run reaches 14–42 GB, so every measurement needs a 14 GB watchdog that kills the process.",
+      "The 0.11.0 release bookkeeping is unfinished, so the nightly retry keeps failing.",
+      "Weekly jobs, the only runs on the real corpora, did not run on the checker default before the 0.11.0 release.",
+      "Watch p95 latency is 134–190 ms against a 25 ms budget."
+    ],
+    "open_items": [
+      "Get #468 through CI and Entire review, merge it, and ship 0.11.1.",
+      "Re-run the 0.11.0 release to finish its bookkeeping so the nightly retry stops failing.",
+      "Build an expansion-time size budget (slice 0.11.2) so oversized types are never built in full, which should cut Chakra's remaining 6.9 GB.",
+      "Slice B: add a heap safety net on the one-shot `extract` path.",
+      "Slice 1 (running): collapse sources over 200 members by default for project and dependency sources, layer the React DOM-global sets in both lanes, and change the addon default away from 'none'.",
+      "Slice 2: the converter should skip building props that land in a collapsed layer.",
+      "T1 (JSX evidence in the extractor) and T5 (call-site relevance baseline) are running. T0, T2, T3 and T4 follow, including Pick keys, override and JSDoc signals, spread forwarding minus attributes set after the spread, and consumers.",
+      "Fix the real misses: own props hidden by factory wrappers (`chakra(\"div\",{variants})`, `createLeafComponent`) and `tw` through Omit/Pick.",
+      "Add structural-vs-checker equality rows to the weekly record as a ratchet, and make the weekly measure the addon's real configuration.",
+      "Measure the Storybook addon on a project where the style system is in source, like the Chakra corpus.",
+      "Agent-flow output narrowing is deferred.",
+      "Ask tsrs for a slimmer `getPropertiesOfType`, and share memo results to make the converter cheaper."
+    ]
+  }
+}

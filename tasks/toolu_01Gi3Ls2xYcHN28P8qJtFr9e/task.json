@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Gi3Ls2xYcHN28P8qJtFr9e",
+  "agent_id": "a62ca8da5648ee860",
+  "subagent_type": "general-purpose",
+  "task_description": "Census of missed prop patterns by component",
+  "token_usage": {
+    "input_tokens": 52,
+    "cache_creation_tokens": 84196,
+    "cache_read_tokens": 1734289,
+    "output_tokens": 34663,
+    "api_call_count": 26
+  },
+  "started_at": "2026-11-15T11:27:43.838121-08:00",
+  "completed_at": "2026-11-15T11:35:01.708656-08:00"
+}

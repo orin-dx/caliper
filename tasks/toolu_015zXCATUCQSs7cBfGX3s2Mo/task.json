@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_015zXCATUCQSs7cBfGX3s2Mo",
+  "agent_id": "aa31dc41d351b16f1",
+  "subagent_type": "general-purpose",
+  "task_description": "Bisect the Chakra corpus memory regression",
+  "token_usage": {
+    "input_tokens": 118,
+    "cache_creation_tokens": 212728,
+    "cache_read_tokens": 4886771,
+    "output_tokens": 31704,
+    "api_call_count": 59
+  },
+  "started_at": "2026-11-15T10:31:48.219745-08:00",
+  "completed_at": "2026-11-15T10:46:43.196353-08:00"
+}
