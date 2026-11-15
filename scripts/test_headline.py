@@ -107,12 +107,18 @@ class Findings(unittest.TestCase):
         with mock.patch.dict(headline.BUDGETS, {'chakra': {'ms': 2000, 'rss_mib': 600}}):
             self.assertEqual(headline.findings('chakra', entry(ms=2000, rss_mib=600), entry(ms=500, rss_mib=100)), [])
 
-    def test_a_corpus_with_no_budget_is_recorded_and_opens_nothing(self):
-        """No checker run of the five corpora is measured yet: every budget is None, 'record on first run'."""
+    def test_every_corpus_has_a_time_and_a_memory_budget(self):
         self.assertEqual(set(headline.BUDGETS), {'mantine', 'chakra', 'shadcn', 'antd', 'spectrum'})
         for name, budget in headline.BUDGETS.items():
-            self.assertEqual(budget, {'ms': None, 'rss_mib': None})
-            self.assertEqual(headline.findings(name, entry(ms=10**6, rss_mib=10**6), None), [])
+            self.assertEqual(set(budget), {'ms', 'rss_mib'})
+            self.assertTrue(all(isinstance(limit, int) and limit > 0 for limit in budget.values()), name)
+
+    def test_over_budget_names_the_corpus_the_metric_the_value_and_the_limit(self):
+        budgets = {'antd': {'ms': 100, 'rss_mib': 50}}
+        self.assertEqual(headline.over_budget('antd', entry(ms=101, rss_mib=50), budgets),
+                         ["antd: a whole run's time is 101 ms, over the 100 ms budget"])
+        self.assertEqual(headline.over_budget('antd', entry(ms=100, rss_mib=50), budgets), [])
+        self.assertEqual(headline.over_budget('mantine', entry(ms=10**9, rss_mib=10**9), budgets), [])
 
     def test_a_record_without_a_headline_or_without_numbers_is_quiet(self):
         self.assertEqual(headline.findings('antd', {}, None), [])
