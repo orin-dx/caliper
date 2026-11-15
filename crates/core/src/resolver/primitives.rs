@@ -63,6 +63,12 @@ pub(super) fn union_of(members: impl IntoIterator<Item = PropType>) -> PropType 
     let mut flat = Flat::default();
     flat.push(members);
     collapse_booleans(&mut flat.members);
+    // `any` absorbs every other member, and `unknown` every member but `any` (`T | null` with `T` read as `unknown`).
+    for top in [PropType::Any, PropType::Unknown] {
+        if flat.members.len() > 1 && flat.members.contains(&top) {
+            return top;
+        }
+    }
     // A union of nothing is `never`.
     match flat.members.len() {
         0 => PropType::Never,

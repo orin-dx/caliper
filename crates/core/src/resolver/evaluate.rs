@@ -950,6 +950,150 @@ fn literal_set(ty: &CollectedType) -> Option<Vec<String>> {
     }
 }
 
+/// An object type's member, with the file its type is written in.
+pub(super) type LocatedField = (CollectedObjectField, Utf8PathBuf);
+
+/// The members TypeScript's `Partial`, `Required`, `Pick` or `Omit` (named `name`, bound to nothing in `file`) gives
+/// `args`, when the object it maps is known member by member: an object literal, an interface without type parameters
+/// (its own members, then those of the interfaces it extends), an alias of one, or another of these four over one.
+/// `Pick` and `Omit` need their keys as literals, an alias of them or `keyof` of a known object. `Omit<A[], keyof B[]>`
+/// takes every key an array has away and leaves `{}`. `None` for anything else, which stays an application.
+pub(super) fn utility_fields(
+    name: &str,
+    args: &[CollectedType],
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<Vec<LocatedField>> {
+    if depth > MAX_DEPTH
+        || !matches!(name, "Partial" | "Required" | "Pick" | "Omit")
+        || !super::may_be_ts_lib_type(name, file, ctx)
+    {
+        return None;
+    }
+    match (name, args) {
+        ("Partial" | "Required", [base]) => {
+            let required = name == "Required";
+            let mut fields = object_fields(base, file, ctx, depth + 1)?;
+            for (field, _) in &mut fields {
+                // `-?` takes `undefined` out of an optional member's type, as `Required` declares.
+                if required && !field.required {
+                    field.collected_type = without_undefined(&field.collected_type);
+                }
+                field.required = required;
+            }
+            Some(fields)
+        }
+        ("Omit", [base, CollectedType::KeyOf(keys)]) if is_array(base) && is_array(keys) => Some(Vec::new()),
+        ("Pick" | "Omit", [base, keys]) => {
+            let keys: Vec<String> = mapped_keys(keys, file, ctx, depth + 1)?.into_iter().map(|key| key.name).collect();
+            let mut fields = object_fields(base, file, ctx, depth + 1)?;
+            if name == "Pick" {
+                // A key the object lacks is an error TypeScript reports; nothing is guessed for it.
+                if !keys.iter().all(|key| fields.iter().any(|(field, _)| &field.name == key)) {
+                    return None;
+                }
+                fields.retain(|(field, _)| keys.contains(&field.name));
+            } else {
+                fields.retain(|(field, _)| !keys.contains(&field.name));
+            }
+            Some(fields)
+        }
+        _ => None,
+    }
+}
+
+/// The members of `ty`, read as `utility_fields` describes; `None` when one of them is an index signature or `ty` is
+/// not one of those forms.
+fn object_fields(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<LocatedField>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match ty {
+        CollectedType::AtFile { file, inner } => object_fields(inner, file, ctx, depth + 1),
+        CollectedType::Object(fields) => {
+            fields.iter().map(|field| field.is_member().then(|| (field.clone(), file.to_owned()))).collect()
+        }
+        CollectedType::Named { name, args } => {
+            if let Some(fields) = utility_fields(name, args, file, ctx, depth + 1) {
+                return Some(fields);
+            }
+            let (canonical_file, canonical_name) = canonical(name, file, ctx);
+            if let Some(iface) = lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name) {
+                let mut fields = Vec::new();
+                return (args.is_empty() && interface_fields(iface, ctx, depth + 1, &mut fields)).then_some(fields);
+            }
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            object_fields(&body, &body_file, ctx, depth + 1)
+        }
+        _ => None,
+    }
+}
+
+/// An interface's members, then those of each interface it extends that the run declares; `false` when it or a parent
+/// has type parameters, or a parent is not such an interface, so its members are not all known.
+fn interface_fields(
+    iface: &CollectedInterface,
+    ctx: &ResolutionContext,
+    depth: u8,
+    out: &mut Vec<LocatedField>,
+) -> bool {
+    if depth > MAX_DEPTH || ctx.named_types.lookup_interface_type_params_for(iface).is_some_and(|p| !p.is_empty()) {
+        return false;
+    }
+    for prop in &iface.props {
+        if !out.iter().any(|(field, _)| field.name == prop.name) {
+            let field = CollectedObjectField {
+                name: prop.name.clone(),
+                collected_type: prop.collected_type.clone(),
+                required: prop.required,
+                description: String::new(),
+                readonly: false,
+                index_key: None,
+                tags: Default::default(),
+            };
+            out.push((field, iface.file_path.clone()));
+        }
+    }
+    iface.extends.iter().all(|parent| {
+        let (name, args) = match parent {
+            ExtendsRef::SameFile { name, type_args } => (name, type_args),
+            ExtendsRef::Imported { local_name, type_args, .. } => (local_name, type_args),
+            ExtendsRef::Builtin { .. } => return false,
+        };
+        let (file, name) = canonical(name, &iface.file_path, ctx);
+        args.is_empty()
+            && lookup_interface_from(ctx, file.as_str(), &name, &iface.scope)
+                .is_some_and(|parent| interface_fields(parent, ctx, depth + 1, out))
+    })
+}
+
+/// Whether `ty` is an array type `T[]` or `Array<T>`, whose keys are the same whatever `T` is.
+fn is_array(ty: &CollectedType) -> bool {
+    match ty {
+        CollectedType::AtFile { inner, .. } => is_array(inner),
+        CollectedType::Array(_) => true,
+        CollectedType::Named { name, args } => name == "Array" && args.len() == 1,
+        _ => false,
+    }
+}
+
+/// `ty` without an `undefined` union member.
+fn without_undefined(ty: &CollectedType) -> CollectedType {
+    match ty {
+        CollectedType::Union(members) => {
+            let kept: Vec<CollectedType> =
+                members.iter().filter(|m| !matches!(m, CollectedType::Undefined)).cloned().collect();
+            match kept.len() {
+                0 => CollectedType::Never,
+                1 => kept.into_iter().next().unwrap_or(CollectedType::Never),
+                _ => CollectedType::Union(kept),
+            }
+        }
+        other => other.clone(),
+    }
+}
+
 fn unwrap_at_file(ty: &CollectedType) -> (&CollectedType, Option<&Utf8Path>) {
     match ty {
         CollectedType::AtFile { file, inner } => (unwrap_at_file(inner).0, Some(file.as_path())),

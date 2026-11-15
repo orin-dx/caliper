@@ -2704,7 +2704,9 @@ expression: value
         "leftIcon": {
           "name": "leftIcon",
           "type": {
-            "kind": "reactNode"
+            "kind": "named",
+            "name": "ReactElement",
+            "args": []
           },
           "required": false,
           "defaultValue": null,
@@ -9872,7 +9874,9 @@ expression: value
         "rightIcon": {
           "name": "rightIcon",
           "type": {
-            "kind": "reactNode"
+            "kind": "named",
+            "name": "ReactElement",
+            "args": []
           },
           "required": false,
           "defaultValue": null,
@@ -10306,7 +10310,9 @@ expression: value
         "spinner": {
           "name": "spinner",
           "type": {
-            "kind": "reactNode"
+            "kind": "named",
+            "name": "ReactElement",
+            "args": []
           },
           "required": false,
           "defaultValue": null,

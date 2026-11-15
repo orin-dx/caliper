@@ -242,6 +242,40 @@ fn resolve_named_uncycled(
     {
         return evaluated;
     }
+    // `Partial<Classes>`, `Omit<Props, "x">`: the object TypeScript maps a known object to, when every member's type
+    // is evaluated through; otherwise the application stays, as an alias over a type not evaluated keeps its name.
+    if let Some(fields) = super::evaluate::utility_fields(name.as_str(), args, consuming_file, ctx, 0) {
+        // Read with the caller's cycle sets; what the reading reported is taken back when the application stays.
+        let (diagnostics, shared, unevaluated) =
+            (state.diagnostics.len(), state.shared_diagnostics.len(), state.named_unevaluated);
+        let object = PropType::Object(
+            fields
+                .into_iter()
+                .map(|(field, file)| ObjectField {
+                    prop_type: resolve_collected_type(&field.collected_type, &file, ctx, state, depth + 1),
+                    name: field.name,
+                    required: field.required,
+                    description: field.description,
+                    readonly: field.readonly,
+                    index_key: None,
+                })
+                .collect(),
+        );
+        if evaluated_through(&object) {
+            return object;
+        }
+        state.diagnostics.truncate(diagnostics);
+        state.shared_diagnostics.truncate(shared);
+        state.named_unevaluated = unevaluated;
+    }
+    // `NonNullable<number | undefined>` once its argument is known: `number`.
+    if let [arg] = resolved_args.as_slice()
+        && name == "NonNullable"
+        && super::may_be_ts_lib_type(name, consuming_file, ctx)
+        && let Some(kept) = non_nullish(arg)
+    {
+        return kept;
+    }
     if super::is_ts_utility_type(bare)
         || matches!(
             bare,
@@ -493,6 +527,78 @@ fn without_nullish(
         1 => kept.remove(0),
         _ => CollectedType::Union(kept),
     })
+}
+
+/// Whether `ty` is evaluated to its leaves: no part of it is a reference by name, a function whose types are kept as
+/// written, or a type the resolver gave up on.
+fn evaluated_through(ty: &PropType) -> bool {
+    match ty {
+        PropType::Union(members) | PropType::Intersection(members) => members.iter().all(evaluated_through),
+        PropType::Array(inner) | PropType::Readonly(inner) => evaluated_through(inner),
+        PropType::Tuple(elements) => elements.iter().all(|element| evaluated_through(&element.element_type)),
+        PropType::Object(fields) => fields.iter().all(|field| evaluated_through(&field.prop_type)),
+        PropType::String
+        | PropType::Number
+        | PropType::Boolean
+        | PropType::Null
+        | PropType::Undefined
+        | PropType::Any
+        | PropType::Never
+        | PropType::Unknown
+        | PropType::Void
+        | PropType::BigInt
+        | PropType::StringLiteral(_)
+        | PropType::NumberLiteral(_)
+        | PropType::BoolLiteral(_)
+        | PropType::BigIntLiteral(_)
+        | PropType::LiteralUnion { .. }
+        | PropType::EnumMember { .. }
+        | PropType::TemplateLiteral(_)
+        | PropType::ReactNode
+        | PropType::CssProperties
+        | PropType::ElementType => true,
+        PropType::Named { .. }
+        | PropType::Recursive { .. }
+        | PropType::Function { .. }
+        | PropType::Callable { .. }
+        | PropType::Ref { .. }
+        | PropType::HtmlAttributes { .. }
+        | PropType::SxProps
+        | PropType::UniqueSymbol { .. }
+        | PropType::Truncated { .. }
+        | PropType::Opaque(_) => false,
+    }
+}
+
+/// A resolved `ty` without `null` and `undefined`, when every other member surely holds neither (a primitive, a literal,
+/// an object, a function, an array); `None` when one might (a name, `unknown`, React's node type).
+fn non_nullish(ty: &PropType) -> Option<PropType> {
+    let members = match ty {
+        PropType::Union(members) => members.as_slice(),
+        single => std::slice::from_ref(single),
+    };
+    let mut kept = Vec::with_capacity(members.len());
+    for member in members {
+        match member {
+            PropType::Null | PropType::Undefined => {}
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::BigInt
+            | PropType::StringLiteral(_)
+            | PropType::NumberLiteral(_)
+            | PropType::BoolLiteral(_)
+            | PropType::BigIntLiteral(_)
+            | PropType::LiteralUnion { .. }
+            | PropType::TemplateLiteral(_)
+            | PropType::Object(_)
+            | PropType::Function { .. }
+            | PropType::Array(_)
+            | PropType::Tuple(_) => kept.push(member.clone()),
+            _ => return None,
+        }
+    }
+    Some(super::primitives::union_of(kept))
 }
 
 /// Whether `ty` may include `null` or `undefined`: it says so, or is an alias whose definition does. A form the
