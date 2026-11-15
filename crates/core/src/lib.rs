@@ -18,6 +18,7 @@ pub mod panic_guard;
 pub(crate) mod path_key;
 pub mod pipeline;
 pub mod react_types;
+pub(crate) mod relevance;
 pub(crate) mod resolver;
 pub mod toon;
 pub mod types;
