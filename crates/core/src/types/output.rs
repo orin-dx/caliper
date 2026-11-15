@@ -337,7 +337,7 @@ pub struct DefaultValue {
 
 /// Where a prop was declared — enables RDT propFilter compatibility.
 /// The canonical RDT pattern: `prop => !prop.parent.fileName.includes('node_modules')`
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PropParent {
     /// Name of the interface/type alias that declared this prop
@@ -1622,7 +1622,8 @@ pub enum SignatureKind {
 /// The limit a [`PropType::Truncated`] type was cut at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TruncationLimit {
-    /// The type is nested deeper than the converter expands.
+    /// The type is nested deeper than the converter expands, or is made of more types, itself and every type inside it
+    /// counted, than the converter keeps (18,724: never a type under 256 KiB of JSON, near 0.75 MB on real projects).
     Depth,
     /// The type has more members than the converter lists.
     Members {
