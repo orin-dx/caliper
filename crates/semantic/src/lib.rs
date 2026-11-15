@@ -32,7 +32,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use caliper_docgen_core::types::ExtractionOutput;
-use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome};
+use caliper_docgen_core::types::options::CollapseContext;
+use caliper_docgen_core::types::semantic::{
+    Layering, PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome,
+};
 use camino::{Utf8Path, Utf8PathBuf};
 use rustc_hash::FxHashMap;
 use tokio::task::JoinSet;
@@ -66,12 +69,24 @@ pub const KEPT_ANSWER_FILE: &str = kept::FILE;
 /// A component the structural pass found.
 pub use caliper_docgen_core::types::semantic::SemanticTarget as Target;
 
-/// The components of `output`, in output order.
+/// The components of `output`, in output order, each of whose props is converted.
 pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
+    targets_with(output, None)
+}
+
+/// [`targets_of`] for an answer merged with `cx` ([`merge_semantic_in`](caliper_docgen_core::types::semantic::merge_semantic_in)
+/// over this `output`): a prop the merge leaves to a collapsed layer is reported by name and `parent`, not converted
+/// ([`Target::layering`]).
+pub fn targets_collapsing(output: &ExtractionOutput, cx: CollapseContext) -> Vec<Target> {
+    targets_with(output, Some(cx))
+}
+
+fn targets_with(output: &ExtractionOutput, cx: Option<CollapseContext>) -> Vec<Target> {
     output
         .components
         .iter()
         .map(|(key, entry)| Target {
+            layering: cx.map(|cx| Layering::of(entry, cx)),
             key: key.clone(),
             file_path: entry.file_path.clone(),
             display_name: entry.display_name.clone(),
