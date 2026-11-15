@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01WvgB4oE6BZLVaLTmWJE8jx",
+  "agent_id": "a50ad94c9617f5378",
+  "subagent_type": "general-purpose",
+  "task_description": "P1: structural parity for utility types, type params, handler aliases",
+  "started_at": "2026-11-15T13:03:17.32373-08:00"
+}
