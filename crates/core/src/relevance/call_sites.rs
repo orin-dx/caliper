@@ -153,7 +153,8 @@ impl<'c, F: Canonical> Resolver<'c, F> {
     /// The component a tag in `file` is, if it is one that resolves.
     fn tag(&mut self, file: &'c Utf8Path, tag: &'c JsxTag) -> Option<usize> {
         match tag {
-            JsxTag::Intrinsic(_) => None,
+            // A tag an inner binding shadows is not the module's component of that name: no call site of it.
+            JsxTag::Intrinsic(_) | JsxTag::Scoped(_) => None,
             JsxTag::Identifier(path) | JsxTag::Member(path) => self.path(file, path),
         }
     }
@@ -311,6 +312,14 @@ mod tests {
         let table = [("/app.tsx", "Gone", "/missing.tsx", "Gone")];
         usages.extend(sites(3, &id("Gone"), &["a"]));
         let counted = count(&[button], &[FileUsages { file: "/app.tsx".into(), usages: &usages }], imports(&table));
+        assert_eq!(counted[0], CallSites::default());
+    }
+
+    #[test]
+    fn a_tag_an_inner_binding_shadows_is_no_site_of_the_module_component() {
+        let button = component("/b.tsx", "Button", &[ComponentExport::named("Button")]);
+        let usages = sites(3, &JsxTag::Scoped("Button".to_owned()), &["tone"]);
+        let counted = count(&[button], &[FileUsages { file: "/b.tsx".into(), usages: &usages }], nothing);
         assert_eq!(counted[0], CallSites::default());
     }
 
