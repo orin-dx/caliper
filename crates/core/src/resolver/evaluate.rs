@@ -497,10 +497,11 @@ pub(super) fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionC
         CollectedType::AtFile { file, inner } => keys_of(inner, file, ctx, depth + 1),
         // `keyof typeof Icons`: the keys of a `const` object literal.
         CollectedType::TypeOf(name) => keys_of(&value_type(name, file, ctx)?, file, ctx, depth + 1),
+        // An index signature's keys are a type (`string | number`), not names: no list states them.
+        CollectedType::Object(fields) if fields.iter().any(|f| !f.is_member()) => None,
         CollectedType::Object(fields) => Some(
             fields
                 .iter()
-                .filter(|f| f.is_member())
                 .map(|f| Key {
                     name: f.name.clone(),
                     required: f.required,
@@ -513,8 +514,7 @@ pub(super) fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionC
             let (canonical_file, canonical_name) = canonical(name, file, ctx);
             if let Some(iface) = lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name) {
                 let mut keys = Vec::new();
-                interface_keys(iface, ctx, depth + 1, &mut keys);
-                return Some(keys);
+                return interface_keys(iface, ctx, depth + 1, &mut keys).then_some(keys);
             }
             let (body, body_file) = alias_body(name, args, file, ctx)?;
             keys_of(&body, &body_file, ctx, depth + 1)
@@ -533,8 +533,11 @@ pub(super) fn value_type(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -
     }
 }
 
-/// An interface's members, then those of every interface it extends that the project declares.
-fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8, keys: &mut Vec<Key>) {
+/// An interface's members, then those of every interface it extends that the project declares; `false` when they are
+/// not all its keys: it or an ancestor declares a member it does not list (`CollectedInterface::unlisted_members`), or
+/// a parent is not found.
+fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8, keys: &mut Vec<Key>) -> bool {
+    let mut complete = !iface.unlisted_members;
     for prop in &iface.props {
         if !keys.iter().any(|key| key.name == prop.name) {
             keys.push(Key {
@@ -546,7 +549,7 @@ fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8
         }
     }
     if depth > MAX_DEPTH {
-        return;
+        return false;
     }
     for parent in &iface.extends {
         let name = match parent {
@@ -558,10 +561,9 @@ fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8
         let (file, name) = canonical(name, &iface.file_path, ctx);
         let found = lookup_interface_from(ctx, file.as_str(), &name, &iface.scope)
             .or_else(|| react_interface(ctx, &file, &name));
-        if let Some(parent) = found {
-            interface_keys(parent, ctx, depth + 1, keys);
-        }
+        complete &= found.is_some_and(|parent| interface_keys(parent, ctx, depth + 1, keys));
     }
+    complete
 }
 
 /// The member names of React's interface `name` (`HTMLAttributes`, with the interfaces it extends), whether or not
@@ -570,7 +572,8 @@ pub(super) fn react_interface_keys(name: &str, file: &Utf8Path, ctx: &Resolution
     let (canonical_file, canonical_name) = canonical(name, file, ctx);
     let iface = react_interface(ctx, &canonical_file, &canonical_name)?;
     let mut keys = Vec::new();
-    interface_keys(iface, ctx, 0, &mut keys);
+    // React's interfaces are read as far as they are found, as before: their parents are named by builtin spellings.
+    let _complete = interface_keys(iface, ctx, 0, &mut keys);
     Some(keys.into_iter().map(|key| key.name.to_string()).collect())
 }
 
@@ -950,144 +953,310 @@ fn literal_set(ty: &CollectedType) -> Option<Vec<String>> {
     }
 }
 
-/// An object type's member, with the file its type is written in.
-pub(super) type LocatedField = (CollectedObjectField, Utf8PathBuf);
+/// An object type's member, with the file and the scope its type is written in: its names are looked up from there.
+#[derive(Debug, Clone)]
+pub(super) struct LocatedField {
+    pub(super) field: CollectedObjectField,
+    pub(super) file: Utf8PathBuf,
+    pub(super) scope: DeclarationScope,
+}
 
-/// The members TypeScript's `Partial`, `Required`, `Pick` or `Omit` (named `name`, bound to nothing in `file`) gives
-/// `args`, when the object it maps is known member by member: an object literal, an interface without type parameters
-/// (its own members, then those of the interfaces it extends), an alias of one, or another of these four over one.
-/// `Pick` and `Omit` need their keys as literals, an alias of them or `keyof` of a known object. `Omit<A[], keyof B[]>`
-/// takes every key an array has away and leaves `{}`. `None` for anything else, which stays an application.
-pub(super) fn utility_fields(
+/// Why the structural lane leaves an application of `Partial`, `Required`, `Pick` or `Omit` as written: a fact the
+/// expansion would read is not recorded, or not complete. The checker lane (ADR 0026) answers it instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Declined {
+    /// The name is bound to a declaration of the project (in its file, or a scope enclosing the reference), not to
+    /// TypeScript's lib type.
+    NotLibUtility,
+    /// The object it maps is not one whose members are recorded one by one: a type parameter, a conditional, a type
+    /// from a file the run does not read.
+    UnknownObject,
+    /// The object declares a member the collected model does not list: an index signature, a member whose key is not
+    /// a static name, or it is a class.
+    UnlistedMembers,
+    /// A generic interface, or one extending a type that is not such an interface: its members are not all recorded.
+    UnknownParent,
+    /// A member an interface and one it extends (or two of its parents) both declare: where the checker lists it is not
+    /// recorded.
+    Redeclared,
+    /// The interface a name finds is declared in a scope that does not enclose the reference.
+    OutOfScope,
+    /// The keys of `Pick` or `Omit` are not a known set of names.
+    UnknownKeys,
+    /// `Pick` names a key the object does not have, an error TypeScript reports.
+    MissingKey,
+    /// `Required` over an optional member whose type may hold `undefined` through a name.
+    OptionalUndefined,
+    /// Nested past `MAX_DEPTH`.
+    TooDeep,
+}
+
+/// The guard every structural expansion of `Partial`, `Required`, `Pick` or `Omit` goes through: the members of the
+/// exact expansion, or why there is none.
+pub(super) type Exactness = Result<Vec<LocatedField>, Declined>;
+
+/// Whether `name` is one of the utility types `structural_expansion` reads.
+pub(super) fn is_structural_utility(name: &str) -> bool {
+    matches!(name, "Partial" | "Required" | "Pick" | "Omit")
+}
+
+/// The members TypeScript's `Partial`, `Required`, `Pick` or `Omit` (named `name`, written in `file` within `scope`)
+/// gives `args`. Structural expansion is exact or declined: it proceeds only when every fact it reads is recorded and
+/// complete, which is when the name is TypeScript's own (bound to nothing in `file` or an enclosing scope); the object
+/// it maps is an object literal, an interface without type parameters (its own members, then its parents'), an alias of
+/// one, or another of these four over one, found from `scope` and listing every member it declares (no index
+/// signature, no computed key); `Pick` and `Omit` have their keys as literals, an alias of them or `keyof` of such an
+/// object; and `Required` drops `undefined` only from a type that holds it by no name. `Omit<A[], keyof B[]>`, both
+/// TypeScript's `Array`, takes every key an array has away and leaves `{}`. Modifiers are kept: `readonly` as declared,
+/// and `?` as each utility sets it. Anything else is [`Declined`], and the application stays.
+pub(super) fn structural_expansion(
     name: &str,
     args: &[CollectedType],
     file: &Utf8Path,
+    scope: &DeclarationScope,
     ctx: &ResolutionContext,
     depth: u8,
-) -> Option<Vec<LocatedField>> {
-    if depth > MAX_DEPTH
-        || !matches!(name, "Partial" | "Required" | "Pick" | "Omit")
-        || !super::may_be_ts_lib_type(name, file, ctx)
-    {
-        return None;
+) -> Exactness {
+    if depth > MAX_DEPTH {
+        return Err(Declined::TooDeep);
+    }
+    if !is_structural_utility(name) || !is_lib_type(name, file, scope, ctx) {
+        return Err(Declined::NotLibUtility);
     }
     match (name, args) {
         ("Partial" | "Required", [base]) => {
             let required = name == "Required";
-            let mut fields = object_fields(base, file, ctx, depth + 1)?;
-            for (field, _) in &mut fields {
-                // `-?` takes `undefined` out of an optional member's type, as `Required` declares.
-                if required && !field.required {
-                    field.collected_type = without_undefined(&field.collected_type);
+            let mut fields = object_fields(base, file, scope, ctx, depth + 1)?;
+            for located in &mut fields {
+                let ty = &mut located.field.collected_type;
+                if required && !located.field.required {
+                    // `-?` takes `undefined` out of an optional member's type, as `Required` declares.
+                    *ty = without_undefined(ty)?;
                 }
-                field.required = required;
+                located.field.required = required;
             }
-            Some(fields)
+            Ok(fields)
         }
-        ("Omit", [base, CollectedType::KeyOf(keys)]) if is_array(base) && is_array(keys) => Some(Vec::new()),
+        ("Omit", [base, CollectedType::KeyOf(keys)])
+            if is_lib_array(base, file, scope, ctx) && is_lib_array(keys, file, scope, ctx) =>
+        {
+            Ok(Vec::new())
+        }
         ("Pick" | "Omit", [base, keys]) => {
-            let keys: Vec<String> = mapped_keys(keys, file, ctx, depth + 1)?.into_iter().map(|key| key.name).collect();
-            let mut fields = object_fields(base, file, ctx, depth + 1)?;
+            let keys: Vec<String> = match keys {
+                // `keyof` of an object is read as the object is, from the same scope and with the same fidelity.
+                CollectedType::KeyOf(target) if !matches!(target.as_ref(), CollectedType::TypeOf(_)) => {
+                    object_fields(target, file, scope, ctx, depth + 1)?.into_iter().map(|f| f.field.name).collect()
+                }
+                other => mapped_keys(other, file, ctx, depth + 1)
+                    .ok_or(Declined::UnknownKeys)?
+                    .into_iter()
+                    .map(|key| key.name)
+                    .collect(),
+            };
+            let mut fields = object_fields(base, file, scope, ctx, depth + 1)?;
             if name == "Pick" {
                 // `[P in K]` lists the members in the keys' order. A key the object lacks is an error TypeScript
                 // reports; nothing is guessed for it.
-                return keys.iter().map(|key| fields.iter().find(|(field, _)| &field.name == key).cloned()).collect();
+                return keys
+                    .iter()
+                    .map(|key| fields.iter().find(|f| &f.field.name == key).cloned().ok_or(Declined::MissingKey))
+                    .collect();
             }
-            fields.retain(|(field, _)| !keys.contains(&field.name));
-            Some(fields)
+            fields.retain(|f| !keys.contains(&f.field.name));
+            Ok(fields)
         }
-        _ => None,
+        _ => Err(Declined::UnknownObject),
     }
 }
 
-/// The members of `ty`, read as `utility_fields` describes; `None` when one of them is an index signature or `ty` is
-/// not one of those forms.
-fn object_fields(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<LocatedField>> {
+/// Whether `name`, written in `file` within `scope`, is TypeScript's lib type: no import, module-level declaration or
+/// declaration of an enclosing scope binds it.
+fn is_lib_type(name: &str, file: &Utf8Path, scope: &DeclarationScope, ctx: &ResolutionContext) -> bool {
+    super::deps::record(file);
+    super::may_be_ts_lib_type(name, file, ctx) && ctx.named_types.lookup_local_interface(file, name, scope).is_none()
+}
+
+/// The members of `ty`, written in `file` within `scope`, read as `structural_expansion` describes.
+fn object_fields(
+    ty: &CollectedType,
+    file: &Utf8Path,
+    scope: &DeclarationScope,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Exactness {
     if depth > MAX_DEPTH {
-        return None;
+        return Err(Declined::TooDeep);
     }
     match ty {
-        CollectedType::AtFile { file, inner } => object_fields(inner, file, ctx, depth + 1),
-        CollectedType::Object(fields) => {
-            fields.iter().map(|field| field.is_member().then(|| (field.clone(), file.to_owned()))).collect()
+        // A type written in another file is read from that file's module scope.
+        CollectedType::AtFile { file: at, inner } if at != file => {
+            object_fields(inner, at, &DeclarationScope::default(), ctx, depth + 1)
         }
+        CollectedType::AtFile { inner, .. } => object_fields(inner, file, scope, ctx, depth + 1),
+        CollectedType::Object(fields) => fields
+            .iter()
+            .map(|field| {
+                field
+                    .is_member()
+                    .then(|| LocatedField { field: field.clone(), file: file.to_owned(), scope: scope.clone() })
+                    .ok_or(Declined::UnlistedMembers)
+            })
+            .collect(),
         CollectedType::Named { name, args } => {
-            if let Some(fields) = utility_fields(name, args, file, ctx, depth + 1) {
-                return Some(fields);
+            if is_structural_utility(name) && is_lib_type(name, file, scope, ctx) {
+                return structural_expansion(name, args, file, scope, ctx, depth + 1);
+            }
+            // A name no import binds is looked up from where it is written outward, as `find_declaration` does.
+            super::deps::record(file);
+            if let Some(local) = ctx.named_types.lookup_local_interface(file, name, scope) {
+                return interface_object(local, args, ctx, depth);
             }
             let (canonical_file, canonical_name) = canonical(name, file, ctx);
             if let Some(iface) = lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name) {
-                let mut fields = Vec::new();
-                return (args.is_empty() && interface_fields(iface, ctx, depth + 1, &mut fields)).then_some(fields);
+                // The file's sole local interface of a name is found without a scope; outside that scope it is not
+                // this name's declaration.
+                if iface.file_path == file && !iface.scope.encloses(scope) {
+                    return Err(Declined::OutOfScope);
+                }
+                return interface_object(iface, args, ctx, depth);
             }
-            let (body, body_file) = alias_body(name, args, file, ctx)?;
-            object_fields(&body, &body_file, ctx, depth + 1)
+            let (body, body_file, body_scope) =
+                alias_body_declared(name, args, file, ctx).ok_or(Declined::UnknownObject)?;
+            object_fields(&body, &body_file, &body_scope, ctx, depth + 1)
         }
-        _ => None,
+        _ => Err(Declined::UnknownObject),
     }
 }
 
-/// An interface's members, then those of each interface it extends that the run declares; `false` when it or a parent
-/// has type parameters, or a parent is not such an interface, so its members are not all known.
+/// The members of an interface given `args`, which an interface with type parameters would need bound.
+fn interface_object(
+    iface: &CollectedInterface,
+    args: &[CollectedType],
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Exactness {
+    if !args.is_empty() {
+        return Err(Declined::UnknownParent);
+    }
+    let mut fields = Vec::new();
+    interface_fields(iface, ctx, depth + 1, &mut fields)?;
+    Ok(fields)
+}
+
+/// The members of each interface `iface` extends that the run declares, then its own: the order the checker lists them
+/// in. Declined when it or a parent has type parameters or lists not every member it declares, a parent is not such an
+/// interface, or a member is declared twice (an override, whose place in that order is not recorded).
 fn interface_fields(
     iface: &CollectedInterface,
     ctx: &ResolutionContext,
     depth: u8,
     out: &mut Vec<LocatedField>,
-) -> bool {
-    if depth > MAX_DEPTH || ctx.named_types.lookup_interface_type_params_for(iface).is_some_and(|p| !p.is_empty()) {
-        return false;
+) -> Result<(), Declined> {
+    if depth > MAX_DEPTH {
+        return Err(Declined::TooDeep);
     }
-    for prop in &iface.props {
-        if !out.iter().any(|(field, _)| field.name == prop.name) {
-            let field = CollectedObjectField {
-                name: prop.name.clone(),
-                collected_type: prop.collected_type.clone(),
-                required: prop.required,
-                description: String::new(),
-                readonly: false,
-                index_key: None,
-                tags: Default::default(),
-            };
-            out.push((field, iface.file_path.clone()));
-        }
+    if ctx.named_types.lookup_interface_type_params_for(iface).is_some_and(|p| !p.is_empty()) {
+        return Err(Declined::UnknownParent);
     }
-    iface.extends.iter().all(|parent| {
+    if iface.unlisted_members {
+        return Err(Declined::UnlistedMembers);
+    }
+    for parent in &iface.extends {
         let (name, args) = match parent {
             ExtendsRef::SameFile { name, type_args } => (name, type_args),
             ExtendsRef::Imported { local_name, type_args, .. } => (local_name, type_args),
-            ExtendsRef::Builtin { .. } => return false,
+            ExtendsRef::Builtin { .. } => return Err(Declined::UnknownParent),
         };
         let (file, name) = canonical(name, &iface.file_path, ctx);
-        args.is_empty()
-            && lookup_interface_from(ctx, file.as_str(), &name, &iface.scope)
-                .is_some_and(|parent| interface_fields(parent, ctx, depth + 1, out))
-    })
+        let parent = lookup_interface_from(ctx, file.as_str(), &name, &iface.scope).ok_or(Declined::UnknownParent)?;
+        if !args.is_empty() {
+            return Err(Declined::UnknownParent);
+        }
+        interface_fields(parent, ctx, depth + 1, out)?;
+    }
+    for prop in &iface.props {
+        if out.iter().any(|f| f.field.name == prop.name) {
+            return Err(Declined::Redeclared);
+        }
+        let field = CollectedObjectField {
+            name: prop.name.clone(),
+            collected_type: prop.collected_type.clone(),
+            required: prop.required,
+            description: String::new(),
+            readonly: prop.readonly,
+            index_key: None,
+            tags: Default::default(),
+        };
+        out.push(LocatedField { field, file: iface.file_path.clone(), scope: iface.scope.clone() });
+    }
+    Ok(())
 }
 
-/// Whether `ty` is an array type `T[]` or `Array<T>`, whose keys are the same whatever `T` is.
-fn is_array(ty: &CollectedType) -> bool {
+/// Whether `ty` is an array type `T[]` or TypeScript's `Array<T>` (bound to nothing where it is written), whose keys
+/// are the same whatever `T` is.
+fn is_lib_array(ty: &CollectedType, file: &Utf8Path, scope: &DeclarationScope, ctx: &ResolutionContext) -> bool {
     match ty {
-        CollectedType::AtFile { inner, .. } => is_array(inner),
+        CollectedType::AtFile { file: at, inner } if at != file => {
+            is_lib_array(inner, at, &DeclarationScope::default(), ctx)
+        }
+        CollectedType::AtFile { inner, .. } => is_lib_array(inner, file, scope, ctx),
         CollectedType::Array(_) => true,
-        CollectedType::Named { name, args } => name == "Array" && args.len() == 1,
+        CollectedType::Named { name, args } => {
+            name == "Array" && args.len() == 1 && is_lib_type(name, file, scope, ctx)
+        }
         _ => false,
     }
 }
 
-/// `ty` without an `undefined` union member.
-fn without_undefined(ty: &CollectedType) -> CollectedType {
-    match ty {
-        CollectedType::Union(members) => {
-            let kept: Vec<CollectedType> =
-                members.iter().filter(|m| !matches!(m, CollectedType::Undefined)).cloned().collect();
-            match kept.len() {
-                0 => CollectedType::Never,
-                1 => kept.into_iter().next().unwrap_or(CollectedType::Never),
-                _ => CollectedType::Union(kept),
-            }
+/// `ty` without `undefined`, as `-?` leaves an optional member's type: `undefined` alone leaves `never`. Declined when
+/// a member may hold `undefined` through a name (an alias, a type parameter) or a form not read here.
+fn without_undefined(ty: &CollectedType) -> Result<CollectedType, Declined> {
+    let members = match ty {
+        CollectedType::Union(members) => members.as_slice(),
+        single => std::slice::from_ref(single),
+    };
+    let mut kept = Vec::with_capacity(members.len());
+    for member in members {
+        match member {
+            CollectedType::Undefined => {}
+            member if holds_no_undefined(member) => kept.push(member.clone()),
+            _ => return Err(Declined::OptionalUndefined),
         }
-        other => other.clone(),
+    }
+    Ok(match kept.len() {
+        0 => CollectedType::Never,
+        1 => kept.into_iter().next().unwrap_or(CollectedType::Never),
+        _ => CollectedType::Union(kept),
+    })
+}
+
+/// Whether `ty` surely holds no `undefined`, or is `any` or `unknown`, which `-?` leaves as they are.
+fn holds_no_undefined(ty: &CollectedType) -> bool {
+    match ty {
+        CollectedType::AtFile { inner, .. } => holds_no_undefined(inner),
+        CollectedType::String
+        | CollectedType::Number
+        | CollectedType::Boolean
+        | CollectedType::Null
+        | CollectedType::Any
+        | CollectedType::Unknown
+        | CollectedType::Never
+        | CollectedType::BigInt
+        | CollectedType::Symbol
+        | CollectedType::StringLiteral(_)
+        | CollectedType::NumberLiteral(_)
+        | CollectedType::BoolLiteral(_)
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::UniqueSymbol
+        | CollectedType::Array(_)
+        | CollectedType::Tuple(_)
+        | CollectedType::Readonly(_)
+        | CollectedType::Object(_)
+        | CollectedType::Callable { .. }
+        | CollectedType::Function { .. }
+        | CollectedType::TemplateLiteral(_) => true,
+        _ => false,
     }
 }
 

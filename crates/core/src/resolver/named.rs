@@ -244,18 +244,26 @@ fn resolve_named_uncycled(
     }
     // `Partial<Classes>`, `Omit<Props, "x">`: the object TypeScript maps a known object to, when every member's type
     // is evaluated through; otherwise the application stays, as an alias over a type not evaluated keeps its name.
-    if let Some(fields) = super::evaluate::utility_fields(name.as_str(), args, consuming_file, ctx, 0) {
+    // The expansion is exact or declined (`evaluate::structural_expansion`); declined, the checker answers it.
+    let written_in = state.declared_in.as_deref().cloned().unwrap_or_default();
+    if super::evaluate::is_structural_utility(name.as_str())
+        && let Ok(fields) =
+            super::evaluate::structural_expansion(name.as_str(), args, consuming_file, &written_in, ctx, 0)
+    {
         // Read in a branch with the caller's cycle sets, stopping at the first member that does not evaluate through.
+        // Each member's type is read where it is written, so its names mean what they mean there.
         let mut branch = state.branch();
         let total = fields.len();
         let mut members = Vec::with_capacity(total);
-        for (field, file) in fields {
+        for super::evaluate::LocatedField { field, file, scope } in fields {
+            let site = branch.enter_declared_in(&scope);
             let prop_type = resolve_collected_type(&field.collected_type, &file, ctx, &mut branch, depth + 1);
+            branch.leave_declared_in(site);
             if !evaluated_through(&prop_type) {
                 break;
             }
             members.push(ObjectField {
-                prop_type,
+                prop_type: if field.required { prop_type } else { optional_member_type(prop_type) },
                 name: field.name,
                 required: field.required,
                 description: field.description,
@@ -537,6 +545,18 @@ fn without_nullish(
         1 => kept.remove(0),
         _ => CollectedType::Union(kept),
     })
+}
+
+/// The type of an optional member as the checker states it beside `?`: the `undefined` that `?` implies is left out
+/// (`a?: Maybe` over `string | undefined` reads `a?: string`), and `never` reads `undefined`, the type `?` leaves it.
+fn optional_member_type(ty: PropType) -> PropType {
+    match ty {
+        PropType::Never => PropType::Undefined,
+        PropType::Union(members) if members.len() > 1 && members.contains(&PropType::Undefined) => {
+            super::primitives::union_of(members.into_iter().filter(|m| *m != PropType::Undefined).collect::<Vec<_>>())
+        }
+        other => other,
+    }
 }
 
 /// Whether `ty` is evaluated to its leaves: no part of it is a reference by name, a function whose types are kept as

@@ -38,12 +38,13 @@ fn text_of(declared: &str) -> String {
 
 #[test]
 fn partial_of_an_interface_lists_its_members_and_its_parents_optional() {
-    assert_eq!(text_of("Partial<Classes>"), "{ label?: string; icon?: string; root?: string }");
+    // The checker lists the inherited members first.
+    assert_eq!(text_of("Partial<Classes>"), "{ root?: string; label?: string; icon?: string }");
 }
 
 #[test]
 fn required_of_an_object_drops_undefined_from_optional_members() {
-    assert_eq!(text_of("Required<Classes>"), "{ label: string; icon: string; root: string }");
+    assert_eq!(text_of("Required<Classes>"), "{ root: string; label: string; icon: string }");
 }
 
 #[test]
@@ -82,4 +83,65 @@ fn a_react_element_stays_narrower_than_a_node() {
 fn a_union_with_a_type_parameter_keeps_its_concrete_members() {
     let source = "import * as React from 'react';\ninterface ShowProps<T> { when: T | null | undefined }\nfunction Show<T>(props: ShowProps<T>) { return null; }\nexport function Box(props: React.ComponentProps<typeof Show>) { return null; }";
     assert_eq!(type_text(source, "when"), "unknown | null");
+}
+
+// ─── Exact or declined ───────────────────────────────────────────────────────
+// The structural lane expands `Partial`, `Required`, `Pick` and `Omit` only when every fact the expansion reads is
+// recorded; otherwise the application stays and the checker answers it. Each case below expanded to a wrong type.
+
+/// Whether `text` is the application of `utility` left as written, not an expansion.
+fn declined(text: &str, utility: &str) -> bool {
+    text.starts_with(&format!("{utility}<"))
+}
+
+#[test]
+fn omit_by_the_keys_of_an_index_signature_is_declined() {
+    // TypeScript gives `{}`: `keyof { [k: string]: unknown }` is `string | number`, which takes every key away.
+    let text = text_of("Omit<{ a: string }, keyof { [k: string]: unknown }>");
+    assert!(declined(&text, "Omit"), "{text}");
+}
+
+#[test]
+fn a_module_local_array_alias_is_not_the_builtin_array() {
+    // `Array` here is the module's `{ value: T }`, whose keys an array's keys do not take away.
+    let source = "type Array<T> = { value: T };\nexport function Box(props: { value?: Omit<Array<string>, keyof any[]> }) { return null; }";
+    let text = type_text(source, "value");
+    assert_ne!(text, "{  }");
+}
+
+#[test]
+fn an_interface_with_an_index_signature_is_declined() {
+    let source = "interface Dict { [k: string]: number }\nexport function Box(props: { value?: Partial<Dict> }) { return null; }";
+    let text = type_text(source, "value");
+    assert!(declined(&text, "Partial"), "{text}");
+}
+
+#[test]
+fn partial_keeps_an_interface_members_readonly_modifier() {
+    let source = "interface Config { readonly mode: string; size?: number }\nexport function Box(props: { value?: Partial<Config> }) { return null; }";
+    assert_eq!(type_text(source, "value"), "{ readonly mode?: string; size?: number }");
+}
+
+#[test]
+fn required_of_an_optional_undefined_member_is_never() {
+    assert_eq!(text_of("Required<{ value?: undefined }>"), "{ value: never }");
+}
+
+#[test]
+fn a_factory_local_interface_shadows_the_module_one_in_a_utility() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
+    std::fs::write(
+        root.join("factory.tsx"),
+        "interface Data { fromModule: string }\n\
+         export function make() { interface Data { fromFunction: number } return (p: { value?: Partial<Data> }) => null; }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("Field.tsx"), "import { make } from './factory';\nexport const Field = make();\n")
+        .unwrap();
+    let options =
+        PipelineOptions { src_dirs: vec![root.clone()], cache_dir: Some(root.join(".cache")), ..Default::default() };
+    let output = extract(&options);
+    let entry = output.components.iter().find(|(key, _)| key.ends_with("Field")).expect("the component Field").1;
+    assert_eq!(entry.props["value"].prop_type.raw_string(), "{ fromFunction?: number }");
 }

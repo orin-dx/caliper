@@ -589,6 +589,8 @@ impl<'src> SourceDataCollector<'src> {
                     scope,
                     file_path: self.file_path.clone(),
                     props: Vec::new(),
+                    // A class's members are not collected.
+                    unlisted_members: true,
                     extends: Vec::new(),
                     description: String::new(),
                     tags: Default::default(),
@@ -1332,6 +1334,7 @@ impl<'src> SourceDataCollector<'src> {
                     tags,
                     span_start: ps.span.start,
                     span_end: ps.span.end,
+                    readonly: ps.readonly,
                 })
             }
             TSSignature::TSMethodSignature(ms) => {
@@ -1346,6 +1349,7 @@ impl<'src> SourceDataCollector<'src> {
                     tags,
                     span_start: ms.span.start,
                     span_end: ms.span.end,
+                    readonly: false,
                 })
             }
             _ => None,

@@ -1294,6 +1294,11 @@ pub struct CollectedInterface {
     pub file_path: Utf8PathBuf,
     /// The props it declares itself, in declaration order; the ones it inherits come through `extends`.
     pub props: Vec<RawProp>,
+    /// It declares a member `props` does not list: an index signature, or a member whose key is not a static name
+    /// (`[Symbol.iterator]`); or it stands for a class, whose members are not collected. Its keys are then not known
+    /// one by one, and a structural expansion over it declines.
+    #[serde(default)]
+    pub unlisted_members: bool,
     /// The interfaces and types it extends, in order.
     pub extends: Vec<ExtendsRef>,
     /// Its JSDoc description, empty when it has none.
@@ -1319,6 +1324,9 @@ pub struct RawProp {
     pub span_start: u32,
     /// The end of the span that starts at `span_start`, in bytes.
     pub span_end: u32,
+    /// The prop is written `readonly name: T`, a modifier `Partial`, `Required`, `Pick` and `Omit` keep.
+    #[serde(default)]
+    pub readonly: bool,
 }
 
 /// An extends reference in an interface declaration.

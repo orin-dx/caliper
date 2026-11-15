@@ -486,6 +486,7 @@ mod tests {
     fn make_interface(scoped_key: &str, file_path: &str, name: &str) -> CollectedInterface {
         CollectedInterface {
             scoped_key: scoped_key.to_owned(),
+            unlisted_members: false,
             scope: Default::default(),
             name: TypeName::from(name),
             file_path: Utf8PathBuf::from(file_path),
