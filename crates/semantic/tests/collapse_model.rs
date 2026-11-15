@@ -250,3 +250,128 @@ fn a_source_collapses_by_the_members_that_reach_the_component() {
         }
     }
 }
+
+/// A scratch project with the package `pkg` declaring `package` and the project files `project`, read by the
+/// structural lane and by the checker lane (the structural answer with the checker's merged over it), under the default
+/// options.
+fn both_lanes(package: &str, project: &[(&str, String)]) -> (tempfile::TempDir, ExtractionOutput, ExtractionOutput) {
+    let dir = tempfile::Builder::new().prefix("CollapseLanes").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    let pkg = root.join("node_modules/pkg");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(pkg.join("package.json"), r#"{ "name": "pkg", "version": "1.0.0", "types": "index.d.ts" }"#)
+        .unwrap();
+    std::fs::write(pkg.join("index.d.ts"), package).unwrap();
+    for (file, text) in project {
+        std::fs::write(root.join(file), text).unwrap();
+    }
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "preserve", "strict": true, "skipLibCheck": true, "noEmit": true, "types": [] } }"#,
+    )
+    .unwrap();
+    let options = PipelineOptions { src_dirs: vec![root.clone()], use_cache: false, ..PipelineOptions::default() };
+    let structural = extract(&options);
+    let mut request = SemanticRequest::new(root.clone(), targets_of(&structural));
+    request.request_timeout = Duration::from_secs(60);
+    let outcome = resolve(request);
+    assert_eq!(outcome.fallbacks, [], "the checker answers every component");
+    let mut checker = structural.clone();
+    merge_semantic_in(&mut checker, outcome, Default::default(), CollapseContext::of(&options));
+    (dir, structural, checker)
+}
+
+/// Finding A: a `Pick` names its keys on purpose, so the props it picks are listed however large their source, also
+/// when only the checker reads the source (`PropsOf<typeof WidgetHuge>`), and through an `Omit`, a `Partial` or an
+/// intersection around it.
+#[test]
+fn finding_a_picked_keys_over_a_large_source_stay_listed_in_both_lanes() {
+    let keys = |range: std::ops::Range<usize>| range.map(|i| format!("'h{i}'")).collect::<Vec<_>>().join(" | ");
+    // (component, wrapper of `S`, props listed)
+    let cases: Vec<(&str, String, usize)> = vec![
+        ("Pick250", format!("Pick<S, {}>", keys(0..250)), 250),
+        ("OmitOfPick300", format!("Omit<Pick<S, {}>, 'h0'>", keys(0..300)), 299),
+        ("PartialPick250", format!("Partial<Pick<S, {}>>", keys(0..250)), 250),
+        ("PickAndOwn250", format!("Pick<S, {}> & {{ own?: boolean }}", keys(0..250)), 250),
+    ];
+    let mut text = String::from(
+        "import type { Huge } from 'pkg';\nimport { WidgetHuge } from 'pkg';\n\
+         type PropsOf<T> = T extends (props: infer P) => unknown ? P : never;\ntype Seen = PropsOf<typeof WidgetHuge>;\n",
+    );
+    for (name, wrapper, _) in &cases {
+        let structural = wrapper.replace('S', "Huge");
+        let checker_only = wrapper.replace('S', "Seen");
+        text.push_str(&format!("export function Struct{name}(props: {structural}) {{ return null; }}\n"));
+        text.push_str(&format!("export function Only{name}(props: {checker_only}) {{ return null; }}\n"));
+    }
+    let package = format!(
+        "export interface Huge {{ {}}}\nexport interface WidgetHugeProps extends Huge {{ w?: boolean }}\n\
+         export declare function WidgetHuge(props: WidgetHugeProps): null;\n",
+        members("h", 700)
+    );
+    let (_dir, structural, checker) = both_lanes(&package, &[("Components.tsx", text)]);
+    for (name, _, listed) in &cases {
+        for (lane, output, key) in [
+            ("structural", &structural, format!("Struct{name}")),
+            ("checker", &checker, format!("Struct{name}")),
+            ("checker only", &checker, format!("Only{name}")),
+        ] {
+            let entry = &output.components[&key];
+            assert!(entry.inheritance.iter().all(|layer| layer.type_name != "Huge"), "{lane} {key}: no Huge layer");
+            let shown = entry.props.keys().filter(|prop| prop.starts_with('h')).count();
+            assert_eq!(shown, *listed, "{lane} {key}: listed");
+        }
+        assert_eq!(props(&checker, &format!("Only{name}")), props(&structural, &format!("Struct{name}")), "{name}");
+    }
+}
+
+/// Finding B: a collapsed source's notable prop (`className`) keeps the default the component gives it, its JSDoc and
+/// its optionality (a default makes it optional; `Partial`, `Required`) in `notableInherited`, the same in both lanes, whether the structural lane
+/// collapsed the source (the checker's answer merged into its layer) or only the checker read it.
+#[test]
+fn finding_b_a_notable_prop_of_a_collapsed_source_keeps_its_default_in_both_lanes() {
+    let big = |name: &str| {
+        format!(
+            "export interface {name} {{ /** The class. */ className: string; {}}}\n\
+             export interface Widget{name}Props extends {name} {{ w?: boolean }}\n\
+             export declare function Widget{name}(props: Widget{name}Props): null;\n",
+            members("b", 201)
+        )
+    };
+    let text = String::from(
+        "import type { BigBox } from './sources';\nimport { WidgetHugeBox } from 'pkg';\n\
+         type PropsOf<T> = T extends (props: infer P) => unknown ? P : never;\n\
+         interface BoxProps extends BigBox { own?: boolean }\n\
+         export function Box({ className = 'base' }: BoxProps) { return null; }\n\
+         export function PartialBox({ className = 'base' }: Partial<BigBox>) { return null; }\n\
+         export function RequiredBox(props: Required<Partial<BigBox>>) { return null; }\n\
+         export function OnlyBox({ className = 'base' }: PropsOf<typeof WidgetHugeBox>) { return null; }\n",
+    );
+    let (_dir, structural, checker) =
+        both_lanes(&big("HugeBox"), &[("sources.ts", big("BigBox")), ("Components.tsx", text)]);
+    type Notable = (String, bool, Option<String>, String);
+    let notable = |output: &ExtractionOutput, key: &str| -> Option<Notable> {
+        let entry = &output.components[key];
+        assert!(!entry.props.contains_key("className"), "{key}: className is the layer's");
+        entry.notable_inherited.get("className").map(|prop| {
+            let source = prop.parent.as_ref().map(|parent| parent.name.clone()).unwrap_or_default();
+            let default = prop.default_value.as_ref().map(|value| value.value.clone());
+            (source, prop.required, default, prop.description.clone())
+        })
+    };
+    let expect = |source: &str, required: bool, default: Option<&str>| {
+        Some((source.to_string(), required, default.map(str::to_string), "The class.".to_string()))
+    };
+    for (key, expected) in [
+        ("Box", expect("BigBox", false, Some("'base'"))),
+        ("PartialBox", expect("BigBox", false, Some("'base'"))),
+        ("RequiredBox", expect("BigBox", true, None)),
+    ] {
+        assert!(layers(&structural, key).iter().any(|layer| layer.0 == "BigBox"), "{key}: a BigBox layer");
+        assert_eq!(notable(&structural, key), expected, "structural {key}");
+        assert_eq!(notable(&checker, key), expected, "checker {key}");
+    }
+    // Only the checker reads this source; its JSDoc for a package's prop is not what this asks.
+    let only = notable(&checker, "OnlyBox").map(|(source, required, default, _)| (source, required, default));
+    assert_eq!(only, Some(("HugeBox".to_string(), false, Some("'base'".to_string()))), "checker only OnlyBox");
+}

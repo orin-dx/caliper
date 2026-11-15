@@ -25,6 +25,8 @@ pub(crate) struct Props {
     pub(crate) props: Vec<Arc<SemanticProp>>,
     /// See [`caliper_docgen_core::types::semantic::SemanticComponent::composes`].
     pub(crate) composes: Option<Vec<String>>,
+    /// See [`caliper_docgen_core::types::semantic::SemanticComponent::picked`].
+    pub(crate) picked: Vec<String>,
 }
 
 /// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
@@ -207,8 +209,8 @@ pub(crate) async fn props_of_type(
         }
     }
     let props: Vec<Arc<SemanticProp>> = props.into_iter().flatten().collect();
-    let composes = converter.composes(props_type).await?;
-    Ok(Ok(Props { props, composes }))
+    let (composes, picked) = converter.composes(props_type).await?;
+    Ok(Ok(Props { props, composes, picked }))
 }
 
 #[cfg(test)]
