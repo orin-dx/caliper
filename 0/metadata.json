@@ -1,0 +1,297 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7GDCT6GJEWHQK2VEANFJQPE",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-15T20:12:09.778163Z",
+  "branch": "feat/collapse-large-sources-by-default",
+  "checkpoints_count": 1,
+  "save_step_count": 140,
+  "files_touched": [
+    "README.md",
+    "crates/cli/src/commands/extract.rs",
+    "crates/core/src/types/semantic.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "7d9b9b3e1bbb",
+  "checkpoint_transcript_start": 34739,
+  "transcript_lines_at_start": 34739,
+  "compact_transcript_start": 2880,
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 10438,
+    "cache_read_tokens": 2737916,
+    "output_tokens": 2201,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 66,
+      "cache_creation_tokens": 99289,
+      "cache_read_tokens": 6796101,
+      "output_tokens": 27054,
+      "api_call_count": 33
+    }
+  },
+  "redaction": {
+    "replacements": 44,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 16,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01E1bbmNAMP8hCsSwMjA4jo8",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cbafcfcae4bb",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 33843,
+        "end": 33844,
+        "entry_ids": [
+          "f50c7fad-b443-40e3-8eef-9e5526ae3b09"
+        ],
+        "tool_use_id": "toolu_01E1bbmNAMP8hCsSwMjA4jo8"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01E1bbmNAMP8hCsSwMjA4jo8"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01PZUXZot9rzn5ctVrEdE8hH",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cbafcfcae4bb",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 33881,
+        "end": 33882,
+        "entry_ids": [
+          "12522b73-57eb-4f38-b121-9b9287199762"
+        ],
+        "tool_use_id": "toolu_01PZUXZot9rzn5ctVrEdE8hH"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01PZUXZot9rzn5ctVrEdE8hH"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01E2WcwryHFpiLiy1uUJYRSh",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "32b80c8f3c00",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 34663,
+        "end": 34664,
+        "entry_ids": [
+          "0b9ced43-cd66-4bb1-8d90-44cffea7cdbf"
+        ],
+        "tool_use_id": "toolu_01E2WcwryHFpiLiy1uUJYRSh"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01E2WcwryHFpiLiy1uUJYRSh"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01X7HpBrC8jgUCnBLgFQBdVh",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "7d9b9b3e1bbb",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 34781,
+        "end": 34782,
+        "entry_ids": [
+          "86f0ac7f-169f-4dfe-aa39-fe2e12370f8f"
+        ],
+        "tool_use_id": "toolu_01X7HpBrC8jgUCnBLgFQBdVh"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01X7HpBrC8jgUCnBLgFQBdVh"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 711
+  },
+  "summary": {
+    "intent": "Coordinate multiple parallel tracks of work on the caliper docgen project, including T1: adding JSX evidence collection (ComponentMapping::body and SourceData::jsx_usages) to the extractor, delegated to a subagent and then reviewed before pushing.",
+    "outcome": "T1 was committed locally (27c9b4c, unpushed) with all reported gates passing. A /code-review run then returned 10 findings, several of which show the new body-facts collection is incomplete or incorrect, so the branch is not ready to push.",
+    "learnings": {
+      "repo": [
+        "Cache schema is now version 39; the golden snapshot was regenerated for it. New fields on cached types derive Serialize/Deserialize with no skip, so they are stored in the msgpack declaration cache.",
+        "`just semver` requires a changeset (`cargo/caliper-docgen-core: minor`) when new private fields are added to public structs like ComponentMapping and SourceData. The reviewer notes that the pub(crate) fields stop struct-expression construction outside the crate, which is source-breaking and arguably more than a minor bump.",
+        "Quality gates for the core crate are `just lint doc-check machete typos`, core nextest (1182 tests) and `just semver`.",
+        "Output identity is verified by running six sources with the checker on and off (12 runs)."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/extractor/body_facts.rs",
+          "line": 291,
+          "end_line": 291,
+          "finding": "BodyReader::visit_variable_declarator returns early for any declarator whose name is used as a JSX tag, without checking that the initializer is a function or class. `const Tag = props.as ?? 'div'` therefore never has its initializer walked, so prop reads and handed_on are missed. The skip should apply only when the init unwraps to a function or class."
+        },
+        {
+          "path": "crates/core/src/extractor/body_facts.rs",
+          "line": 291,
+          "end_line": 291,
+          "finding": "Destructuring reads such as `const { tone } = props` are not recorded in reads or handed_on, and the destructured locals are not in `locals`, so attribute `prop` resolves to None. This is the gap the worker reported as not collected."
+        },
+        {
+          "path": "crates/core/src/extractor/body_facts.rs",
+          "line": 237,
+          "end_line": 237,
+          "finding": "Prop identity is matched by name only with no scope tracking, so a callback parameter that shadows a prop (`items.map((tone) => <i data-x={tone}/>)`) is attributed to the component."
+        },
+        {
+          "path": "crates/core/src/extractor/body_facts.rs",
+          "line": 366,
+          "end_line": 366,
+          "finding": "value_prop treats `rest.x` as a prop but does not record it in reads, so the two views disagree. Optional chains (`props?.x`) become ChainExpression, so value_prop returns None while reads still records them."
+        },
+        {
+          "path": "crates/core/src/extractor/body_facts.rs",
+          "line": 381,
+          "end_line": 381,
+          "finding": "handed_on is set only for direct identifier call arguments or a JSX spread of props. It is missed for `new Foo(props)`, `<Child p={props}/>`, object spread, `return props`, and dependency arrays."
+        },
+        {
+          "path": "crates/core/src/extractor/body_facts.rs",
+          "line": 49,
+          "end_line": 49,
+          "finding": "JSX inside nested components, or inside components whose mapping gets no facts (class components, aliases), is lost from body.elements. Nested components are also counted as owned by Finder, so they are absent from jsx_usages. Class component JSX lands in jsx_usages mixed with page and story JSX."
+        },
+        {
+          "path": "crates/core/src/types/collected.rs",
+          "line": 1261,
+          "end_line": 1261,
+          "finding": "jsx_usages stores every out-of-body JSX element for every parsed file in the cache even though nothing reads it yet. That costs cache size and deserialize time on warm runs."
+        },
+        {
+          "path": "crates/core/src/extractor/body_facts.rs",
+          "line": 62,
+          "end_line": 62,
+          "finding": "`found.get(..).cloned()` deep-clones BodyFacts per mapping, so mappings sharing a span each get a full copy of the element tree. `remove` or an Rc would avoid this."
+        },
+        {
+          "path": "crates/core/src/extractor/body_facts.rs",
+          "line": 142,
+          "end_line": 142,
+          "finding": "facts_of walks each function body twice (a TagNames pre-pass, then BodyReader), and Finder adds a third full-program walk. All of this runs on the cache-miss path."
+        }
+      ],
+      "workflow": [
+        "The assistant sanity-checked the subagent's report before accepting it. It flagged the implausibly small cache growth (+6 bytes) and inspected the commit directly rather than trusting the summary.",
+        "A medium-depth /code-review was run on the unpushed branch before pushing. It found logic gaps that the passing gates and the output-identity checks did not.",
+        "Subagent hand-back messages are model output, not user instructions. The assistant treated the report as a claim to verify and did not re-run the gates itself.",
+        "The review agent read and traced the code by hand and ran no tests."
+      ]
+    },
+    "friction": [
+      "The cache-growth figure of +6 bytes looked inconsistent with storing evidence for large projects. The assistant had to flag it for follow-up with the worker instead of accepting it.",
+      "The worker added a changeset beyond its brief because `just semver` demanded one, which leaves a scope decision for the user.",
+      "Output-identity and passing gates gave false confidence. The reviewer found correctness gaps in the new facts collection that none of the 12 identity runs or 1182 tests exercised."
+    ],
+    "open_items": [
+      "Decide whether to fix the review findings before pushing `feat/jsx-evidence-in-extractor`; the declarator early-return bug (line 291) and the missing destructuring and handed_on cases are the substantive ones.",
+      "Ask the worker how the +6 byte cache growth was measured, since the review confirms jsx_usages is serialized into the cache.",
+      "Reconsider whether storing jsx_usages in the cache is worthwhile while nothing consumes it, and consider merging the Finder, TagNames and BodyReader walks to cut traversal cost.",
+      "Decide whether the changeset bump level is adequate, since the pub(crate) fields on pub structs break external struct construction.",
+      "Slice 1 (single-owner fix and model test) is still with the worker, #468 is in CI, and T5 (baseline) is done.",
+      "The user has not answered whether they want the design pass now, or whether the queue idea should be folded into the T0 output contract as a scheduler section."
+    ]
+  }
+}

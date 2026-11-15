@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01KR4ALpFG5b8e6EzCLZTaRC",
+  "agent_id": "ab7d11bbb323a7a77",
+  "subagent_type": "general-purpose",
+  "task_description": "T1: JSX evidence in the extractor",
+  "token_usage": {
+    "input_tokens": 122,
+    "cache_creation_tokens": 173448,
+    "cache_read_tokens": 8002904,
+    "output_tokens": 61997,
+    "api_call_count": 60
+  },
+  "started_at": "2026-11-15T11:49:29.394946-08:00",
+  "completed_at": "2026-11-15T12:10:16.967399-08:00"
+}
