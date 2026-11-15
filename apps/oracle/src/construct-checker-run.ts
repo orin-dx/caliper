@@ -13,7 +13,6 @@ import {
   factDifferences,
   factFailures,
   listFixtures,
-  PROP,
   rowKey,
   rowKeysOf,
   rowVerdict,
@@ -138,11 +137,11 @@ function laneRows(checked: any): LaneRow[] {
     }
   }
 
-  const byRow = new Map<string, { key: string; prop: any }>()
+  const byRow = new Map<string, { key: string; props: Record<string, string> }>()
   for (const [key, component] of Object.entries<any>(checked.components)) {
-    const id = flattenProps(checked, key, component)[PROP]
+    const props = flattenProps(checked, key, component)
     for (const row of rowKeysOf(component)) {
-      byRow.set(row, { key, prop: id === undefined ? undefined : checked.props[id] })
+      byRow.set(row, { key, props })
     }
   }
 
@@ -150,15 +149,17 @@ function laneRows(checked: any): LaneRow[] {
   return listFixtures(suiteDir).map((fixture) => {
     const golden: Golden = JSON.parse(readFileSync(fixture.golden, 'utf8'))
     const found = byRow.get(rowKey(realpathSync(fixture.file), fixture.exportPath))
+    const id = found?.props[fixture.prop]
+    const prop = id === undefined ? undefined : checked.props[id]
     return {
       id: fixture.id,
-      verdict: rowVerdict(found?.prop, golden),
+      verdict: rowVerdict(prop, golden),
       structural: structural[fixture.id]?.verdicts ?? [],
       answered: found !== undefined && answered.has(found.key),
-      type: found?.prop?.type,
-      degradedBy: found?.prop?.degradedBy,
+      type: prop?.type,
+      degradedBy: prop?.degradedBy,
       golden: golden.text,
-      facts: factDifferences(found?.prop, golden, suiteDir),
+      facts: factDifferences(prop, golden, suiteDir),
     }
   })
 }

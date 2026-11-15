@@ -56,7 +56,9 @@ type Facts = (
 fn facts(outcome: &SemanticOutcome) -> Facts {
     let mut props = BTreeMap::new();
     for component in &outcome.components {
-        for prop in &component.props {
+        // `Button` has no inheritance layer, so the checker also reports the `@types/react` props the structural pass
+        // lists (`children`, `className`, ...): this test is about the props the project declares.
+        for prop in component.props.iter().filter(|prop| !prop.react_declared) {
             props.insert(
                 (component.key.clone(), prop.name.clone()),
                 (prop.parent.clone(), prop.declarations.clone(), prop.tags.clone()),

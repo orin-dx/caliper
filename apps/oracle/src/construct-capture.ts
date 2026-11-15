@@ -95,8 +95,8 @@ function capture(fixture: Fixture): Golden {
   const exported = moduleSymbol && exportAt(checker, moduleSymbol, fixture.exportPath)
   if (!exported) throw new Error(`${fixture.id}: no export ${fixture.exportPath.join('.')}`)
   const propsType = propsTypeOf(checker, exported)
-  const prop = propsType && checker.getPropertyOfType(propsType, PROP)
-  if (!prop) throw new Error(`${fixture.id}: ${fixture.component} has no prop ${PROP}`)
+  const prop = propsType && checker.getPropertyOfType(propsType, fixture.prop)
+  if (!prop) throw new Error(`${fixture.id}: ${fixture.component} has no prop ${fixture.prop}`)
   const type = checker.getTypeOfSymbol(prop)
   return { checker: norm(type), text: checker.typeToString(type), facts: factsOf(prop, exported) }
 }

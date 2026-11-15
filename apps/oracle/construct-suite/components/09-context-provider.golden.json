@@ -1,0 +1,29 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "lit",
+        "value": "compact",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "roomy",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"compact\" | \"roomy\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "ProviderProps",
+      "file": "../../../node_modules/.pnpm/@types+react@19.3.0/node_modules/@types/react/index.d.ts"
+    },
+    "order": null
+  }
+}

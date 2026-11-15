@@ -8,6 +8,8 @@
     "components/06-lib-parameter-function": {"verdicts":["identical","spelled"]},
     "components/07-lib-parameters-of": {"verdicts":["identical","spelled"]},
     "components/08-hook-typed-props": {"verdicts":["identical","spelled"]},
+    "components/09-context-provider": {"verdicts":["identical","spelled"]},
+    "components/10-th-td-intersection": {"verdicts":["identical","spelled"]},
     "cross-file/01-imported-alias": {"verdicts":["identical","spelled"]},
     "cross-file/02-extends-across-files": {"verdicts":["identical","spelled"]},
     "cross-file/03-imported-interface": {"verdicts":["identical","spelled"]},

@@ -8,6 +8,8 @@
     "components/06-lib-parameter-function": {"verdicts":["identical","spelled"]},
     "components/07-lib-parameters-of": {"verdicts":["opaque with marker"],"gap":"the structural resolver does not evaluate Parameters<typeof setTimeout>, a lib function's signature, and marks the type opaque"},
     "components/08-hook-typed-props": {"verdicts":["missing"],"gap":"the structural resolver does not infer a hook's return type, so ReturnType<typeof useRowState> gives no props"},
+    "components/09-context-provider": {"verdicts":["identical","spelled"]},
+    "components/10-th-td-intersection": {"verdicts":["identical","spelled"]},
     "cross-file/01-imported-alias": {"verdicts":["identical","spelled"]},
     "cross-file/02-extends-across-files": {"verdicts":["identical","spelled"]},
     "cross-file/03-imported-interface": {"verdicts":["identical","spelled"]},

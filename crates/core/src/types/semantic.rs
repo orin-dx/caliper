@@ -354,10 +354,18 @@ fn apply_props(
     syntax: &SourceSyntax,
     resolver: ResolverFacts,
 ) -> MergedProps {
-    // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
-    let own = semantic.props.iter().filter(|prop| !prop.react_declared);
+    // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers. A component
+    // with no layer has nowhere to leave them: a context's `Provider` (`value`, `children`) or a `th`/`td` attribute
+    // intersection names no element. Its `@types/react` props the structural pass lists stay, as the curated mode
+    // keeps them (`targets_of` asks the checker for those names only, `key` among them only if the component lists it).
+    let layered = !entry.inheritance.is_empty();
+    let own: Vec<&Arc<SemanticProp>> = semantic
+        .props
+        .iter()
+        .filter(|prop| !prop.react_declared || (!layered && entry.props.contains_key(&prop.name)))
+        .collect();
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
-    replace_props(entry, own, &merge, shared, memo)
+    replace_props(entry, own.into_iter(), &merge, shared, memo)
 }
 
 /// What one merged prop was made from, by identity: the checker's prop, the structural prop of the same name, the

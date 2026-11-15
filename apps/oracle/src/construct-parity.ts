@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { exportAt, propsTypeOf } from './checker-components.ts'
-import { listFixtures, PROP } from './construct-suite.ts'
+import { listFixtures } from './construct-suite.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import type { Norm } from './oracle-compare.ts'
 
@@ -184,8 +184,8 @@ export function captureRows(mod: ApiModule, suite: string): Capture {
         const exported = moduleSymbol && exportAt(checker, moduleSymbol, fixture.exportPath)
         if (!exported) throw new Error(`${fixture.id}: no export ${fixture.exportPath.join('.')}`)
         const propsType = propsTypeOf(checker, exported)
-        const prop = propsType && checker.getPropertyOfType(propsType, PROP)
-        if (!prop) throw new Error(`${fixture.id}: ${fixture.component} has no prop ${PROP}`)
+        const prop = propsType && checker.getPropertyOfType(propsType, fixture.prop)
+        if (!prop) throw new Error(`${fixture.id}: ${fixture.component} has no prop ${fixture.prop}`)
         const type = checker.getTypeOfSymbol(prop)
         rows[fixture.id] = {
           norm: norm(type),
