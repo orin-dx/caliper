@@ -323,7 +323,7 @@ jobs:
   # steps are weekly.yml's. A budget breach or a corpus that failed (killed, over its timeout) fails the job.
   corpora-budget:
     name: Corpora budget
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.head_ref == 'callisto/version-packages' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'callisto/version-packages') &&github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
     # Longer than two hung commands (weekly.py's STEP_TIMEOUT, 40 min each), so that it records the failure itself.
     timeout-minutes: 150
