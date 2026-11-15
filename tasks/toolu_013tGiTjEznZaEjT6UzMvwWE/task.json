@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_013tGiTjEznZaEjT6UzMvwWE",
+  "agent_id": "a3d62b6f3733ca766",
+  "subagent_type": "general-purpose",
+  "task_description": "ADR 0028: relevance evidence contract and checker scheduler",
+  "started_at": "2026-11-15T12:58:31.80688-08:00"
+}
