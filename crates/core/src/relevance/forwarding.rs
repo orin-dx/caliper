@@ -102,6 +102,8 @@ fn attribute(fact: &JsxAttributeFact) -> Attribute {
 fn target(file: &Utf8Path, tag: &JsxTag, project: Project<'_>, lane: &impl Lane) -> Target {
     let path: Vec<&str> = match tag {
         JsxTag::Intrinsic(_) => return Target::Dom,
+        // Bound in an inner scope (`const Item = props.as`): whatever it holds at run time, not a module binding.
+        JsxTag::Scoped(_) => return Target::Unresolved,
         JsxTag::Identifier(name) => vec![name.as_str()],
         JsxTag::Member(path) => path.split('.').collect(),
     };

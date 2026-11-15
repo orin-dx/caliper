@@ -209,6 +209,50 @@ fn the_tag_resolves_by_its_import_not_by_its_name() {
 }
 
 #[test]
+fn a_tag_an_inner_binding_shadows_is_unknown_not_the_module_component() {
+    // `Item` is a component of the file and an import of another; each body renders a different `Item` of its own.
+    let item = "export function Item(props: ItemProps) { return <li />; }\n";
+    let bodies = [
+        "export function FromProp({ label, ...rest }: P) { const Item = rest.as; return <Item {...rest} />; }",
+        "export function FromParam({ Item, ...rest }: P) { return <Item {...rest} />; }",
+        "export function FromInner({ label, ...rest }: P) { function Item() { return null; } return <Item {...rest} />; }",
+        "export function FromMember({ label, ...rest }: P) { const Item = rest.parts; return <Item.Row {...rest} />; }",
+    ];
+    for import in [false, true] {
+        let mut source = if import { "import { Item } from './item';\n".to_owned() } else { item.to_owned() };
+        source.push_str(&bodies.join("\n"));
+        let files = [("item.tsx", item), ("outer.tsx", source.as_str())];
+        let fixture = Fixture::new(&files[usize::from(!import)..]).props("item.tsx", "Item", vec![own("value")]).props(
+            "outer.tsx",
+            "Item",
+            vec![own("value")],
+        );
+        for component in ["FromProp", "FromParam", "FromInner", "FromMember"] {
+            let forwarding = fixture.forwarding("outer.tsx", component);
+            let element = forwarding.elements.iter().find(|element| element.attributes.len() == 1).expect("the spread");
+            assert_eq!(element.target, Target::Unresolved, "{component}, imported: {import}");
+            let shown = fixture.decide("outer.tsx", component, vec![inherited("value")]);
+            assert_eq!(shown.as_today, ["value"], "{component}, imported: {import}");
+        }
+    }
+}
+
+#[test]
+fn a_sub_component_its_module_also_exports_by_name_stays_unknown() {
+    // The extractor gives `MenuItem` only its own export, not `default.Item`: the tag is unknown, never guessed.
+    let menu = "function Menu(props: MenuProps) { return <div />; }\n\
+                export function MenuItem(props: ItemProps) { return <div />; }\n\
+                Menu.Item = MenuItem;\n\
+                export default Menu;\n";
+    let consumer = "import Menu from './menu';\n\
+                    export function Outer({ label, ...rest }: OuterProps) { return <Menu.Item {...rest} />; }\n";
+    let fixture = Fixture::new(&[("menu.tsx", menu), ("outer.tsx", consumer)])
+        .props("menu.tsx", "Menu", vec![own("open")])
+        .props("menu.tsx", "MenuItem", vec![own("item")]);
+    assert_eq!(fixture.forwarding("outer.tsx", "Outer").elements[0].target, Target::Unresolved);
+}
+
+#[test]
 fn a_local_component_resolves_by_its_binding() {
     let source =
         format!("{INNER}export function Outer({{ label, ...rest }}: OuterProps) {{ return <Inner {{...rest}} />; }}\n");

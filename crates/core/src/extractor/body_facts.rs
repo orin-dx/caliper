@@ -558,9 +558,37 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
                     }
                 })
                 .collect();
-            self.elements.push(JsxElementFact { tag: tag_of(&it.name), attributes });
+            self.elements.push(JsxElementFact { tag: self.reader.scoped(tag_of(&it.name), &it.name), attributes });
         }
         walk::walk_jsx_opening_element(self, it);
+    }
+}
+
+impl Reader<'_, '_> {
+    /// `tag`, as [`JsxTag::Scoped`] when the symbol its first name refers to is bound in a scope other than the
+    /// module's (a parameter, a local `const`, an inner function or class): not the module binding of that name.
+    fn scoped(&self, tag: JsxTag, name: &JSXElementName<'_>) -> JsxTag {
+        let first = match name {
+            JSXElementName::IdentifierReference(id) => Some(&**id),
+            JSXElementName::MemberExpression(member) => Some(&member.object).and_then(|mut object| {
+                loop {
+                    match object {
+                        JSXMemberExpressionObject::IdentifierReference(id) => break Some(&**id),
+                        JSXMemberExpressionObject::MemberExpression(inner) => object = &inner.object,
+                        JSXMemberExpressionObject::ThisExpression(_) => break None,
+                    }
+                }
+            }),
+            _ => None,
+        };
+        let inner = first
+            .and_then(|id| id.reference_id.get())
+            .and_then(|reference| self.scoping.get_reference(reference).symbol_id())
+            .is_some_and(|symbol| self.scoping.symbol_scope_id(symbol) != self.scoping.root_scope_id());
+        match tag {
+            JsxTag::Identifier(name) | JsxTag::Member(name) if inner => JsxTag::Scoped(name),
+            tag => tag,
+        }
     }
 }
 
