@@ -547,3 +547,170 @@ fn jsx_in_a_parameter_default_is_the_components() {
     assert_eq!(facts.elements, [component("Icon", vec![named("size", None)]), intrinsic("span", vec![])]);
     assert_eq!(data.jsx_usages, []);
 }
+
+#[test]
+fn reads_through_a_rest_binding_keep_source_order() {
+    // Every reference to `props` used to be classified before any to `rest`, which put `b` first.
+    let rest = facts("export function C(props: P) { const { ...rest } = props; rest.a; props.b; return <div /> }", "C");
+    assert_eq!(reads(&rest), ["a", "b"]);
+    let chain = facts(
+        "export function C(props: P) { const { ...r1 } = props; const { ...r2 } = r1; r2.a; r1.b; props.c; \
+         const { ...r3 } = props; return <div /> }",
+        "C",
+    );
+    assert_eq!(reads(&chain), ["a", "b", "c"]);
+    assert_eq!(chain.rests, ["r1", "r2", "r3"]);
+}
+
+#[test]
+fn jsx_in_a_wrappers_other_arguments_is_the_files() {
+    // The whole declarator used to be owned, so `<Icon />` was neither the component's nor the file's.
+    let icon = || [usage(JsxTag::Identifier("Icon".into()))];
+    let options = parse("export const C = withOptions((props: P) => <div />, { fallback: <Icon /> });");
+    assert_eq!(options.component_mappings[0].body.as_ref().unwrap().elements, [intrinsic("div", vec![])]);
+    assert_eq!(options.jsx_usages, icon());
+    let default = parse("export default withOptions(function C(props: P) { return <div /> }, <Icon />);");
+    assert_eq!(default.jsx_usages, icon());
+    let callee = parse("export const C = withIcon(<Icon />)((props: P) => <div />);");
+    assert_eq!(callee.jsx_usages, icon());
+}
+
+#[test]
+fn a_nested_components_wrapper_arguments_are_the_parents() {
+    let facts = facts(
+        "export function C(props: P) { const Item = withX(() => <li />, { a: <Icon /> }); return <Item /> }",
+        "C",
+    );
+    assert_eq!(facts.elements, [component("Icon", vec![]), component("Item", vec![])]);
+}
+
+/// A small deterministic generator of one-component files (a linear congruential sequence, no dependency): a wrapper
+/// around the component function, a body of reads through the props object and rest chains, and JSX in every place a
+/// fact could be owned by extent rather than by node (wrapper arguments and callees, nested components and their
+/// wrappers, module level).
+struct Gen {
+    state: u64,
+    keys: u32,
+    tags: Vec<String>,
+}
+
+impl Gen {
+    fn next(&mut self, bound: usize) -> usize {
+        self.state = self.state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        usize::try_from(self.state >> 33).unwrap() % bound
+    }
+
+    /// A fresh prop name; names are numbered in source order, since only the body holds them.
+    fn key(&mut self) -> String {
+        self.keys += 1;
+        format!("k{}x", self.keys)
+    }
+
+    fn tag(&mut self, stem: &str) -> String {
+        let tag = format!("{stem}{}", self.tags.len());
+        self.tags.push(tag.clone());
+        tag
+    }
+
+    fn jsx(&mut self) -> String {
+        format!("<{} />", self.tag("J"))
+    }
+
+    fn body(&mut self) -> String {
+        let mut objects = vec!["props".to_owned()];
+        let mut statements = Vec::new();
+        for _ in 0..2 + self.next(6) {
+            let object = objects[self.next(objects.len())].clone();
+            let statement = match self.next(9) {
+                0 | 1 => format!("{object}.{};", self.key()),
+                2 => format!("{object}?.['{}'];", self.key()),
+                3 | 4 => {
+                    let rest = format!("r{}", objects.len());
+                    objects.push(rest.clone());
+                    if self.next(2) == 0 {
+                        format!("const {{ ...{rest} }} = {object};")
+                    } else {
+                        format!("const {{ {}, ...{rest} }} = {object};", self.key())
+                    }
+                }
+                5 => format!("const x{} = {};", self.tags.len(), self.jsx()),
+                6 => {
+                    let item = self.tag("Item");
+                    format!("const {item} = () => {}; const y{item} = <{item} />;", self.jsx())
+                }
+                7 => {
+                    let item = self.tag("Item");
+                    let (inner, option) = (self.jsx(), self.jsx());
+                    format!("const {item} = withX(() => {inner}, {{ a: {option} }}); const y{item} = <{item} />;")
+                }
+                _ => format!("use({object}.{}, {});", self.key(), self.jsx()),
+            };
+            statements.push(statement);
+        }
+        statements.push(format!("return {};", self.jsx()));
+        statements.join(" ")
+    }
+
+    /// The file's source, its prop names and every component tag it writes (each once).
+    fn file(seed: u64) -> (String, Vec<String>, Vec<String>) {
+        let mut generator = Gen { state: seed, keys: 0, tags: Vec::new() };
+        let (wrapper, arrow) = (generator.next(9), generator.next(2) == 0);
+        let before =
+            if generator.next(3) == 0 { format!("const page = {};\n", generator.jsx()) } else { String::new() };
+        let callee = if wrapper == 6 { generator.jsx() } else { String::new() };
+        let body = generator.body();
+        let function =
+            if arrow { format!("(props: P) => {{ {body} }}") } else { format!("function C(props: P) {{ {body} }}") };
+        let declaration = match wrapper {
+            0 => format!("export function C(props: P) {{ {body} }}"),
+            1 => format!("export const C = {function};"),
+            2 => format!("export const C = memo({function});"),
+            3 => format!("export const C = memo(forwardRef({function}));"),
+            4 => format!("export const C = withOptions({function}, {{ fallback: {} }});", generator.jsx()),
+            5 => format!("export const C = hoc({function}, {}, other);", generator.jsx()),
+            6 => format!("export const C = withIcon({callee})({function});"),
+            7 => format!("export default withOptions({function}, {{ fallback: {} }});", generator.jsx()),
+            _ => format!("export default memo({function});"),
+        };
+        let after =
+            if generator.next(3) == 0 { format!("\nconst story = {};", generator.jsx()) } else { String::new() };
+        let keys = (1..=generator.keys).map(|key| format!("k{key}x")).collect();
+        (format!("{before}{declaration}{after}"), keys, generator.tags)
+    }
+}
+
+fn tag_name(tag: &JsxTag) -> String {
+    match tag {
+        JsxTag::Identifier(name) | JsxTag::Intrinsic(name) | JsxTag::Member(name) => name.clone(),
+    }
+}
+
+/// Invariants over generated files: every JSX element is in exactly one of the component's elements and the file's
+/// usages; the component's own elements are in source order; every prop read is recorded, in source order of first
+/// read, and nothing generated hands the props object on.
+#[test]
+fn generated_components_place_every_element_once_and_read_in_source_order() {
+    let mut with_body = 0;
+    for seed in 0..800 {
+        let (source, keys, tags) = Gen::file(seed);
+        let data = parse(&source);
+        let bodies: Vec<&BodyFacts> =
+            data.component_mappings.iter().filter_map(|mapping| mapping.body.as_ref()).collect();
+        assert!(bodies.windows(2).all(|pair| pair[0] == pair[1]), "one function, one set of facts:\n{source}");
+        let mut seen: Vec<String> = data.jsx_usages.iter().map(|usage| tag_name(&usage.tag)).collect();
+        if let Some(body) = bodies.first() {
+            with_body += 1;
+            assert_eq!(body.reads, keys, "every read, in source order:\n{source}");
+            assert!(!body.handed_on, "{source}");
+            let own: Vec<String> = body.elements.iter().map(|element| tag_name(&element.tag)).collect();
+            let numbered: Vec<usize> = own.iter().filter_map(|tag| tag.strip_prefix('J')?.parse().ok()).collect();
+            assert!(numbered.is_sorted(), "elements in source order:\n{source}");
+            seen.extend(own);
+        }
+        seen.sort_unstable();
+        let mut expected = tags;
+        expected.sort_unstable();
+        assert_eq!(seen, expected, "every element in exactly one collection:\n{source}");
+    }
+    assert!(with_body > 600, "the generator mostly yields components: {with_body}");
+}

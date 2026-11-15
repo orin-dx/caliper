@@ -27,6 +27,13 @@
 //! A function or class the body binds and renders as a JSX tag, by symbol (`const Item = () => <li/>; return
 //! <Item/>`), is a component of its own: its references to the props object still count, but its elements are the
 //! file's ([`JsxUsage`]), not the parent's.
+//!
+//! # Owned by node and ordered by position
+//!
+//! An element belongs to the exact function or class node it is written in, never to the extent of a declaration or
+//! wrapper call around it: JSX in a wrapper's other arguments (`withOptions(fn, { fallback: <Icon /> })`) is written
+//! where the wrapper is called. Reads and rest bindings are ordered by source position, not by the order references
+//! are classified in (symbol by symbol).
 
 use std::collections::VecDeque;
 
@@ -58,11 +65,12 @@ pub(super) fn attach<'a>(program: &'a Program<'a>, mappings: &mut [ComponentMapp
     let mut finder = Finder {
         wanted: mappings.iter().map(|mapping| (mapping.span_start, mapping.span_end)).collect(),
         functions: FxHashMap::default(),
+        reached: FxHashMap::default(),
         owned: 0,
         usages: Vec::new(),
     };
     finder.visit_program(program);
-    let Finder { functions, mut usages, .. } = finder;
+    let Finder { functions, reached, mut usages, .. } = finder;
     if functions.is_empty() {
         return usages;
     }
@@ -81,11 +89,11 @@ pub(super) fn attach<'a>(program: &'a Program<'a>, mappings: &mut [ComponentMapp
         };
         let Some(holders) = functions.get(&(span.start, span.end)) else { continue };
         let (facts, usages_of_nested) = Reader::new(scoping, nodes).facts_of(&function);
-        for &(key, _) in holders {
+        for &key in holders {
             found.entry(key).or_insert_with(|| facts.clone());
         }
-        // Once per function, where the first mapping holding it was reached.
-        if let Some(at) = holders.iter().map(|&(_, at)| at).min() {
+        // Once per function, where the function itself was reached.
+        if let Some(&at) = reached.get(&(span.start, span.end)) {
             nested.push((at, usages_of_nested));
         }
     }
@@ -128,34 +136,42 @@ fn unwrap<'b, 'a>(expr: &'b Expression<'a>) -> Option<ComponentFn<'b, 'a>> {
 /// A span as `(start, end)`.
 type SpanKey = (u32, u32);
 
-/// A mapping's span that holds a component function, and where in the file's usages it was reached.
-type Holder = (SpanKey, usize);
-
 /// Finds the nodes that start and end where a mapping does and the function each holds, and collects the JSX
 /// elements outside all of those functions.
+///
+/// A mapping owns exactly the function [`Reader::facts_of`] reads, never the declaration or wrapper call around it:
+/// JSX in a wrapper's other arguments or callee (`withOptions(fn, { fallback: <Icon /> })`) is the file's.
 struct Finder {
     wanted: FxHashSet<SpanKey>,
-    /// The span of each component function, to the mappings that hold it.
-    functions: FxHashMap<SpanKey, Vec<Holder>>,
+    /// The span of each component function, to the spans of the mappings that hold it.
+    functions: FxHashMap<SpanKey, Vec<SpanKey>>,
+    /// Where in the file's usages each component function was reached.
+    reached: FxHashMap<SpanKey, usize>,
     /// How many component functions enclose the current node.
     owned: u32,
     usages: Vec<JsxUsage>,
 }
 
 impl Finder {
-    /// Notes the function a wanted node holds; `true` when the node is one, so its JSX is the component's.
-    fn record(&mut self, span: oxc_span::Span, function: Option<ComponentFn<'_, '_>>) -> bool {
+    /// Notes the function a wanted node holds.
+    fn record(&mut self, span: oxc_span::Span, function: Option<ComponentFn<'_, '_>>) {
         let key = (span.start, span.end);
-        let Some(function) = function.filter(|_| self.wanted.contains(&key)) else { return false };
+        let Some(function) = function.filter(|_| self.wanted.contains(&key)) else { return };
         let function = function.span();
         let holders = self.functions.entry((function.start, function.end)).or_default();
-        if !holders.iter().any(|(held, _)| *held == key) {
-            holders.push((key, self.usages.len()));
+        if !holders.contains(&key) {
+            holders.push(key);
         }
-        true
     }
 
-    fn walk_owned(&mut self, owned: bool, walk: impl FnOnce(&mut Self)) {
+    /// Walks a function, owning its JSX when a mapping holds it. A wrapped function is reached after the declaration
+    /// holding it, so it has been recorded by then.
+    fn walk_function(&mut self, span: oxc_span::Span, walk: impl FnOnce(&mut Self)) {
+        let key = (span.start, span.end);
+        let owned = self.functions.contains_key(&key);
+        if owned {
+            self.reached.entry(key).or_insert(self.usages.len());
+        }
         self.owned += u32::from(owned);
         walk(self);
         self.owned -= u32::from(owned);
@@ -164,23 +180,23 @@ impl Finder {
 
 impl<'a> Visit<'a> for Finder {
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        let owned = self.record(it.span, it.init.as_ref().and_then(unwrap));
-        self.walk_owned(owned, |finder| walk::walk_variable_declarator(finder, it));
+        self.record(it.span, it.init.as_ref().and_then(unwrap));
+        walk::walk_variable_declarator(self, it);
     }
 
     fn visit_export_default_declaration(&mut self, it: &ExportDefaultDeclaration<'a>) {
-        let owned = self.record(it.span, it.declaration.as_expression().and_then(unwrap));
-        self.walk_owned(owned, |finder| walk::walk_export_default_declaration(finder, it));
+        self.record(it.span, it.declaration.as_expression().and_then(unwrap));
+        walk::walk_export_default_declaration(self, it);
     }
 
     fn visit_function(&mut self, it: &Function<'a>, flags: ScopeFlags) {
-        let owned = self.record(it.span, Some(ComponentFn::Function(it)));
-        self.walk_owned(owned, |finder| walk::walk_function(finder, it, flags));
+        self.record(it.span, Some(ComponentFn::Function(it)));
+        self.walk_function(it.span, |finder| walk::walk_function(finder, it, flags));
     }
 
     fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
-        let owned = self.record(it.span, Some(ComponentFn::Arrow(it)));
-        self.walk_owned(owned, |finder| walk::walk_arrow_function_expression(finder, it));
+        self.record(it.span, Some(ComponentFn::Arrow(it)));
+        self.walk_function(it.span, |finder| walk::walk_arrow_function_expression(finder, it));
     }
 
     fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
@@ -208,6 +224,11 @@ struct Reader<'s, 'a> {
     scoping: &'s Scoping,
     nodes: &'s AstNodes<'a>,
     facts: BodyFacts,
+    /// Each read with its source position. References are classified symbol by symbol (a rest binding's after every
+    /// one of the props object's), so the order of `facts.reads` is made from the positions once all are classified.
+    reads: Vec<(u32, String)>,
+    /// Each rest binding with its source position, ordered into `facts.rests` the same way.
+    rests: Vec<(u32, String)>,
     /// The props object's symbols: the first parameter, and each rest binding taken from it.
     whole: FxHashMap<SymbolId, SpreadOf>,
     /// The symbols still to classify the references of.
@@ -222,6 +243,8 @@ impl<'s, 'a> Reader<'s, 'a> {
             scoping,
             nodes,
             facts: BodyFacts::default(),
+            reads: Vec::new(),
+            rests: Vec::new(),
             whole: FxHashMap::default(),
             queue: VecDeque::new(),
             locals: FxHashMap::default(),
@@ -241,9 +264,20 @@ impl<'s, 'a> Reader<'s, 'a> {
                 self.classify(reference.node_id());
             }
         }
+        // A key's first read is its earliest in the source.
+        self.reads.sort_by_key(|&(at, _)| at);
+        let mut seen = FxHashSet::default();
+        for (_, key) in std::mem::take(&mut self.reads) {
+            if seen.insert(key.clone()) {
+                self.facts.reads.push(key);
+            }
+        }
+        self.rests.sort_by_key(|&(at, _)| at);
+        self.facts.rests = std::mem::take(&mut self.rests).into_iter().map(|(_, name)| name).collect();
         let mut elements = Elements {
             reader: &self,
             tags: FxHashSet::default(),
+            nested_spans: FxHashSet::default(),
             nested: 0,
             elements: Vec::new(),
             nested_usages: Vec::new(),
@@ -297,10 +331,8 @@ impl<'s, 'a> Reader<'s, 'a> {
         }
     }
 
-    fn read(&mut self, prop: String) {
-        if !self.facts.reads.contains(&prop) {
-            self.facts.reads.push(prop);
-        }
+    fn read(&mut self, at: oxc_span::Span, prop: String) {
+        self.reads.push((at.start, prop));
     }
 
     /// An object pattern taken from the props object: each static key is read, a plain name bound to a key that is
@@ -320,12 +352,12 @@ impl<'s, 'a> Reader<'s, 'a> {
             {
                 self.locals.insert(symbol, key.clone());
             }
-            self.read(key);
+            self.read(property.span, key);
         }
         if let Some(rest) = &object.rest {
             match &rest.argument {
                 BindingPattern::BindingIdentifier(id) => {
-                    self.facts.rests.push(id.name.to_string());
+                    self.rests.push((rest.span.start, id.name.to_string()));
                     if let Some(symbol) = id.symbol_id.get() {
                         self.track(symbol, SpreadOf::Rest);
                     }
@@ -381,11 +413,11 @@ impl<'s, 'a> Reader<'s, 'a> {
                         for property in &object.properties {
                             match property {
                                 AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(property) => {
-                                    self.read(property.binding.name.to_string());
+                                    self.read(property.span, property.binding.name.to_string());
                                 }
                                 AssignmentTargetProperty::AssignmentTargetPropertyProperty(property) => {
                                     match property.name.static_name() {
-                                        Some(key) => self.read(js_text::property_name(&key)),
+                                        Some(key) => self.read(property.span, js_text::property_name(&key)),
                                         None => self.facts.handed_on = true,
                                     }
                                 }
@@ -407,7 +439,7 @@ impl<'s, 'a> Reader<'s, 'a> {
         };
         let is_jsx_tag = matches!(self.nodes.kind(parent), AstKind::JSXMemberExpression(_));
         match read {
-            Some(key) if is_jsx_tag || self.is_read(parent) => self.read(key),
+            Some(key) if is_jsx_tag || self.is_read(parent) => self.read(self.nodes.kind(reference).span(), key),
             Some(_) | None => self.facts.handed_on = true,
         }
     }
@@ -505,6 +537,9 @@ impl<'a> Visit<'a> for TagSymbols<'_> {
 struct Elements<'r, 's, 'a> {
     reader: &'r Reader<'s, 'a>,
     tags: FxHashSet<SymbolId>,
+    /// The functions and classes a declarator binds to a tag symbol, by span: only they are nested, not a wrapper call
+    /// around them (`withX(() => <li />, { icon: <Icon /> })` writes `<Icon />` in the body that calls `withX`).
+    nested_spans: FxHashSet<SpanKey>,
     nested: u32,
     elements: Vec<JsxElementFact>,
     nested_usages: Vec<JsxUsage>,
@@ -513,6 +548,10 @@ struct Elements<'r, 's, 'a> {
 impl Elements<'_, '_, '_> {
     fn is_tag(&self, id: Option<&BindingIdentifier<'_>>) -> bool {
         id.and_then(|id| id.symbol_id.get()).is_some_and(|symbol| self.tags.contains(&symbol))
+    }
+
+    fn is_nested_span(&self, span: oxc_span::Span) -> bool {
+        self.nested_spans.contains(&(span.start, span.end))
     }
 
     fn in_nested(&mut self, nested: bool, walk: impl FnOnce(&mut Self)) {
@@ -524,20 +563,33 @@ impl Elements<'_, '_, '_> {
 
 impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        let nested = matches!(&it.id, BindingPattern::BindingIdentifier(id) if self.is_tag(Some(id)))
-            && it.init.as_ref().is_some_and(|init| {
-                unwrap(init).is_some() || matches!(peel_expr(init), Expression::ClassExpression(_))
-            });
-        self.in_nested(nested, |elements| walk::walk_variable_declarator(elements, it));
+        if matches!(&it.id, BindingPattern::BindingIdentifier(id) if self.is_tag(Some(id)))
+            && let Some(init) = &it.init
+        {
+            let span = match (unwrap(init), peel_expr(init)) {
+                (Some(function), _) => Some(function.span()),
+                (None, Expression::ClassExpression(class)) => Some(class.span),
+                _ => None,
+            };
+            if let Some(span) = span {
+                self.nested_spans.insert((span.start, span.end));
+            }
+        }
+        walk::walk_variable_declarator(self, it);
     }
 
     fn visit_function(&mut self, it: &Function<'a>, flags: ScopeFlags) {
-        let nested = it.is_declaration() && self.is_tag(it.id.as_ref());
+        let nested = (it.is_declaration() && self.is_tag(it.id.as_ref())) || self.is_nested_span(it.span);
         self.in_nested(nested, |elements| walk::walk_function(elements, it, flags));
     }
 
+    fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
+        let nested = self.is_nested_span(it.span);
+        self.in_nested(nested, |elements| walk::walk_arrow_function_expression(elements, it));
+    }
+
     fn visit_class(&mut self, it: &Class<'a>) {
-        let nested = it.is_declaration() && self.is_tag(it.id.as_ref());
+        let nested = (it.is_declaration() && self.is_tag(it.id.as_ref())) || self.is_nested_span(it.span);
         self.in_nested(nested, |elements| walk::walk_class(elements, it));
     }
 
