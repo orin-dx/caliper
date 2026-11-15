@@ -276,7 +276,13 @@ pub(super) fn resolve_props_chain(
                 &mut state.diagnostics,
             );
             if let CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), file_path } = &alias
-                && ctx.collapses(file_path, &canonical_name, fields.len(), depth, state)
+                && ctx.collapses(
+                    file_path,
+                    &canonical_name,
+                    fields.iter().map(|field| field.name.as_str()),
+                    depth,
+                    state,
+                )
             {
                 let notable = fields
                     .iter()
@@ -579,7 +585,7 @@ fn resolve_interface_members(
     }
 
     // Its parents are sources of their own, resolved above; only this interface's members collapse.
-    if ctx.collapses(&iface.file_path, &iface.name, iface.props.len(), depth, state) {
+    if ctx.collapses(&iface.file_path, &iface.name, iface.props.iter().map(|prop| prop.name.as_str()), depth, state) {
         let notable = iface.props.iter().filter(|prop| is_notable(&prop.name)).map(|prop| {
             let ty = match &substitution {
                 Some(subst) => super::substitute::substitute_type(&prop.collected_type, subst),

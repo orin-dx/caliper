@@ -17,9 +17,10 @@ mod syntax;
 use crate::extractor::written::WrittenMember;
 use crate::types::collected::ComponentExport;
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, Superseded};
+use crate::types::options::CollapseContext;
 use crate::types::output::{
-    ComponentEntry, DefaultValue, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropParent, PropType,
-    TRUNCATED_KIND,
+    ComponentEntry, DefaultValue, ExtractionOutput, InheritedLayer, OpaqueDetail, OpaqueReason, ParsedProp, PropParent,
+    PropType, TRUNCATED_KIND,
 };
 use order::Placed;
 use syntax::SourceSyntax;
@@ -345,7 +346,8 @@ impl ResolverFacts {
 
 /// Replaces `entry`'s props and `composes` with the checker's, keeping a description or tags only the structural pass
 /// has, for the whole-project merge. Facts are read as [`merge_semantic_props`] reads them, from `syntax` and as
-/// `resolver` allows.
+/// `resolver` allows. The checker's props are laid out in the layers `cx` decides ([`layer_checker_props`]).
+#[allow(clippy::too_many_arguments)]
 fn apply_props(
     entry: &mut ComponentEntry,
     semantic: &SemanticComponent,
@@ -353,6 +355,7 @@ fn apply_props(
     memo: &mut MergeMemo,
     syntax: &SourceSyntax,
     resolver: ResolverFacts,
+    cx: CollapseContext,
 ) -> MergedProps {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers. A component
     // with no layer has nowhere to leave them: a context's `Provider` (`value`, `children`) or a `th`/`td` attribute
@@ -364,8 +367,103 @@ fn apply_props(
         .iter()
         .filter(|prop| !prop.react_declared || (!layered && entry.props.contains_key(&prop.name)))
         .collect();
+    let (own, notable) = layer_checker_props(entry, own, cx);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
-    replace_props(entry, own.into_iter(), &merge, shared, memo)
+    let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
+    move_notable(entry, &notable);
+    merged
+}
+
+/// The checker's `props` for `entry` without those an inherited source collapsed into a layer holds, and the notable
+/// ones to move to `notableInherited` once merged ([`move_notable`]).
+///
+/// The collapse decision has one owner, [`CollapseInheritedProps::collapses`](crate::types::options::CollapseInheritedProps::collapses),
+/// asked with a source's declared member count. Both lanes supply that count: the structural resolver for the sources
+/// it reads, which are its layers here; the checker (`sources`) for a source the structural answer did not read (no
+/// structural prop and no layer has it as its source), decided by `cx` ([`CollapseContext::collapses`]).
+///
+/// 1. A prop a collapsed layer names (`InheritedLayer::members`) is left to it, unless the structural answer lists the
+///    prop itself (the component declares it again).
+/// 2. A source only the checker read becomes a collapsed layer when the owner collapses it, asked with the members
+///    that reach the component: the props of the answer whose `parent` is the source, after any `Omit` or `Pick`, each
+///    name once (the structural resolver counts the same; no declared count is asked of the checker). `members` are those props and `totalProps` their number,
+///    what the layer holds. Its notable props move to `notableInherited`, as the structural resolver keeps a collapsed
+///    source's notable members.
+///
+/// Applying it again to the entry it changed gives the same props and layers: a layer made here is then a layer of the
+/// entry, which the first rule follows.
+pub(crate) fn layer_checker_props<'a>(
+    entry: &mut ComponentEntry,
+    props: Vec<&'a Arc<SemanticProp>>,
+    cx: CollapseContext,
+) -> (Vec<&'a Arc<SemanticProp>>, Vec<(String, PropParent)>) {
+    // Each source the answer names (a prop's `parent` is an interface), in the order it first names it, with the
+    // members of it that reach the component, each once.
+    let mut sources: Vec<(&'a PropParent, Vec<String>)> = Vec::new();
+    for prop in props.iter().filter(|prop| !prop.react_declared) {
+        let Some(parent) = prop.parent.as_ref() else { continue };
+        match sources.iter_mut().find(|(source, _)| *source == parent) {
+            Some((_, names)) if !names.contains(&prop.name) => names.push(prop.name.clone()),
+            Some(_) => {}
+            None => sources.push((parent, vec![prop.name.clone()])),
+        }
+    }
+    let unread = |source: &PropParent| {
+        !entry.props.values().any(|prop| prop.parent.as_ref() == Some(source))
+            && !entry
+                .inheritance
+                .iter()
+                .any(|layer| layer.type_name == source.name && layer.file_name == source.file_name)
+    };
+    let notable_names = crate::react_types::notable_html_attrs("");
+    let mut notable = Vec::new();
+    let mut layers = Vec::new();
+    for (source, members) in sources {
+        if !unread(source) || !cx.collapses(&source.file_name, &source.name, members.len()) {
+            continue;
+        }
+        notable.extend(
+            members
+                .iter()
+                .filter(|name| notable_names.contains(&name.as_str()))
+                .map(|name| (name.clone(), source.clone())),
+        );
+        layers.push(InheritedLayer {
+            type_name: source.name.clone(),
+            file_name: source.file_name.clone(),
+            omitted: Vec::new(),
+            html_element: None,
+            total_props: u32::try_from(members.len()).unwrap_or(u32::MAX),
+            members,
+        });
+    }
+    entry.inheritance.extend(layers);
+    let layered: rustc_hash::FxHashSet<&str> =
+        entry.inheritance.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
+    if layered.is_empty() {
+        return (props, notable);
+    }
+    let kept = props
+        .into_iter()
+        .filter(|prop| {
+            notable.iter().any(|(name, _)| *name == prop.name)
+                || entry.props.contains_key(&prop.name)
+                || !layered.contains(prop.name.as_str())
+        })
+        .collect();
+    (kept, notable)
+}
+
+/// Moves each merged prop `notable` names from `entry`'s props to its `notableInherited`, when it is the collapsed
+/// source's member (its `parent` is that source); a prop of that name the component declares itself stays a prop.
+pub(crate) fn move_notable(entry: &mut ComponentEntry, notable: &[(String, PropParent)]) {
+    for (name, source) in notable {
+        if entry.props.get(name).is_some_and(|prop| prop.parent.as_ref() == Some(source))
+            && let Some(prop) = entry.props.remove(name)
+        {
+            entry.notable_inherited.insert(name.clone(), prop);
+        }
+    }
 }
 
 /// What one merged prop was made from, by identity: the checker's prop, the structural prop of the same name, the
@@ -745,6 +843,17 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
 /// [`merge_semantic`], taking the facts the checker does not supply from the structural answer only as `resolver`
 /// allows.
 pub fn merge_semantic_with(output: &mut ExtractionOutput, outcome: SemanticOutcome, resolver: ResolverFacts) {
+    merge_semantic_in(output, outcome, resolver, CollapseContext::OFF);
+}
+
+/// [`merge_semantic_with`] for a run with the choices `cx`: a source only the checker read collapses as the structural
+/// pass would collapse it (`layer_checker_props`). The other merges follow the structural layers only.
+pub fn merge_semantic_in(
+    output: &mut ExtractionOutput,
+    outcome: SemanticOutcome,
+    resolver: ResolverFacts,
+    cx: CollapseContext,
+) {
     let SemanticOutcome { components, fallbacks, diagnostics } = outcome;
     let syntax = SourceSyntax::read(
         components
@@ -757,7 +866,7 @@ pub fn merge_semantic_with(output: &mut ExtractionOutput, outcome: SemanticOutco
     let mut memo = MergeMemo::default();
     for semantic in components {
         let Some(entry) = output.components.get_mut(&semantic.key) else { continue };
-        let unread = apply_props(entry, &semantic, &mut shared, &mut memo, &syntax, resolver).unread;
+        let unread = apply_props(entry, &semantic, &mut shared, &mut memo, &syntax, resolver, cx).unread;
         if unread > 0 {
             unread_props += unread;
             unread_keys.push(semantic.key.clone());

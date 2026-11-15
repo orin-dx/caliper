@@ -1,6 +1,6 @@
 # Storybook parity
 
-What the Storybook addon adds to, and costs against, Storybook's own docgen on real repositories: how often the addon hands a component on, what it documents that Storybook doesn't, where the two disagree, and what each costs. The numbers below were measured by hand on the corpora `scripts/corpora.py setup` fetches, installed, and are the record; the measurement is not run in CI or in the weekly. `scripts/weekly.py` records the addon's configuration of the resolver (`collapse` `none`) against the checker, and `just bench` its time and memory.
+What the Storybook addon adds to, and costs against, Storybook's own docgen on real repositories: how often the addon hands a component on, what it documents that Storybook doesn't, where the two disagree, and what each costs. The numbers below were measured by hand on the corpora `scripts/corpora.py setup` fetches, installed, and are the record; the measurement is not run in CI or in the weekly. `scripts/weekly.py` times the addon's configuration (`--collapse-inherited-props dependencies`, its default) and compares an expanded record (`none`) against the checker, and `just bench` times the addon's configuration too.
 
 ## What is compared
 
@@ -41,7 +41,7 @@ Not measured: Storybook's control inference from argTypes (kind is `type.name`),
 
 ### 2026-11-06, main at `c5fbb33e`: should an opaque prop hand the component on?
 
-The `degraded` rule counts warnings and errors. A prop the extractor cannot expand (`keyof typeof x`, `-1 | 0`, an indexed access, a mapped or conditional type) is an `info` diagnostic (`OPAQUE_TYPE`, `INDEXED_ACCESS_OPAQUE`) and does not hand the component on, so Storybook shows the raw type text as an `object` control where its own docgen may show a radio. The question was whether `info`-level opaque diagnostics should count as incomplete. The session of each corpus was run with the addon's defaults (`loadDependencies`, `collapseInheritedProps: 'none'`), and each component's diagnostics read from `sessionComponentAnswers`.
+The `degraded` rule counts warnings and errors. A prop the extractor cannot expand (`keyof typeof x`, `-1 | 0`, an indexed access, a mapped or conditional type) is an `info` diagnostic (`OPAQUE_TYPE`, `INDEXED_ACCESS_OPAQUE`) and does not hand the component on, so Storybook shows the raw type text as an `object` control where its own docgen may show a radio. The question was whether `info`-level opaque diagnostics should count as incomplete. The session of each corpus was run with the addon's defaults at the time (`loadDependencies`, `collapseInheritedProps: 'none'`; it is `'dependencies'` now), and each component's diagnostics read from `sessionComponentAnswers`.
 
 Components the addon would hand on, today (warning or error) and with the rule extended to `info` `OPAQUE_TYPE` or `INDEXED_ACCESS_OPAQUE`:
 

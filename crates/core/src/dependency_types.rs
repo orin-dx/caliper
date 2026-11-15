@@ -1244,9 +1244,7 @@ fn index_path(options: &PipelineOptions) -> (Utf8PathBuf, u64) {
 
 /// Whether `path` lies inside a `node_modules` directory, spelled with either separator (a Windows path has
 /// backslashes once the verbatim prefix is gone).
-pub(crate) fn in_node_modules(path: &str) -> bool {
-    path.contains("/node_modules/") || path.contains(r"\node_modules\")
-}
+pub(crate) use crate::types::options::in_node_modules;
 
 fn package_stamp(dir: &str) -> Option<(u128, u64)> {
     let meta = std::fs::metadata(Utf8Path::new(dir).join("package.json")).ok()?;
