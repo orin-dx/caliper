@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01AGKXzsG37sxjVjWWBPYJdS",
+  "agent_id": "abf730aed71712b14",
+  "subagent_type": "general-purpose",
+  "task_description": "S1: scheduler priority classes and cancel (ADR 0028 wave 1)",
+  "token_usage": {
+    "input_tokens": 184,
+    "cache_creation_tokens": 187723,
+    "cache_read_tokens": 13364591,
+    "output_tokens": 61256,
+    "api_call_count": 92
+  },
+  "started_at": "2026-11-15T13:51:13.837802-08:00",
+  "completed_at": "2026-11-15T14:17:11.98566-08:00"
+}
