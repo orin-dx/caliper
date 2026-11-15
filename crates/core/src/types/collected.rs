@@ -1254,6 +1254,11 @@ pub struct SourceData {
     /// The scope each named class in this file sits in. Keyed as the interface a class is recorded as when the file
     /// declares no interface or alias of its name; the first class of a key wins. Nothing reads it yet.
     pub class_scopes: FxHashMap<std::string::String, DeclarationScope>,
+
+    /// The JSX elements of this file outside every component body the extractor reads facts from (pages, stories,
+    /// helpers, module-level JSX), in source order (trail 405). Names only, nothing resolved. Internal evidence for the
+    /// resolver: never emitted.
+    pub(crate) jsx_usages: Vec<JsxUsage>,
 }
 
 /// What a generic function returns: its declared or asserted type, or a generic call stored in a returned local const.
@@ -1792,6 +1797,89 @@ pub struct ComponentMapping {
     /// module exports under one other name by that export, and the binding is what the module's own code, and a
     /// `typeof` in another module reached through the export, find it by. Read it with [`Self::binding_name`].
     pub local_name: Option<std::string::String>,
+    /// What the component's own function body does with its props (trail 405); `None` when the declaration holds no
+    /// function of its own. Internal evidence for the resolver: never emitted.
+    pub(crate) body: Option<BodyFacts>,
+}
+
+/// What a component's function body does with its props, read from the syntax alone (`extractor::body_facts`). Facts
+/// only: no judgement of relevance or forwarding is made where they are collected.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct BodyFacts {
+    /// The props the function reads, in first-read order: the keys its first parameter destructures (renamed,
+    /// defaulted or nested alike), then `props.x` and `props['x']` on a first parameter that is an identifier.
+    pub(crate) reads: Vec<std::string::String>,
+    /// The rest binding of a destructured first parameter (`...rest`).
+    pub(crate) rest: Option<std::string::String>,
+    /// Every JSX element the body writes, in source order, nested components' excepted.
+    pub(crate) elements: Vec<JsxElementFact>,
+    /// Whether the props object or the rest binding is passed whole as a call argument (`useX(props)`), or the props
+    /// object is spread whole into JSX (`{...props}`).
+    pub(crate) handed_on: bool,
+}
+
+/// One JSX element a component body writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct JsxElementFact {
+    /// The element's tag.
+    pub(crate) tag: JsxTag,
+    /// Its attributes in source order, so a named attribute's place before or after a spread is kept.
+    pub(crate) attributes: Vec<JsxAttributeFact>,
+}
+
+/// A JSX tag, by the JSX rule: a lowercase first letter, a dash or a namespace makes it intrinsic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum JsxTag {
+    /// A host element: `div`, `my-element`, `svg:path`.
+    Intrinsic(std::string::String),
+    /// A component named by an identifier: `Button`.
+    Identifier(std::string::String),
+    /// A component reached through a member path: `chakra.button`.
+    Member(std::string::String),
+}
+
+/// One attribute of a JSX element.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum JsxAttributeFact {
+    /// `name={value}`, with the prop the value is when it is exactly one of the component's own: a destructured name,
+    /// `props.x` or `rest.x`.
+    Named {
+        /// The attribute's name.
+        name: std::string::String,
+        /// The component's prop the value is, if it is exactly one.
+        prop: Option<std::string::String>,
+    },
+    /// `{...value}`.
+    Spread(SpreadOf),
+}
+
+/// A JSX element outside every component body: its tag and its attributes' names in source order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct JsxUsage {
+    /// The element's tag.
+    pub(crate) tag: JsxTag,
+    /// Its attributes in source order.
+    pub(crate) attributes: Vec<JsxUsageAttribute>,
+}
+
+/// One attribute of a [`JsxUsage`], by name only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum JsxUsageAttribute {
+    /// `name=…`.
+    Named(std::string::String),
+    /// `{...value}`.
+    Spread,
+}
+
+/// What a JSX spread attribute spreads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum SpreadOf {
+    /// The first parameter, whole.
+    Props,
+    /// The rest binding of the destructured first parameter.
+    Rest,
+    /// Any other expression.
+    Other,
 }
 
 impl ComponentMapping {
@@ -1820,6 +1908,7 @@ impl ComponentMapping {
             type_params: Vec::new(),
             bound: rule != DetectionRule::AttachedSubComponent,
             local_name: None,
+            body: None,
         }
     }
 
