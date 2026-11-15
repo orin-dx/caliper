@@ -52,7 +52,8 @@ fn destructuring_reads_renamed_defaulted_nested_keys_and_the_rest_binding() {
             "div",
             vec![
                 named("data-tone", Some("tone")),
-                named("data-size", Some("size")),
+                // A defaulted name is the prop or its default, not the prop.
+                named("data-size", None),
                 named("data-color", None),
                 JsxAttributeFact::Spread(SpreadOf::Rest),
             ]
@@ -66,7 +67,7 @@ fn member_reads_of_the_props_identifier_are_reads_anywhere_in_the_body() {
     let facts = facts(
         "export function C(props: P) {\n\
            const label = props.label;\n\
-           const onClick = () => props['onPress']?.();\n\
+           const onClick = () => use(props['onPress']);\n\
            return <button title={props.title} aria-label={label} onClick={onClick} />\n\
          }",
         "C",
@@ -336,5 +337,138 @@ fn jsx_outside_every_component_body_is_a_usage_of_the_file() {
                 attributes: vec![JsxUsageAttribute::Spread, JsxUsageAttribute::Named("tone".into())],
             },
         ]
+    );
+}
+
+#[test]
+fn parameter_defaults_and_computed_keys_are_references_too() {
+    let read = facts("export function C(props: P, { x = props.b } = {}) { return <div /> }", "C");
+    assert_eq!(reads(&read), ["b"]);
+    assert!(!read.handed_on);
+    let handed = facts("export function C(props: P, store = use(props)) { return <div /> }", "C");
+    assert!(handed.handed_on);
+    let key = facts("export function C(props: P) { const { [props.k]: v } = other; return <div /> }", "C");
+    assert_eq!(reads(&key), ["k"]);
+}
+
+#[test]
+fn a_body_declaration_does_not_capture_a_parameter_default() {
+    // The default is evaluated in the parameters' scope: `props` there is the parameter, whatever the body declares.
+    let facts = facts("export function C(props: P, d = use(props)) { const use = 1; return <div /> }", "C");
+    assert!(facts.handed_on);
+}
+
+#[test]
+fn a_var_in_a_nested_function_is_another_binding() {
+    let facts = facts(
+        "export function C({ size }: P) {\n\
+           const f = () => { var size = 2; return <i data-s={size} /> };\n\
+           return <b data-s={size}>{f()}</b>\n\
+         }",
+        "C",
+    );
+    assert_eq!(
+        facts.elements,
+        [intrinsic("i", vec![named("data-s", None)]), intrinsic("b", vec![named("data-s", Some("size"))])]
+    );
+}
+
+#[test]
+fn a_named_function_expression_binds_its_own_name() {
+    let facts = facts(
+        "export function C(props: P) { const g = function props() { return props.x }; return <div>{g()}</div> }",
+        "C",
+    );
+    assert_eq!(facts.reads, Vec::<String>::new());
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn every_rest_binding_is_the_props_object_and_the_first_is_named() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const { a, ...r1 } = props; const { b, ...r2 } = r1;\n\
+           return <div {...r2} data-z={r2.z} />\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["a", "b", "z"]);
+    assert_eq!(facts.rest.as_deref(), Some("r1"));
+    assert_eq!(
+        facts.elements,
+        [intrinsic("div", vec![JsxAttributeFact::Spread(SpreadOf::Rest), named("data-z", Some("z"))])]
+    );
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn a_switch_discriminant_is_outside_the_case_bindings() {
+    let facts = facts(
+        "export function C(props: P) { switch (props.kind) { case 'a': const props = 1; return <i /> } return null }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["kind"]);
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn typescript_wrappers_around_the_props_object_are_seen_through() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           const x = props!.x; const y = (props as P).y;\n\
+           const { a } = props as P; const { b } = props satisfies P;\n\
+           return <div />\n\
+         }",
+        "C",
+    );
+    assert_eq!(reads(&facts), ["x", "y", "a", "b"]);
+    assert!(!facts.handed_on);
+}
+
+#[test]
+fn a_method_call_a_write_or_a_delete_through_the_props_object_hands_it_on() {
+    let uses = [
+        "props.onClick()",
+        "props.onClick?.()",
+        "props.hasOwnProperty('a')",
+        "props.x = 1",
+        "delete props.x",
+        "props.n++",
+    ];
+    for used in uses {
+        let source = format!("export function C(props: P) {{ {used}; return <div /> }}");
+        assert!(facts(&source, "C").handed_on, "`{used}` hands the props object on");
+    }
+}
+
+#[test]
+fn a_reassigned_or_defaulted_local_is_not_the_prop() {
+    let facts = facts(
+        "export function C(props: P) {\n\
+           let { a } = props; a = f(a);\n\
+           const { b = 5, c } = props;\n\
+           return <i data-a={a} data-b={b} data-c={c} />\n\
+         }",
+        "C",
+    );
+    assert_eq!(
+        facts.elements,
+        [intrinsic("i", vec![named("data-a", None), named("data-b", None), named("data-c", Some("c"))])]
+    );
+}
+
+#[test]
+fn a_nested_component_is_found_by_symbol_not_by_name() {
+    let facts = facts(
+        "import { Row } from './row';\n\
+         export function C(props: P) {\n\
+           { const Row = memoize(() => <li {...props} />); use(Row); }\n\
+           return <Row />\n\
+         }",
+        "C",
+    );
+    assert_eq!(
+        facts.elements,
+        [intrinsic("li", vec![JsxAttributeFact::Spread(SpreadOf::Props)]), component("Row", vec![])]
     );
 }

@@ -8,28 +8,36 @@
 //!
 //! # Conservative by construction
 //!
-//! Names are resolved by scope: a parameter, a `let`/`const`/`class`/`function` declaration or a `catch` binding of
-//! the same name in an inner scope is another binding, and its uses are not the component's. Every use of the props
-//! object (the first parameter, its rest binding, and a rest binding destructured from either) is classified by the
-//! node it sits in, and only three are safe:
+//! Names are resolved by `oxc_semantic`, which binds every reference to its symbol: a parameter, `var`, `let`,
+//! function or class name, catch or loop binding of the same name is another symbol, and what is the component's is
+//! decided by the symbol. Every reference to the props object (the first parameter and each rest binding taken from
+//! it) is classified by the node around it, through TypeScript's `as`, `satisfies`, `!` and `<T>`; only three are
+//! safe:
 //!
-//! - the object of a member read with a static or string-literal key (`props.x`, `props?.['x']`): `x` is read;
+//! - the object of a member read with a static or string-literal key (`props.x`, `props?.['x']`) that is not called
+//!   (`props.f()` passes the object as `this`), written, deleted or destructured into: `x` is read;
 //! - the initializer of an object destructuring (`const { a, b = 1, ...r } = props`) or the right side of a
-//!   destructuring assignment: its keys are read, and a rest binding is the props object again;
-//! - a JSX spread attribute (`{...props}`): recorded as a spread.
+//!   destructuring assignment: its static keys are read, and a rest binding is the props object again;
+//! - a JSX spread attribute (`{...props}`): recorded as a spread, and the whole props object spread is handed on.
 //!
-//! Any other use (a call argument, `new`, an attribute value, an object or array literal, a `return`, a computed key,
-//! an assignment, `typeof`, a type query) hands the object on, so `reads` is complete only when `handed_on` is false.
-//! A `var` is not taken to shadow, and a name the resolver cannot place counts as the component's: an error here
-//! only ever adds reads or hand-offs.
+//! Any other reference (a call argument, `new`, an attribute value, an object or array literal, a `return`, a
+//! computed key, an assignment, `typeof`, a type query) hands the object on, so `reads` is complete only when
+//! `handed_on` is false.
 //!
-//! A function or class the body declares and renders as a JSX tag (`const Item = () => <li/>; return <Item/>`) is a
-//! component of its own: its uses of the props object still count, but its elements are the file's
-//! ([`JsxUsage`]), not the parent's.
+//! A function or class the body binds and renders as a JSX tag, by symbol (`const Item = () => <li/>; return
+//! <Item/>`), is a component of its own: its references to the props object still count, but its elements are the
+//! file's ([`JsxUsage`]), not the parent's.
 
+use std::collections::VecDeque;
+
+use oxc_ast::AstKind;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
+use oxc_semantic::{AstNodes, Scoping, SemanticBuilder};
+use oxc_span::GetSpan;
+use oxc_syntax::node::NodeId;
 use oxc_syntax::scope::ScopeFlags;
+use oxc_syntax::symbol::SymbolId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::component::peel_expr;
@@ -41,28 +49,66 @@ use crate::types::collected::{
 /// Records on each mapping the facts of the function its declaration holds, and returns the file's other JSX elements:
 /// those outside every function a mapping is given facts of (pages, stories, helpers, module-level JSX, class
 /// components) and those of components nested in one. A mapping with no function of its own (a class, an alias of
-/// another component, a declaration without a body) gets none.
-pub(super) fn attach(program: &Program<'_>, mappings: &mut [ComponentMapping], jsx: bool) -> Vec<JsxUsage> {
+/// another component, a declaration without a body) gets none. The semantic pass runs only for a file with at least
+/// one such function.
+pub(super) fn attach<'a>(program: &'a Program<'a>, mappings: &mut [ComponentMapping], jsx: bool) -> Vec<JsxUsage> {
     if mappings.is_empty() && !jsx {
         return Vec::new();
     }
     let mut finder = Finder {
         wanted: mappings.iter().map(|mapping| (mapping.span_start, mapping.span_end)).collect(),
-        found: FxHashMap::default(),
+        functions: FxHashMap::default(),
         owned: 0,
         usages: Vec::new(),
     };
     finder.visit_program(program);
-    for mapping in mappings {
-        mapping.body = finder.found.get(&(mapping.span_start, mapping.span_end)).cloned();
+    let Finder { functions, mut usages, .. } = finder;
+    if functions.is_empty() {
+        return usages;
     }
-    finder.usages
+
+    // The nodes are what a reference's parent is read from.
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let (scoping, nodes) = (semantic.scoping(), semantic.nodes());
+    let mut found = FxHashMap::default();
+    // Elements of nested components, each at the place in `usages` its component's declaration was reached.
+    let mut nested: Vec<(usize, Vec<JsxUsage>)> = Vec::new();
+    for node in nodes.iter() {
+        let (span, function) = match node.kind() {
+            AstKind::Function(function) => (function.span, ComponentFn::Function(function)),
+            AstKind::ArrowFunctionExpression(arrow) => (arrow.span, ComponentFn::Arrow(arrow)),
+            _ => continue,
+        };
+        let Some(holders) = functions.get(&(span.start, span.end)) else { continue };
+        let (facts, usages_of_nested) = Reader::new(scoping, nodes).facts_of(&function);
+        for &(key, at) in holders {
+            found.entry(key).or_insert_with(|| facts.clone());
+            nested.push((at, usages_of_nested.clone()));
+        }
+    }
+    nested.sort_by_key(|(at, _)| *at);
+    for (at, inserted) in nested.into_iter().rev() {
+        usages.splice(at..at, inserted);
+    }
+    for mapping in mappings {
+        mapping.body = found.get(&(mapping.span_start, mapping.span_end)).cloned();
+    }
+    usages
 }
 
 /// A component function, by the parts the facts are read from.
 enum ComponentFn<'b, 'a> {
     Function(&'b Function<'a>),
     Arrow(&'b ArrowFunctionExpression<'a>),
+}
+
+impl ComponentFn<'_, '_> {
+    fn span(&self) -> oxc_span::Span {
+        match self {
+            Self::Function(function) => function.span,
+            Self::Arrow(arrow) => arrow.span,
+        }
+    }
 }
 
 /// The function an expression is, through parentheses, type assertions and the first argument of wrapper calls
@@ -76,25 +122,32 @@ fn unwrap<'b, 'a>(expr: &'b Expression<'a>) -> Option<ComponentFn<'b, 'a>> {
     }
 }
 
-/// Finds the nodes that start and end where a mapping does, reads the function each holds, and collects the JSX
-/// elements no component's facts hold.
+/// A span as `(start, end)`.
+type SpanKey = (u32, u32);
+
+/// A mapping's span that holds a component function, and where in the file's usages it was reached.
+type Holder = (SpanKey, usize);
+
+/// Finds the nodes that start and end where a mapping does and the function each holds, and collects the JSX
+/// elements outside all of those functions.
 struct Finder {
-    wanted: FxHashSet<(u32, u32)>,
-    found: FxHashMap<(u32, u32), BodyFacts>,
-    /// How many nodes whose function was read enclose the current one.
+    wanted: FxHashSet<SpanKey>,
+    /// The span of each component function, to the mappings that hold it.
+    functions: FxHashMap<SpanKey, Vec<Holder>>,
+    /// How many component functions enclose the current node.
     owned: u32,
     usages: Vec<JsxUsage>,
 }
 
 impl Finder {
-    /// Reads the function a wanted node holds; `true` when the node is one, so its JSX is the component's.
+    /// Notes the function a wanted node holds; `true` when the node is one, so its JSX is the component's.
     fn record(&mut self, span: oxc_span::Span, function: Option<ComponentFn<'_, '_>>) -> bool {
         let key = (span.start, span.end);
         let Some(function) = function.filter(|_| self.wanted.contains(&key)) else { return false };
-        if let std::collections::hash_map::Entry::Vacant(entry) = self.found.entry(key) {
-            let (facts, nested) = facts_of(&function);
-            entry.insert(facts);
-            self.usages.extend(nested);
+        let function = function.span();
+        let holders = self.functions.entry((function.start, function.end)).or_default();
+        if !holders.iter().any(|(held, _)| *held == key) {
+            holders.push((key, self.usages.len()));
         }
         true
     }
@@ -147,226 +200,86 @@ fn usage_of(it: &JSXOpeningElement<'_>) -> JsxUsage {
     JsxUsage { tag: tag_of(&it.name), attributes }
 }
 
-/// The facts of a component function, and the elements of the components nested in it.
-fn facts_of(function: &ComponentFn<'_, '_>) -> (BodyFacts, Vec<JsxUsage>) {
-    let mut reader = BodyReader::default();
-    let mut tags = TagNames::default();
-    match function {
-        ComponentFn::Function(function) => {
-            reader.enter_params(&function.params, true);
-            if let Some(body) = &function.body {
-                tags.visit_function_body(body);
-                reader.nested_components = tags.names;
-                reader.declare_statements(&body.statements);
-                reader.visit_function_body(body);
-            }
-        }
-        ComponentFn::Arrow(arrow) => {
-            reader.enter_params(&arrow.params, true);
-            tags.visit_arrow_function_body(&arrow.body);
-            reader.nested_components = tags.names;
-            reader.declare_statements(arrow_statements(arrow));
-            reader.visit_arrow_function_body(&arrow.body);
-        }
-    }
-    (reader.facts, reader.nested_usages)
-}
-
-/// The names a body uses as a component tag (`<Item/>`): a function or class the body declares under one of them is a
-/// component of its own.
-#[derive(Default)]
-struct TagNames<'a> {
-    names: FxHashSet<&'a str>,
-}
-
-impl<'a> Visit<'a> for TagNames<'a> {
-    fn visit_jsx_element_name(&mut self, it: &JSXElementName<'a>) {
-        if let JSXElementName::IdentifierReference(id) = it {
-            self.names.insert(id.name.as_str());
-        }
-    }
-}
-
-/// What a name in scope is bound to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Bound {
-    /// The props object: the first parameter.
-    Props,
-    /// The props object less some keys: a rest binding destructured from it.
-    Rest,
-    /// The value of one prop: a name destructured from the props object under this key.
-    Prop(String),
-    /// Anything else: a binding that shadows an outer one of the same name.
-    Other,
-}
-
-#[derive(Default)]
-struct BodyReader<'a> {
+/// Reads one component function against the file's semantic model.
+struct Reader<'s, 'a> {
+    scoping: &'s Scoping,
+    nodes: &'s AstNodes<'a>,
     facts: BodyFacts,
-    /// The scopes from the component function's inward, each with the names it binds.
-    scopes: Vec<FxHashMap<&'a str, Bound>>,
-    /// The functions and classes the body declares and renders as a tag: components of their own.
-    nested_components: FxHashSet<&'a str>,
-    /// How many nested components enclose the current node.
-    nested: u32,
-    /// The elements of the nested components.
-    nested_usages: Vec<JsxUsage>,
+    /// The props object's symbols: the first parameter, and each rest binding taken from it.
+    whole: FxHashMap<SymbolId, SpreadOf>,
+    /// The symbols still to classify the references of.
+    queue: VecDeque<SymbolId>,
+    /// The destructured locals that hold one prop's value unchanged: no default, never written.
+    locals: FxHashMap<SymbolId, String>,
 }
 
-/// The names a binding pattern binds.
-fn bound_names<'a>(pattern: &BindingPattern<'a>, out: &mut Vec<&'a str>) {
-    match pattern {
-        BindingPattern::BindingIdentifier(id) => out.push(id.name.as_str()),
-        BindingPattern::AssignmentPattern(assignment) => bound_names(&assignment.left, out),
-        BindingPattern::ObjectPattern(object) => {
-            for property in &object.properties {
-                bound_names(&property.value, out);
-            }
-            if let Some(rest) = &object.rest {
-                bound_names(&rest.argument, out);
-            }
-        }
-        BindingPattern::ArrayPattern(array) => {
-            for element in array.elements.iter().flatten() {
-                bound_names(element, out);
-            }
-            if let Some(rest) = &array.rest {
-                bound_names(&rest.argument, out);
-            }
-        }
-    }
-}
-
-impl<'a> BodyReader<'a> {
-    /// Binds `name` in the innermost scope; the component function's scope is always open while its body is read.
-    fn bind(&mut self, name: &'a str, bound: Bound) {
-        if self.scopes.is_empty() {
-            self.scopes.push(FxHashMap::default());
-        }
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name, bound);
+impl<'s, 'a> Reader<'s, 'a> {
+    fn new(scoping: &'s Scoping, nodes: &'s AstNodes<'a>) -> Self {
+        Self {
+            scoping,
+            nodes,
+            facts: BodyFacts::default(),
+            whole: FxHashMap::default(),
+            queue: VecDeque::new(),
+            locals: FxHashMap::default(),
         }
     }
 
-    fn shadow(&mut self, pattern: &BindingPattern<'a>) {
-        let mut names = Vec::new();
-        bound_names(pattern, &mut names);
-        for name in names {
-            self.bind(name, Bound::Other);
+    fn facts_of(mut self, function: &ComponentFn<'_, 'a>) -> (BodyFacts, Vec<JsxUsage>) {
+        let params = match function {
+            ComponentFn::Function(function) => &*function.params,
+            ComponentFn::Arrow(arrow) => &*arrow.params,
+        };
+        if let Some(first) = params.items.first() {
+            self.props_param(&first.pattern);
         }
-    }
-
-    /// Opens a function's scope with its parameters. The component's own first parameter is the props object.
-    fn enter_params(&mut self, params: &FormalParameters<'a>, component: bool) {
-        self.scopes.push(FxHashMap::default());
-        for (index, param) in params.items.iter().enumerate() {
-            if component && index == 0 {
-                self.bind_props_param(&param.pattern);
-            } else {
-                self.shadow(&param.pattern);
+        while let Some(symbol) = self.queue.pop_front() {
+            for reference in self.scoping.get_resolved_references(symbol) {
+                self.classify(reference.node_id());
             }
         }
-        if let Some(rest) = &params.rest {
-            self.shadow(&rest.rest.argument);
+        let mut elements = Elements {
+            reader: &self,
+            tags: FxHashSet::default(),
+            nested: 0,
+            elements: Vec::new(),
+            nested_usages: Vec::new(),
+        };
+        match function {
+            ComponentFn::Function(function) => {
+                if let Some(body) = &function.body {
+                    elements.tags = tag_symbols(self.scoping, |tags| tags.visit_function_body(body));
+                    elements.visit_function_body(body);
+                }
+            }
+            ComponentFn::Arrow(arrow) => {
+                elements.tags = tag_symbols(self.scoping, |tags| tags.visit_arrow_function_body(&arrow.body));
+                elements.visit_arrow_function_body(&arrow.body);
+            }
         }
+        let (found, nested_usages) = (elements.elements, elements.nested_usages);
+        self.facts.elements = found;
+        (self.facts, nested_usages)
     }
 
-    fn bind_props_param(&mut self, pattern: &BindingPattern<'a>) {
+    fn props_param(&mut self, pattern: &BindingPattern<'_>) {
         match pattern {
-            BindingPattern::BindingIdentifier(id) => self.bind(id.name.as_str(), Bound::Props),
+            BindingPattern::BindingIdentifier(id) => {
+                if let Some(symbol) = id.symbol_id.get() {
+                    self.track(symbol, SpreadOf::Props);
+                }
+            }
             // `function C({ a } = {})`.
-            BindingPattern::AssignmentPattern(assignment) => self.bind_props_param(&assignment.left),
+            BindingPattern::AssignmentPattern(assignment) => self.props_param(&assignment.left),
             BindingPattern::ObjectPattern(object) => self.destructure(object),
             // An array pattern reads indices of the props object, which says nothing about its keys.
-            BindingPattern::ArrayPattern(_) => {
-                self.facts.handed_on = true;
-                self.shadow(pattern);
-            }
+            BindingPattern::ArrayPattern(_) => self.facts.handed_on = true,
         }
     }
 
-    /// An object pattern destructured from the props object: each key is read, a name bound to a key is that prop's
-    /// value, and a rest binding is the props object again. Default values are walked by the caller's visit.
-    fn destructure(&mut self, object: &ObjectPattern<'a>) {
-        for property in &object.properties {
-            let Some(key) = property.key.static_name().map(|key| js_text::property_name(&key)) else {
-                // `{ [k]: v }` reads a key the syntax does not name.
-                self.facts.handed_on = true;
-                self.shadow(&property.value);
-                continue;
-            };
-            let local = match &property.value {
-                BindingPattern::AssignmentPattern(assignment) => &assignment.left,
-                value => value,
-            };
-            match local {
-                BindingPattern::BindingIdentifier(id) => self.bind(id.name.as_str(), Bound::Prop(key.clone())),
-                nested => self.shadow(nested),
-            }
-            self.read(key);
-        }
-        if let Some(rest) = &object.rest {
-            match &rest.argument {
-                BindingPattern::BindingIdentifier(id) => {
-                    self.bind(id.name.as_str(), Bound::Rest);
-                    if self.facts.rest.is_none() {
-                        self.facts.rest = Some(id.name.to_string());
-                    }
-                }
-                other => self.shadow(other),
-            }
-        }
-    }
-
-    /// Binds, as shadows, what the statements of a scope declare: `let`, `const`, `using`, `class` and `function`.
-    /// A `var` belongs to the function and can redeclare a parameter, so it is not taken to shadow.
-    fn declare_statements(&mut self, statements: &[Statement<'a>]) {
-        for statement in statements {
-            match statement {
-                Statement::VariableDeclaration(declaration) if declaration.kind != VariableDeclarationKind::Var => {
-                    for declarator in &declaration.declarations {
-                        self.shadow(&declarator.id);
-                    }
-                }
-                Statement::FunctionDeclaration(function) => {
-                    if let Some(id) = &function.id {
-                        self.bind(id.name.as_str(), Bound::Other);
-                    }
-                }
-                Statement::ClassDeclaration(class) => {
-                    if let Some(id) = &class.id {
-                        self.bind(id.name.as_str(), Bound::Other);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn scoped(&mut self, statements: &[Statement<'a>], walk: impl FnOnce(&mut Self)) {
-        self.scopes.push(FxHashMap::default());
-        self.declare_statements(statements);
-        walk(self);
-        self.scopes.pop();
-    }
-
-    fn lookup(&self, name: &str) -> Option<&Bound> {
-        self.scopes.iter().rev().find_map(|scope| scope.get(name))
-    }
-
-    /// What the props object an identifier is: `Props` or `Rest`, or `None` for anything else.
-    fn whole(&self, name: &str) -> Option<SpreadOf> {
-        match self.lookup(name) {
-            Some(Bound::Props) => Some(SpreadOf::Props),
-            Some(Bound::Rest) => Some(SpreadOf::Rest),
-            _ => None,
-        }
-    }
-
-    fn whole_expr(&self, expr: &Expression<'_>) -> Option<SpreadOf> {
-        match expr {
-            Expression::Identifier(id) => self.whole(id.name.as_str()),
-            _ => None,
+    fn track(&mut self, symbol: SymbolId, whole: SpreadOf) {
+        if self.whole.insert(symbol, whole).is_none() {
+            self.queue.push_back(symbol);
         }
     }
 
@@ -376,45 +289,215 @@ impl<'a> BodyReader<'a> {
         }
     }
 
-    /// The prop a member read names, when its object is the props object: `props.x`, `props?.['x']`, `rest.x`.
-    fn member_prop(&self, expr: &Expression<'_>) -> Option<String> {
-        match expr {
-            Expression::StaticMemberExpression(member) if self.whole_expr(&member.object).is_some() => {
-                Some(member.property.name.to_string())
+    /// An object pattern taken from the props object: each static key is read, a plain name bound to a key that is
+    /// never written holds that prop, and a rest binding is the props object again.
+    fn destructure(&mut self, object: &ObjectPattern<'_>) {
+        for property in &object.properties {
+            let Some(key) = property.key.static_name().map(|key| js_text::property_name(&key)) else {
+                // `{ [k]: v }` reads a key the syntax does not name.
+                self.facts.handed_on = true;
+                continue;
+            };
+            if let BindingPattern::BindingIdentifier(id) = &property.value
+                && let Some(symbol) = id.symbol_id.get()
+                && !self.scoping.symbol_is_mutated(symbol)
+            {
+                self.locals.insert(symbol, key.clone());
             }
-            Expression::ComputedMemberExpression(member) if self.whole_expr(&member.object).is_some() => {
-                match &member.expression {
-                    Expression::StringLiteral(key) => Some(js_text::lossy(key.value).into_owned()),
-                    _ => None,
-                }
-            }
-            Expression::ChainExpression(chain) => match &chain.expression {
-                ChainElement::StaticMemberExpression(member) if self.whole_expr(&member.object).is_some() => {
-                    Some(member.property.name.to_string())
-                }
-                ChainElement::ComputedMemberExpression(member) if self.whole_expr(&member.object).is_some() => {
-                    match &member.expression {
-                        Expression::StringLiteral(key) => Some(js_text::lossy(key.value).into_owned()),
-                        _ => None,
+            self.read(key);
+        }
+        if let Some(rest) = &object.rest {
+            match &rest.argument {
+                BindingPattern::BindingIdentifier(id) => {
+                    if self.facts.rest.is_none() {
+                        self.facts.rest = Some(id.name.to_string());
+                    }
+                    if let Some(symbol) = id.symbol_id.get() {
+                        self.track(symbol, SpreadOf::Rest);
                     }
                 }
+                _ => self.facts.handed_on = true,
+            }
+        }
+    }
+
+    /// The nearest ancestor of `node` that is not a TypeScript assertion or parentheses, and the span of the child
+    /// of it the walk came from.
+    fn through_wrappers(&self, node: NodeId) -> (NodeId, oxc_span::Span) {
+        let (mut child, mut parent) = (self.nodes.kind(node).span(), self.nodes.parent_id(node));
+        while matches!(
+            self.nodes.kind(parent),
+            AstKind::TSAsExpression(_)
+                | AstKind::TSSatisfiesExpression(_)
+                | AstKind::TSNonNullExpression(_)
+                | AstKind::TSTypeAssertion(_)
+                | AstKind::TSInstantiationExpression(_)
+                | AstKind::ParenthesizedExpression(_)
+        ) {
+            child = self.nodes.kind(parent).span();
+            parent = self.nodes.parent_id(parent);
+        }
+        (parent, child)
+    }
+
+    /// Classifies one reference to the props object; any use not named here hands it on.
+    fn classify(&mut self, reference: NodeId) {
+        let (parent, child) = self.through_wrappers(reference);
+        let read = match self.nodes.kind(parent) {
+            AstKind::StaticMemberExpression(member) if member.object.span() == child => {
+                Some(member.property.name.to_string())
+            }
+            AstKind::ComputedMemberExpression(member) if member.object.span() == child => match &member.expression {
+                Expression::StringLiteral(key) => Some(js_text::lossy(key.value).into_owned()),
                 _ => None,
             },
+            AstKind::JSXMemberExpression(member) => Some(member.property.name.to_string()),
+            AstKind::VariableDeclarator(declarator)
+                if declarator.init.as_ref().is_some_and(|init| init.span() == child) =>
+            {
+                match &declarator.id {
+                    BindingPattern::ObjectPattern(object) => self.destructure(object),
+                    _ => self.facts.handed_on = true,
+                }
+                return;
+            }
+            AstKind::AssignmentExpression(assignment) if assignment.right.span() == child => {
+                match &assignment.left {
+                    AssignmentTarget::ObjectAssignmentTarget(object) if object.rest.is_none() => {
+                        for property in &object.properties {
+                            match property {
+                                AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(property) => {
+                                    self.read(property.binding.name.to_string());
+                                }
+                                AssignmentTargetProperty::AssignmentTargetPropertyProperty(property) => {
+                                    match property.name.static_name() {
+                                        Some(key) => self.read(js_text::property_name(&key)),
+                                        None => self.facts.handed_on = true,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => self.facts.handed_on = true,
+                }
+                return;
+            }
+            AstKind::JSXSpreadAttribute(_) => {
+                // Spreading the whole props object passes every prop on; a rest binding's spread is recorded only.
+                if self.is_props(reference) {
+                    self.facts.handed_on = true;
+                }
+                return;
+            }
+            _ => None,
+        };
+        let is_jsx_tag = matches!(self.nodes.kind(parent), AstKind::JSXMemberExpression(_));
+        match read {
+            Some(key) if is_jsx_tag || self.is_read(parent) => self.read(key),
+            Some(_) | None => self.facts.handed_on = true,
+        }
+    }
+
+    /// Whether the reference at `node` is to the first parameter itself rather than a rest binding.
+    fn is_props(&self, node: NodeId) -> bool {
+        let AstKind::IdentifierReference(id) = self.nodes.kind(node) else { return false };
+        self.symbol_of(id).and_then(|symbol| self.whole.get(&symbol)) == Some(&SpreadOf::Props)
+    }
+
+    /// Whether a member expression is only read: not called with its object as `this`, written, deleted or
+    /// destructured into.
+    fn is_read(&self, member: NodeId) -> bool {
+        let (parent, child) = self.through_wrappers(member);
+        let (parent, child) = match self.nodes.kind(parent) {
+            AstKind::ChainExpression(chain) => (self.through_wrappers(self.nodes.parent_id(parent)).0, chain.span),
+            _ => (parent, child),
+        };
+        match self.nodes.kind(parent) {
+            AstKind::CallExpression(call) => call.callee.span() != child,
+            AstKind::TaggedTemplateExpression(tagged) => tagged.tag.span() != child,
+            AstKind::AssignmentExpression(assignment) => assignment.left.span() != child,
+            AstKind::UnaryExpression(unary) => unary.operator != UnaryOperator::Delete,
+            AstKind::ForInStatement(each) => each.left.span() != child,
+            AstKind::ForOfStatement(each) => each.left.span() != child,
+            AstKind::UpdateExpression(_)
+            | AstKind::ArrayAssignmentTarget(_)
+            | AstKind::ObjectAssignmentTarget(_)
+            | AstKind::AssignmentTargetRest(_)
+            | AstKind::AssignmentTargetWithDefault(_)
+            | AstKind::AssignmentTargetPropertyProperty(_) => false,
+            _ => true,
+        }
+    }
+
+    fn symbol_of(&self, id: &IdentifierReference<'_>) -> Option<SymbolId> {
+        id.reference_id.get().and_then(|reference| self.scoping.get_reference(reference).symbol_id())
+    }
+
+    fn whole_expr(&self, expr: &Expression<'_>) -> Option<SpreadOf> {
+        match peel_expr(expr) {
+            Expression::Identifier(id) => self.symbol_of(id).and_then(|symbol| self.whole.get(&symbol).copied()),
             _ => None,
         }
     }
 
-    /// The prop an attribute's value is, when it is exactly one: a destructured name, `props.x` or `rest.x`.
+    /// The prop an attribute's value is, when it is exactly one: an unchanged destructured name, `props.x`, `rest.x`.
     fn value_prop(&self, value: Option<&JSXAttributeValue<'_>>) -> Option<String> {
         let Some(JSXAttributeValue::ExpressionContainer(container)) = value else { return None };
-        let expr = container.expression.as_expression()?;
-        match expr {
-            Expression::Identifier(id) => match self.lookup(id.name.as_str()) {
-                Some(Bound::Prop(key)) => Some(key.clone()),
-                _ => None,
+        let (object, key) = match peel_expr(container.expression.as_expression()?) {
+            Expression::Identifier(id) => {
+                return self.symbol_of(id).and_then(|symbol| self.locals.get(&symbol).cloned());
+            }
+            Expression::StaticMemberExpression(member) => (&member.object, member.property.name.to_string()),
+            Expression::ComputedMemberExpression(member) => match &member.expression {
+                Expression::StringLiteral(key) => (&member.object, js_text::lossy(key.value).into_owned()),
+                _ => return None,
             },
-            _ => self.member_prop(expr),
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::StaticMemberExpression(member) => (&member.object, member.property.name.to_string()),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        self.whole_expr(object).map(|_| key)
+    }
+}
+
+/// The symbols a body renders as a component tag (`<Item/>`).
+fn tag_symbols(scoping: &Scoping, visit: impl FnOnce(&mut TagSymbols<'_>)) -> FxHashSet<SymbolId> {
+    let mut tags = TagSymbols { scoping, symbols: FxHashSet::default() };
+    visit(&mut tags);
+    tags.symbols
+}
+
+struct TagSymbols<'s> {
+    scoping: &'s Scoping,
+    symbols: FxHashSet<SymbolId>,
+}
+
+impl<'a> Visit<'a> for TagSymbols<'_> {
+    fn visit_jsx_element_name(&mut self, it: &JSXElementName<'a>) {
+        if let JSXElementName::IdentifierReference(id) = it
+            && let Some(symbol) =
+                id.reference_id.get().and_then(|reference| self.scoping.get_reference(reference).symbol_id())
+        {
+            self.symbols.insert(symbol);
         }
+    }
+}
+
+/// Collects a component body's elements; those of a nested component (a function or class bound to a symbol the body
+/// renders as a tag) go to `nested_usages`.
+struct Elements<'r, 's, 'a> {
+    reader: &'r Reader<'s, 'a>,
+    tags: FxHashSet<SymbolId>,
+    nested: u32,
+    elements: Vec<JsxElementFact>,
+    nested_usages: Vec<JsxUsage>,
+}
+
+impl Elements<'_, '_, '_> {
+    fn is_tag(&self, id: Option<&BindingIdentifier<'_>>) -> bool {
+        id.and_then(|id| id.symbol_id.get()).is_some_and(|symbol| self.tags.contains(&symbol))
     }
 
     fn in_nested(&mut self, nested: bool, walk: impl FnOnce(&mut Self)) {
@@ -422,9 +505,47 @@ impl<'a> BodyReader<'a> {
         walk(self);
         self.nested -= u32::from(nested);
     }
+}
 
-    fn is_nested_component(&self, id: Option<&BindingIdentifier<'_>>) -> bool {
-        id.is_some_and(|id| self.nested_components.contains(id.name.as_str()))
+impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
+    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
+        let nested = matches!(&it.id, BindingPattern::BindingIdentifier(id) if self.is_tag(Some(id)))
+            && it.init.as_ref().is_some_and(|init| {
+                unwrap(init).is_some() || matches!(peel_expr(init), Expression::ClassExpression(_))
+            });
+        self.in_nested(nested, |elements| walk::walk_variable_declarator(elements, it));
+    }
+
+    fn visit_function(&mut self, it: &Function<'a>, flags: ScopeFlags) {
+        let nested = it.is_declaration() && self.is_tag(it.id.as_ref());
+        self.in_nested(nested, |elements| walk::walk_function(elements, it, flags));
+    }
+
+    fn visit_class(&mut self, it: &Class<'a>) {
+        let nested = it.is_declaration() && self.is_tag(it.id.as_ref());
+        self.in_nested(nested, |elements| walk::walk_class(elements, it));
+    }
+
+    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+        if self.nested > 0 {
+            self.nested_usages.push(usage_of(it));
+        } else {
+            let attributes = it
+                .attributes
+                .iter()
+                .map(|attribute| match attribute {
+                    JSXAttributeItem::Attribute(attribute) => JsxAttributeFact::Named {
+                        name: attribute_name(&attribute.name),
+                        prop: self.reader.value_prop(attribute.value.as_ref()),
+                    },
+                    JSXAttributeItem::SpreadAttribute(spread) => {
+                        JsxAttributeFact::Spread(self.reader.whole_expr(&spread.argument).unwrap_or(SpreadOf::Other))
+                    }
+                })
+                .collect();
+            self.elements.push(JsxElementFact { tag: tag_of(&it.name), attributes });
+        }
+        walk::walk_jsx_opening_element(self, it);
     }
 }
 
@@ -464,211 +585,6 @@ fn attribute_name(name: &JSXAttributeName<'_>) -> String {
             format!("{}:{}", namespaced.namespace.name, namespaced.name.name)
         }
     }
-}
-
-impl<'a> Visit<'a> for BodyReader<'a> {
-    /// The fallback: a use of the props object that no safe form below took hands it on.
-    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
-        if self.whole(it.name.as_str()).is_some() {
-            self.facts.handed_on = true;
-        }
-    }
-
-    fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
-        if self.whole_expr(&it.object).is_some() {
-            self.read(it.property.name.to_string());
-            return;
-        }
-        walk::walk_static_member_expression(self, it);
-    }
-
-    fn visit_computed_member_expression(&mut self, it: &ComputedMemberExpression<'a>) {
-        if self.whole_expr(&it.object).is_some()
-            && let Expression::StringLiteral(key) = &it.expression
-        {
-            self.read(js_text::lossy(key.value).into_owned());
-            return;
-        }
-        walk::walk_computed_member_expression(self, it);
-    }
-
-    fn visit_jsx_member_expression(&mut self, it: &JSXMemberExpression<'a>) {
-        if let JSXMemberExpressionObject::IdentifierReference(object) = &it.object
-            && self.whole(object.name.as_str()).is_some()
-        {
-            self.read(it.property.name.to_string());
-            return;
-        }
-        walk::walk_jsx_member_expression(self, it);
-    }
-
-    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        if let (BindingPattern::ObjectPattern(object), Some(init)) = (&it.id, &it.init)
-            && self.whole_expr(init).is_some()
-        {
-            self.destructure(object);
-            // Default values and computed keys, not the initializer: it is the props object, taken apart.
-            self.visit_binding_pattern(&it.id);
-            return;
-        }
-        let nested = matches!(&it.id, BindingPattern::BindingIdentifier(id) if self.is_nested_component(Some(id)))
-            && it.init.as_ref().is_some_and(|init| {
-                unwrap(init).is_some() || matches!(peel_expr(init), Expression::ClassExpression(_))
-            });
-        self.in_nested(nested, |reader| walk::walk_variable_declarator(reader, it));
-    }
-
-    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        if let AssignmentTarget::ObjectAssignmentTarget(object) = &it.left
-            && self.whole_expr(&it.right).is_some()
-        {
-            for property in &object.properties {
-                match property {
-                    AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(property) => {
-                        self.read(property.binding.name.to_string());
-                    }
-                    AssignmentTargetProperty::AssignmentTargetPropertyProperty(property) => {
-                        match property.name.static_name() {
-                            Some(key) => self.read(js_text::property_name(&key)),
-                            None => self.facts.handed_on = true,
-                        }
-                    }
-                }
-            }
-            // The rest target is an existing binding the props object is copied into: not followed.
-            if object.rest.is_some() {
-                self.facts.handed_on = true;
-            }
-            self.visit_assignment_target(&it.left);
-            return;
-        }
-        walk::walk_assignment_expression(self, it);
-    }
-
-    fn visit_function(&mut self, it: &Function<'a>, flags: ScopeFlags) {
-        let nested = it.is_declaration() && self.is_nested_component(it.id.as_ref());
-        self.in_nested(nested, |reader| {
-            reader.enter_params(&it.params, false);
-            if let Some(body) = &it.body {
-                reader.declare_statements(&body.statements);
-            }
-            walk::walk_function(reader, it, flags);
-            reader.scopes.pop();
-        });
-    }
-
-    fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
-        self.enter_params(&it.params, false);
-        self.declare_statements(arrow_statements(it));
-        walk::walk_arrow_function_expression(self, it);
-        self.scopes.pop();
-    }
-
-    fn visit_class(&mut self, it: &Class<'a>) {
-        let nested = it.is_declaration() && self.is_nested_component(it.id.as_ref());
-        self.in_nested(nested, |reader| walk::walk_class(reader, it));
-    }
-
-    fn visit_block_statement(&mut self, it: &BlockStatement<'a>) {
-        self.scoped(&it.body, |reader| walk::walk_block_statement(reader, it));
-    }
-
-    fn visit_static_block(&mut self, it: &StaticBlock<'a>) {
-        self.scoped(&it.body, |reader| walk::walk_static_block(reader, it));
-    }
-
-    fn visit_switch_statement(&mut self, it: &SwitchStatement<'a>) {
-        self.scopes.push(FxHashMap::default());
-        for case in &it.cases {
-            self.declare_statements(&case.consequent);
-        }
-        walk::walk_switch_statement(self, it);
-        self.scopes.pop();
-    }
-
-    fn visit_catch_clause(&mut self, it: &CatchClause<'a>) {
-        self.scopes.push(FxHashMap::default());
-        if let Some(param) = &it.param {
-            self.shadow(&param.pattern);
-        }
-        walk::walk_catch_clause(self, it);
-        self.scopes.pop();
-    }
-
-    fn visit_for_statement(&mut self, it: &ForStatement<'a>) {
-        self.scopes.push(FxHashMap::default());
-        if let Some(ForStatementInit::VariableDeclaration(declaration)) = &it.init
-            && declaration.kind != VariableDeclarationKind::Var
-        {
-            for declarator in &declaration.declarations {
-                self.shadow(&declarator.id);
-            }
-        }
-        walk::walk_for_statement(self, it);
-        self.scopes.pop();
-    }
-
-    fn visit_for_of_statement(&mut self, it: &ForOfStatement<'a>) {
-        self.scopes.push(FxHashMap::default());
-        if let ForStatementLeft::VariableDeclaration(declaration) = &it.left
-            && declaration.kind != VariableDeclarationKind::Var
-        {
-            for declarator in &declaration.declarations {
-                self.shadow(&declarator.id);
-            }
-        }
-        walk::walk_for_of_statement(self, it);
-        self.scopes.pop();
-    }
-
-    fn visit_for_in_statement(&mut self, it: &ForInStatement<'a>) {
-        self.scopes.push(FxHashMap::default());
-        if let ForStatementLeft::VariableDeclaration(declaration) = &it.left
-            && declaration.kind != VariableDeclarationKind::Var
-        {
-            for declarator in &declaration.declarations {
-                self.shadow(&declarator.id);
-            }
-        }
-        walk::walk_for_in_statement(self, it);
-        self.scopes.pop();
-    }
-
-    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
-        if self.nested > 0 {
-            self.nested_usages.push(usage_of(it));
-        } else {
-            let attributes = it
-                .attributes
-                .iter()
-                .map(|attribute| match attribute {
-                    JSXAttributeItem::Attribute(attribute) => JsxAttributeFact::Named {
-                        name: attribute_name(&attribute.name),
-                        prop: self.value_prop(attribute.value.as_ref()),
-                    },
-                    JSXAttributeItem::SpreadAttribute(spread) => {
-                        JsxAttributeFact::Spread(self.whole_expr(&spread.argument).unwrap_or(SpreadOf::Other))
-                    }
-                })
-                .collect();
-            self.facts.elements.push(JsxElementFact { tag: tag_of(&it.name), attributes });
-        }
-        walk::walk_jsx_opening_element(self, it);
-    }
-
-    fn visit_jsx_spread_attribute(&mut self, it: &JSXSpreadAttribute<'a>) {
-        match self.whole_expr(&it.argument) {
-            // Spreading the whole props object passes every prop on.
-            Some(SpreadOf::Props) => self.facts.handed_on = true,
-            Some(SpreadOf::Rest | SpreadOf::Other) => {}
-            None => walk::walk_jsx_spread_attribute(self, it),
-        }
-    }
-}
-
-/// The statements of an arrow's block body; none for an expression body.
-fn arrow_statements<'b, 'a>(arrow: &'b ArrowFunctionExpression<'a>) -> &'b [Statement<'a>] {
-    arrow.body.as_function_body().map_or(&[], |body| &body.statements)
 }
 
 #[cfg(test)]
