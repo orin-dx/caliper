@@ -38,6 +38,8 @@ export class Background {
   private readonly host: BackgroundHost
   private readonly link: Link<ToDevServer, ToProvider>
   private queue: IndexEntry[] = []
+  /** Keys to ask again after an edit, for the list of `generation`; asked by the drain, between stories. */
+  private again: { keys: string[]; generation: number }[] = []
   private prefetching = false
   private readonly prefetched = initialPrefetched()
 
@@ -92,13 +94,15 @@ export class Background {
     if (this.prefetching) return
     this.prefetching = true
     try {
-      while (this.queue.length > 0) {
-        const entry = this.queue.shift()!
+      while (this.again.length > 0 || this.queue.length > 0) {
+        const again = this.again.shift()
+        const entry = again ? undefined : this.queue.shift()!
         try {
-          // oxlint-disable-next-line no-await-in-loop -- one story at a time, so a story someone opens waits behind one at most
-          await this.prefetchStory(entry)
+          // oxlint-disable-next-line no-await-in-loop -- one ask at a time, so a story someone opens waits behind one at most
+          await (again ? this.askAgain(again) : this.prefetchStory(entry!))
         } catch (error) {
-          logger.debug(`[caliper-docgen] prefetch of ${entry.importPath} stopped: ${(error as Error).message}`)
+          const what = again ? again.keys.join(', ') : entry!.importPath
+          logger.debug(`[caliper-docgen] prefetch of ${what} stopped: ${(error as Error).message}`)
         }
       }
     } finally {
@@ -109,6 +113,11 @@ export class Background {
   private async prefetchStory(entry: IndexEntry): Promise<void> {
     const { generation } = this.prefetched
     await this.ask(await this.host.keysOf(entry), generation)
+  }
+
+  /** Asks again for keys an edit dropped, unless a newer list replaced the one they were asked for. */
+  private async askAgain({ keys, generation }: { keys: string[]; generation: number }): Promise<void> {
+    if (generation === this.prefetched.generation) await this.ask(keys, generation)
   }
 
   /** Asks the checker for `keys` at the neighbour class, for the list of `generation`, and reports it. */
@@ -125,22 +134,26 @@ export class Background {
     }
   }
 
-  /** Applies `event` to what was prefetched and carries out its effects. Best effort, like the prefetch. */
+  /**
+   * Applies `event` to what was prefetched and carries out its effects: a cancel at once, an ask through the drain, so
+   * the asks stay one at a time. Best effort, like the prefetch.
+   */
   private dispatch(event: PrefetchEvent): void {
-    for (const effect of prefetchStep(this.prefetched, event)) void this.carryOut(effect)
+    for (const effect of prefetchStep(this.prefetched, event)) {
+      if (effect.type === 'cancel') void this.cancel(effect.keys)
+      else {
+        this.again.push({ keys: effect.keys, generation: this.prefetched.generation })
+        void this.drain()
+      }
+    }
   }
 
-  private async carryOut(effect: PrefetchEffect): Promise<void> {
+  private async cancel(keys: string[]): Promise<void> {
     try {
-      if (effect.type === 'ask') await this.ask(effect.keys, this.prefetched.generation)
-      else {
-        const session = await this.host.session()
-        session.cancel(effect.keys)
-      }
+      const session = await this.host.session()
+      session.cancel(keys)
     } catch (error) {
-      logger.debug(
-        `[caliper-docgen] prefetch ${effect.type} of ${effect.keys.join(', ')} stopped: ${(error as Error).message}`,
-      )
+      logger.debug(`[caliper-docgen] cancel of ${keys.join(', ')} stopped: ${(error as Error).message}`)
     }
   }
 }
@@ -198,7 +211,10 @@ export function prefetchStep(state: Prefetched, event: PrefetchEvent): PrefetchE
         const keys = event.keys.filter((key) => !state.asked.includes(key) && !state.asking.includes(key))
         return keys.length > 0 ? [{ type: 'cancel', keys }] : []
       }
-      for (const key of event.keys) state.asking.splice(state.asking.indexOf(key), 1)
+      for (const key of event.keys) {
+        const at = state.asking.indexOf(key)
+        if (at !== -1) state.asking.splice(at, 1)
+      }
       // The keys asked before an edit this ask saw are asked again; these were asked at its revision.
       const effects = seen(state, event.revision)
       const fresh = event.keys.filter((key) => !state.asked.includes(key))
