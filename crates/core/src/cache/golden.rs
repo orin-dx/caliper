@@ -64,6 +64,8 @@ export function make<P>(render: (props: P) => null) {
 }
 
 export const Panel = make<PanelProps>((props) => <div />);
+
+export const icon = <svg data-size="sm" {...rest} />;
 "#;
 
 fn fixture() -> SourceData {
@@ -88,6 +90,7 @@ fn fixture_populates_every_source_data_field() {
         enum_declarations,
         type_alias_scopes,
         class_scopes,
+        jsx_usages,
     } = fixture();
     let fields = [
         ("interfaces", interfaces.is_empty()),
@@ -105,6 +108,7 @@ fn fixture_populates_every_source_data_field() {
         ("enum_declarations", enum_declarations.is_empty()),
         ("type_alias_scopes", type_alias_scopes.is_empty()),
         ("class_scopes", class_scopes.is_empty()),
+        ("jsx_usages", jsx_usages.is_empty()),
     ];
     let empty: Vec<&str> = fields.iter().filter(|(_, is_empty)| *is_empty).map(|(name, _)| *name).collect();
     assert_eq!(empty, Vec::<&str>::new(), "extend FIXTURE so the golden bytes cover these fields");

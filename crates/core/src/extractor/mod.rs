@@ -25,6 +25,7 @@ use crate::types::{
 
 mod alias;
 mod asserted;
+mod body_facts;
 mod component;
 mod defaults;
 mod evidence;
@@ -227,7 +228,9 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     collector.comments = comments;
     collector.element_helpers = evidence::element_helpers(&ret.program);
     collector.visit_program(&ret.program);
-    collector.finish()
+    let mut data = collector.finish();
+    data.jsx_usages = body_facts::attach(&ret.program, &mut data.component_mappings, source_type.is_jsx());
+    data
     // allocator drops here — ALL arena memory freed
 }
 
