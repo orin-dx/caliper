@@ -14,7 +14,6 @@ import {
   factDifferences,
   factFailures,
   listFixtures,
-  PROP,
   rowKey,
   rowKeysOf,
   rowVerdict,
@@ -255,16 +254,17 @@ describe.skipIf(!available)('the construct suite against the caliper binary', ()
     )
     const caliper = JSON.parse(stdout)
     checkCaliperShape(caliper)
-    const propByRow = new Map<string, any>()
+    const propsByRow = new Map<string, Record<string, string>>()
     for (const [key, component] of Object.entries<any>(caliper.components)) {
-      const id = flattenProps(caliper, key, component)[PROP]
-      for (const row of rowKeysOf(component)) propByRow.set(row, id === undefined ? undefined : caliper.props[id])
+      const props = flattenProps(caliper, key, component)
+      for (const row of rowKeysOf(component)) propsByRow.set(row, props)
     }
 
     const failures: string[] = []
     for (const fixture of listFixtures(suite)) {
       const golden: Golden = JSON.parse(readFileSync(fixture.golden, 'utf8'))
-      const prop = propByRow.get(rowKey(realpathSync(fixture.file), fixture.exportPath))
+      const id = propsByRow.get(rowKey(realpathSync(fixture.file), fixture.exportPath))?.[fixture.prop]
+      const prop = id === undefined ? undefined : caliper.props[id]
       const verdict = rowVerdict(prop, golden)
       const row = expectations.rows[fixture.id]
       const failure = row && expectationFailure(fixture.id, verdict, row)

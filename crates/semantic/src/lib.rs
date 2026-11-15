@@ -82,8 +82,14 @@ pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
                 .filter(|prop| !prop.description.is_empty())
                 .map(|prop| prop.name.clone())
                 .collect(),
-            // The whole-project merge leaves `@types/react`'s props to the inheritance layers.
-            react_wanted: Some(Default::default()),
+            // The whole-project merge leaves `@types/react`'s props to the inheritance layers. A component with no
+            // layer (a context's `Provider`, a `th`/`td` attribute intersection) has none to leave them to, so the
+            // checker reports the ones the structural pass lists, which `apply_props` keeps.
+            react_wanted: Some(if entry.inheritance.is_empty() {
+                entry.props.keys().cloned().collect()
+            } else {
+                Default::default()
+            }),
         })
         .collect()
 }

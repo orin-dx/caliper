@@ -1,0 +1,36 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      }
+    ]
+  },
+  "text": "string | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "HTMLAttributes",
+      "file": "../../../node_modules/.pnpm/@types+react@19.3.0/node_modules/@types/react/index.d.ts"
+    },
+    "order": [
+      {
+        "k": "prim",
+        "name": "string"
+      },
+      {
+        "k": "prim",
+        "name": "undefined"
+      }
+    ]
+  }
+}

@@ -9,8 +9,16 @@ import type { PropType } from '../../../packages/napi/index.d.ts'
 import { compare, type Norm } from './oracle-compare.ts'
 import { isAgreement, ROW_VERDICTS, type RowVerdict } from './vocabulary.ts'
 
-/** The prop every fixture states its type through. */
+/** The prop every fixture states its type through, unless it names another in a `// prop: <name>` comment: a row about
+ * a prop its component does not choose the name of (a context Provider's `value`, an attribute such as `className`). */
 export const PROP = 'p'
+
+const PROP_COMMENT = /^\/\/ prop: (\S+)$/m
+
+/** The prop a fixture's row is about. */
+export function propOf(source: string): string {
+  return PROP_COMMENT.exec(source)?.[1] ?? PROP
+}
 
 /** What `--check` and the test read back from `<name>.golden.json`. */
 export interface Golden {
@@ -59,6 +67,8 @@ export interface Fixture {
   /** How the module exports it: the export name (`default` for the default export), then the properties of the export
    * a sub-component is attached to (`['default', 'Item']` for `Menu.Item = Item; export default Menu`). */
   exportPath: string[]
+  /** The prop the row compares: `p`, or the one a `// prop:` comment names. */
+  prop: string
 }
 
 const FIXTURE = /^\d{2}-[a-z0-9][a-z0-9-]*\.tsx$/
@@ -92,7 +102,9 @@ export function listFixtures(dir: string): Fixture[] {
       }
       const file = join(dir, family.name, entry)
       const id = `${family.name}/${entry.replace(/\.tsx$/, '')}`
-      const listed = componentsOf(readFileSync(file, 'utf8'))
+      const source = readFileSync(file, 'utf8')
+      const prop = propOf(source)
+      const listed = componentsOf(source)
       if (listed === undefined) {
         fixtures.push({
           id,
@@ -100,6 +112,7 @@ export function listFixtures(dir: string): Fixture[] {
           golden: file.replace(/\.tsx$/, '.golden.json'),
           component: 'Row',
           exportPath: ['Row'],
+          prop,
         })
         continue
       }
@@ -110,6 +123,7 @@ export function listFixtures(dir: string): Fixture[] {
           golden: file.replace(/\.tsx$/, `.${component}.golden.json`),
           component,
           exportPath,
+          prop,
         })
       }
     }
