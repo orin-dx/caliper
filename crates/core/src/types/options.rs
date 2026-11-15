@@ -37,11 +37,13 @@ impl HtmlAttributeMode {
 
 /// Which inherited sources are recorded as an `InheritedLayer` of names instead of expanded prop by prop (collapse).
 /// A component's own props type is always expanded. A dependency source collapses when it is ambient (DOM and ARIA
-/// attributes, style systems) and declares more than 30 props; a dependency's own API is listed unless it declares more than 200 props.
+/// attributes, style systems) and declares more than 30 props; a dependency's own API is listed unless it declares more
+/// than 200 props. By default a project source declaring more than 200 props collapses too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CollapseInheritedProps {
-    /// Large ambient sources declared in a loaded dependency (`load_dependencies`).
+    /// Large ambient sources declared in a loaded dependency (`load_dependencies`), a dependency's sources of more than
+    /// 200 props, and the project's own sources of more than 200 props. The default.
     #[default]
     Dependencies,
     /// Those, and the project's own sources of more than 30 props.
@@ -60,6 +62,53 @@ impl CollapseInheritedProps {
             other => Err(other),
         }
     }
+
+    /// Whether an inherited source of type `type_name` in `file`, declaring `declared` props, is recorded as a layer of
+    /// names instead of listed prop by prop. `dependency` says the file is a dependency's. Both lanes decide by it: the
+    /// structural resolver with the props a source declares, and the checker's merge with the props of its answer a
+    /// source declares (`crate::types::semantic::layer_checker_props`). A component's own props type is never asked.
+    ///
+    /// - A dependency source collapses when it is ambient (`crate::types::ambient`: DOM and ARIA attributes, style
+    ///   systems) and past [`COLLAPSE_THRESHOLD`] props, or when it is not ambient but past [`LARGE_API_SOURCE`] props.
+    ///   Otherwise it is listed: what a dependency's component exposes is the API a reader needs typed, and a small
+    ///   ambient source costs more as a layer than as props.
+    /// - A project source collapses past [`LARGE_API_SOURCE`] props in the default mode, as a dependency source that is
+    ///   not ambient does: a style system is as large in the project's own source (Chakra's `SystemProperties`
+    ///   declares 705) as installed. Its name is not read. Under [`Self::All`] it collapses past
+    ///   [`COLLAPSE_THRESHOLD`].
+    /// - A file in `node_modules` that is not a dependency's (`@types/react`, TypeScript's libraries) never collapses:
+    ///   React's attributes follow `htmlAttributes`.
+    /// - Under [`Self::None`] nothing collapses.
+    pub(crate) fn collapses(self, dependency: bool, file: &str, type_name: &str, declared: usize) -> bool {
+        let project_threshold = match self {
+            Self::None => return false,
+            Self::Dependencies => LARGE_API_SOURCE,
+            Self::All => COLLAPSE_THRESHOLD,
+        };
+        if dependency {
+            let ambient = crate::types::ambient::is_ambient_source(file, type_name);
+            declared > if ambient { COLLAPSE_THRESHOLD } else { LARGE_API_SOURCE }
+        } else {
+            declared > project_threshold && !in_node_modules(file)
+        }
+    }
+}
+
+/// A source declaring more than this many props can collapse: an ambient dependency source (`crate::types::ambient`),
+/// or a project source under [`CollapseInheritedProps::All`]. Storybook's react-component-meta hides a dependency
+/// source contributing more than this many props, whatever it contains; here an API source is hidden only past
+/// [`LARGE_API_SOURCE`].
+pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
+
+/// Any other source collapses past this many props by default: a dependency source that is not ambient by name, or a
+/// project source. It is a style system, not an API. Chakra v3's `SystemProperties` declares 705 and, listed, took a
+/// four-component app from 516 KB to 1.96 MB; the largest source that is an API in the pinned corpora and in apps on
+/// Chakra, Mantine and MUI declares 75 (`docs/measurement.md`, "Collapse by relevance").
+pub(crate) const LARGE_API_SOURCE: usize = 200;
+
+/// Whether `path` is inside a `node_modules` directory.
+pub(crate) fn in_node_modules(path: &str) -> bool {
+    path.contains("/node_modules/") || path.contains(r"\node_modules\")
 }
 
 /// Configuration for a single extraction run.

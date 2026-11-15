@@ -90,12 +90,12 @@ def tool_run(command, out):
 
 def caliper_run(binary, src, runs):
     """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
-    loaded, inherited props not collapsed), and the JSON's size. The checker answers, as
+    loaded, large inherited sources collapsed by default), and the JSON's size. The checker answers, as
     it does by default (docs/measurement.md). The parse caches are warm (a warm-up run fills them), but each timed run
     asks the checker everything: the answer `extract` keeps is removed first, since react-docgen-typescript keeps none.
     `rerun_ms` is the median of as many runs that find it, what a rerun over unchanged files costs."""
     with tempfile.TemporaryDirectory() as cache, tempfile.TemporaryFile() as out:
-        command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none',
+        command = [binary, 'extract', '--src', src, '--json', '--load-dependencies',
                    '--cache-dir', cache]
         run_once(command, stdout=out)
         size = out.tell()
@@ -113,7 +113,7 @@ def caliper_run(binary, src, runs):
 def caliper_components(binary, src, root):
     """Caliper's components in RDT's format, as (file, name) -> prop names."""
     command = [binary, 'extract', '--src', src, '--format', 'rdt', '--html-attributes', 'full', '--include-unexported',
-               '--quiet', '--load-dependencies', '--collapse-inherited-props', 'none']
+               '--quiet', '--load-dependencies']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     return {(relative(c['filePath'], root), norm_name(c['displayName'])): set(c['props'])
             for c in json.loads(out[out.index('{'):]).values()}
@@ -123,7 +123,7 @@ def caliper_layer_members(binary, src, root):
     """The props Caliper's collapsed inheritance layers hold, as (file, name) -> prop names: the output names them in a
     layer instead of listing them as props, and the canonical JSON is the one that carries the layers."""
     command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
-               '--load-dependencies', '--collapse-inherited-props', 'none']
+               '--load-dependencies']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     document = schema_version.check(json.loads(out[out.index('{'):]), 'weekly')
     lists = document.get('nameLists', {})
@@ -493,7 +493,7 @@ def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
-                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet'],
+                        '--load-dependencies', '--quiet'],
                        stdout=f, check=True)
     list_file, tsconfig = program_inputs(name, src, work)
     verdicts = os.path.join(work, f'{name}.oracle.json')

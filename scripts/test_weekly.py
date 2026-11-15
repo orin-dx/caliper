@@ -381,7 +381,7 @@ class Baseline(unittest.TestCase):
 
 
 class AddonConfiguration(unittest.TestCase):
-    def test_the_timed_command_is_the_addons_collapse_none_with_dependencies(self):
+    def test_the_timed_command_is_the_addons_default_collapse_with_dependencies(self):
         commands = []
 
         def run_once(command, **kwargs):
@@ -392,7 +392,8 @@ class AddonConfiguration(unittest.TestCase):
             weekly.caliper_run('/bin/caliper-docgen', '/src', 1)
         command = commands[-1]
         self.assertIn('--load-dependencies', command)
-        self.assertEqual(command[command.index('--collapse-inherited-props') + 1], 'none')
+        # The addon collapses by relevance by default (`collapseInheritedProps` 'dependencies', the CLI's default too).
+        self.assertNotIn('--collapse-inherited-props', command)
 
 
 class PeakRss(unittest.TestCase):

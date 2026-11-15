@@ -189,7 +189,12 @@ fn apply_semantic_backend(
         Some(started) => caliper_docgen_semantic::resolve_early(request, started.early),
         None => caliper_docgen_semantic::resolve(request),
     };
-    caliper_docgen_core::types::semantic::merge_semantic_with(output, outcome, resolver);
+    caliper_docgen_core::types::semantic::merge_semantic_collapsing(
+        output,
+        outcome,
+        resolver,
+        options.collapse_inherited_props,
+    );
 }
 
 /// What `check` and `inspect` run: unless `--no-checker` or the config turned it off, [`apply_semantic_backend`] at the

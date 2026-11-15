@@ -714,3 +714,104 @@ fn with_no_fallback_the_checker_is_asked_for_every_description() {
         assert_eq!(targets[0].described.is_empty(), asked_for_label, "{resolver:?}");
     }
 }
+
+/// `count` props a source declares, as the checker reports them: each with that source as its `parent`.
+fn from_source(prefix: &str, count: usize, source: &str, file: &str) -> Vec<Arc<SemanticProp>> {
+    (0..count)
+        .map(|i| {
+            let parent = PropParent { name: source.to_string(), file_name: file.to_string() };
+            Arc::new(SemanticProp {
+                name: format!("{prefix}{i}"),
+                prop_type: PropType::String,
+                required: false,
+                description: String::new(),
+                react_declared: false,
+                tags: Default::default(),
+                parent: Some(parent.clone()),
+                declarations: vec![parent],
+            })
+        })
+        .collect()
+}
+
+const DOM: &str = "/p/node_modules/@react-types/shared/src/dom.d.ts";
+
+fn merged_names(out: &ExtractionOutput) -> Vec<&str> {
+    out.components["Button"].props.keys().map(String::as_str).collect()
+}
+
+#[test]
+fn the_checker_lane_leaves_a_structurally_collapsed_layers_props_to_the_layer() {
+    // The structural answer collapsed `GlobalDOMEvents` into a layer of names; the checker lists the same handlers.
+    // The merged answer has the structural shape: the layer, and the handlers not listed.
+    let mut out = output();
+    let handlers = from_source("on", 60, "GlobalDOMEvents", DOM);
+    let entry = out.components.get_mut("Button").unwrap();
+    entry.inheritance.push(InheritedLayer {
+        type_name: "GlobalDOMEvents".to_string(),
+        file_name: DOM.to_string(),
+        omitted: vec![],
+        html_element: None,
+        total_props: 60,
+        members: handlers.iter().map(|prop| prop.name.clone()).collect(),
+    });
+    let mut props = vec![semantic_prop("label", "", false)];
+    props.extend(handlers);
+    let outcome = SemanticOutcome { components: vec![button(props)], ..Default::default() };
+
+    merge_semantic_collapsing(&mut out, outcome, ResolverFacts::Used, CollapseInheritedProps::Dependencies);
+
+    assert_eq!(merged_names(&out), ["label"]);
+    assert_eq!(out.components["Button"].inheritance.len(), 1);
+}
+
+#[test]
+fn the_checker_lane_layers_a_large_dependency_dom_source_the_structural_answer_did_not_follow() {
+    // The structural answer could not follow the props type into the package; the checker found the ~60
+    // `GlobalDOMEvents` handlers. They are layered as the structural lane layers that source.
+    let mut out = output();
+    let mut props = vec![semantic_prop("label", "", false)];
+    props.extend(from_source("on", 60, "GlobalDOMEvents", DOM));
+    let outcome = SemanticOutcome { components: vec![button(props.clone())], ..Default::default() };
+    merge_semantic_collapsing(&mut out, outcome, ResolverFacts::Used, CollapseInheritedProps::Dependencies);
+
+    let layers = &out.components["Button"].inheritance;
+    assert_eq!(merged_names(&out), ["label"]);
+    assert_eq!(layers.len(), 1);
+    assert_eq!((layers[0].type_name.as_str(), layers[0].file_name.as_str()), ("GlobalDOMEvents", DOM));
+    assert_eq!((layers[0].total_props, layers[0].members.len()), (60, 60));
+
+    // `none` lists every prop.
+    let mut out = output();
+    let outcome = SemanticOutcome { components: vec![button(props)], ..Default::default() };
+    merge_semantic_collapsing(&mut out, outcome, ResolverFacts::Used, CollapseInheritedProps::None);
+    assert_eq!(out.components["Button"].props.len(), 61);
+    assert!(out.components["Button"].inheritance.is_empty());
+}
+
+#[test]
+fn the_checker_lane_layers_a_project_source_only_past_the_large_source_threshold() {
+    let run = |count: usize| {
+        let mut out = output();
+        let mut props = vec![semantic_prop("label", "", false)];
+        props.extend(from_source("s", count, "SystemProperties", "/src/styled-system/system.gen.ts"));
+        let outcome = SemanticOutcome { components: vec![button(props)], ..Default::default() };
+        merge_semantic_collapsing(&mut out, outcome, ResolverFacts::Used, CollapseInheritedProps::Dependencies);
+        let entry = &out.components["Button"];
+        (entry.props.len(), entry.inheritance.iter().map(|layer| layer.total_props).collect::<Vec<_>>())
+    };
+    assert_eq!(run(201), (1, vec![201]));
+    assert_eq!(run(200), (201, vec![]));
+}
+
+#[test]
+fn the_checker_lane_keeps_a_source_the_structural_answer_listed() {
+    // `Props` is the component's own props type: the structural answer lists its props, so the checker's answer does
+    // not layer it, however many it declares.
+    let mut out = output();
+    let props = from_source("p", 300, "Props", "/src/Button.tsx");
+    let outcome = SemanticOutcome { components: vec![button(props)], ..Default::default() };
+    merge_semantic_collapsing(&mut out, outcome, ResolverFacts::Used, CollapseInheritedProps::Dependencies);
+    assert_eq!(out.components["Button"].props.len(), 300);
+    assert!(out.components["Button"].inheritance.is_empty());
+}

@@ -125,3 +125,46 @@ fn the_canonical_json_writes_a_members_list_id() {
     assert_eq!(json["nameLists"][id], json!(output.components["WithInterface"].inheritance[0].members));
     assert!(json["components"]["WithSmall"]["inheritance"][0].get("members").is_none());
 }
+
+/// A project interface of `count` props, `System`, that a component's props type extends.
+fn run_project_source(count: usize, collapse: CollapseInheritedProps) -> ExtractionOutput {
+    let tmp = TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let fields: String = (0..count).map(|i| format!("s{i}?: string; ")).collect();
+    std::fs::write(
+        root.join("System.tsx"),
+        format!(
+            "export interface System {{ {fields}}}\n\
+             interface BoxProps extends System {{ own?: boolean }}\n\
+             export function Box(props: BoxProps) {{ return null; }}\n"
+        ),
+    )
+    .unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        cache_dir: Some(root.join(".cache")),
+        html_attributes: HtmlAttributeMode::None,
+        collapse_inherited_props: collapse,
+        ..Default::default()
+    };
+    extract(&options)
+}
+
+#[test]
+fn by_default_a_project_source_past_the_large_source_threshold_collapses_to_a_layer() {
+    // A style system in the project's own source (Chakra's `SystemProperties`, 705) is as large as an installed one.
+    let output = run_project_source(201, CollapseInheritedProps::default());
+    let entry = &output.components["Box"];
+    assert_eq!(props(&output, "Box"), ["own"]);
+    assert_eq!(entry.inheritance.len(), 1);
+    assert_eq!((entry.inheritance[0].type_name.as_str(), entry.inheritance[0].total_props), ("System", 201));
+    assert_eq!(entry.inheritance[0].members.len(), 201);
+}
+
+#[test]
+fn a_project_source_under_the_large_source_threshold_stays_expanded_and_none_expands_any() {
+    assert_eq!(run_project_source(200, CollapseInheritedProps::default()).components["Box"].props.len(), 201);
+    let none = run_project_source(201, CollapseInheritedProps::None);
+    assert_eq!(none.components["Box"].props.len(), 202);
+    assert!(none.components["Box"].inheritance.is_empty());
+}

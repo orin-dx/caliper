@@ -212,7 +212,7 @@ describe('createDocgenProvider', () => {
     warn.mockRestore()
   })
 
-  it('reads dependencies and lists inherited props unless told not to, and passes the HTML attribute choice on', async () => {
+  it('reads dependencies and collapses large inherited sources unless told not to, and passes the HTML attribute choice on', async () => {
     const seen: unknown[] = []
     const spy = (fake: FakeBinding) => {
       const init = fake.initializeSessionIndex
@@ -223,13 +223,17 @@ describe('createDocgenProvider', () => {
       return fake
     }
     await request(spy(binding()), story('Button'))
-    expect(seen[0]).toMatchObject({ loadDependencies: true, collapseInheritedProps: 'none', htmlAttributes: undefined })
+    expect(seen[0]).toMatchObject({
+      loadDependencies: true,
+      collapseInheritedProps: 'dependencies',
+      htmlAttributes: undefined,
+    })
     await request(spy(binding()), story('Button'), {
       loadDependencies: false,
       htmlAttributes: 'full',
-      collapseInheritedProps: 'all',
+      collapseInheritedProps: 'none',
     })
-    expect(seen[1]).toMatchObject({ loadDependencies: false, collapseInheritedProps: 'all', htmlAttributes: 'full' })
+    expect(seen[1]).toMatchObject({ loadDependencies: false, collapseInheritedProps: 'none', htmlAttributes: 'full' })
   })
 
   it('warns once, at a level Storybook shows, when the session cannot start, and starts again on the next request', async () => {

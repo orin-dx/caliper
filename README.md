@@ -99,7 +99,7 @@ caliper-docgen check --src src
 
 Parsed declarations and the dependency index are cached under `node_modules/.cache/caliper-docgen`. `--no-cache` (config, NAPI, Vite and Storybook option `cache: false`) reads and writes nothing there; the output is the same.
 
-Types your props import from installed packages are resolved by default: the declarations those names point to are loaded. `--no-load-dependencies` (config, NAPI and Vite option `loadDependencies: false`) leaves them as named references with an `UNRESOLVABLE_IMPORT` warning, and a project with no packages installed loads nothing either way. A package source contributing more than 30 props is then listed as one inherited layer with its notable props, as Storybook does; `--collapse-inherited-props all` does the same for the project's own sources and `none` lists every prop.
+Types your props import from installed packages are resolved by default: the declarations those names point to are loaded. `--no-load-dependencies` (config, NAPI and Vite option `loadDependencies: false`) leaves them as named references with an `UNRESOLVABLE_IMPORT` warning, and a project with no packages installed loads nothing either way. A package's DOM, ARIA or style-system source contributing more than 30 props is then listed as one inherited layer of names with its notable props, as Storybook does, and so is any source declaring more than 200 props, the project's own included (a design system's style props); `--collapse-inherited-props all` collapses the project's own sources past 30 props and `none` lists every prop. The checker's answer is laid out in the same layers.
 
 ## Vite plugin
 
