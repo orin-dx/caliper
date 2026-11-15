@@ -208,10 +208,11 @@ pub(crate) async fn props_of_type(
             *slot = Some(prop);
         }
     }
-    // In the props type's order: each converted prop in its place among those left to a layer.
-    let mut converted = props.into_iter().flatten();
+    // In the props type's order: each converted prop in its place among those left to a layer. `props` has one slot per
+    // converted prop, so a slot left empty above stays empty and shifts no other prop.
+    let mut converted = props.into_iter();
     let props: Vec<Arc<SemanticProp>> =
-        layered.into_iter().filter_map(|slot| slot.or_else(|| converted.next())).collect();
+        layered.into_iter().filter_map(|slot| slot.or_else(|| converted.next().flatten())).collect();
     let composes = converter.composes(props_type).await?;
     Ok(Ok(Props { props, composes }))
 }

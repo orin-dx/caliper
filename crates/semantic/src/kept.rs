@@ -274,8 +274,14 @@ pub(crate) fn request_key(request: &SemanticRequest) -> u128 {
         .iter()
         .map(|target| {
             let wanted = target.react_wanted.as_ref().map(sorted);
-            // Which props the answer converted depends on the layering, so it is part of the request.
-            let layering = &target.layering;
+            // Which props the answer converted depends on the layering, so it is part of the request: hashed, since its
+            // listed names and layer members would make the text below megabytes long on a large project.
+            let layering = {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = rustc_hash::FxHasher::default();
+                target.layering.hash(&mut hasher);
+                hasher.finish()
+            };
             (
                 (&target.key, &target.file_path, &target.display_name, &target.exports),
                 (sorted(&target.described), wanted, layering),

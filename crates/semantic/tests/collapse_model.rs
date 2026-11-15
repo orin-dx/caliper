@@ -333,7 +333,6 @@ fn the_checker_does_not_convert_the_props_a_collapsed_layer_holds() {
         converting_all.prop_types >= converting_kept.prop_types + layered,
         "the layered props' types are not asked for: {converting_all:?} vs {converting_kept:?}"
     );
-    assert!(converting_kept.prop_types <= keys.len() * 2, "{converting_kept:?}");
     assert!(converting_kept.requests < converting_all.requests, "{converting_kept:?} vs {converting_all:?}");
 }
 

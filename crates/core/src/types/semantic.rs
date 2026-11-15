@@ -410,13 +410,21 @@ pub(crate) fn layer_checker_props<'a>(
     entry.inheritance.extend(layers);
     let layered: rustc_hash::FxHashSet<&str> =
         entry.inheritance.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
-    if layered.is_empty() {
-        return (props, notable);
-    }
-    let kept = props
+    let unconverted = unconverted_type();
+    let kept: Vec<&'a Arc<SemanticProp>> = props
         .into_iter()
-        .filter(|prop| keeps(&prop.name, &notable, entry.props.contains_key(&prop.name), &layered))
+        .filter(|prop| {
+            layered.is_empty() || keeps(&prop.name, &notable, entry.props.contains_key(&prop.name), &layered)
+        })
         .collect();
+    // A prop the checker left unconverted is one this decision leaves to a layer ([`Layering::kept`]). Keeping one means
+    // the target's layering was made from another structural answer or context than this merge's: it is never merged
+    // as a type, so the structural prop stays.
+    debug_assert!(
+        kept.iter().all(|prop| prop.prop_type != unconverted),
+        "the merge keeps a prop the checker left to a layer: the target's layering is not this merge's"
+    );
+    let kept = kept.into_iter().filter(|prop| prop.prop_type != unconverted).collect();
     (kept, notable)
 }
 

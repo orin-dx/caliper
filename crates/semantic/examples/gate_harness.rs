@@ -361,11 +361,9 @@ fn watch(src: &Utf8PathBuf, run: WatchRun) -> bool {
         exports: entry.exports.clone(),
         described: entry.props.values().filter(|p| !p.description.is_empty()).map(|p| p.name.clone()).collect(),
         react_wanted: react_props_wanted(session.options.html_attributes, &entry.props),
-        // The merged entry's layers: deciding again from them keeps what the session's request kept.
-        layering: Some(caliper_docgen_core::types::semantic::Layering::of(
-            &entry,
-            caliper_docgen_core::types::options::CollapseContext::of(&session.options),
-        )),
+        // Every prop converted: the session's request decides its layering from the structural answer, which this
+        // merged entry no longer is, so this times at most the work the session's request does.
+        layering: None,
     };
     let mut query = Vec::new();
     for _ in 0..21 {
