@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01BpbNNnYDXxKBh9dYCnVFXB",
+  "agent_id": "ae5e944b55afb7fe1",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolver reach map",
+  "token_usage": {
+    "input_tokens": 50,
+    "cache_creation_tokens": 66912,
+    "cache_read_tokens": 1301045,
+    "output_tokens": 13539,
+    "api_call_count": 25
+  },
+  "started_at": "2026-11-14T17:31:48.564086-08:00",
+  "completed_at": "2026-11-14T17:34:59.21665-08:00"
+}

@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Tfo5tNnPZZvHagUmsHFVsb",
+  "agent_id": "ab5d408e71a543762",
+  "subagent_type": "general-purpose",
+  "task_description": "Pending-prop contract design",
+  "token_usage": {
+    "input_tokens": 92,
+    "cache_creation_tokens": 135246,
+    "cache_read_tokens": 3904538,
+    "output_tokens": 26326,
+    "api_call_count": 45
+  },
+  "started_at": "2026-11-14T17:31:48.320515-08:00",
+  "completed_at": "2026-11-14T17:37:30.24318-08:00"
+}

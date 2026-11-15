@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_013nxv7WSiKuLY6qDNWRDVMT",
+  "agent_id": "afdd20a2e681f208c",
+  "subagent_type": "general-purpose",
+  "task_description": "Spike: tsrs libraries replacing our structural code",
+  "token_usage": {
+    "input_tokens": 110,
+    "cache_creation_tokens": 138348,
+    "cache_read_tokens": 5919825,
+    "output_tokens": 45749,
+    "api_call_count": 55
+  },
+  "started_at": "2026-11-14T17:41:13.352535-08:00",
+  "completed_at": "2026-11-14T17:50:58.812596-08:00"
+}

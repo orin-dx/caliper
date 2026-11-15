@@ -1,0 +1,152 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7EF5TFW1QFPA0HAVR3E0S5Q",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-15T02:04:55.070495Z",
+  "branch": "fix/checker-omitted-props",
+  "checkpoints_count": 16,
+  "save_step_count": 85,
+  "files_touched": [
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "2c0fa0c52e06",
+  "checkpoint_transcript_start": 29866,
+  "transcript_lines_at_start": 29866,
+  "compact_transcript_start": 2512,
+  "token_usage": {
+    "input_tokens": 204,
+    "cache_creation_tokens": 198971,
+    "cache_read_tokens": 16256897,
+    "output_tokens": 74581,
+    "api_call_count": 98,
+    "subagent_tokens": {
+      "input_tokens": 536,
+      "cache_creation_tokens": 674499,
+      "cache_read_tokens": 21388298,
+      "output_tokens": 163229,
+      "api_call_count": 267
+    }
+  },
+  "redaction": {
+    "replacements": 38,
+    "layers": {
+      "betterleaks": 24,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 656
+  },
+  "summary": {
+    "intent": "Fix the reviewer's provider.ts:281 finding (answer revision stuck at 0 causing an unbounded refresh loop) in the Storybook live upgrade, then proceed to ADR 0026 S7c-e: shrink or replace hand-written structural resolver code with tsrs library calls without lowering the speed or quality of the structural first answer.",
+    "outcome": "The revision-stamp fix shipped as 02d05ed0 and #462 merged with CI green and no open findings. Stale worktrees were cleaned up. The S7 shrink was re-scoped after evidence workers and a tsrs spike showed that only module/tsconfig resolution can be swapped to tsrs at equal speed. Two workers are running: that swap and a fix for 16 checker-omitted props.",
+    "learnings": {
+      "repo": [
+        "Every answer must carry the revision the request saw. The lifecycle compares answer.revision with the files' revision, so a revision of 0 makes the answer look stale and refreshes it again indefinitely.",
+        "The repo's test lint (oxlint vitest plugin) rejects a message argument to expect(); outcome labels have to be carried in the asserted value instead.",
+        "ADR 0026 (docs/adr/0026-the-checker-is-the-type-authority.md) says the addon keeps the structural-first answer (ADR 0022). The resolver shrinks to a thin fallback, but its ~7,600-line deletion estimate came from file headers and is unreliable.",
+        "Storybook 11 beta runs a single docgen worker per dev server and never respawns it, so one global revision counter is sound.",
+        "Measured first-answer timings (5 runs, loaded machine): structural ~4-5 ms after session start; checker ~65 ms start plus 125-130 ms answer, similar on gate-large. The structural pass is only 5-7% of a checker run, so deleting it would not speed up the CLI.",
+        "Diff map over 17,840 props: 95.8% are equal between structural and checker, 106 are concretely wrong in structural and 449 unresolved. named.rs:178-188 drops the 'unevaluated' marker and returns a bare name, leaving degradedBy empty.",
+        "The 49k props listed only by the structural answer are HTML/ARIA/DOM attributes that the checker keeps in a collapsed inheritance layer. 16 real checker omissions exist: four context Provider components, MuiTableCell className/style, and a structural error on MuiTextareaAutosize.",
+        "tsrs spike results: tsrs_module + tsrs_tsoptions + cachedvfs resolved the same file for 9,295 of 9,295 imports at the same speed and memory, but need a long-lived resolver or Region and are 3-4x slower without the cache. tsrs_parser is 1.8x slower and 3.3x the memory of oxc. The binder, pseudochecker and JSDoc need a second parse for ~zero net lines saved. Only the checker evaluates types.",
+        "Coverage evidence cannot separate 'needed' from 'computed then discarded', because a checker-on run reaches almost the whole structural resolver (7,478 of 10,681 lines reached).",
+        "--semantic-timeout-ms conflicts with --no-checker."
+      ],
+      "code": [
+        {
+          "path": "packages/storybook/src/provider.ts",
+          "line": 281,
+          "finding": "locate() throwing exited before answered.revision was updated, so fallback answers were stamped 0. Fixed by stamping the request with the session revision at start, raised by the look, via Background.revision."
+        },
+        {
+          "path": "packages/storybook/src/lifecycle.ts",
+          "line": 230,
+          "finding": "Treats an answer whose revision is below the files' revision as stale and triggers another extraction, which produced the loop when the revision was 0."
+        },
+        {
+          "path": "crates/core/src/resolver/named.rs",
+          "line": 178,
+          "end_line": 188,
+          "finding": "Discards the unevaluated marker and returns a bare name, so the first answer looks decided when it is not. This is the one real structural correctness bug found."
+        }
+      ],
+      "workflow": [
+        "Before recommending a design change, read the existing ADR and the measured numbers. Two reversed recommendations (delete the resolver, then remove duplicated semantics) cost the user's trust.",
+        "Fixing a finding should include auditing sibling code paths. Here that exposed two further outcomes with the same revision-0 bug, covered by one test through the real reducer.",
+        "Use a clean worktree off origin/<branch> when an existing checkout has unrelated uncommitted work. Save a patch before removing stale worktrees.",
+        "Parallelise read-only evidence workers (reach map, contract design, diff map) before slicing branches, and write their reports to a persistent directory rather than /tmp.",
+        "Subagent hand-backs carry no user authority and were treated as reports only.",
+        "The user wants the extra scrutiny to cut cost: anticipate the review agent's findings by analysing patterns in earlier findings before pushing."
+      ]
+    },
+    "friction": [
+      "User frustration at token cost and at the assistant's rapid recommendation reversals on resolver deletion.",
+      "The assistant misread the goal as thinning the structural answer, when the user wanted the same quality with our own code replaced by tsrs calls. A P0 worker was stopped and its work discarded.",
+      "Stale worktrees with uncommitted files from earlier sessions caused confusion, and 27 worktrees remain.",
+      "Rust toolchain 1.99.1 has no llvm tools, so coverage needed 1.100.0's llvm-profdata and llvm-cov.",
+      "The sandbox had to be disabled for a worker to write into caliper-fixtures.",
+      "The first --no-checker coverage run failed because of the --semantic-timeout-ms conflict.",
+      "test:integration reported exit 0 but all 10 tests were skipped in the fresh worktree, so they do not count as a run.",
+      "Machine load of 7-19 made the perf measurements only directional."
+    ],
+    "open_items": [
+      "Two workers are running: feat/tsrs-module-resolution (oxc_resolver to tsrs_module/tsoptions swap, identity diff gate) and fix/checker-omitted-props (16 omissions).",
+      "The user needs to confirm whether to accept that the ~12,000 lines of type evaluators stay while the first answer is structural. The assistant is treating that as accepted.",
+      "Release PR #396 needs the user's merge.",
+      "Watch-budget wording: ButtonProps p95 is ~134 ms against a 25 ms budget, and either the docs or the budget has to change.",
+      "The tsrs_vfs::bundled libs swap was left out because Date/HTMLElement expansion costs more parsing.",
+      "The overstated 'seconds on a large project' comment in background.ts should be corrected.",
+      "About 27 worktrees remain, some locked (agent-aab, agent-ac2, agent-aed) and agent-a7ab0bb is stale. A merged-and-clean cleanup needs user approval.",
+      "The main checkout has uncommitted changes (.moon/hooks/pre-push, apps/validate/, .playwright-mcp/) that were not inspected.",
+      "No real storybook dev run in a browser has verified the live upgrade end to end.",
+      "Upstream tsrs repros may be needed if the omitted-props causes lie in tsrs, and the getPropertiesOfType hotspot (57% of checker time) is an upstream request.",
+      "The oracle run is deferred until after the shrink work."
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_012VyXn5srtnzQyJWqvhgiMj",
+  "agent_id": "ad519c165d2c35ac9",
+  "subagent_type": "general-purpose",
+  "task_description": "Structural vs checker diff map",
+  "token_usage": {
+    "input_tokens": 56,
+    "cache_creation_tokens": 81730,
+    "cache_read_tokens": 1730819,
+    "output_tokens": 25222,
+    "api_call_count": 28
+  },
+  "started_at": "2026-11-14T17:31:49.715131-08:00",
+  "completed_at": "2026-11-14T17:37:02.171549-08:00"
+}

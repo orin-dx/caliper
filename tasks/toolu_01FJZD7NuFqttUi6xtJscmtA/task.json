@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01FJZD7NuFqttUi6xtJscmtA",
+  "agent_id": "a3f258f5490d6d3bf",
+  "subagent_type": "general-purpose",
+  "task_description": "Check props only structural lists",
+  "token_usage": {
+    "input_tokens": 50,
+    "cache_creation_tokens": 67810,
+    "cache_read_tokens": 1652221,
+    "output_tokens": 14932,
+    "api_call_count": 25
+  },
+  "started_at": "2026-11-14T17:37:35.155426-08:00",
+  "completed_at": "2026-11-14T17:41:36.237325-08:00"
+}
