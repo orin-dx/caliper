@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_014W3JLPxv6BX26y3c592ftd",
+  "agent_id": "ac47565e8458052a0",
+  "subagent_type": "general-purpose",
+  "task_description": "Swap oxc_resolver for tsrs_module and tsoptions",
+  "token_usage": {
+    "input_tokens": 264,
+    "cache_creation_tokens": 423260,
+    "cache_read_tokens": 20729397,
+    "output_tokens": 88910,
+    "api_call_count": 127
+  },
+  "started_at": "2026-11-14T17:51:22.796619-08:00",
+  "completed_at": "2026-11-14T18:16:03.29639-08:00"
+}
