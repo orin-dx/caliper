@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01S26BMjNFERrER7uYb3qPHF",
+  "agent_id": "aaa46c0a48e07d584",
+  "subagent_type": "general-purpose",
+  "task_description": "S2: addon wiring of priorities",
+  "token_usage": {
+    "input_tokens": 146,
+    "cache_creation_tokens": 114194,
+    "cache_read_tokens": 7245763,
+    "output_tokens": 43818,
+    "api_call_count": 73
+  },
+  "started_at": "2026-11-15T14:17:55.00667-08:00",
+  "completed_at": "2026-11-15T14:31:22.148714-08:00"
+}
