@@ -998,12 +998,14 @@ pub(crate) fn resolve_component_shared(
 
     // A component a generic call builds has the props its callee's result type declares; the props type the extractor
     // selected is for a callee whose result isn't known.
+    // The factory's own props resolve beside the main chain, not inside it: a type both reach is shared, not a cycle.
+    let mut factory_state = mapping.factory_props.as_ref().map(|_| state.branch());
     let result = callee::result_chain(mapping, ctx, &mut state);
     // A call to a function whose result is no component is no component: nothing to document, nothing to report.
     if result.is_none() && mapping.rule == DetectionRule::FactoryResult {
         return (unpublished_entry(mapping), ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
     }
-    let chain = result.unwrap_or_else(|| {
+    let mut chain = result.unwrap_or_else(|| {
         chain::resolve_props_chain(
             mapping.props_type_name.as_str(),
             &mapping.props_type_args,
@@ -1014,6 +1016,13 @@ pub(crate) fn resolve_component_shared(
             0,
         )
     });
+    // The props a factory call's own arguments give the component, which the props type read above can lack: the
+    // variant keys of its style recipe, or the annotated props of its render function (`extractor::factory_props`).
+    if let (Some(own), Some(mut branch)) = (&mapping.factory_props, factory_state.take()) {
+        let own = alias::resolve_base_as_chain(own, &mapping.file_path, mapping, ctx, &mut branch, 0);
+        state.absorb(branch);
+        chain.add_absent(own);
+    }
 
     // Build props BTreeMap — own props win over inherited props with same name.
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
@@ -1221,6 +1230,31 @@ impl ResolvedChain {
         // being merged into.
         if self.discriminant_prop.is_none() {
             self.discriminant_prop = parent.discriminant_prop;
+        }
+    }
+
+    /// Add what `other` has and self lacks: props and notable props by name, inheritance layers by declaration. Self's
+    /// answer wins wherever both have one, so nothing self lists changes; `other`'s unresolved names are not added.
+    fn add_absent(&mut self, other: ResolvedChain) {
+        let mut known: FxHashSet<String> = self.props.iter().map(|p| p.name.clone()).collect();
+        for prop in other.props {
+            if known.insert(prop.name.clone()) {
+                self.props.push(prop);
+            }
+        }
+        for layer in other.inheritance {
+            let present = self
+                .inheritance
+                .iter()
+                .any(|mine| mine.type_name == layer.type_name && mine.file_name == layer.file_name);
+            if !present {
+                self.inheritance.push(layer);
+            }
+        }
+        let notable: FxHashSet<String> = self.notable.iter().map(|p| p.name.clone()).collect();
+        self.notable.extend(other.notable.into_iter().filter(|p| !notable.contains(&p.name)));
+        for (name, prop) in other.inherited_by_name {
+            self.inherited_by_name.entry(name).or_insert(prop);
         }
     }
 

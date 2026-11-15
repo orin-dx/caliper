@@ -1800,6 +1800,10 @@ pub struct ComponentMapping {
     /// What the component's own function body does with its props (trail 405); `None` when the declaration holds no
     /// function of its own. Internal evidence for the resolver: never emitted.
     pub(crate) body: Option<BodyFacts>,
+    /// For a component a factory call builds, the props the call's own arguments give it (`extractor::factory_props`):
+    /// the annotated props type of the render function it is given, or the variant keys of the style recipe it is
+    /// given. The resolver adds those its props type lacks.
+    pub(crate) factory_props: Option<CollectedType>,
 }
 
 /// What a component's function body does with its props, read from the syntax alone (`extractor::body_facts`). Facts
@@ -1912,6 +1916,7 @@ impl ComponentMapping {
             bound: rule != DetectionRule::AttachedSubComponent,
             local_name: None,
             body: None,
+            factory_props: None,
         }
     }
 
