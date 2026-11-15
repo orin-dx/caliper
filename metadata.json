@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7GE4615417BTTK6DTA1EMNV",
+  "strategy": "manual-commit",
+  "branch": "feat/jsx-evidence-in-extractor",
+  "checkpoints_count": 2,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 12,
+    "cache_creation_tokens": 17879,
+    "cache_read_tokens": 2782184,
+    "output_tokens": 7125,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 34,
+      "cache_creation_tokens": 58624,
+      "cache_read_tokens": 3667532,
+      "output_tokens": 26250,
+      "api_call_count": 17
+    }
+  },
+  "redaction": {
+    "replacements": 44,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 16,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
