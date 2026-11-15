@@ -16,7 +16,8 @@ use std::collections::BTreeSet;
 /// Everything known about the members one component's props type reaches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Evidence {
-    /// The members, in the order the props type reaches them; [`Shown`] keeps this order.
+    /// The members, in the order the props type reaches them; [`Shown`] keeps this order. A name repeated is placed
+    /// once, by its first member.
     pub(crate) members: Vec<Member>,
     /// What the component's own function body does with its props; `None` when it has no function of its own.
     pub(crate) body: Option<Body>,
@@ -59,7 +60,8 @@ pub(crate) struct Body {
     pub(crate) defaulted: Vec<String>,
     /// The JSX elements the body writes, in source order.
     pub(crate) elements: Vec<Element>,
-    /// The props object or a rest binding escapes in a way the syntax cannot follow; the body then says nothing.
+    /// The props object or a rest binding escapes in a way the syntax cannot follow: what the body says still holds,
+    /// but its silence about a prop is unknown, never guessed.
     pub(crate) handed_on: bool,
 }
 
@@ -90,7 +92,8 @@ pub(crate) enum Attribute {
     Named {
         /// The attribute's name.
         name: String,
-        /// The component's prop the value is, if it is exactly one.
+        /// The component's prop the value is, if it is exactly one. Kept from the extractor's facts; [`decide`] gives
+        /// it no weight (an attribute valued with an own prop adds nothing).
         prop: Option<String>,
     },
     /// `{...value}`.
@@ -134,13 +137,19 @@ pub(crate) struct Shown {
     pub(crate) used: Vec<String>,
     /// Members left in their collapsed layer.
     pub(crate) collapsed: Vec<String>,
-    /// Non-ambient members with no signal whose body evidence is unknown: listed or collapsed as today.
+    /// Members with no signal whose body evidence is incomplete: listed or collapsed as today, so missing evidence
+    /// never hides more than today does.
     pub(crate) as_today: Vec<String>,
 }
 
 /// Decides, from the evidence alone, where each member of a component's props goes.
 pub(crate) fn decide(evidence: &Evidence) -> Shown {
-    let body = evidence.body.as_ref().filter(|body| body.says_something());
+    let body = evidence.body.as_ref();
+    let complete = body.is_some_and(Body::is_complete);
+    let facts = |names: fn(&Body) -> &[String]| -> BTreeSet<&str> {
+        body.map(|body| names(body).iter().map(String::as_str).collect()).unwrap_or_default()
+    };
+    let (reads, defaulted) = (facts(|body| &body.reads), facts(|body| &body.defaulted));
     let forwarded = body.map(Body::forwarded).unwrap_or_default();
     let passed: BTreeSet<&str> = evidence
         .call_sites
@@ -152,18 +161,21 @@ pub(crate) fn decide(evidence: &Evidence) -> Shown {
         .collect();
     let mut shown = Shown::default();
     let mut ordered_rows = Vec::new();
+    let mut placed = BTreeSet::new();
     for member in &evidence.members {
         let name = member.name.as_str();
-        let names = |names: &[String]| names.iter().any(|named| named == name);
-        let read = body.is_some_and(|body| names(&body.reads));
-        let defaulted = member.default_tag || body.is_some_and(|body| names(&body.defaulted));
+        if !placed.insert(name) {
+            continue;
+        }
+        let read = reads.contains(name);
+        let defaulted = member.default_tag || defaulted.contains(name);
         let declared = member.own || member.picked || member.overrides || member.required || defaulted;
         let list = if declared || passed.contains(name) || (!member.ambient && (read || forwarded.contains(name))) {
             ordered_rows.push((!(member.documented || member.literal_union), member.name.clone()));
             continue;
         } else if member.ambient && read {
             &mut shown.used
-        } else if body.is_none() && !member.ambient {
+        } else if !complete {
             &mut shown.as_today
         } else {
             &mut shown.collapsed
@@ -176,9 +188,10 @@ pub(crate) fn decide(evidence: &Evidence) -> Shown {
 }
 
 impl Body {
-    /// Whether the body's evidence is complete: nothing handed on, and no spread of the props onto a tag that did not
-    /// resolve.
-    fn says_something(&self) -> bool {
+    /// Whether the body's evidence is complete, so that a prop it never mentions is known to be unused: nothing handed
+    /// on, and no spread of the props onto a tag that did not resolve. What an incomplete body does say (a read, a
+    /// default, a forward) is still certain; only its silence is unknown.
+    fn is_complete(&self) -> bool {
         !self.handed_on
             && !self.elements.iter().any(|element| {
                 element.target == Target::Unresolved
@@ -437,19 +450,38 @@ mod tests {
 
     #[test]
     fn an_unknown_body_is_never_guessed() {
-        let handed_on = Body { handed_on: true, ..reading(&["a"]) };
-        let unresolved = Body {
-            elements: vec![element(Target::Unresolved, vec![Attribute::Spread(SpreadOf::Rest)])],
-            ..reading(&["a"])
+        let said = || Body { defaulted: strings(&["e"]), ..reading(&["a"]) };
+        let handed_on = Body { handed_on: true, ..said() };
+        let unresolved =
+            Body { elements: vec![element(Target::Unresolved, vec![Attribute::Spread(SpreadOf::Rest)])], ..said() };
+        let members = || {
+            vec![
+                inherited("a"),
+                inherited("b"),
+                ambient("c"),
+                Member { required: true, ..inherited("d") },
+                inherited("e"),
+            ]
         };
-        let members =
-            || vec![inherited("a"), inherited("b"), ambient("c"), Member { required: true, ..inherited("d") }];
-        let expected: &[(&str, Placed)] =
-            &[("a", Placed::AsToday), ("b", Placed::AsToday), ("c", Placed::Collapsed), ("d", Placed::Row)];
+        // What an incomplete body says still holds; only its silence is unknown, ambient or not.
+        let incomplete: &[(&str, Placed)] = &[
+            ("a", Placed::Row),
+            ("b", Placed::AsToday),
+            ("c", Placed::AsToday),
+            ("d", Placed::Row),
+            ("e", Placed::Row),
+        ];
+        let none: &[(&str, Placed)] = &[
+            ("a", Placed::AsToday),
+            ("b", Placed::AsToday),
+            ("c", Placed::AsToday),
+            ("d", Placed::Row),
+            ("e", Placed::AsToday),
+        ];
         table(vec![
-            ("handed on", with(members(), Some(handed_on)), expected),
-            ("spread onto an unresolved tag", with(members(), Some(unresolved)), expected),
-            ("no function of its own", with(members(), None), expected),
+            ("handed on", with(members(), Some(handed_on)), incomplete),
+            ("spread onto an unresolved tag", with(members(), Some(unresolved)), incomplete),
+            ("no function of its own", with(members(), None), none),
         ]);
     }
 
@@ -468,5 +500,7 @@ mod tests {
         assert_eq!(familiar.used, ["children"]);
         assert_eq!(familiar.collapsed, ["className", "style"]);
         assert_eq!(decide(&Evidence::default()), Shown::default());
+        let twice = decide(&with(vec![inherited("a"), ambient("a")], Some(reading(&["a"]))));
+        assert_eq!((twice.rows, twice.used), (strings(&["a"]), Vec::new()));
     }
 }
