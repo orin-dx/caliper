@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01QsY9kroYhSM7LoN8CsLTiq",
+  "agent_id": "ac5ebfe0323365da5",
+  "subagent_type": "general-purpose",
+  "task_description": "T2: props-type relevance signals (ADR 0028 wave 1)",
+  "token_usage": {
+    "input_tokens": 134,
+    "cache_creation_tokens": 200792,
+    "cache_read_tokens": 9010918,
+    "output_tokens": 61373,
+    "api_call_count": 67
+  },
+  "started_at": "2026-11-15T13:28:17.352051-08:00",
+  "completed_at": "2026-11-15T13:45:10.182546-08:00"
+}
