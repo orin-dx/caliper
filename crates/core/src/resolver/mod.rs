@@ -590,26 +590,26 @@ impl ResolutionContext {
         }
     }
 
-    /// Whether a source of type `type_name` declaring `declared` props in `file`, reached at `depth`, is recorded as a
+    /// Whether a source of type `type_name` declaring `members` in `file`, reached at `depth`, is recorded as a
     /// layer instead of expanded (collapse). Depth 0 is the component's own props type. The rule is
     /// [`CollapseInheritedProps::collapses`](crate::types::options::CollapseInheritedProps::collapses), with a loaded dependency file as the dependency; React's and TypeScript's own declarations
     /// (in `node_modules`, not loaded as a dependency) stay with `html_attributes`.
-    pub(crate) fn collapses(
+    pub(crate) fn collapses<'a>(
         &self,
         file: &Utf8Path,
         type_name: &str,
-        declared: usize,
+        members: impl Iterator<Item = &'a str>,
         depth: u8,
         state: &ResolveState,
     ) -> bool {
-        depth > 0
-            && !state.expand_all
-            && self.collapse_inherited_props.collapses(
-                self.is_dependency_file(file),
-                file.as_str(),
-                type_name,
-                declared,
-            )
+        if depth == 0 || state.expand_all {
+            return false;
+        }
+        let reaching = match &state.omitted {
+            Some(omitted) => members.filter(|name| !omitted.contains(*name)).count(),
+            None => members.count(),
+        };
+        self.collapse_inherited_props.collapses(self.is_dependency_file(file), file.as_str(), type_name, reaching)
     }
 }
 

@@ -67,11 +67,13 @@ impl CollapseInheritedProps {
     /// recorded as a layer of names instead of listed prop by prop. `dependency` says the file is a loaded dependency's.
     /// A component's own props type is never asked.
     ///
-    /// The one owner of the decision, and both lanes give it the same input: `reaching` is the number of distinct
+    /// The one owner of the decision, and both lanes give it the same input, `reaching`; no declared member count is
+    /// read anywhere. `reaching` is the number of distinct
     /// members of the source that reach the component after `Omit` and `Pick` (a member reached through two paths counts
     /// once). For a plain `extends` it is what the source declares. A `Pick` names its keys on purpose, so the props it
-    /// picks are listed however large the source. The structural resolver counts what it reads (the members it holds,
-    /// less what an `Omit` takes; `alias.rs`); the checker's merge counts the props of its answer whose `parent` is the
+    /// picks are listed however large the source. The structural resolver counts the members a source declares less
+    /// the keys the `Omit`s around it take (`ResolveState::omitted`, so only that source is affected); the checker's
+    /// merge counts the props of its answer whose `parent` is the
     /// source, which are exactly the members that reach (`crate::types::semantic::layer_checker_props`).
     ///
     /// - A dependency source collapses when it is ambient (`crate::types::ambient`: DOM and ARIA attributes, style

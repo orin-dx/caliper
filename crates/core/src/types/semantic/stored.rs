@@ -49,8 +49,6 @@ struct StoredComponent {
     key: String,
     props: Vec<u32>,
     composes: Option<Vec<String>>,
-    /// [`SemanticComponent::sources`] as (name, file, declared).
-    sources: Vec<(String, String, u32)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -190,11 +188,6 @@ impl SemanticOutcome {
                 key: component.key.clone(),
                 props: held,
                 composes: component.composes.clone(),
-                sources: component
-                    .sources
-                    .iter()
-                    .map(|source| (source.parent.name.clone(), source.parent.file_name.clone(), source.declared))
-                    .collect(),
             });
         }
         let stored = Stored {
@@ -232,15 +225,7 @@ impl SemanticOutcome {
                         props.get(at).cloned().ok_or_else(|| "a prop index out of range".to_string())
                     })
                     .collect::<Result<_, String>>()?;
-                let sources = component
-                    .sources
-                    .into_iter()
-                    .map(|(name, file_name, declared)| super::DeclaredSource {
-                        parent: crate::types::PropParent { name, file_name },
-                        declared,
-                    })
-                    .collect();
-                Ok(SemanticComponent { key: component.key, props: held, composes: component.composes, sources })
+                Ok(SemanticComponent { key: component.key, props: held, composes: component.composes })
             })
             .collect::<Result<_, String>>()?;
         Ok(SemanticOutcome {

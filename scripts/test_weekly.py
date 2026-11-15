@@ -392,8 +392,8 @@ class AddonConfiguration(unittest.TestCase):
             weekly.caliper_run('/bin/caliper-docgen', '/src', 1)
         command = commands[-1]
         self.assertIn('--load-dependencies', command)
-        # The addon collapses by relevance by default (`collapseInheritedProps` 'dependencies', the CLI's default too).
-        self.assertNotIn('--collapse-inherited-props', command)
+        # The addon's configuration, pinned: `collapseInheritedProps` 'dependencies' (its default), not left implicit.
+        self.assertEqual(command[command.index('--collapse-inherited-props') + 1], 'dependencies')
 
 
 class PeakRss(unittest.TestCase):

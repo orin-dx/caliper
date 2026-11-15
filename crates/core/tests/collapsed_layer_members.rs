@@ -167,3 +167,67 @@ fn a_project_source_under_the_large_source_threshold_stays_expanded_and_none_exp
     assert_eq!(none.components["Box"].props.len(), 202);
     assert!(none.components["Box"].inheritance.is_empty());
 }
+
+/// Extracts `source` (a `Components.tsx`) with the default collapse.
+fn run_source(source: &str) -> ExtractionOutput {
+    let tmp = TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    std::fs::write(root.join("Components.tsx"), source).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        cache_dir: Some(root.join(".cache")),
+        html_attributes: HtmlAttributeMode::None,
+        ..Default::default()
+    };
+    extract(&options)
+}
+
+fn interface(name: &str, prefix: &str, count: usize) -> String {
+    let fields: String = (0..count).map(|i| format!("{prefix}{i}?: string; ")).collect();
+    format!("export interface {name} {{ {fields}}}\n")
+}
+
+fn keys(prefix: &str, range: std::ops::Range<usize>) -> String {
+    range.map(|i| format!("'{prefix}{i}'")).collect::<Vec<_>>().join(" | ")
+}
+
+#[test]
+fn an_omit_lists_only_the_source_it_leaves_small_and_keeps_every_other_collapsed() {
+    // `A` declares 250; the `Omit` leaves 150 of it, so `A` is listed. `Big` declares 700 and none is omitted: one layer.
+    let source = format!(
+        "{}{}export function Box(props: Omit<A & Big, {}>) {{ return null; }}\n",
+        interface("A", "a", 250),
+        interface("Big", "b", 700),
+        keys("a", 0..100)
+    );
+    let output = run_source(&source);
+    let entry = &output.components["Box"];
+    let listed_a = entry.props.keys().filter(|name| name.starts_with('a')).count();
+    let listed_b = entry.props.keys().filter(|name| name.starts_with('b')).count();
+    assert_eq!((listed_a, listed_b), (150, 0));
+    let layers: Vec<(&str, u32)> = entry
+        .inheritance
+        .iter()
+        .filter(|layer| !layer.members.is_empty())
+        .map(|l| (l.type_name.as_str(), l.total_props))
+        .collect();
+    assert_eq!(layers, [("Big", 700)]);
+}
+
+#[test]
+fn a_deeply_nested_omit_reads_its_base_once_per_level() {
+    // Sixteen nested `Omit`s, the innermost leaving `Big` at 200 (listed): a base read again at each level would cost
+    // 2^16 reads of a 700-member interface.
+    let mut ty = "Big".to_string();
+    for level in 0..16 {
+        let range = if level == 0 { 0..500 } else { 600 + level..601 + level };
+        ty = format!("Omit<{ty}, {}>", keys("b", range));
+    }
+    let source = format!("{}export function Deep(props: {ty}) {{ return null; }}\n", interface("Big", "b", 700));
+    let started = std::time::Instant::now();
+    let output = run_source(&source);
+    assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
+    let entry = &output.components["Deep"];
+    assert!(entry.inheritance.iter().all(|layer| layer.members.is_empty()));
+    assert_eq!(entry.props.len(), 200 - 15);
+}

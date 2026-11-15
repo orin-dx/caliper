@@ -113,12 +113,7 @@ fn expected() -> Vec<(String, PropType, Option<String>)> {
 fn the_whole_project_merge_reads_defaults_and_union_order_from_the_source() {
     let Project { _dir, mut output, button } = project();
     let outcome = SemanticOutcome {
-        components: vec![SemanticComponent {
-            key: "Button".to_string(),
-            props: answer(&button),
-            composes: None,
-            sources: Vec::new(),
-        }],
+        components: vec![SemanticComponent { key: "Button".to_string(), props: answer(&button), composes: None }],
         ..Default::default()
     };
 
@@ -150,7 +145,7 @@ fn a_union_declared_in_a_file_that_cannot_be_found_keeps_the_checker_order() {
     size.parent = Some(moved.clone());
     size.declarations = vec![moved];
     let outcome = SemanticOutcome {
-        components: vec![SemanticComponent { key: "Button".to_string(), props, composes: None, sources: Vec::new() }],
+        components: vec![SemanticComponent { key: "Button".to_string(), props, composes: None }],
         ..Default::default()
     };
 
@@ -193,12 +188,7 @@ fn a_type_literal_that_does_not_hold_the_components_props_gives_no_order() {
         react_declared: false,
     });
     let outcome = SemanticOutcome {
-        components: vec![SemanticComponent {
-            key: "Card".to_string(),
-            props: vec![prop],
-            composes: None,
-            sources: Vec::new(),
-        }],
+        components: vec![SemanticComponent { key: "Card".to_string(), props: vec![prop], composes: None }],
         ..Default::default()
     };
 

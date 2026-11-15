@@ -130,19 +130,6 @@ pub struct SemanticComponent {
     /// and `Some` of an empty list says the props type is made of none. `None` says the checker could not tell (a type
     /// it cannot read the bases of), and the structural `composes` stays.
     pub composes: Option<Vec<String>>,
-    /// Each interface that declares one of `props` (not `@types/react`'s), with how many members it declares itself:
-    /// what a source only the checker read is collapsed by (`layer_checker_props`).
-    pub sources: Vec<DeclaredSource>,
-}
-
-/// An interface that declares props of a component, as the checker read it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DeclaredSource {
-    /// The interface and its file, as a prop's `parent` names it.
-    pub parent: PropParent,
-    /// How many members it declares itself, before an `Omit` or a `Pick` and without what it inherits: the count the
-    /// structural pass collapses a source by.
-    pub declared: u32,
 }
 
 /// A component the backend left to the structural result, and why.
@@ -380,7 +367,7 @@ fn apply_props(
         .iter()
         .filter(|prop| !prop.react_declared || (!layered && entry.props.contains_key(&prop.name)))
         .collect();
-    let (own, notable) = layer_checker_props(entry, own, &semantic.sources, cx);
+    let (own, notable) = layer_checker_props(entry, own, cx);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
     move_notable(entry, &notable);
@@ -399,7 +386,7 @@ fn apply_props(
 ///    prop itself (the component declares it again).
 /// 2. A source only the checker read becomes a collapsed layer when the owner collapses it, asked with the members
 ///    that reach the component: the props of the answer whose `parent` is the source, after any `Omit` or `Pick`, each
-///    name once (the structural resolver counts the same). `members` are those props and `totalProps` their number,
+///    name once (the structural resolver counts the same; no declared count is asked of the checker). `members` are those props and `totalProps` their number,
 ///    what the layer holds. Its notable props move to `notableInherited`, as the structural resolver keeps a collapsed
 ///    source's notable members.
 ///
@@ -408,37 +395,42 @@ fn apply_props(
 pub(crate) fn layer_checker_props<'a>(
     entry: &mut ComponentEntry,
     props: Vec<&'a Arc<SemanticProp>>,
-    sources: &[DeclaredSource],
     cx: CollapseContext,
-) -> (Vec<&'a Arc<SemanticProp>>, Vec<String>) {
-    let unread = |source: &DeclaredSource| {
-        !entry.props.values().any(|prop| prop.parent.as_ref() == Some(&source.parent))
+) -> (Vec<&'a Arc<SemanticProp>>, Vec<(String, PropParent)>) {
+    // Each source the answer names (a prop's `parent` is an interface), in the order it first names it, with the
+    // members of it that reach the component, each once.
+    let mut sources: Vec<(&'a PropParent, Vec<String>)> = Vec::new();
+    for prop in props.iter().filter(|prop| !prop.react_declared) {
+        let Some(parent) = prop.parent.as_ref() else { continue };
+        match sources.iter_mut().find(|(source, _)| *source == parent) {
+            Some((_, names)) if !names.contains(&prop.name) => names.push(prop.name.clone()),
+            Some(_) => {}
+            None => sources.push((parent, vec![prop.name.clone()])),
+        }
+    }
+    let unread = |source: &PropParent| {
+        !entry.props.values().any(|prop| prop.parent.as_ref() == Some(source))
             && !entry
                 .inheritance
                 .iter()
-                .any(|layer| layer.type_name == source.parent.name && layer.file_name == source.parent.file_name)
+                .any(|layer| layer.type_name == source.name && layer.file_name == source.file_name)
     };
-    let reaching = |source: &DeclaredSource| -> Vec<String> {
-        let mut names: Vec<String> = Vec::new();
-        for prop in props.iter().filter(|prop| !prop.react_declared && prop.parent.as_ref() == Some(&source.parent)) {
-            if !names.contains(&prop.name) {
-                names.push(prop.name.clone());
-            }
-        }
-        names
-    };
-    let mut notable = Vec::new();
     let notable_names = crate::react_types::notable_html_attrs("");
+    let mut notable = Vec::new();
     let mut layers = Vec::new();
-    for source in sources.iter().filter(|source| unread(source)) {
-        let members = reaching(source);
-        if !cx.collapses(&source.parent.file_name, &source.parent.name, members.len()) {
+    for (source, members) in sources {
+        if !unread(source) || !cx.collapses(&source.file_name, &source.name, members.len()) {
             continue;
         }
-        notable.extend(members.iter().filter(|name| notable_names.contains(&name.as_str())).cloned());
+        notable.extend(
+            members
+                .iter()
+                .filter(|name| notable_names.contains(&name.as_str()))
+                .map(|name| (name.clone(), source.clone())),
+        );
         layers.push(InheritedLayer {
-            type_name: source.parent.name.clone(),
-            file_name: source.parent.file_name.clone(),
+            type_name: source.name.clone(),
+            file_name: source.file_name.clone(),
             omitted: Vec::new(),
             html_element: None,
             total_props: u32::try_from(members.len()).unwrap_or(u32::MAX),
@@ -454,7 +446,7 @@ pub(crate) fn layer_checker_props<'a>(
     let kept = props
         .into_iter()
         .filter(|prop| {
-            notable.contains(&prop.name)
+            notable.iter().any(|(name, _)| *name == prop.name)
                 || entry.props.contains_key(&prop.name)
                 || !layered.contains(prop.name.as_str())
         })
@@ -462,10 +454,13 @@ pub(crate) fn layer_checker_props<'a>(
     (kept, notable)
 }
 
-/// Moves the merged props `notable` names from `entry`'s props to its `notableInherited` ([`layer_checker_props`]).
-pub(crate) fn move_notable(entry: &mut ComponentEntry, notable: &[String]) {
-    for name in notable {
-        if let Some(prop) = entry.props.remove(name) {
+/// Moves each merged prop `notable` names from `entry`'s props to its `notableInherited`, when it is the collapsed
+/// source's member (its `parent` is that source); a prop of that name the component declares itself stays a prop.
+pub(crate) fn move_notable(entry: &mut ComponentEntry, notable: &[(String, PropParent)]) {
+    for (name, source) in notable {
+        if entry.props.get(name).is_some_and(|prop| prop.parent.as_ref() == Some(source))
+            && let Some(prop) = entry.props.remove(name)
+        {
             entry.notable_inherited.insert(name.clone(), prop);
         }
     }

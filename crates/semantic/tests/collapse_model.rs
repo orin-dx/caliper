@@ -6,9 +6,8 @@
 //! Both must give each component the same inheritance layers, and, wherever the structural lane can read the source,
 //! the same props. A fourth origin is a package source only the checker can see: a package component's props reached
 //! through `PropsOf<typeof Widget>` (an `infer` conditional, as `ComponentProps` is), which the structural lane does not follow; there the checker supplies the
-//! source's declared member count and the layers must be what the structural lane would give (the one decision,
-//! `CollapseInheritedProps::collapses`, asked with that count). Where both lanes see a source, the checker's declared
-//! count is the structural one.
+//! source's reaching members and the layers must be what the structural lane would give (the one decision,
+//! `CollapseInheritedProps::collapses`, asked with the members that reach the component, counted alike in both lanes).
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -131,14 +130,6 @@ fn the_structural_and_the_checker_lane_give_the_same_layers_and_props() {
                 request.request_timeout = Duration::from_secs(60);
                 let outcome = resolve(request);
                 assert_eq!(outcome.fallbacks, [], "the checker answers every component");
-                // Where both lanes see a source, the checker's declared count is the one the source declares.
-                for component in &outcome.components {
-                    for source in &component.sources {
-                        if let Some((_, _, count, _)) = SOURCES.iter().find(|s| s.0 == source.parent.name) {
-                            assert_eq!(source.declared as usize, *count, "declared count of {}", source.parent.name);
-                        }
-                    }
-                }
                 let mut checker = structural.clone();
                 merge_semantic_in(&mut checker, outcome, Default::default(), CollapseContext::of(&options));
 

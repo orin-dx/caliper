@@ -36,23 +36,19 @@ pub(super) fn resolve_type_alias_chain(
         }
 
         CollectedTypeAlias::Omit { base, keys, file_path } => {
-            // A source collapses by the members that reach the component (`CollapseInheritedProps::collapses`): the base
-            // is read in a branch, and read again with nothing collapsed when the `Omit` leaves a collapsed source at or
-            // under its threshold, so what reaches is listed.
-            let mut probe = state.branch();
-            let probed = resolve_base_as_chain(base, file_path, mapping, ctx, &mut probe, depth);
-            let mut chain = if !state.expand_all
-                && omit_lists_a_collapsed_source(&probed, keys, file_path, mapping, ctx, state, depth)
-            {
-                let expand_all = state.expand_all;
-                state.expand_all = true;
-                let chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
-                state.expand_all = expand_all;
-                chain
-            } else {
-                state.absorb(probe);
-                probed
-            };
+            // The base is read once, knowing the keys this `Omit` (and any around it) takes away, so each source in it
+            // collapses by the members that reach the component (`ResolutionContext::collapses`). The keys are read
+            // first in a detached state; their diagnostics come from the read after the base, as before.
+            let mut detached = state.detached();
+            let known = resolve_key_set(keys, file_path, mapping, ctx, &mut detached, depth);
+            let outer = state.omitted.clone();
+            if let Some(known) = known {
+                let mut all: FxHashSet<String> = outer.as_deref().cloned().unwrap_or_default();
+                all.extend(known);
+                state.omitted = Some(Arc::new(all));
+            }
+            let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
+            state.omitted = outer;
             let Some(omitted) = resolve_key_set_or_warn("Omit", keys, file_path, mapping, ctx, state, depth) else {
                 return chain;
             };
@@ -922,34 +918,6 @@ fn utility_reference<'a>(
 ) -> PropType {
     let reference = CollectedType::Named { name: name.into(), args: args.into_iter().cloned().collect() };
     resolve_collected_type(&reference, file_path, ctx, state, depth + 1)
-}
-
-/// Whether `Omit<_, keys>` over `chain` leaves one of its collapsed sources with no more members reaching the component
-/// than its threshold. The keys are read in a detached state, so their diagnostics come from the real read.
-#[allow(clippy::too_many_arguments)]
-fn omit_lists_a_collapsed_source(
-    chain: &ResolvedChain,
-    keys: &CollectedType,
-    file: &Utf8Path,
-    mapping: &ComponentMapping,
-    ctx: &ResolutionContext,
-    state: &ResolveState,
-    depth: u8,
-) -> bool {
-    if chain.inheritance.iter().all(|layer| layer.members.is_empty()) {
-        return false;
-    }
-    let mut detached = state.detached();
-    let Some(omitted) = resolve_key_set(keys, file, mapping, ctx, &mut detached, depth) else { return false };
-    chain.inheritance.iter().filter(|layer| !layer.members.is_empty()).any(|layer| {
-        let reaching = layer.members.iter().filter(|name| !omitted.contains(name)).count();
-        !ctx.collapse_inherited_props.collapses(
-            ctx.is_dependency_file(Utf8Path::new(&layer.file_name)),
-            &layer.file_name,
-            &layer.type_name,
-            reaching,
-        )
-    })
 }
 
 /// The key set a `Pick`/`Omit` key expression denotes, or a warning and `None` when it can't be known statically.

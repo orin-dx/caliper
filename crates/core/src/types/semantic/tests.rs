@@ -64,7 +64,7 @@ fn semantic_prop(name: &str, description: &str, required: bool) -> Arc<SemanticP
 }
 
 fn button(props: Vec<Arc<SemanticProp>>) -> SemanticComponent {
-    SemanticComponent { key: "Button".to_string(), props, composes: Some(Vec::new()), sources: Vec::new() }
+    SemanticComponent { key: "Button".to_string(), props, composes: Some(Vec::new()) }
 }
 
 #[test]
@@ -510,7 +510,6 @@ fn merged_props_that_come_out_equal_are_one_allocation() {
         key: "Card".to_string(),
         props: vec![semantic_prop("tone", "", true)],
         composes: Some(Vec::new()),
-        sources: Vec::new(),
     };
     let tone_on_button = button(vec![semantic_prop("tone", "", true)]);
 
@@ -533,7 +532,6 @@ fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_fil
         key: "Card~2".to_string(),
         props: vec![semantic_prop("tone", "", true)],
         composes: Some(Vec::new()),
-        sources: Vec::new(),
     };
     let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string() };
     merge_semantic(
@@ -618,12 +616,7 @@ fn one_checker_prop_over_different_structural_props_merges_into_each_its_own() {
     out.components.insert("First".to_string(), entry("First", shared.clone()));
     out.components.insert("Second".to_string(), entry("Second", shared));
     let label = semantic_prop("label", "", false);
-    let answer = |key: &str| SemanticComponent {
-        key: key.to_string(),
-        props: vec![label.clone()],
-        composes: None,
-        sources: Vec::new(),
-    };
+    let answer = |key: &str| SemanticComponent { key: key.to_string(), props: vec![label.clone()], composes: None };
     let outcome = SemanticOutcome {
         components: vec![button(vec![label.clone()]), answer("Card"), answer("First"), answer("Second")],
         ..Default::default()
@@ -780,25 +773,20 @@ fn the_checker_lane_leaves_a_structurally_collapsed_layers_props_and_notable_one
     assert!(out.components["Button"].notable_inherited.contains_key("disabled"));
 }
 
-fn source(name: &str, file: &str, declared: u32) -> DeclaredSource {
-    DeclaredSource { parent: PropParent { name: name.to_string(), file_name: file.to_string() }, declared }
-}
-
 const LOADED: CollapseContext =
     CollapseContext { mode: crate::types::options::CollapseInheritedProps::Dependencies, load_dependencies: true };
 
 #[test]
 fn a_source_only_the_checker_read_collapses_by_the_members_that_reach_and_only_when_asked() {
-    // The structural answer did not reach `GlobalDOMEvents` (declared 700 here); the checker's answer holds `reaching`
-    // of its members, after an `Omit` or a `Pick`. Those decide, as in the structural pass.
+    // The structural answer did not reach `GlobalDOMEvents`; the checker's answer holds `reaching` of its members,
+    // after an `Omit` or a `Pick`. Those decide, as in the structural pass.
     let run = |cx: CollapseContext, reaching: usize| {
         let mut out = output();
         let mut props = vec![semantic_prop("label", "", false)];
         props.extend(from_source("on", reaching, "GlobalDOMEvents", DOM));
         // The same member reached through a second path counts once.
         props.push(props[1].clone());
-        let mut component = button(props);
-        component.sources = vec![source("GlobalDOMEvents", DOM, 700)];
+        let component = button(props);
         let outcome = SemanticOutcome { components: vec![component], ..Default::default() };
         merge_semantic_in(&mut out, outcome, ResolverFacts::Used, cx);
         let entry = &out.components["Button"];
@@ -824,8 +812,7 @@ fn a_notable_prop_of_a_source_only_the_checker_read_is_notable_inherited_not_a_p
     props.extend(from_source("on", 31, "GlobalDOMEvents", DOM));
     let notable = Arc::new(SemanticProp { name: "onClick".to_string(), ..(*props[2]).clone() });
     props.push(notable);
-    let mut component = button(props);
-    component.sources = vec![source("GlobalDOMEvents", DOM, 32)];
+    let component = button(props);
     merge_semantic_in(
         &mut out,
         SemanticOutcome { components: vec![component], ..Default::default() },
@@ -839,12 +826,12 @@ fn a_notable_prop_of_a_source_only_the_checker_read_is_notable_inherited_not_a_p
 }
 
 #[test]
-fn the_checker_lane_makes_no_layer_of_its_own_without_a_declared_count() {
-    // The structural answer did not reach the source and the checker reported no declared count for it: nothing is
-    // collapsed (the decision needs the count a source declares, never the props of the answer).
+fn a_prop_with_no_interface_parent_is_never_layered() {
+    // Props declared in a type literal have no `parent`: no source to collapse, so they are listed.
     let mut out = output();
-    let mut props = vec![semantic_prop("label", "", false)];
-    props.extend(from_source("on", 60, "GlobalDOMEvents", DOM));
+    let props: Vec<Arc<SemanticProp>> = (0..60).map(|i| semantic_prop(&format!("on{i}"), "", false)).collect();
+    let mut props = props;
+    props.insert(0, semantic_prop("label", "", false));
     merge_semantic_in(
         &mut out,
         SemanticOutcome { components: vec![button(props)], ..Default::default() },
@@ -862,11 +849,34 @@ fn following_the_layers_twice_gives_the_same_props_and_layers() {
     let entry = out.components.get_mut("Button").unwrap();
     let mut props = vec![semantic_prop("label", "", false)];
     props.extend(from_source("on", 31, "GlobalDOMEvents", DOM));
-    let sources = vec![source("GlobalDOMEvents", DOM, 31)];
-    let (once, _) = layer_checker_props(entry, props.iter().collect(), &sources, LOADED);
+    let (once, _) = layer_checker_props(entry, props.iter().collect(), LOADED);
     let layers = entry.inheritance.clone();
-    let (twice, _) = layer_checker_props(entry, once.clone(), &sources, LOADED);
+    let (twice, _) = layer_checker_props(entry, once.clone(), LOADED);
     assert_eq!(once, twice);
     assert_eq!(entry.inheritance, layers);
     assert_eq!(once.iter().map(|prop| prop.name.as_str()).collect::<Vec<_>>(), ["label"]);
+}
+
+#[test]
+fn a_prop_the_component_declares_itself_stays_a_prop_beside_a_collapsed_source_of_that_name() {
+    // `onClick` is the component's own (parent `Props`); `GlobalDOMEvents` also declares `onClick`, and 31 of its
+    // members reach through the checker's answer under other names. Only the source's members are layered and moved.
+    let mut out = output();
+    let own = Arc::new(SemanticProp {
+        parent: Some(PropParent { name: "Props".to_string(), file_name: "/src/Button.tsx".to_string() }),
+        ..(*semantic_prop("onClick", "Own click.", false)).clone()
+    });
+    let mut props = vec![semantic_prop("label", "", false), own];
+    props.extend(from_source("on", 31, "GlobalDOMEvents", DOM));
+    merge_semantic_in(
+        &mut out,
+        SemanticOutcome { components: vec![button(props)], ..Default::default() },
+        ResolverFacts::Used,
+        LOADED,
+    );
+    let entry = &out.components["Button"];
+    assert!(entry.props.contains_key("onClick"), "{:?}", entry.props.keys().collect::<Vec<_>>());
+    assert!(!entry.notable_inherited.contains_key("onClick"));
+    assert_eq!(entry.inheritance.len(), 1);
+    assert!(!entry.inheritance[0].members.contains(&"onClick".to_string()));
 }

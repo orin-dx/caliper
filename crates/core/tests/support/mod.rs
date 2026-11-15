@@ -21,5 +21,5 @@ pub fn semantic_prop(name: &str, prop_type: PropType, required: bool, react_decl
 
 /// A component whose props type is made of no `@types/react` types.
 pub fn semantic_component(key: &str, props: Vec<Arc<SemanticProp>>) -> SemanticComponent {
-    SemanticComponent { key: key.to_string(), props, composes: Some(Vec::new()), sources: Vec::new() }
+    SemanticComponent { key: key.to_string(), props, composes: Some(Vec::new()) }
 }
