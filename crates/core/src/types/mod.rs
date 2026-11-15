@@ -14,6 +14,7 @@
 //! - `global`    — GlobalSourceData + ResolveState (the shared resolution context)
 //! - `options`   — PipelineOptions and the mode enums it carries (re-exported by `pipeline`)
 
+pub(crate) mod ambient;
 pub mod collected;
 pub mod diagnostic;
 pub mod global;

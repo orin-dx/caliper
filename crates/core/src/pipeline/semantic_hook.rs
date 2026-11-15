@@ -25,6 +25,7 @@ use super::ComponentAnswer;
 use crate::pipeline::HtmlAttributeMode;
 use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
+use crate::types::options::CollapseContext;
 use crate::types::semantic::{
     Delivery, MergedProps, Priority, PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome, SemanticProp,
     SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, drop_superseded, merge_semantic_props,
@@ -191,6 +192,7 @@ impl SemanticHook {
         &self,
         mut answer: ComponentAnswer,
         mode: HtmlAttributeMode,
+        cx: CollapseContext,
         priority: Priority,
     ) -> ComponentAnswer {
         let stamp = std::fs::read(&answer.entry.file_path).map(|bytes| {
@@ -203,7 +205,7 @@ impl SemanticHook {
         let (found, generation) = self.find(cache_key.as_ref(), priority);
         let pending = match found {
             Found::Cached(cached) => {
-                self.apply(&mut answer, cached, mode);
+                self.apply(&mut answer, cached, mode, cx);
                 return answer;
             }
             Found::Joined(pending) => pending,
@@ -220,7 +222,7 @@ impl SemanticHook {
                         answer.diagnostics.push(diagnostic);
                     }
                 }
-                self.apply(&mut answer, answered, mode);
+                self.apply(&mut answer, answered, mode, cx);
             }
             Some(Settled::Stopped) => {
                 let mut stopped = Diagnostic::new(
@@ -322,7 +324,7 @@ impl SemanticHook {
     /// Merges what the checker made of the component into `answer`: its props, if it found the component, then what it
     /// said about the request. The structural diagnostics its props supersede go first, so the checker's are never
     /// read as structural.
-    fn apply(&self, answer: &mut ComponentAnswer, answered: Answered, mode: HtmlAttributeMode) {
+    fn apply(&self, answer: &mut ComponentAnswer, answered: Answered, mode: HtmlAttributeMode, cx: CollapseContext) {
         let Answered { component, diagnostics } = answered;
         let Some(component) = component else {
             answer.diagnostics.extend(diagnostics);
@@ -334,6 +336,8 @@ impl SemanticHook {
             .iter()
             .filter(|prop| checker_prop_used(mode, &prop.name, prop.react_declared, &structural))
             .collect();
+        // The props of a collapsed source are its layer's, not listed again.
+        let (used, notable) = crate::types::semantic::layer_checker_props(&mut answer.entry, used, cx);
         // A structural prop the checker did not return keeps its structural type, opaque or not, and a structural
         // diagnostic naming the component may be about it.
         let structural_left = structural
@@ -345,6 +349,7 @@ impl SemanticHook {
             component.composes.as_deref(),
             &mut FxHashMap::default(),
         );
+        crate::types::semantic::move_notable(&mut answer.entry, &notable);
         let superseding = Superseding::new(&answer.key, &answer.entry, structural_left);
         drop_superseded(&mut answer.diagnostics, &[superseding]);
         answer.diagnostics.extend(diagnostics);

@@ -21,8 +21,10 @@ export interface CaliperStorybookOptions {
    */
   loadDependencies?: boolean
   /**
-   * Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop. Default:
-   * `'none'`, every inherited prop listed.
+   * Which large inherited sources to list as one inherited layer of names instead of prop by prop. Default:
+   * `'dependencies'`: a dependency's DOM, ARIA and style-system sources of more than 30 props, and any other source,
+   * the project's own included, of more than 200 props. `'all'` also collapses project sources of more than 30 props;
+   * `'none'` lists every inherited prop.
    */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
   /**

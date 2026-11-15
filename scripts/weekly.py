@@ -90,12 +90,12 @@ def tool_run(command, out):
 
 def caliper_run(binary, src, runs):
     """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
-    loaded, inherited props not collapsed), and the JSON's size. The checker answers, as
+    loaded, `--collapse-inherited-props dependencies` pinned: the addon's default), and the JSON's size. The checker answers, as
     it does by default (docs/measurement.md). The parse caches are warm (a warm-up run fills them), but each timed run
     asks the checker everything: the answer `extract` keeps is removed first, since react-docgen-typescript keeps none.
     `rerun_ms` is the median of as many runs that find it, what a rerun over unchanged files costs."""
     with tempfile.TemporaryDirectory() as cache, tempfile.TemporaryFile() as out:
-        command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none',
+        command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'dependencies',
                    '--cache-dir', cache]
         run_once(command, stdout=out)
         size = out.tell()

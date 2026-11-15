@@ -2,7 +2,7 @@
 """A/B speed and memory of this checkout (or a branch) against origin/main, for when a change touches the resolver.
 
 Builds both in release mode, then times `extract --json` in the Storybook addon's configuration (dependencies loaded,
-cache on after a warm-up run, inherited props not collapsed) over Mantine and Chakra with their dependencies installed
+cache on after a warm-up run, large inherited sources collapsed: `--collapse-inherited-props dependencies`) over Mantine and Chakra with their dependencies installed
 (`scripts/corpora.py setup --corpus mantine --corpus chakra`; without them nothing would be loaded, so the run stops)
 with the two builds interleaved and alternating which goes first, and prints the median wall time and peak RSS of each
 side. The 1.10x time and 1.20x memory thresholds come from a calibration made with dependency loading and the cache
@@ -35,9 +35,9 @@ def build(manifest_dir, target_dir, destination):
 
 def extract_command(binary, src, cache_dir):
     """The addon's configuration (packages/storybook/src/provider.ts): dependencies loaded, the cache on, and
-    inherited props never collapsed. Each side keeps its own cache directory so one build never reads the other's. The
+    large inherited sources collapsed (`dependencies`, the addon's default). Each side keeps its own cache directory so one build never reads the other's. The
     checker answers, as it does by default."""
-    return [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none',
+    return [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'dependencies',
             '--cache-dir', cache_dir]
 
 
