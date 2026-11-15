@@ -582,6 +582,12 @@ fn a_nested_components_wrapper_arguments_are_the_parents() {
         "C",
     );
     assert_eq!(facts.elements, [component("Icon", vec![]), component("Item", vec![])]);
+    let class = parse(
+        "export function C(props: P) { const Item = observer(class extends Component { render() { return <li /> } }); \
+         return <Item /> }",
+    );
+    assert_eq!(class.component_mappings[0].body.as_ref().unwrap().elements, [component("Item", vec![])]);
+    assert_eq!(class.jsx_usages, [usage(JsxTag::Intrinsic("li".into()))]);
 }
 
 /// A small deterministic generator of one-component files (a linear congruential sequence, no dependency): a wrapper

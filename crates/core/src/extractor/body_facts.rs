@@ -79,7 +79,7 @@ pub(super) fn attach<'a>(program: &'a Program<'a>, mappings: &mut [ComponentMapp
     let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
     let (scoping, nodes) = (semantic.scoping(), semantic.nodes());
     let mut found = FxHashMap::default();
-    // Elements of nested components, each at the place in `usages` its component's declaration was reached.
+    // Elements of nested components, each at the place in `usages` its component function was reached.
     let mut nested: Vec<(usize, Vec<JsxUsage>)> = Vec::new();
     for node in nodes.iter() {
         let (span, function) = match node.kind() {
@@ -130,6 +130,16 @@ fn unwrap<'b, 'a>(expr: &'b Expression<'a>) -> Option<ComponentFn<'b, 'a>> {
         Expression::ArrowFunctionExpression(arrow) => Some(ComponentFn::Arrow(arrow)),
         Expression::CallExpression(call) => unwrap(call.arguments.first()?.as_expression()?),
         _ => None,
+    }
+}
+
+/// The span of the function or class a nested component's initializer is, through the same wrappers as [`unwrap`]
+/// (`observer(class extends Component { … })`).
+fn nested_component(expr: &Expression<'_>) -> Option<oxc_span::Span> {
+    match peel_expr(expr) {
+        Expression::ClassExpression(class) => Some(class.span),
+        Expression::CallExpression(call) => nested_component(call.arguments.first()?.as_expression()?),
+        _ => unwrap(expr).map(|function| function.span()),
     }
 }
 
@@ -266,9 +276,8 @@ impl<'s, 'a> Reader<'s, 'a> {
         }
         // A key's first read is its earliest in the source.
         self.reads.sort_by_key(|&(at, _)| at);
-        let mut seen = FxHashSet::default();
         for (_, key) in std::mem::take(&mut self.reads) {
-            if seen.insert(key.clone()) {
+            if !self.facts.reads.contains(&key) {
                 self.facts.reads.push(key);
             }
         }
@@ -564,16 +573,9 @@ impl Elements<'_, '_, '_> {
 impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
         if matches!(&it.id, BindingPattern::BindingIdentifier(id) if self.is_tag(Some(id)))
-            && let Some(init) = &it.init
+            && let Some(span) = it.init.as_ref().and_then(nested_component)
         {
-            let span = match (unwrap(init), peel_expr(init)) {
-                (Some(function), _) => Some(function.span()),
-                (None, Expression::ClassExpression(class)) => Some(class.span),
-                _ => None,
-            };
-            if let Some(span) = span {
-                self.nested_spans.insert((span.start, span.end));
-            }
+            self.nested_spans.insert((span.start, span.end));
         }
         walk::walk_variable_declarator(self, it);
     }
