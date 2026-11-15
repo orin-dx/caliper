@@ -490,6 +490,7 @@ pub(crate) fn layer_checker_props<'a>(
     for (name, source) in of_entry {
         if kept.iter().any(|prop| prop.name == *name && prop.parent.as_ref() == Some(source))
             && !entry.props.contains_key(name)
+            && entry.notable_inherited.get(name).is_some_and(|structural| structural.parent.as_ref() == Some(source))
             && let Some(structural) = entry.notable_inherited.remove(name)
         {
             entry.props.insert(name.clone(), structural);
