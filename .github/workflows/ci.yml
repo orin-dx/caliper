@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
   merge_group:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -316,10 +317,67 @@ jobs:
           callisto version
           callisto release --dry-run --format text
 
+  # The guard the 0.11.0 release lacked: the checker on the five real corpora, against their budgets (BUDGETS in
+  # scripts/headline.py, docs/measurement.md "The budgets"). It runs only on the Callisto release pull request, and by
+  # hand, because it installs about 10 GB of node_modules; it costs no money (no `--oracle`, no `--agent-eval`). The
+  # steps are weekly.yml's. A budget breach or a corpus that failed (killed, over its timeout) fails the job.
+  corpora-budget:
+    name: Corpora budget
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.head_ref == 'callisto/version-packages' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      # The corpora's own package managers run under Node 24 (see weekly.yml): Yarn 4.18 crashes under Node 26. This step
+      # comes before the toolchain's so that the toolchain's Node stays first on PATH; only the installs use this one.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - id: corpus-node
+        run: echo "dir=$(dirname "$(command -v node)")" >> "$GITHUB_OUTPUT"
+      # RDT and react-docgen, which the record also measures, run from apps/oracle's dependencies.
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+      - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+      - run: pnpm install --frozen-lockfile
+      - run: cargo build --release --locked -p caliper-docgen
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .corpora/caches
+          key: weekly-${{ hashFiles('scripts/corpora.py', 'pnpm-lock.yaml') }}
+      - name: Fetch and install the corpora
+        env:
+          INSTALL_NODE_DIR: ${{ steps.corpus-node.outputs.dir }}
+        run: python3 scripts/corpora.py setup --install-node-dir "$INSTALL_NODE_DIR"
+      - name: Measure against the budgets
+        run: >-
+          python3 scripts/weekly.py --bin target/release/caliper-docgen --runs 1 --enforce-budgets
+          --out weekly.json --markdown weekly.md
+      - if: always()
+        run: cat weekly.md >> "$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: corpora-budget
+          path: |
+            weekly.json
+            weekly.md
+            .corpora/logs
+          if-no-files-found: ignore
+
   # The one check to require in branch protection.
   ci:
     name: CI
-    needs: [lint, test-rust, test-checker-lane, test-napi, test-py, test-ts, test-integration, test-construct, coverage, install, semver, msrv, audit, changesets]
+    needs: [lint, test-rust, test-checker-lane, test-napi, test-py, test-ts, test-integration, test-construct, coverage, install, semver, msrv, audit, changesets, corpora-budget]
     if: always()
     runs-on: ubuntu-latest
     steps:
