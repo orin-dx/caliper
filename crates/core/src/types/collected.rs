@@ -1839,6 +1839,9 @@ pub(crate) enum JsxTag {
     Identifier(std::string::String),
     /// A component reached through a member path: `chakra.button`.
     Member(std::string::String),
+    /// A component tag, or member path, whose first name a binding of an inner scope binds (a parameter, `const Item =
+    /// props.as`, an inner function or class): it is not the module's binding of that name.
+    Scoped(std::string::String),
 }
 
 /// One attribute of a JSX element.
