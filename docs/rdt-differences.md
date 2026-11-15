@@ -350,7 +350,7 @@ What RDT does that Caliper does not, run on small files:
 - Caliper, default collapse: 1 prop listed, and `gap3` is a name in the layer's `members` (35 of them), with no type. With `none`: 36 props listed and `gap3` has its type.
 - Checker: `gap3 : string | number | undefined`.
 
-**Why not better, at the default.** A CLI, NAPI or agent consumer sees the name and not the type. The Storybook addon runs `none` and lists the type. Fix direction is in `docs/measurement.md`, "Layer-only props".
+**Why not better, at the default.** A CLI, NAPI or agent consumer sees the name and not the type. The Storybook addon collapses by default too (`dependencies`); `collapseInheritedProps: 'none'` lists the type. Fix direction is in `docs/measurement.md`, "Layer-only props".
 
 **Measured.** The weekly record runs with `none`, so `named only` is 0 on every corpus; the 39.6% shadcn figure in `docs/measurement.md` is a local default-collapse run.
 
