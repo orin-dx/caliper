@@ -624,7 +624,10 @@ impl Converter {
     ///
     /// The same walk finds the props each lib `Pick` on the way selects (the second of the pair), each name once: they
     /// reach the component by name (`SemanticComponent::picked`). A type whose bases cannot be asked for is not looked
-    /// into, for either.
+    /// into, for either. A `Pick` that is the whole body of a project alias (`type P = Pick<Base, "a">`) is not found:
+    /// the checker names the type by the project alias (TypeScript keeps the outermost alias), and the mapped type it
+    /// is cannot tell a `Pick` from an `Omit`, which the lib writes as a `Pick`. Where the structural pass reads the
+    /// base it lists those props itself, and the merge follows it; only a base it cannot read is decided here alone.
     pub(crate) async fn composes(
         &self,
         props_type: &TypeInfo,

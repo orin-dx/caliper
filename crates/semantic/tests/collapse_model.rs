@@ -281,6 +281,51 @@ fn both_lanes(package: &str, project: &[(&str, String)]) -> (tempfile::TempDir, 
     (dir, structural, checker)
 }
 
+/// The checker answers a prop's JSDoc when it is asked (`described` cleared), for a plain interface and for one only
+/// it can reach. It answers `""` for every property of a TypeScript file today, so a source only the checker reads
+/// (`OnlyBox` in the finding B test) has no description: the whole-project merge hides this elsewhere by keeping the
+/// structural description (`SemanticTarget::described`).
+#[test]
+#[ignore = "the checker (tsrs 0.24 getDocumentationComment) answers \"\" for every property of a .ts file"]
+fn the_checker_answers_a_props_jsdoc() {
+    let dir = tempfile::Builder::new().prefix("Jsdoc").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    std::fs::write(
+        root.join("local.ts"),
+        "export interface LocalSmall { /** The class. */ className?: string; /** L. */ l?: string }\n\
+         export declare function WidgetLocal(props: LocalSmall): null;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("C.tsx"),
+        "import { WidgetLocal, type LocalSmall } from './local';\n\
+         type PropsOf<T> = T extends (props: infer P) => unknown ? P : never;\n\
+         export function OnlyLocal(props: PropsOf<typeof WidgetLocal>) { return null; }\n\
+         export function Direct(props: LocalSmall) { return null; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "preserve", "strict": true, "skipLibCheck": true, "noEmit": true, "types": [] } }"#,
+    )
+    .unwrap();
+    let options = PipelineOptions { src_dirs: vec![root.clone()], use_cache: false, ..PipelineOptions::default() };
+    let structural = extract(&options);
+    let mut targets = targets_of(&structural);
+    for target in &mut targets {
+        target.described.clear();
+    }
+    let mut request = SemanticRequest::new(root.clone(), targets);
+    request.request_timeout = Duration::from_secs(60);
+    let outcome = resolve(request);
+    for component in &outcome.components {
+        for prop in &component.props {
+            let expected = if prop.name == "className" { "The class." } else { "L." };
+            assert_eq!(prop.description, expected, "{} {}", component.key, prop.name);
+        }
+    }
+}
+
 /// Finding A: a `Pick` names its keys on purpose, so the props it picks are listed however large their source, also
 /// when only the checker reads the source (`PropsOf<typeof WidgetHuge>`), and through an `Omit`, a `Partial` or an
 /// intersection around it.
@@ -293,11 +338,16 @@ fn finding_a_picked_keys_over_a_large_source_stay_listed_in_both_lanes() {
         ("OmitOfPick300", format!("Omit<Pick<S, {}>, 'h0'>", keys(0..300)), 299),
         ("PartialPick250", format!("Partial<Pick<S, {}>>", keys(0..250)), 250),
         ("PickAndOwn250", format!("Pick<S, {}> & {{ own?: boolean }}", keys(0..250)), 250),
+        // A project alias whose whole body is the `Pick`.
+        ("NamedPick250", "NamedS".to_string(), 250),
     ];
     let mut text = String::from(
         "import type { Huge } from 'pkg';\nimport { WidgetHuge } from 'pkg';\n\
          type PropsOf<T> = T extends (props: infer P) => unknown ? P : never;\ntype Seen = PropsOf<typeof WidgetHuge>;\n",
     );
+    for base in ["Huge", "Seen"] {
+        text.push_str(&format!("type Named{base} = Pick<{base}, {}>;\n", keys(0..250)));
+    }
     for (name, wrapper, _) in &cases {
         let structural = wrapper.replace('S', "Huge");
         let checker_only = wrapper.replace('S', "Seen");
@@ -316,12 +366,19 @@ fn finding_a_picked_keys_over_a_large_source_stay_listed_in_both_lanes() {
             ("checker", &checker, format!("Struct{name}")),
             ("checker only", &checker, format!("Only{name}")),
         ] {
+            // The checker cannot see a `Pick` a project alias is (`Converter::composes`), and the structural lane
+            // cannot read `Seen`: this one case collapses (a known limit, not asserted).
+            if *name == "NamedPick250" && lane == "checker only" {
+                continue;
+            }
             let entry = &output.components[&key];
             assert!(entry.inheritance.iter().all(|layer| layer.type_name != "Huge"), "{lane} {key}: no Huge layer");
             let shown = entry.props.keys().filter(|prop| prop.starts_with('h')).count();
             assert_eq!(shown, *listed, "{lane} {key}: listed");
         }
-        assert_eq!(props(&checker, &format!("Only{name}")), props(&structural, &format!("Struct{name}")), "{name}");
+        if *name != "NamedPick250" {
+            assert_eq!(props(&checker, &format!("Only{name}")), props(&structural, &format!("Struct{name}")), "{name}");
+        }
     }
 }
 
@@ -345,7 +402,8 @@ fn finding_b_a_notable_prop_of_a_collapsed_source_keeps_its_default_in_both_lane
          export function Box({ className = 'base' }: BoxProps) { return null; }\n\
          export function PartialBox({ className = 'base' }: Partial<BigBox>) { return null; }\n\
          export function RequiredBox(props: Required<Partial<BigBox>>) { return null; }\n\
-         export function OnlyBox({ className = 'base' }: PropsOf<typeof WidgetHugeBox>) { return null; }\n",
+         export function OnlyBox({ className = 'base' }: PropsOf<typeof WidgetHugeBox>) { return null; }\n\
+         export function PickedAndLayered(props: Pick<BigBox, 'className'> & Omit<BigBox, 'b0'>) { return null; }\n",
     );
     let (_dir, structural, checker) =
         both_lanes(&big("HugeBox"), &[("sources.ts", big("BigBox")), ("Components.tsx", text)]);
@@ -371,7 +429,14 @@ fn finding_b_a_notable_prop_of_a_collapsed_source_keeps_its_default_in_both_lane
         assert_eq!(notable(&structural, key), expected, "structural {key}");
         assert_eq!(notable(&checker, key), expected, "checker {key}");
     }
-    // Only the checker reads this source; its JSDoc for a package's prop is not what this asks.
+    // Picked by name and held by a layer through the `Omit`: the structural lane lists it, so the checker lane does.
+    for (lane, output) in [("structural", &structural), ("checker", &checker)] {
+        let entry = &output.components["PickedAndLayered"];
+        assert!(entry.inheritance.iter().any(|layer| layer.type_name == "BigBox"), "{lane}: a BigBox layer");
+        assert!(entry.props.contains_key("className"), "{lane}: className listed");
+        assert!(!entry.notable_inherited.contains_key("className"), "{lane}: className not moved");
+    }
+    // Only the checker reads this source; its JSDoc is `the_checker_answers_a_props_jsdoc`'s.
     let only = notable(&checker, "OnlyBox").map(|(source, required, default, _)| (source, required, default));
     assert_eq!(only, Some(("HugeBox".to_string(), false, Some("'base'".to_string()))), "checker only OnlyBox");
 }

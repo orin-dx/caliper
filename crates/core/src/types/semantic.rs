@@ -396,7 +396,11 @@ fn apply_props(
 ///    that reach the component: the props of the answer whose `parent` is the source, after any `Omit` or `Pick`, each
 ///    name once (the structural resolver counts the same; no declared count is asked of the checker). A prop `picked`
 ///    names reaches by name, as the structural resolver lists whatever a `Pick` selects: it is neither counted nor held
-///    by a layer, and stays listed. `members` are the others and `totalProps` their number, what the layer holds. Its
+///    by a layer, and stays listed. `picked` holds names, not (source, name): a member of another source that has the
+///    name of a picked key is also left out of that source's count and layer, so the prop is listed (shown, never
+///    hidden) and the layer holds one member fewer than the structural one; at the threshold that source can be listed
+///    instead of collapsed. The checker answers one `parent` per name, so the pair would not tell the two apart either.
+///    `members` are the others and `totalProps` their number, what the layer holds. Its
 ///    notable props move to `notableInherited`, as the structural resolver keeps a collapsed source's notable members.
 ///
 /// Applying it again to the entry it changed gives the same props and layers: a layer made here is then a layer of the
@@ -409,15 +413,21 @@ pub(crate) fn layer_checker_props<'a>(
 ) -> (Vec<&'a Arc<SemanticProp>>, Vec<(String, PropParent)>) {
     let notable_names = crate::react_types::notable_html_attrs("");
     // The notable members of the layers the entry has (the structural resolver's): the checker's answer for each is
-    // merged, then moved back to `notableInherited` (rule 1).
+    // merged, then moved back to `notableInherited` (rule 1). One the structural answer lists itself (picked, or
+    // declared again) stays a prop.
     let mut notable: Vec<(String, PropParent)> = entry
         .inheritance
         .iter()
         .filter(|layer| layer.html_element.is_none())
         .flat_map(|layer| {
-            layer.members.iter().filter(|name| notable_names.contains(&name.as_str())).map(|name| {
-                (name.clone(), PropParent { name: layer.type_name.clone(), file_name: layer.file_name.clone() })
-            })
+            let listed = &entry.props;
+            layer
+                .members
+                .iter()
+                .filter(|name| notable_names.contains(&name.as_str()) && !listed.contains_key(*name))
+                .map(|name| {
+                    (name.clone(), PropParent { name: layer.type_name.clone(), file_name: layer.file_name.clone() })
+                })
         })
         .collect();
     let existing = notable.len();
