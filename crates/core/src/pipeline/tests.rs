@@ -1615,6 +1615,38 @@ fn test_watch_session_update() {
     );
 }
 
+// ── a watch revision sees the file system as the edit left it ─────────────
+
+#[test]
+fn a_file_created_after_the_session_started_resolves_in_the_next_revision() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "Button.tsx",
+        "import type { ButtonProps } from './props';\nexport function Button(props: ButtonProps) { return null; }\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    let options =
+        PipelineOptions { src_dirs: vec![dir.clone()], cache_dir: Some(dir.join("cache")), ..Default::default() };
+    let session = WatchSession::new(options);
+    let before = session.initialize();
+    assert!(
+        before.diagnostics.iter().any(|d| d.message.starts_with("Cannot resolve './props'")),
+        "{:#?}",
+        before.diagnostics
+    );
+
+    // The import's target appears and the importer is saved: a resolver that kept the first revision's view of the
+    // disk would still not find it.
+    write_file(&tmp, "props.ts", "export interface ButtonProps { label: string }\n");
+    session.update_file(&dir.join("props.ts"));
+    let update = session.update_file(&dir.join("Button.tsx"));
+
+    let props: Vec<&String> = update.updated_components[0].props.keys().collect();
+    assert_eq!(props, ["label"], "{:#?}", update.diagnostics);
+    assert!(session.snapshot().diagnostics.iter().all(|d| !d.message.starts_with("Cannot resolve './props'")));
+}
+
 // ── test_duplicate_component_declarations_in_one_file_emit_a_collision_diagnostic ─
 //
 // Bug C: `components.insert(key, entry)` in Phase

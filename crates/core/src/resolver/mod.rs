@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
-use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
+use oxc_resolver::{ResolveOptions, Resolver};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::import_map::ImportResolutionMap;
@@ -34,6 +34,7 @@ mod func;
 mod html;
 mod import;
 mod memo;
+mod modules;
 mod named;
 mod precedence;
 mod primitives;
@@ -41,9 +42,10 @@ mod react;
 mod substitute;
 mod template;
 
-pub(crate) use import::{ModuleResolution, resolve_module_with};
+pub(crate) use import::ModuleResolution;
 #[cfg(test)]
 pub(crate) use import::{follow_reexports_call_count, reset_follow_reexports_call_count};
+pub(crate) use modules::ModuleResolvers;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -264,9 +266,8 @@ pub struct ResolutionContext {
     /// module doc for why this exists alongside (not instead of) those flat
     /// maps.
     pub(crate) named_types: Arc<crate::named_type_index::NamedTypeIndex>,
-    pub oxc_resolver: Arc<Resolver>,
-    /// `ModuleResolvers::types_first`.
-    pub(crate) types_first_resolver: Arc<Resolver>,
+    /// Resolves import specifiers to files; its caches live and die with this context (a watch revision builds a new one).
+    pub(crate) module_resolvers: Arc<ModuleResolvers>,
     /// Module resolutions by `(directory, specifier)`. Resolution only reads the file system, which a run treats as
     /// fixed, and every component importing from the same directory asks again; a watch revision builds a fresh
     /// context, so nothing outlives one revision.
@@ -353,7 +354,7 @@ impl ResolutionContext {
         let resolvers = ModuleResolvers::new(options);
         // A tsconfig that can't be read or parsed would otherwise fail every aliased import one by one.
         let tsconfig_diagnostic = governing_tsconfig(options).and_then(|path| {
-            let error = resolvers.main.resolve_tsconfig(path.as_std_path()).err()?;
+            let error = resolvers.tsconfig_error(&path)?;
             Some(
                 Diagnostic::new(
                     DiagnosticSeverity::Warning,
@@ -388,8 +389,7 @@ impl ResolutionContext {
             import_map: Arc::new(ImportResolutionMap::build(&global)),
             named_types,
             global,
-            oxc_resolver: Arc::new(resolvers.main),
-            types_first_resolver: Arc::new(resolvers.types_first),
+            module_resolvers: Arc::new(resolvers),
             tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
             mapping_index: Default::default(),
@@ -545,8 +545,7 @@ impl ResolutionContext {
             global: self.global.clone(),
             import_map: Arc::new(import_map),
             named_types,
-            oxc_resolver: self.oxc_resolver.clone(),
-            types_first_resolver: self.types_first_resolver.clone(),
+            module_resolvers: self.module_resolvers.clone(),
             module_resolutions: Default::default(),
             react_types_files: Default::default(),
             shared_props: Default::default(),
@@ -649,7 +648,7 @@ pub(crate) fn resolution_fingerprint(options: &PipelineOptions) -> u64 {
         .map(|age| age.as_nanos());
     let text = format!(
         "{:?}|{:?}|{:?}|{}",
-        resolve_options(options),
+        "tsrs_module:bundler",
         tsconfig,
         tsconfig_mtime,
         env!("CALIPER_SOURCE_FINGERPRINT"),
@@ -679,61 +678,8 @@ pub fn resolve_package_dts_path(
     package_name: &str,
     options: &PipelineOptions,
 ) -> Option<String> {
-    let resolvers = ModuleResolvers::new(options);
-    // Resolved as if imported by a file in `from_dir`: the declaration resolver walks up from a file's directory.
-    let importing_file = from_dir.join("index.ts");
-    react::resolve_package_types_file(&resolvers.main, &resolvers.types_first, &importing_file, package_name)
-}
-
-/// The two resolvers of a run, configured the way TypeScript resolves this project's modules (`resolve_options`).
-pub(crate) struct ModuleResolvers {
-    pub(crate) main: Resolver,
-    /// Only `types` and the custom conditions: `resolve_dts` takes the first `exports` key that matches any condition,
-    /// so a package listing `"import"` before `"types"` resolves to JavaScript; this one reaches its declarations.
-    pub(crate) types_first: Resolver,
-}
-
-impl ModuleResolvers {
-    pub(crate) fn new(options: &PipelineOptions) -> Self {
-        let main = resolve_options(options);
-        let custom = custom_conditions(options);
-        let types_first =
-            ResolveOptions { condition_names: std::iter::once("types".into()).chain(custom).collect(), ..main.clone() };
-        ModuleResolvers { main: Resolver::new(main), types_first: Resolver::new(types_first) }
-    }
-}
-
-/// Module resolution as TypeScript does it for this project. The resolver reads the tsconfig itself (comments,
-/// `extends`, `baseUrl`, `paths` wildcards): the configured one, or else the nearest one above each importing file.
-/// The governing tsconfig's `customConditions` apply, ESM and CommonJS declaration files resolve, and an import written
-/// with a JavaScript extension (`./button.js`) finds its TypeScript source.
-fn resolve_options(options: &PipelineOptions) -> ResolveOptions {
-    let condition_names = ["types", "import", "require", "default"]
-        .into_iter()
-        .map(String::from)
-        .chain(custom_conditions(options))
-        .collect();
-    let tsconfig = match &options.tsconfig_path {
-        Some(path) => TsconfigDiscovery::Manual(TsconfigOptions {
-            config_file: path.as_std_path().to_owned(),
-            references: TsconfigReferences::Auto,
-        }),
-        None => TsconfigDiscovery::Auto,
-    };
-    let aliases = |js: &str, ts: &[&str]| (js.to_owned(), ts.iter().map(|ext| (*ext).to_owned()).collect());
-    ResolveOptions {
-        condition_names,
-        main_fields: vec!["types".into(), "typings".into(), "module".into(), "main".into()],
-        extensions: [".ts", ".tsx", ".d.ts", ".d.mts", ".d.cts", ".js"].map(String::from).to_vec(),
-        extension_alias: vec![
-            aliases(".js", &[".ts", ".tsx", ".d.ts", ".js"]),
-            aliases(".jsx", &[".tsx", ".jsx"]),
-            aliases(".mjs", &[".mts", ".d.mts", ".mjs"]),
-            aliases(".cjs", &[".cts", ".d.cts", ".cjs"]),
-        ],
-        tsconfig: Some(tsconfig),
-        ..ResolveOptions::default()
-    }
+    // Resolved as if imported by a file in `from_dir`: resolution walks up from a file's directory.
+    ModuleResolvers::new(options).package_declaration(&from_dir.join("index.ts"), package_name)
 }
 
 /// The tsconfig that governs the run: the configured one, or the nearest `tsconfig.json` above the first source
@@ -744,48 +690,6 @@ fn governing_tsconfig(options: &PipelineOptions) -> Option<Utf8PathBuf> {
     }
     let first = crate::canonical_path::canonicalize(options.src_dirs.first()?).ok()?;
     first.ancestors().map(|dir| dir.join("tsconfig.json")).find(|candidate| candidate.is_file())
-}
-
-/// `compilerOptions.customConditions` of the governing tsconfig, or of the nearest config it extends that sets them.
-/// `oxc_resolver` does not read them, and workspaces such as Chakra's and React Spectrum's point their packages'
-/// `exports` at TypeScript sources only through them.
-fn custom_conditions(options: &PipelineOptions) -> Vec<String> {
-    let mut next = governing_tsconfig(options);
-    // Bounds an `extends` cycle.
-    for _ in 0..16 {
-        let Some(path) = next.take() else { break };
-        let Some(config) = read_tsconfig_json(&path) else { break };
-        if let Some(conditions) = config.pointer("/compilerOptions/customConditions").and_then(|v| v.as_array()) {
-            return conditions.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect();
-        }
-        // TypeScript applies an array of bases in order, so the last one that sets an option wins.
-        let extends: Vec<&str> = match config.get("extends") {
-            Some(serde_json::Value::String(base)) => vec![base.as_str()],
-            Some(serde_json::Value::Array(bases)) => bases.iter().rev().filter_map(|b| b.as_str()).collect(),
-            _ => Vec::new(),
-        };
-        let dir = path.parent().map(Utf8Path::to_owned).unwrap_or_default();
-        next = extends.into_iter().find_map(|base| tsconfig_base_path(&dir, base));
-    }
-    Vec::new()
-}
-
-/// Where an `extends` entry points: a relative path, with `.json` implied, or a package's tsconfig.
-fn tsconfig_base_path(dir: &Utf8Path, base: &str) -> Option<Utf8PathBuf> {
-    if base.starts_with('.') || base.starts_with('/') {
-        let path = dir.join(base);
-        let path = if path.extension() == Some("json") { path } else { Utf8PathBuf::from(format!("{path}.json")) };
-        return path.is_file().then_some(path);
-    }
-    let found = Resolver::new(ResolveOptions::default()).resolve(dir.as_std_path(), base).ok()?;
-    Utf8PathBuf::from_path_buf(found.into_path_buf()).ok()
-}
-
-/// A tsconfig as JSON: comments and trailing commas removed the way `oxc_resolver` removes them.
-fn read_tsconfig_json(path: &Utf8Path) -> Option<serde_json::Value> {
-    let mut bytes = std::fs::read(path).ok()?;
-    json_strip_comments::strip_slice(&mut bytes).ok()?;
-    serde_json::from_slice(&bytes).ok()
 }
 
 /// Where TypeScript's lib files were found; see [`resolve_ts_lib_paths`].

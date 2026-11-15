@@ -238,7 +238,7 @@ pub(crate) enum ModuleResolution {
     Unresolved(String),
 }
 
-/// Use `oxc_resolver` to turn an import specifier into an absolute file path.
+/// Use `tsrs_module` to turn an import specifier into an absolute file path.
 pub(super) fn resolve_import_specifier(
     specifier: &str,
     from_file: &Utf8Path,
@@ -252,7 +252,7 @@ pub(super) fn resolve_import_specifier(
     let resolution = match ctx.module_resolutions.get(&key) {
         Some(cached) => cached.clone(),
         None => {
-            let resolution = resolve_module(specifier, from_file, ctx);
+            let resolution = ctx.module_resolvers.resolve(specifier, from_file);
             ctx.module_resolutions.insert(key, resolution.clone());
             resolution
         }
@@ -275,45 +275,5 @@ pub(super) fn resolve_import_specifier(
             );
             None
         }
-    }
-}
-
-/// Resolve `specifier` as imported by `from_file`; the file, not its directory, is what finds the nearest tsconfig.
-fn resolve_module(specifier: &str, from_file: &Utf8Path, ctx: &ResolutionContext) -> ModuleResolution {
-    resolve_module_with(&ctx.oxc_resolver, &ctx.types_first_resolver, specifier, from_file)
-}
-
-/// `resolve_module` with explicit resolvers (`ModuleResolvers`): the dependency loader resolves before a
-/// `ResolutionContext` exists and must find the same files the resolver later does.
-pub(crate) fn resolve_module_with(
-    main: &oxc_resolver::Resolver,
-    types_first: &oxc_resolver::Resolver,
-    specifier: &str,
-    from_file: &Utf8Path,
-) -> ModuleResolution {
-    // Bare package specifiers (not relative/absolute) need real TypeScript
-    // declaration resolution: prefer a real .d.ts over whatever JS entry point
-    // the package's own "main"/"exports" happens to point to, and fall back to
-    // the separate `@types/<package>` package when the package ships no types
-    // of its own at all — e.g. "react": its package.json has no "types" field
-    // and no "types" export condition, so a plain `resolve()` below lands on
-    // `index.js`, and a named type-only import like `HTMLAttributes` can never
-    // be found there.
-    if !specifier.starts_with('.') && !specifier.starts_with('/') {
-        let types = super::react::resolve_package_types_file(main, types_first, from_file, specifier);
-        if let Some(path) = types {
-            return match Utf8PathBuf::from_path_buf(std::path::PathBuf::from(path)) {
-                Ok(path) => ModuleResolution::PackageTypes(path),
-                Err(path) => ModuleResolution::Unresolved(format!("non-UTF-8 path {}", path.display())),
-            };
-        }
-    }
-
-    match main.resolve_file(from_file.as_std_path(), specifier) {
-        Ok(resolved) => match Utf8PathBuf::from_path_buf(resolved.path().to_owned()) {
-            Ok(path) => ModuleResolution::File(path),
-            Err(path) => ModuleResolution::Unresolved(format!("non-UTF-8 path {}", path.display())),
-        },
-        Err(e) => ModuleResolution::Unresolved(e.to_string()),
     }
 }

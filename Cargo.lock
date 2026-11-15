@@ -238,7 +238,6 @@ dependencies = [
  "dashmap",
  "ignore",
  "insta",
- "json-strip-comments",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
@@ -254,6 +253,10 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tsrs_core",
+ "tsrs_module",
+ "tsrs_tsoptions",
+ "tsrs_vfs",
 ]
 
 [[package]]

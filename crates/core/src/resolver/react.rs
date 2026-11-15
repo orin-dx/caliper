@@ -1,7 +1,6 @@
 //! React builtin type mapping and related helpers.
 
 use camino::Utf8Path;
-use oxc_resolver::Resolver;
 
 use crate::types::*;
 
@@ -102,39 +101,12 @@ pub(super) fn resolve_react_types_file(from_file: &Utf8Path, ctx: &ResolutionCon
     if let Some(found) = ctx.react_types_files.get(dir) {
         return found.clone();
     }
-    let found = resolve_package_types_file(&ctx.oxc_resolver, &ctx.types_first_resolver, from_file, "react")
+    let found = ctx
+        .module_resolvers
+        .package_declaration(from_file, "react")
         .unwrap_or_else(|| "node_modules/@types/react/index.d.ts".to_owned());
     ctx.react_types_files.insert(Box::from(dir), found.clone());
     found
-}
-
-/// Resolve `package_name` to its declaration file the way TypeScript does. `oxc_resolver`'s `resolve_dts` stops at the
-/// first `exports` key that matches any condition, even one pointing at JavaScript, so two retries follow: with only
-/// the `types` conditions (`types_first`), for a package that lists `"import"` before `"types"`; then the separate
-/// `@types/<name>` package, for one with no types of its own. A declaration file that doesn't exist counts as none.
-pub(super) fn resolve_package_types_file(
-    resolver: &Resolver,
-    types_first: &Resolver,
-    importing_file: &Utf8Path,
-    package_name: &str,
-) -> Option<String> {
-    let declaration = |resolver: &Resolver, specifier: &str| {
-        let resolved = resolver.resolve_dts(importing_file.as_std_path(), specifier).ok()?;
-        // `resolve_dts` returns an `exports` target without checking it exists (an unbuilt workspace package's `dist`).
-        let is_declaration =
-            [".d.ts", ".d.mts", ".d.cts"].iter().any(|ext| resolved.path().to_string_lossy().ends_with(ext));
-        (is_declaration && resolved.path().is_file()).then(|| resolved.path().to_string_lossy().into_owned())
-    };
-    declaration(resolver, package_name)
-        .or_else(|| declaration(types_first, package_name))
-        .or_else(|| declaration(resolver, &format!("@types/{}", mangle_scoped_package_name(package_name))))
-}
-
-/// `@scope/name` -> `scope__name`, matching TypeScript's `@types` scoped-package
-/// naming convention (e.g. `@babel/core` -> `@types/babel__core`). Unscoped names
-/// pass through unchanged.
-fn mangle_scoped_package_name(name: &str) -> String {
-    name.strip_prefix('@').map_or_else(|| name.to_owned(), |rest| rest.replacen('/', "__", 1))
 }
 
 #[cfg(test)]
@@ -147,16 +119,24 @@ mod tests {
         ModuleResolvers::new(&PipelineOptions::default())
     }
 
+    fn resolve_package_types_file(
+        resolvers: &ModuleResolvers,
+        importing_file: &Utf8Path,
+        package_name: &str,
+    ) -> Option<String> {
+        resolvers.package_declaration(importing_file, package_name)
+    }
+
     #[test]
     fn falls_back_to_at_types_when_package_has_no_own_types() {
-        let ModuleResolvers { main, types_first } = test_resolvers();
+        let resolvers = test_resolvers();
         // `react`'s package.json has an `exports` field with no "types" condition and
         // ships no .d.ts of its own — this repo's node_modules has a real `@types/react`
         // package, so this exercises the real gap end to end, not a mock.
         let from_file = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
 
-        let resolved = resolve_package_types_file(&main, &types_first, &from_file, "react")
-            .expect("expected @types/react to resolve");
+        let resolved =
+            resolve_package_types_file(&resolvers, &from_file, "react").expect("expected @types/react to resolve");
 
         assert!(resolved.ends_with(".d.ts"), "expected a .d.ts file, got {resolved}");
         assert!(
@@ -167,7 +147,7 @@ mod tests {
 
     #[test]
     fn resolves_own_types_directly_without_at_types_fallback() {
-        let ModuleResolvers { main, types_first } = test_resolvers();
+        let resolvers = test_resolvers();
         // Resolving "@types/react" itself (rather than "react") exercises the
         // primary (non-fallback) path with no ambiguity: if it ever fell through
         // to the fallback branch, that would ask for the nonexistent
@@ -175,17 +155,10 @@ mod tests {
         // `Some(..d.ts)` result here can only come from the primary path.
         let from_file = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
 
-        let resolved = resolve_package_types_file(&main, &types_first, &from_file, "@types/react")
+        let resolved = resolve_package_types_file(&resolvers, &from_file, "@types/react")
             .expect("expected @types/react's own types to resolve directly");
 
         assert!(resolved.ends_with(".d.ts"), "expected a .d.ts file, got {resolved}");
-    }
-
-    #[test]
-    fn mangles_scoped_package_names_for_at_types() {
-        assert_eq!(mangle_scoped_package_name("react"), "react");
-        assert_eq!(mangle_scoped_package_name("@babel/core"), "babel__core");
-        assert_eq!(mangle_scoped_package_name("@radix-ui/react-select"), "radix-ui__react-select");
     }
 
     /// `node_modules/<name>` holding `files`, resolved from the project root.
@@ -197,8 +170,8 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, body).unwrap();
         }
-        let ModuleResolvers { main, types_first } = test_resolvers();
-        let resolved = resolve_package_types_file(&main, &types_first, &root.join("index.ts"), name)?;
+        let resolvers = test_resolvers();
+        let resolved = resolve_package_types_file(&resolvers, &root.join("index.ts"), name)?;
         Some(resolved.strip_prefix(root.as_str()).unwrap_or(&resolved).to_owned())
     }
 
@@ -229,5 +202,24 @@ mod tests {
             ],
         );
         assert_eq!(resolved.as_deref(), Some("/node_modules/esm-only/dist/index.d.mts"));
+    }
+
+    #[test]
+    fn a_scoped_package_without_types_resolves_to_its_mangled_at_types_package() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        for (file, body) in [
+            ("node_modules/@babel/core/package.json", r#"{ "main": "./lib/index.js" }"#),
+            ("node_modules/@babel/core/lib/index.js", "module.exports = {};\n"),
+            ("node_modules/@types/babel__core/index.d.ts", "export interface Options {}\n"),
+        ] {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+
+        let resolved = resolve_package_types_file(&test_resolvers(), &root.join("index.ts"), "@babel/core");
+
+        assert_eq!(resolved.as_deref(), Some(root.join("node_modules/@types/babel__core/index.d.ts").as_str()));
     }
 }

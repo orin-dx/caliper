@@ -2,7 +2,7 @@
 //! (`PipelineOptions::load_dependencies`, ADR 0010).
 //!
 //! A demand is a name a project file imports from a package and uses in a type. The loader resolves the module the
-//! way the resolver will (`resolve_module_with`), finds the file declaring the name by following re-exports
+//! way the resolver will (`ModuleResolvers::resolve`), finds the file declaring the name by following re-exports
 //! (`export *`, `export { a as b } from`, `export * as ns from`, `import x; export { x }`), parses that file, then
 //! follows the names its declaration references the same way. Only declaring files enter the layer; re-export stubs are
 //! walked once and their answers kept, in the layer and in a per-package index on disk, so later runs never
@@ -485,12 +485,7 @@ impl Loader<'_> {
         if let Some(found) = self.parent.and_then(|parent| parent.resolution(&key)) {
             return found.clone();
         }
-        let result = match crate::resolver::resolve_module_with(
-            &self.resolvers.main,
-            &self.resolvers.types_first,
-            specifier,
-            from_file,
-        ) {
+        let result = match self.resolvers.resolve(specifier, from_file) {
             ModuleResolution::PackageTypes(path) => Ok(path),
             ModuleResolution::File(path) if is_typescript(&path) => Ok(path),
             ModuleResolution::File(_) => Err(Unresolved::NoTypes),

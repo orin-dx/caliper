@@ -2,7 +2,7 @@
 //!
 //! Answers the question: "in file F, the name N was imported — what specifier and
 //! canonical name does it refer to?"  Actual path resolution (specifier → absolute
-//! path) is left to the caller via `oxc_resolver`.
+//! path) is left to the caller via `ModuleResolvers`.
 
 use camino::Utf8Path;
 use compact_str::CompactString;
@@ -44,7 +44,7 @@ pub struct ImportResolutionMap {
     /// Nested (rather than a flat `(Utf8PathBuf, CompactString)` key) so lookups can
     /// borrow `&Utf8Path` directly instead of cloning the whole path per call.
     /// Note: we store the specifier string, not the resolved file path.
-    /// The resolver calls `oxc_resolver` to turn specifiers into absolute paths.
+    /// The resolver calls `ModuleResolvers` to turn specifiers into absolute paths.
     /// Behind an `Arc` so the same project's map with another dependency layer (`with_fallback`) shares it.
     bindings: std::sync::Arc<FxHashMap<PathKey, FxHashMap<CompactString, ImportRef>>>,
     /// `global.re_export_map`, keyed for string-hashed lookups during barrel walks.
