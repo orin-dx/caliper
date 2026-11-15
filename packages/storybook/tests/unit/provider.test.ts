@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url'
 import type { DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { logger } from 'storybook/internal/node-logger'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { CaliperStorybookOptions } from '../../src/index.js'
+import { initialState, step } from '../../src/lifecycle.js'
+import type { Link, ToDevServer, ToProvider } from '../../src/live.js'
 import { createDocgenProvider } from '../../src/provider.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
@@ -291,5 +294,150 @@ describe('createDocgenProvider', () => {
     const docs = { ...story('Intro', './src/Intro.mdx'), type: 'docs', storiesImports: [] } as unknown as IndexEntry
     expect(await request(fake, docs)).toEqual({ payload: NEXT, nextCalls: 1 })
     expect(fake.initializations).toBe(0)
+  })
+})
+
+// The lifecycle itself is tested in lifecycle.test.ts; these test the provider's reports and how it carries out what
+// the dev server asks of it.
+describe('the provider as an adapter of the answer lifecycle', () => {
+  function linked(fake: FakeBinding, options: CaliperStorybookOptions = {}) {
+    const posted: ToDevServer[] = []
+    let receive: (message: ToProvider) => void = () => {}
+    const link: Link<ToDevServer, ToProvider> = {
+      post: (message) => posted.push(message),
+      listen: (listener) => {
+        receive = listener
+      },
+    }
+    const provider = createDocgenProvider(options, fake, link)(async () => NEXT)
+    return { provider, posted, say: (message: ToProvider) => receive(message) }
+  }
+
+  it("reports every answer with the binding's pending keys, the subcomponents asked before a parent handed on", async () => {
+    for (const lazy of [true, false]) {
+      const fake = binding()
+      // The parent is degraded (handed on) and pending; its subcomponent is pending too.
+      fake.output.diagnostics = [warning(['List'])]
+      fake.pending.add('List').add('ListItem')
+      const { provider, posted } = linked(fake, { lazy })
+      expect(await provider({ entry: story('List') })).toEqual(NEXT)
+      expect(posted).toEqual([
+        {
+          type: 'answer',
+          provider: expect.any(String),
+          component: 'list',
+          revision: 1,
+          pending: ['ListItem', 'List'],
+          revisionNow: 1,
+        },
+      ])
+    }
+  })
+
+  it('keeps the newest completion when an older async fallback finishes after a newer request', async () => {
+    const fake = binding()
+    fake.output.diagnostics = [warning(['Card'])]
+    fake.pending.add('Card')
+    const posted: ToDevServer[] = []
+    const link: Link<ToDevServer, ToProvider> = { post: (message) => posted.push(message), listen: () => {} }
+    let finishFallback: (payload: DocgenPayload) => void = () => {}
+    const fallback = new Promise<DocgenPayload>((done) => {
+      finishFallback = done
+    })
+    const provider = createDocgenProvider({}, fake, link)(() => fallback)
+    // The first request is handed on to a slow provider; the checker answers before it returns.
+    const older = provider({ entry: story('Card') })
+    await vi.waitFor(() => expect(fake.resolved).toContain('Card'))
+    fake.output.diagnostics = []
+    fake.pending.clear()
+    const newer = await provider({ entry: story('Card') })
+    expect(Object.keys(newer!.argTypes!)).toEqual(['title'])
+    finishFallback(NEXT)
+    // What the service stores from the older request is the newer payload; only the newer one is announced.
+    expect(await older).toEqual(newer)
+    expect(posted).toEqual([
+      { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [], revisionNow: 1 },
+    ])
+  })
+
+  it('reports an answer with nothing pending, so the lifecycle knows the structural answer was replaced', async () => {
+    const { provider, posted } = linked(binding())
+    await provider({ entry: story('Card') })
+    expect(posted).toEqual([
+      { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [], revisionNow: 1 },
+    ])
+  })
+
+  it('stamps an answer the next provider gave with the revision the request saw, so it is not asked for again until an edit', async () => {
+    // Each way a request ends without a component of the session: the answer is Storybook's, but the lifecycle still
+    // compares its revision with the files'. A stamp below the session's would refresh it again, with the same result,
+    // for as long as a client shows the story.
+    const outcomes: Record<string, { lacksCard?: true; looksFail?: true; entry: IndexEntry }> = {
+      'the session lacks the story component': { lacksCard: true, entry: story('Card') },
+      'the story file is not there': { entry: story('Gone') },
+      'the files cannot be looked at': { looksFail: true, entry: story('Card') },
+    }
+    vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const seen: Record<
+      string,
+      { payload: DocgenPayload | undefined; revision: number; now: number; effects: unknown[] }
+    > = {}
+    for (const [outcome, { lacksCard, looksFail, entry: handedOn }] of Object.entries(outcomes)) {
+      const fake = binding()
+      if (lacksCard) delete fake.output.components!.Card
+      fake.updates.push({})
+      const { provider, posted } = linked(fake)
+      // A request that looked at the files, after an edit: the session is at revision 2.
+      await provider({ entry: story('Button') })
+      if (looksFail) {
+        fake.ensureFresh = async () => {
+          throw new Error('disk gone')
+        }
+      }
+      const payload = await provider({ entry: handedOn })
+      const answer = posted.at(-1) as Extract<ToDevServer, { type: 'answer' }>
+      // What the dev server does with it: a client shows the story and nothing is left to ask for.
+      const state = initialState()
+      step(state, { type: 'selected', client: 'a', component: answer.component })
+      const { type: _type, ...event } = answer
+      const effects = step(state, { type: 'answer', ...event })
+      seen[outcome] = { payload, revision: answer.revision, now: answer.revisionNow, effects }
+    }
+    vi.restoreAllMocks()
+    const handedOn = { payload: NEXT, revision: 2, now: 2, effects: [] }
+    expect(seen).toEqual({
+      'the session lacks the story component': handedOn,
+      'the story file is not there': handedOn,
+      'the files cannot be looked at': handedOn,
+    })
+  })
+
+  it('carries out a watch addressed to it, and reports the revision the files are at; not one for another', async () => {
+    const fake = binding()
+    fake.pending.add('Card')
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'watch', provider: 'someone-else', component: 'card', revision: 1, keys: ['Card'] })
+    fake.settled = Promise.resolve(false)
+    say({ type: 'watch', provider: id, component: 'card', revision: 1, keys: ['Card'] })
+    await vi.waitFor(() =>
+      expect(posted.slice(1)).toEqual([
+        { type: 'settled', component: 'card', revision: 1, keys: ['Card'], ok: false, revisionNow: 1 },
+      ]),
+    )
+    expect(fake.settles).toEqual([['Card']])
+  })
+
+  it("resolves the named stories' components in the background, in order, the newest list replacing the queue", async () => {
+    const fake = binding()
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'prefetch', provider: 'someone-else', entries: [story('Card')] })
+    say({ type: 'prefetch', provider: id, entries: [story('List'), story('Card')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card']]))
+    say({ type: 'prefetch', provider: undefined, entries: [story('Button')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card'], ['Button']]))
   })
 })

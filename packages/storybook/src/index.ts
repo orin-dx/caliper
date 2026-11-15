@@ -31,26 +31,18 @@ export interface CaliperStorybookOptions {
    */
   lazy?: boolean
   /**
-   * With a lazy session, resolve a few components in the background after it starts. Default: `false`: it did not
-   * make the first story faster in measurement.
-   */
-  warmUp?: boolean
-  /**
-   * With a lazy session, once this many distinct components have been asked for, resolve all the rest in the
-   * background in one parallel pass. It lowers the median story latency of a project read end to end (Spectrum's
-   * 50 stories: 19 ms to 5 ms) but not the total time, and raises peak memory by 170 to 420 MB, so it is off by
-   * default: `0`.
-   */
-  fillAfter?: number
-  /**
-   * When the dev server starts, document the components of this many first stories through Storybook's docgen
-   * service, before a browser asks. Default: `1`, the story Storybook opens. `0` waits for the browser.
+   * How many stories' components to document before the browser asks for them. When the dev server starts, the story
+   * Storybook opens is documented through Storybook's docgen service; then, after it and after every story the browser
+   * opens, the components of the next `prefetchStories - 1` stories in the sidebar are resolved in the background
+   * (checker included), nearest first, behind every story someone opened. Default: `1`, the opening story only. `0`
+   * waits for the browser.
    */
   prefetchStories?: number
   /**
    * Ask the built-in TypeScript checker for each component a story names. Default: `true`: it is kept warm in the
    * background, asked for exactly the requested component, and the structural props stand when it is slower than
-   * `semanticWaitMs`; its answer is kept for the next request. `false` never starts it.
+   * `semanticWaitMs`; its answer then replaces them in the open story when it arrives, without a reload, and is kept
+   * for the next request. `false` never starts it.
    */
   checker?: boolean
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */

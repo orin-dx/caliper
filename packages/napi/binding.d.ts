@@ -124,11 +124,24 @@ export interface JsExtractOptions {
 export declare function resolutionConfigFiles(sessionId: number): Array<string>
 
 /**
- * What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
- * diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
- * component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
- * whether a component's props may be incomplete from the same call that returns them. Errors for an unknown or closed
- * session.
+ * Waits up to `waitMs` until the checker has no request in flight for any of `keys`, for a host that showed a
+ * component's structural props because the checker had not answered in time: once this resolves `true`, a request for
+ * those components gets the checker's kept answer, unless a source file changed since. `false` when a request was
+ * still in flight at the deadline, for a session without the checker, and for an unknown or closed session. Runs off
+ * the calling thread.
+ */
+export declare function sessionCheckerSettled(sessionId: number, keys: Array<string>, waitMs: number): Promise<boolean>
+
+/**
+ * What a host needs to answer for one component, decided here and nowhere else, for a lazy and an eager session
+ * alike: `{ key: { docgenInfo, diagnostics, awaitsChecker, revision } }`. `docgenInfo` is the documentation with the
+ * checker's props merged when it answered in time; `diagnostics` are the component's own, each with `affects` set to
+ * the key, the checker's merged and the structural ones its props supersede dropped (a project diagnostic that names
+ * the component is among them; one that names none is in the session index only). `awaitsChecker` says the props are
+ * the structural ones because the checker had not answered in time, so asking again once `sessionCheckerSettled`
+ * resolves `true` gets its props; `revision` is the session's revision of the files the answer was made at, which
+ * only rises. A key the session has no component under is left out. A lazy session resolves each requested component
+ * now (in parallel). Errors for an unknown or closed session.
  */
 export declare function sessionComponentAnswers(sessionId: number, keys: Array<string>): string
 
@@ -149,11 +162,10 @@ export declare function sessionComponentToon(sessionId: number, key: string): st
 export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>): string
 
 /**
- * Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
- * holds the dependency declarations and resolver memos that components share, so the first request a host answers
- * does not load them. With the checker on (the default) it asks the checker for each at background priority, after any
- * story someone opened, and does not wait for it: the answers are kept for the stories that follow. Runs off the
- * calling thread and returns how many components it resolved. An eager session, an unknown session and a count of 0
- * resolve nothing.
+ * Resolves the components under `keys` in the background, without returning them: a request for one later is
+ * answered from what this resolved. With the checker on (the default) it asks the checker for each at background
+ * priority, after any component someone waits for, and does not wait for it; the answers are kept for the requests
+ * that follow. Runs off the calling thread and returns how many of the keys it resolved. An eager session and an
+ * unknown session resolve nothing.
  */
-export declare function sessionWarmUp(sessionId: number, count: number): Promise<number>
+export declare function sessionPrefetch(sessionId: number, keys: Array<string>): Promise<number>

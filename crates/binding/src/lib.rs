@@ -4,6 +4,8 @@
 
 #![deny(missing_docs)]
 
+mod in_flight;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -21,6 +23,8 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 // ─── Session store ────────────────────────────────────────────────────────────
 
 static SESSIONS: LazyLock<DashMap<u32, Arc<WatchSession>>> = LazyLock::new(DashMap::new);
+/// The checker's requests in flight for each session with the checker on, by session id.
+static IN_FLIGHT: LazyLock<DashMap<u32, Arc<in_flight::InFlight>>> = LazyLock::new(DashMap::new);
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Src-dir value that trips a simulated panic inside `create_session`'s real
@@ -150,8 +154,9 @@ pub struct JsExtractOptions {
 /// How long a request waits for the checker when `semanticWaitMs` is not set: about the first-story budget.
 const DEFAULT_SEMANTIC_WAIT_MS: u32 = 150;
 
-/// An empty session for `options`: lazy when they say so, with a checker attached unless they turn it off.
-fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
+/// An empty session for `options` under `session_id`: lazy when they say so, with a checker attached unless they turn
+/// it off, whose requests in flight are counted for [`session_checker_settled`].
+fn new_session(session_id: u32, options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
     let lazy = options.lazy.unwrap_or(false);
     let semantic = options.checker.unwrap_or(true).then(|| {
         (
@@ -168,7 +173,9 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
     };
     let session = match semantic {
         Some((tsconfig, first_src, wait_ms, wait_empty_ms)) => {
-            let checker = on_demand_checker(tsconfig, first_src);
+            let in_flight = Arc::new(in_flight::InFlight::default());
+            IN_FLIGHT.insert(session_id, in_flight.clone());
+            let checker = Arc::new(in_flight::Tracked::new(on_demand_checker(tsconfig, first_src), in_flight));
             let session = session.with_semantic(checker, std::time::Duration::from_millis(u64::from(wait_ms)));
             match wait_empty_ms {
                 Some(ms) => session.with_semantic_wait_empty(std::time::Duration::from_millis(u64::from(ms))),
@@ -278,8 +285,8 @@ pub fn create_session(options: JsExtractOptions) -> napi::Result<u32> {
             panic!("simulated create_session panic (test-only sentinel)");
         }
 
-        let session = new_session(options)?;
         let id = next_session_id();
+        let session = new_session(id, options)?;
         SESSIONS.insert(id, session);
         Ok(id)
     }) {
@@ -307,7 +314,7 @@ pub async fn extract_file_incremental(
                         panic!("simulated extract_file_incremental auto-vivification panic (test-only sentinel)");
                     }
 
-                    let s = new_session(options)?;
+                    let s = new_session(session_id, options)?;
                     SESSIONS.insert(session_id, s.clone());
                     s
                 }
@@ -344,7 +351,7 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
                         panic!("simulated initialize_session auto-vivification panic (test-only sentinel)");
                     }
 
-                    let s = new_session(options)?;
+                    let s = new_session(session_id, options)?;
                     SESSIONS.insert(session_id, s.clone());
                     s
                 }
@@ -378,7 +385,7 @@ pub async fn initialize_session_index(session_id: u32, options: JsExtractOptions
             let session = match SESSIONS.get(&session_id) {
                 Some(s) => s.clone(),
                 None => {
-                    let s = new_session(options)?;
+                    let s = new_session(session_id, options)?;
                     SESSIONS.insert(session_id, s.clone());
                     s
                 }
@@ -437,15 +444,21 @@ pub fn session_docgen_info(session_id: u32, keys: Vec<String>) -> napi::Result<S
     }
 }
 
-/// What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
-/// diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
-/// component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
-/// whether a component's props may be incomplete from the same call that returns them. Errors for an unknown or closed
-/// session.
+/// What a host needs to answer for one component, decided here and nowhere else, for a lazy and an eager session
+/// alike: `{ key: { docgenInfo, diagnostics, awaitsChecker, revision } }`. `docgenInfo` is the documentation with the
+/// checker's props merged when it answered in time; `diagnostics` are the component's own, each with `affects` set to
+/// the key, the checker's merged and the structural ones its props supersede dropped (a project diagnostic that names
+/// the component is among them; one that names none is in the session index only). `awaitsChecker` says the props are
+/// the structural ones because the checker had not answered in time, so asking again once `sessionCheckerSettled`
+/// resolves `true` gets its props; `revision` is the session's revision of the files the answer was made at, which
+/// only rises. A key the session has no component under is left out. A lazy session resolves each requested component
+/// now (in parallel). Errors for an unknown or closed session.
 #[napi]
 pub fn session_component_answers(session_id: u32, keys: Vec<String>) -> napi::Result<String> {
     match caliper_docgen_core::panic_guard::contain_panic("session_component_answers", move || {
         let session = live_session(session_id)?;
+        // Read before answering: an edit applied meanwhile makes the answer newer than this, never older.
+        let revision = session.revision();
         let answered = session.components(&keys);
         let answers: serde_json::Map<String, serde_json::Value> = keys
             .into_iter()
@@ -454,6 +467,8 @@ pub fn session_component_answers(session_id: u32, keys: Vec<String>) -> napi::Re
                 let answer = answer?;
                 let answer = serde_json::json!({
                     "docgenInfo": caliper_docgen_core::pipeline::rdt::docgen_info(&answer.entry),
+                    "awaitsChecker": caliper_docgen_core::pipeline::awaits_checker(&answer),
+                    "revision": revision,
                     "diagnostics": answer.diagnostics,
                 });
                 Some((key, answer))
@@ -484,24 +499,20 @@ pub fn session_component_toon(session_id: u32, key: String) -> napi::Result<Opti
     }
 }
 
-/// Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
-/// holds the dependency declarations and resolver memos that components share, so the first request a host answers
-/// does not load them. With the checker on (the default) it asks the checker for each at background priority, after any
-/// story someone opened, and does not wait for it: the answers are kept for the stories that follow. Runs off the
-/// calling thread and returns how many components it resolved. An eager session, an unknown session and a count of 0
-/// resolve nothing.
+/// Resolves the components under `keys` in the background, without returning them: a request for one later is
+/// answered from what this resolved. With the checker on (the default) it asks the checker for each at background
+/// priority, after any component someone waits for, and does not wait for it; the answers are kept for the requests
+/// that follow. Runs off the calling thread and returns how many of the keys it resolved. An eager session and an
+/// unknown session resolve nothing.
 #[napi]
-pub async fn session_warm_up(session_id: u32, count: u32) -> napi::Result<u32> {
+pub async fn session_prefetch(session_id: u32, keys: Vec<String>) -> napi::Result<u32> {
     tokio::task::spawn_blocking(move || {
-        match caliper_docgen_core::panic_guard::contain_panic("session_warm_up", move || {
+        match caliper_docgen_core::panic_guard::contain_panic("session_prefetch", move || {
             let Some(session) = SESSIONS.get(&session_id).map(|session| session.clone()) else { return 0 };
-            if !session.is_lazy() || count == 0 {
+            if !session.is_lazy() {
                 return 0;
             }
-            let keys = session.component_keys();
-            let wanted = (count as usize).min(keys.len());
-            let spread: Vec<String> = (0..wanted).filter_map(|n| keys.get(n * keys.len() / wanted).cloned()).collect();
-            session.components_in_background(&spread).into_iter().flatten().count() as u32
+            session.components_in_background(&keys).into_iter().flatten().count() as u32
         }) {
             Ok(resolved) => Ok(resolved),
             Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
@@ -509,6 +520,19 @@ pub async fn session_warm_up(session_id: u32, count: u32) -> napi::Result<u32> {
     })
     .await
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
+}
+
+/// Waits up to `waitMs` until the checker has no request in flight for any of `keys`, for a host that showed a
+/// component's structural props because the checker had not answered in time: once this resolves `true`, a request for
+/// those components gets the checker's kept answer, unless a source file changed since. `false` when a request was
+/// still in flight at the deadline, for a session without the checker, and for an unknown or closed session. Runs off
+/// the calling thread.
+#[napi]
+pub async fn session_checker_settled(session_id: u32, keys: Vec<String>, wait_ms: u32) -> napi::Result<bool> {
+    let Some(in_flight) = IN_FLIGHT.get(&session_id).map(|in_flight| in_flight.clone()) else { return Ok(false) };
+    tokio::task::spawn_blocking(move || in_flight.settle(&keys, std::time::Duration::from_millis(u64::from(wait_ms))))
+        .await
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 /// Bring the session up to date with the files on disk, for a host without a file watcher (a docgen provider in a
@@ -565,6 +589,7 @@ pub fn close_session(session_id: u32) {
         }
 
         SESSIONS.remove(&session_id);
+        IN_FLIGHT.remove(&session_id);
     })
     .ok();
 }
@@ -594,8 +619,12 @@ mod tests {
     #[test]
     fn a_session_asks_the_checker_unless_told_not_to() {
         let attached = |checker: Option<bool>| {
-            let session = new_session(JsExtractOptions { checker, ..base_options() }).expect("session");
-            format!("{session:?}").contains("with_semantic: true")
+            let id = next_session_id();
+            let session = new_session(id, JsExtractOptions { checker, ..base_options() }).expect("session");
+            let tracked = IN_FLIGHT.remove(&id).is_some();
+            let attached = format!("{session:?}").contains("with_semantic: true");
+            assert_eq!(tracked, attached, "a session's checker requests are counted exactly when it has a checker");
+            attached
         };
         assert!(attached(None), "the checker is on by default");
         assert!(attached(Some(true)));
@@ -1084,6 +1113,8 @@ mod tests {
         assert_eq!(lazy_answers, eager_answers);
         assert_eq!(lazy_answers["Card"]["docgenInfo"]["displayName"], "Card");
         assert_eq!(lazy_answers["Card"]["diagnostics"], serde_json::json!([]));
+        assert_eq!(lazy_answers["Card"]["awaitsChecker"], false, "the binding decides, for both sessions alike");
+        assert!(lazy_answers["Card"]["revision"].is_u64());
         assert!(lazy_answers.get("Missing").is_none());
         assert_eq!(lazy_stats(lazy).expect("stats").resolved, 1, "Button was never asked for");
 
@@ -1092,8 +1123,12 @@ mod tests {
         std::fs::remove_dir_all(&dir).expect("remove temp dir");
     }
 
+    fn component_keys_of(session_id: u32) -> Vec<String> {
+        live_session(session_id).expect("session").component_keys()
+    }
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn warming_up_resolves_a_spread_of_components_in_a_lazy_session_only() {
+    async fn prefetching_resolves_the_named_components_in_a_lazy_session_only() {
         let dir = std::env::temp_dir().join(format!("caliper-warm-{}-{}", std::process::id(), next_session_id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         for name in ["A", "B", "C", "D"] {
@@ -1118,14 +1153,22 @@ mod tests {
         initialize_session_index(eager, options(None)).await.expect("eager index");
         initialize_session_index(lazy, options(Some(true))).await.expect("lazy index");
 
-        assert_eq!(session_warm_up(lazy, 0).await.expect("no warm-up"), 0);
+        let keys = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+        let all = component_keys_of(lazy);
+        assert_eq!(all.len(), 4, "{all:?}");
+
+        assert_eq!(session_prefetch(lazy, Vec::new()).await.expect("nothing to prefetch"), 0);
         assert_eq!(lazy_stats(lazy).expect("stats").resolved, 0);
-        assert_eq!(session_warm_up(lazy, 2).await.expect("warm-up"), 2);
+        assert_eq!(session_prefetch(lazy, all[..2].to_vec()).await.expect("prefetch"), 2);
         assert_eq!(lazy_stats(lazy).expect("stats").resolved, 2);
-        assert_eq!(session_warm_up(lazy, 99).await.expect("more than there are"), 4);
+        assert_eq!(session_prefetch(lazy, keys(&["NoSuchComponent"])).await.expect("unknown key"), 0);
+        assert_eq!(session_prefetch(lazy, all.clone()).await.expect("the rest"), 4);
         assert_eq!(lazy_stats(lazy).expect("stats").resolved, 4);
-        assert_eq!(session_warm_up(eager, 2).await.expect("eager"), 0);
-        assert_eq!(session_warm_up(9_999_999, 2).await.expect("unknown"), 0);
+        assert_eq!(session_prefetch(eager, all.clone()).await.expect("eager"), 0);
+        assert_eq!(session_prefetch(9_999_999, all).await.expect("unknown"), 0);
+        // Neither session has the checker, so there is nothing to wait for and nothing that settles.
+        assert!(!session_checker_settled(lazy, keys(&["A"]), 0).await.expect("no checker"));
+        assert!(!session_checker_settled(9_999_999, keys(&["A"]), 0).await.expect("unknown"));
 
         close_session(eager);
         close_session(lazy);

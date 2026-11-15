@@ -16,8 +16,6 @@ const OPTION_KEY_SET = {
   loadDependencies: true,
   collapseInheritedProps: true,
   lazy: true,
-  warmUp: true,
-  fillAfter: true,
   prefetchStories: true,
   checker: true,
   semanticWaitMs: true,

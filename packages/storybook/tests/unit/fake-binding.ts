@@ -139,6 +139,12 @@ export class FakeBinding implements SessionBinding {
   /** Counts the components a lazy session was asked to resolve. */
   resolved: string[] = []
 
+  /** The keys whose answer the binding says awaits the checker. */
+  readonly pending = new Set<string>()
+  /** An answer's own diagnostics, where they differ from the index's (a checker answer superseded some). */
+  readonly answerDiagnostics: Record<string, Diagnostic[]> = {}
+
+  /** The binding's answers: it decides each one's diagnostics and whether it awaits the checker. */
   sessionComponentAnswers = (_sessionId: number, keys: string[]): string => {
     this.resolved.push(...keys)
     const diagnostics = this.output.diagnostics ?? []
@@ -148,18 +154,32 @@ export class FakeBinding implements SessionBinding {
           .filter((key) => key in this.docs)
           .map((key) => [
             key,
-            { docgenInfo: this.docs[key], diagnostics: diagnostics.filter((each) => each.affects?.includes(key)) },
+            {
+              docgenInfo: this.docs[key],
+              diagnostics: this.answerDiagnostics[key] ?? diagnostics.filter((each) => each.affects?.includes(key)),
+              awaitsChecker: this.pending.has(key),
+              revision: this.revision,
+            },
           ]),
       ),
     )
   }
 
-  /** The sessions asked to warm up, with how many components. */
-  warmUps: number[] = []
+  /** The keys of each background prefetch, in order. */
+  prefetched: string[][] = []
 
-  sessionWarmUp = async (_sessionId: number, count: number): Promise<number> => {
-    this.warmUps.push(count)
-    return count
+  sessionPrefetch = async (_sessionId: number, keys: string[]): Promise<number> => {
+    this.prefetched.push(keys)
+    return keys.length
+  }
+
+  /** The keys of each wait for the checker; the wait resolves with `settled`. */
+  settles: string[][] = []
+  settled: Promise<boolean> = Promise.resolve(true)
+
+  sessionCheckerSettled = async (_sessionId: number, keys: string[]): Promise<boolean> => {
+    this.settles.push(keys)
+    return this.settled
   }
 
   closeSession = (): void => {

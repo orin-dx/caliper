@@ -1,10 +1,18 @@
 import { fileURLToPath } from 'node:url'
+import { CURRENT_STORY_WAS_SET, SET_CURRENT_STORY } from 'storybook/internal/core-events'
 import { logger } from 'storybook/internal/node-logger'
 import type { DocgenProviderDescriptor, StoryIndex } from 'storybook/internal/types'
 import type { CaliperStorybookOptions } from './index.js'
+import { type Event, initialState, step } from './lifecycle.js'
+import { channel, componentOf, type Link, type ToDevServer, type ToProvider } from './live.js'
 import { assertValidOptions } from './validate.js'
 import { OPTION_KEYS } from './option-keys.js'
-import { prefetch } from './prefetch.js'
+import { neighbours, prefetch } from './prefetch.js'
+
+/** The part of Storybook's server channel the addon uses: the events the browser sends. */
+interface ServerChannel {
+  on(event: string, listener: (payload?: { storyId?: unknown }) => void): void
+}
 
 /**
  * What a preset function receives: Storybook's own options merged with the addon's. Storybook's `cache` is its
@@ -13,8 +21,10 @@ import { prefetch } from './prefetch.js'
 type PresetOptions = Omit<CaliperStorybookOptions, 'cache'> & { cache?: unknown }
 
 /** The part of Storybook's options the prefetch reads: its presets, for the story index. */
-interface DevServerOptions extends PresetOptions {
+export interface DevServerOptions extends PresetOptions {
   presets: { apply(extension: 'storyIndexGenerator'): Promise<{ getIndex(): Promise<StoryIndex> } | undefined> }
+  /** Storybook's server channel, the same object for every hook of one dev server. */
+  channel?: object
 }
 
 /** The addon's options travel to the docgen worker by structured clone, so only these plain fields go. */
@@ -40,35 +50,152 @@ export const isDocgenProviderEnabled = (): boolean => true
 
 const PREFETCH_STORIES = 1
 
-/**
- * When the dev server starts, before a browser has asked, documents the components of the first `prefetchStories`
- * stories through Storybook's docgen service: that starts its worker, the session and the checker, and stores the
- * opening story's answer where the browser reads it. Not awaited, and best effort: a failure costs the first story the
- * time it would have saved.
- */
-export const experimental_devServer = <App>(app: App, options: DevServerOptions): App => {
-  const count = options.prefetchStories ?? PREFETCH_STORIES
-  if (count > 0) void startPrefetch(options, count)
-  return app
+/** The channel events that say which story the browser shows: the manager's choice, then the preview's. */
+const STORY_SHOWN = [SET_CURRENT_STORY, CURRENT_STORY_WAS_SET]
+
+/** How the dev server asks Storybook's docgen service to document one component and store it where the browser reads it. */
+export type Extract = (componentId: string) => Promise<unknown>
+
+async function docgenService(): Promise<Extract> {
+  const { getService } = await import('storybook/internal/core-server')
+  // Registered by Storybook's own `experimental_devServer`, which runs before an addon's.
+  const docgen = getService('core/docgen', { internal: true })
+  return (id) => docgen.commands.extractDocgen({ id })
 }
 
-async function startPrefetch(options: DevServerOptions, count: number): Promise<void> {
-  try {
-    const { getService } = await import('storybook/internal/core-server')
-    // Registered by Storybook's own `experimental_devServer`, which runs before an addon's.
-    const docgen = getService('core/docgen', { internal: true })
-    await prefetch(
-      {
-        index: async () => {
-          const generator = await options.presets.apply('storyIndexGenerator')
-          if (!generator) throw new Error('Storybook has no story index')
-          return generator.getIndex()
-        },
-        extract: (id) => docgen.commands.extractDocgen({ id }),
-      },
-      count,
-    )
-  } catch (error) {
-    logger.debug(`[caliper-docgen] prefetch stopped: ${(error as Error).message}`)
+/**
+ * The dev server's side of the addon: an adapter between Storybook and the answer lifecycle (`lifecycle.ts`), which
+ * decides everything. It documents the opening story before a browser asks, turns what the browsers show and what the
+ * provider says into lifecycle events, and carries out the effects: a `refresh` has Storybook's docgen service ask
+ * again, which stores the new answer, and the browser's Controls and docs, which read it live, show it without a
+ * reload. The channel says nothing when a tab closes, so a closed tab's last component stays shown in the lifecycle:
+ * at most one extra refresh for it.
+ */
+export class DevServer {
+  private readonly state = initialState()
+  /** The provider that answered last, which the next stories' queue goes to. */
+  private provider: string | undefined
+  private readonly count: number
+  private readonly options: DevServerOptions
+  private readonly link: Link<ToProvider, ToDevServer>
+  private readonly extractWith: () => Promise<Extract>
+
+  constructor(
+    options: DevServerOptions,
+    link: Link<ToProvider, ToDevServer>,
+    extractWith: () => Promise<Extract> = docgenService,
+  ) {
+    this.options = options
+    this.link = link
+    this.extractWith = extractWith
+    this.count = options.prefetchStories ?? PREFETCH_STORIES
+    link.listen((message) => {
+      if (message.type === 'answer') {
+        this.provider = message.provider
+        this.dispatch({ ...message, type: 'answer' })
+      } else if (message.type === 'settled') this.dispatch(message)
+    })
   }
+
+  /** Applies `event` to the lifecycle and carries out its effects. */
+  dispatch(event: Event): void {
+    for (const effect of step(this.state, event)) {
+      if (effect.type === 'watch') this.link.post({ ...effect, type: 'watch' })
+      else if (effect.type === 'refresh') void this.extract(effect.component)
+      else void this.prefetchAfter(effect.component)
+    }
+  }
+
+  private async index(): Promise<StoryIndex> {
+    const generator = await this.options.presets.apply('storyIndexGenerator')
+    if (!generator) throw new Error('Storybook has no story index')
+    return generator.getIndex()
+  }
+
+  /** Asks the docgen service for `componentId` again, which stores the answer where the browser reads it. */
+  private async extract(componentId: string): Promise<void> {
+    try {
+      const extract = await this.extractWith()
+      await extract(componentId)
+    } catch (error) {
+      logger.debug(`[caliper-docgen] ${componentId} not asked again: ${(error as Error).message}`)
+    }
+  }
+
+  /**
+   * Documents the opening story's component before a browser asks: that starts the docgen worker, the session and the
+   * checker, and stores the answer where the browser reads it. Then the components after it, unless a browser already
+   * shows a story. Best effort: a failure costs the first story the time it would have saved.
+   */
+  async start(): Promise<void> {
+    if (this.count <= 0) return
+    try {
+      const extract = await this.extractWith()
+      const opening = await prefetch({ index: () => this.index(), extract })
+      if (opening !== undefined && this.state.clients.size === 0) await this.prefetchAfter(opening)
+    } catch (error) {
+      logger.debug(`[caliper-docgen] prefetch stopped: ${(error as Error).message}`)
+    }
+  }
+
+  /**
+   * The browser `client` (a tab's manager or preview, by its channel's sender id) shows a story of `storyId`'s
+   * component, in place of what it showed before.
+   */
+  shown(storyId: string, client = ''): void {
+    this.dispatch({ type: 'selected', client, component: componentOf(storyId) })
+  }
+
+  /** Has the provider resolve the `prefetchStories - 1` components after `componentId` in the background. Best effort. */
+  private async prefetchAfter(componentId: string): Promise<void> {
+    if (this.count <= 1) return
+    try {
+      const entries = neighbours(await this.index(), componentId, this.count - 1)
+      // Even an empty list: it replaces what the provider still has queued for the story the browser left.
+      this.link.post({ type: 'prefetch', provider: this.provider, entries })
+    } catch (error) {
+      logger.debug(`[caliper-docgen] prefetch after ${componentId} stopped: ${(error as Error).message}`)
+    }
+  }
+}
+
+const devServers = new WeakMap<object, DevServer>()
+
+/**
+ * One per dev server, which Storybook's channel stands for: it calls `experimental_serverChannel` and
+ * `experimental_devServer` once each, with a fresh presets wrapper each time but the same channel.
+ */
+function devServerFor(options: DevServerOptions): DevServer {
+  const key = options.channel ?? options.presets
+  let server = devServers.get(key)
+  if (!server) {
+    server = new DevServer(options, channel())
+    devServers.set(key, server)
+  }
+  return server
+}
+
+/** Follows the story the browser shows, which reaches the dev server over Storybook's channel. */
+export const experimental_serverChannel = <Channel extends ServerChannel>(
+  serverChannel: Channel,
+  options: DevServerOptions,
+): Channel => {
+  const server = devServerFor(options)
+  for (const event of STORY_SHOWN) {
+    // Storybook's channel calls a listener with the event as `this`, whose `from` names the sending browser channel.
+    serverChannel.on(event, function storyShown(this: { from?: unknown } | undefined, shown?: { storyId?: unknown }) {
+      if (typeof shown?.storyId !== 'string') return
+      server.shown(shown.storyId, typeof this?.from === 'string' ? this.from : '')
+    })
+  }
+  return serverChannel
+}
+
+/**
+ * When the dev server starts, before a browser has asked, documents the opening story's component through Storybook's
+ * docgen service (`prefetchStories`). Not awaited.
+ */
+export const experimental_devServer = <App>(app: App, options: DevServerOptions): App => {
+  void devServerFor(options).start()
+  return app
 }
