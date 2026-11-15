@@ -58,9 +58,12 @@ const MAX_MEMBERS: [usize; 2] = [500, 120];
 /// system in the project's own source (Chakra's `SystemStyleObject`: about 700 properties, each a value or an object
 /// of 130 conditions) expanded to 25 MB of JSON per prop and 42 GB of memory for one extract.
 ///
-/// Chosen so that no type under 256 KiB of JSON is cut: a type in the output is a JSON object with at least a `kind`
-/// (`{"kind":"any"}`, 14 bytes, is the smallest), so a type of more than this many types is more than 256 KiB. The
-/// largest prop type of Mantine's core is 196 KB; Chakra's style props are 25 MB.
+/// What is enforced is this count (18,724 types), not a byte size. It is chosen so that no type under 256 KiB of JSON
+/// is ever cut: a type in the output is a JSON object with at least a `kind` (`{"kind":"any"}`, 14 bytes, is the
+/// smallest), so a type of more than this many types is more than 256 KiB. On real projects a type averages about 40
+/// bytes, so the cut falls near 0.75 MB of JSON: Chakra's largest prop type left whole is 732 KB. The largest prop
+/// type of Mantine's core is 196 KB; Chakra's style props were 25 MB. The cut is reported as a depth truncation, since
+/// a limit kind of its own would change the output schema.
 const MAX_SIZE: usize = 256 * 1024 / MIN_TYPE_BYTES;
 /// The fewest bytes one type takes in the JSON output: `{"kind":"any"}`.
 const MIN_TYPE_BYTES: usize = 14;
