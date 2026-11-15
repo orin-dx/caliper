@@ -124,8 +124,9 @@ fn an_outcome_reads_back_equal_with_its_props_shared_as_they_were() {
                 key: "A".into(),
                 props: vec![shared.clone(), own],
                 composes: Some(vec!["RefAttributes".into()]),
+                picked: vec!["shared".into()],
             },
-            SemanticComponent { key: "B".into(), props: vec![shared], composes: None },
+            SemanticComponent { key: "B".into(), props: vec![shared], composes: None, picked: Vec::new() },
         ],
         fallbacks: vec![SemanticFallback { key: "C".into(), reason: "overloaded call signatures".into() }],
         diagnostics: vec![Diagnostic::new(DiagnosticSeverity::Info, DiagnosticCode::SemanticBackend, "kept")],
@@ -147,7 +148,7 @@ fn an_outcome_reads_back_equal_with_its_props_shared_as_they_were() {
         (outcome.fallbacks.clone(), outcome.diagnostics.clone())
     );
     for (read, original) in read.components.iter().zip(&outcome.components) {
-        assert_eq!((&read.key, &read.composes), (&original.key, &original.composes));
+        assert_eq!((&read.key, &read.composes, &read.picked), (&original.key, &original.composes, &original.picked));
         for (read, original) in read.props.iter().zip(&original.props) {
             assert_eq!(
                 (
