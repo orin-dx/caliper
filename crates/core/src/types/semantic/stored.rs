@@ -49,6 +49,7 @@ struct StoredComponent {
     key: String,
     props: Vec<u32>,
     composes: Option<Vec<String>>,
+    picked: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -188,6 +189,7 @@ impl SemanticOutcome {
                 key: component.key.clone(),
                 props: held,
                 composes: component.composes.clone(),
+                picked: component.picked.clone(),
             });
         }
         let stored = Stored {
@@ -225,7 +227,12 @@ impl SemanticOutcome {
                         props.get(at).cloned().ok_or_else(|| "a prop index out of range".to_string())
                     })
                     .collect::<Result<_, String>>()?;
-                Ok(SemanticComponent { key: component.key, props: held, composes: component.composes })
+                Ok(SemanticComponent {
+                    key: component.key,
+                    props: held,
+                    composes: component.composes,
+                    picked: component.picked,
+                })
             })
             .collect::<Result<_, String>>()?;
         Ok(SemanticOutcome {

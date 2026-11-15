@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use caliper_docgen_core::types::ComponentExport;
-use caliper_docgen_core::types::semantic::{PropInterner, SemanticProp};
+use caliper_docgen_core::types::PropParent;
+use caliper_docgen_core::types::semantic::{PropInterner, SemanticProp, unconverted_type};
 
 use crate::Target;
 use crate::convert::{Converter, PropKey, declared_in, without_undefined};
@@ -25,6 +26,8 @@ pub(crate) struct Props {
     pub(crate) props: Vec<Arc<SemanticProp>>,
     /// See [`caliper_docgen_core::types::semantic::SemanticComponent::composes`].
     pub(crate) composes: Option<Vec<String>>,
+    /// See [`caliper_docgen_core::types::semantic::SemanticComponent::picked`].
+    pub(crate) picked: Vec<String>,
 }
 
 /// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
@@ -154,6 +157,10 @@ pub(crate) async fn props_of_type(
                 || target.react_wanted.as_ref().is_none_or(|wanted| wanted.contains(&property.name))
         })
         .collect();
+    // The keys a `Pick` selects reach the component by name: the merge lists them however large their source, so they
+    // are converted (`Layering::kept` is asked with them), and are read before what is left to a layer.
+    let (composes, picked) = converter.composes(props_type).await?;
+    let (own, layered) = leave_to_layers(converter, interner, own, &picked, target).await?;
     let references: Vec<_> = own.iter().map(|property| &property.reference).collect();
     let types = if references.is_empty() { Vec::new() } else { converter.types_of_symbols(&references).await? };
 
@@ -206,9 +213,68 @@ pub(crate) async fn props_of_type(
             *slot = Some(prop);
         }
     }
-    let props: Vec<Arc<SemanticProp>> = props.into_iter().flatten().collect();
-    let composes = converter.composes(props_type).await?;
-    Ok(Ok(Props { props, composes }))
+    // In the props type's order: each converted prop in its place among those left to a layer. `props` has one slot per
+    // converted prop, so a slot left empty above stays empty and shifts no other prop.
+    let mut converted = props.into_iter();
+    let props: Vec<Arc<SemanticProp>> =
+        layered.into_iter().filter_map(|slot| slot.or_else(|| converted.next().flatten())).collect();
+    Ok(Ok(Props { props, composes, picked }))
+}
+
+/// Of a component's props `own`, in order, those to convert, and a slot per prop of `own`: `Some` for one the merge
+/// leaves to a collapsed layer ([`Layering::kept`](caliper_docgen_core::types::semantic::Layering::kept)), reported by
+/// name and `parent` with [`unconverted_type`], `None` for one converted. Only where the prop is declared is asked for,
+/// and only when the target has a layering under which the merge can leave a prop to a layer.
+async fn leave_to_layers(
+    converter: &Converter,
+    interner: &PropInterner,
+    own: Vec<SymbolInfo>,
+    picked: &[String],
+    target: &Target,
+) -> Result<(Vec<SymbolInfo>, Vec<Option<Arc<SemanticProp>>>), CallError> {
+    // The merge leaves to a layer only a prop the structural answer does not list: when it lists every prop, where
+    // they are declared is not asked first.
+    let Some(layering) = target.layering.as_ref().filter(|layering| {
+        layering.may_layer()
+            && own.iter().any(|property| !is_react_declared(property) && !layering.lists(&property.name))
+    }) else {
+        let slots = vec![None; own.len()];
+        return Ok((own, slots));
+    };
+    let asked: Vec<Asked<'_>> =
+        own.iter().map(|property| Asked { property, description: false, tags: false }).collect();
+    let declared = converter.declared(&asked).await?;
+    let answer: Vec<(&str, Option<&PropParent>, bool)> = own
+        .iter()
+        .zip(&declared)
+        .map(|(property, declared)| (property.name.as_str(), declared.parent.as_ref(), is_react_declared(property)))
+        .collect();
+    let kept = layering.kept(&answer, picked);
+    if kept.iter().all(|kept| *kept) {
+        let slots = vec![None; own.len()];
+        return Ok((own, slots));
+    }
+    let mut converting = Vec::with_capacity(own.len());
+    let mut slots = Vec::with_capacity(own.len());
+    for ((property, declared), kept) in own.into_iter().zip(declared).zip(kept) {
+        if kept {
+            converting.push(property);
+            slots.push(None);
+            continue;
+        }
+        let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
+        slots.push(Some(interner.share(SemanticProp {
+            prop_type: unconverted_type(),
+            required,
+            description: String::new(),
+            tags: Default::default(),
+            parent: declared.parent,
+            declarations: declared.declarations,
+            react_declared: false,
+            name: property.name,
+        })));
+    }
+    Ok((converting, slots))
 }
 
 #[cfg(test)]
