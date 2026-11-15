@@ -989,14 +989,11 @@ pub(super) fn utility_fields(
             let keys: Vec<String> = mapped_keys(keys, file, ctx, depth + 1)?.into_iter().map(|key| key.name).collect();
             let mut fields = object_fields(base, file, ctx, depth + 1)?;
             if name == "Pick" {
-                // A key the object lacks is an error TypeScript reports; nothing is guessed for it.
-                if !keys.iter().all(|key| fields.iter().any(|(field, _)| &field.name == key)) {
-                    return None;
-                }
-                fields.retain(|(field, _)| keys.contains(&field.name));
-            } else {
-                fields.retain(|(field, _)| !keys.contains(&field.name));
+                // `[P in K]` lists the members in the keys' order. A key the object lacks is an error TypeScript
+                // reports; nothing is guessed for it.
+                return keys.iter().map(|key| fields.iter().find(|(field, _)| &field.name == key).cloned()).collect();
             }
+            fields.retain(|(field, _)| !keys.contains(&field.name));
             Some(fields)
         }
         _ => None,

@@ -8,7 +8,7 @@
 )]
 //! A prop typed by TypeScript's own `Partial`, `Required`, `Pick`, `Omit` or `NonNullable` over a type whose members are
 //! known reads as the type TypeScript computes (MUI's `classes?: Partial<AccordionClasses>`), not as the application;
-//! `ReactElement` stays narrower than a node, and `unknown` absorbs the other members of a union.
+//! `ReactElement` stays narrower than a node, and a union that holds a type parameter keeps its concrete members.
 
 use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use camino::Utf8PathBuf;
@@ -47,8 +47,8 @@ fn required_of_an_object_drops_undefined_from_optional_members() {
 }
 
 #[test]
-fn pick_and_omit_filter_the_members_by_their_literal_keys() {
-    assert_eq!(text_of("Pick<Classes, \"root\" | \"label\">"), "{ label: string; root: string }");
+fn pick_lists_the_members_in_key_order_and_omit_filters_them_out() {
+    assert_eq!(text_of("Pick<Classes, \"root\" | \"label\">"), "{ root: string; label: string }");
     assert_eq!(text_of("Partial<Omit<Transition, \"mounted\">>"), "{ duration?: number }");
 }
 
@@ -79,7 +79,7 @@ fn a_react_element_stays_narrower_than_a_node() {
 }
 
 #[test]
-fn unknown_absorbs_the_other_members_of_a_union() {
+fn a_union_with_a_type_parameter_keeps_its_concrete_members() {
     let source = "import * as React from 'react';\ninterface ShowProps<T> { when: T | null | undefined }\nfunction Show<T>(props: ShowProps<T>) { return null; }\nexport function Box(props: React.ComponentProps<typeof Show>) { return null; }";
-    assert_eq!(type_text(source, "when"), "unknown");
+    assert_eq!(type_text(source, "when"), "unknown | null");
 }

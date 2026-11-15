@@ -245,28 +245,38 @@ fn resolve_named_uncycled(
     // `Partial<Classes>`, `Omit<Props, "x">`: the object TypeScript maps a known object to, when every member's type
     // is evaluated through; otherwise the application stays, as an alias over a type not evaluated keeps its name.
     if let Some(fields) = super::evaluate::utility_fields(name.as_str(), args, consuming_file, ctx, 0) {
-        // Read with the caller's cycle sets; what the reading reported is taken back when the application stays.
-        let (diagnostics, shared, unevaluated) =
-            (state.diagnostics.len(), state.shared_diagnostics.len(), state.named_unevaluated);
-        let object = PropType::Object(
-            fields
-                .into_iter()
-                .map(|(field, file)| ObjectField {
-                    prop_type: resolve_collected_type(&field.collected_type, &file, ctx, state, depth + 1),
-                    name: field.name,
-                    required: field.required,
-                    description: field.description,
-                    readonly: field.readonly,
-                    index_key: None,
-                })
-                .collect(),
-        );
-        if evaluated_through(&object) {
+        // Read in a branch with the caller's cycle sets, stopping at the first member that does not evaluate through.
+        let mut branch = state.branch();
+        let total = fields.len();
+        let mut members = Vec::with_capacity(total);
+        for (field, file) in fields {
+            let prop_type = resolve_collected_type(&field.collected_type, &file, ctx, &mut branch, depth + 1);
+            if !evaluated_through(&prop_type) {
+                break;
+            }
+            members.push(ObjectField {
+                prop_type,
+                name: field.name,
+                required: field.required,
+                description: field.description,
+                readonly: field.readonly,
+                index_key: None,
+            });
+        }
+        let complete = members.len() == total;
+        let object = PropType::Object(members);
+        // A large object keeps the application, as a generic alias's long expansion keeps its name.
+        let kept = complete && !exceeds_expanded_size(&object);
+        if !kept {
+            // What the reading reported is taken back; what it read stays recorded, since the answer depends on it.
+            branch.diagnostics.clear();
+            branch.shared_diagnostics.clear();
+            branch.named_unevaluated = false;
+        }
+        state.absorb(branch);
+        if kept {
             return object;
         }
-        state.diagnostics.truncate(diagnostics);
-        state.shared_diagnostics.truncate(shared);
-        state.named_unevaluated = unevaluated;
     }
     // `NonNullable<number | undefined>` once its argument is known: `number`.
     if let [arg] = resolved_args.as_slice()

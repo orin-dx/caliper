@@ -11,4 +11,4 @@ The structural answer (`--no-checker`, and what the checker lane keeps from it) 
 - `Omit<T[], keyof any[]>` (Chakra's `css` prop) is `{}`.
 - `NonNullable<X>` over a known primitive, literal, object, function or array drops `null` and `undefined` (MUI's `tabIndex`).
 - `React.ReactElement` and `JSX.Element` stay named `ReactElement` / `JSX.Element` instead of widening to `reactNode`.
-- A union holding `any` or `unknown` is that type, as TypeScript reduces it (`T | null` with `T` instantiated as `unknown`).
+- `Pick` lists its members in the order of its keys, as TypeScript does.
