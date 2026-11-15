@@ -176,7 +176,7 @@ export function createDocgenProvider(
     const { key, path } = locate(session, target, storyPath)
     const { doc, degradedBy, awaitsChecker, revision } = session.documentation(key)
     answered.revision = Math.max(answered.revision, revision)
-    if (awaitsChecker) answered.pending.push(key)
+    if (awaitsChecker && !answered.pending.includes(key)) answered.pending.push(key)
     if (fallback === 'degraded' && degradedBy.length > 0) {
       const reason = degradedBy.join('; ')
       reportFallback(key, reason)
@@ -225,8 +225,10 @@ export function createDocgenProvider(
   async function document(entry: IndexEntry, importPath: string, answered: Answered): Promise<DocgenPayload> {
     const file = await storyFile(entry, importPath)
     const { csf, storyPath } = file
-    // One look at the files for the story and its subcomponents: they are all answered from the same moment.
-    await freshSession()
+    // One look at the files for the story and its subcomponents: they are all answered from the same moment, and that
+    // is the revision the request saw, whichever of them (or none) the session then has.
+    const session = await freshSession()
+    answered.revision = Math.max(answered.revision, session.revision)
     // The subcomponents first: a parent handed on throws, and every component the story names must be asked of the
     // checker (and so watched) by this request, or the refresh that replaces it would ask some for the first time.
     const declared = extractDeclaredSubcomponents(csf)
@@ -278,7 +280,9 @@ export function createDocgenProvider(
     if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return next(input)
     const id = getComponentIdFromEntry(input.entry)
     const version = completions.start()
-    const answered: Answered = { pending: [], revision: 0 }
+    // Stamped with the revision the session has when the request starts: an answer the next provider gives, because
+    // the story file is unreadable or the files cannot be looked at, is of those files, not of none.
+    const answered: Answered = { pending: [], revision: await background.revision() }
     // Settled before anything is announced: a fallback may finish after a newer request for the component.
     const payload = await settle(
       () => document(input.entry, importPath, answered),

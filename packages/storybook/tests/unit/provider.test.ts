@@ -4,6 +4,7 @@ import type { DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { logger } from 'storybook/internal/node-logger'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { CaliperStorybookOptions } from '../../src/index.js'
+import { initialState, step } from '../../src/lifecycle.js'
 import type { Link, ToDevServer, ToProvider } from '../../src/live.js'
 import { createDocgenProvider } from '../../src/provider.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
@@ -365,6 +366,50 @@ describe('the provider as an adapter of the answer lifecycle', () => {
     expect(posted).toEqual([
       { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [], revisionNow: 1 },
     ])
+  })
+
+  it('stamps an answer the next provider gave with the revision the request saw, so it is not asked for again until an edit', async () => {
+    // Each way a request ends without a component of the session: the answer is Storybook's, but the lifecycle still
+    // compares its revision with the files'. A stamp below the session's would refresh it again, with the same result,
+    // for as long as a client shows the story.
+    const outcomes: Record<string, { lacksCard?: true; looksFail?: true; entry: IndexEntry }> = {
+      'the session lacks the story component': { lacksCard: true, entry: story('Card') },
+      'the story file is not there': { entry: story('Gone') },
+      'the files cannot be looked at': { looksFail: true, entry: story('Card') },
+    }
+    vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const seen: Record<
+      string,
+      { payload: DocgenPayload | undefined; revision: number; now: number; effects: unknown[] }
+    > = {}
+    for (const [outcome, { lacksCard, looksFail, entry: handedOn }] of Object.entries(outcomes)) {
+      const fake = binding()
+      if (lacksCard) delete fake.output.components!.Card
+      fake.updates.push({})
+      const { provider, posted } = linked(fake)
+      // A request that looked at the files, after an edit: the session is at revision 2.
+      await provider({ entry: story('Button') })
+      if (looksFail) {
+        fake.ensureFresh = async () => {
+          throw new Error('disk gone')
+        }
+      }
+      const payload = await provider({ entry: handedOn })
+      const answer = posted.at(-1) as Extract<ToDevServer, { type: 'answer' }>
+      // What the dev server does with it: a client shows the story and nothing is left to ask for.
+      const state = initialState()
+      step(state, { type: 'selected', client: 'a', component: answer.component })
+      const { type: _type, ...event } = answer
+      const effects = step(state, { type: 'answer', ...event })
+      seen[outcome] = { payload, revision: answer.revision, now: answer.revisionNow, effects }
+    }
+    vi.restoreAllMocks()
+    const handedOn = { payload: NEXT, revision: 2, now: 2, effects: [] }
+    expect(seen).toEqual({
+      'the session lacks the story component': handedOn,
+      'the story file is not there': handedOn,
+      'the files cannot be looked at': handedOn,
+    })
   })
 
   it('carries out a watch addressed to it, and reports the revision the files are at; not one for another', async () => {

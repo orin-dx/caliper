@@ -47,14 +47,18 @@ export class Background {
    * session has seen by now: an edit seen while the extraction ran makes the answer stale.
    */
   async answered(answer: { component: string; revision: number; pending: string[] }): Promise<void> {
-    let revisionNow = answer.revision
-    try {
-      const session = await this.host.session()
-      revisionNow = Math.max(revisionNow, session.revision)
-    } catch {
-      // The answer's own revision stands.
-    }
+    const revisionNow = Math.max(answer.revision, await this.revision())
     this.link.post({ type: 'answer', provider: this.id, ...answer, revisionNow })
+  }
+
+  /** The revision of the files the session has last looked at; 0 while there is no session. */
+  async revision(): Promise<number> {
+    try {
+      const { revision } = await this.host.session()
+      return revision
+    } catch {
+      return 0
+    }
   }
 
   private async watch({ component, revision, keys }: { component: string; revision: number; keys: string[] }) {
