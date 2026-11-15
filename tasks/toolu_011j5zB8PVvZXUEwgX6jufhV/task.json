@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_011j5zB8PVvZXUEwgX6jufhV",
+  "agent_id": "ab6b9d5d1f534b22b",
+  "subagent_type": "general-purpose",
+  "task_description": "T3: forwarding resolution (ADR 0028 wave 1)",
+  "token_usage": {
+    "input_tokens": 64,
+    "cache_creation_tokens": 130680,
+    "cache_read_tokens": 3431270,
+    "output_tokens": 35906,
+    "api_call_count": 32
+  },
+  "started_at": "2026-11-15T13:28:17.303878-08:00",
+  "completed_at": "2026-11-15T13:40:42.616288-08:00"
+}
