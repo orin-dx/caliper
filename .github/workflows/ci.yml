@@ -325,7 +325,8 @@ jobs:
     name: Corpora budget
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.head_ref == 'callisto/version-packages' && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Longer than two hung commands (weekly.py's STEP_TIMEOUT, 40 min each), so that it records the failure itself.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

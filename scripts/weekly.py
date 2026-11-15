@@ -817,10 +817,12 @@ def measure_all(args, work, version):
         name = corpus['name']
         try:
             record['corpora'][name] = measure(args, corpus, work)
-        except StepFailed as error:
-            log(f'{name}: FAILED at {error.step}: {error}')
-            record['failed'][name] = {'step': error.step, 'exit': error.code, 'error': str(error)[:500],
-                                      'stderr_tail': error.tail.splitlines()}
+        except (StepFailed, OSError, ValueError, KeyError) as error:
+            # A tool that exits 0 and writes no or broken output fails its corpus too, not the run.
+            failure = error if isinstance(error, StepFailed) else StepFailed('measure', f'{type(error).__name__}: {error}')
+            log(f'{name}: FAILED at {failure.step}: {failure}')
+            record['failed'][name] = {'step': failure.step, 'exit': failure.code, 'error': str(failure)[:500],
+                                      'stderr_tail': failure.tail.splitlines()}
         save(record, args.out)
     return record
 

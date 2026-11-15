@@ -133,7 +133,10 @@ def run_once(args, stdout=subprocess.DEVNULL, timeout=None):
         try:
             _, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             _, stderr = process.communicate()
             raise RunFailed(f'{command} ran past its {timeout} s timeout and was killed', tail=stderr) from None
         detail = stderr.strip()[-500:]
