@@ -688,8 +688,8 @@ async fn answer_file(
             other => other,
         };
         match answered {
-            Ok(Answer::Props(component::Props { props, composes, picked })) => {
-                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes, picked });
+            Ok(Answer::Props(component::Props { props, composes, whole })) => {
+                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes, whole });
             }
             Ok(Answer::Fallback(reason)) => outcome.fallbacks.push(fallback_of(target, &reason)),
             Ok(Answer::Instantiate(instantiation)) => generic.push((target.clone(), instantiation)),
