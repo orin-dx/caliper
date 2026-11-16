@@ -96,12 +96,15 @@ fn physical_memory() -> Option<u64> {
     None
 }
 
-/// The lowest memory limit of the cgroups this process is in, from its own (`/proc/self/cgroup`) up to the root, in
-/// bytes; none when no limit is set or nothing can be read.
+/// The lowest memory limit of the cgroups this process is in, from its own (`/proc/self/cgroup`) up to the root of the
+/// hierarchy's mount (`/proc/self/mountinfo`), in bytes. None when no limit is set, and equally when nothing can be
+/// found: the files unreadable, no cgroup mount listed, or the process's cgroup outside what the mount shows. The
+/// caller then falls back to the host's physical memory, so a limit that cannot be read is not enforced.
 #[cfg(target_os = "linux")]
 fn cgroup_limit() -> Option<u64> {
     let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
-    limit_files(&own)
+    let mounts = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    limit_files(&own, &mounts)
         .iter()
         .filter_map(|file| std::fs::read_to_string(file).ok())
         .filter_map(|text| parse_limit(&text))
@@ -114,32 +117,92 @@ fn cgroup_limit() -> Option<u64> {
     None
 }
 
-/// The files that hold the memory limits of the cgroups `/proc/self/cgroup` lists, each cgroup's and every
-/// ancestor's: cgroup v2's `memory.max` (the `0::` line) under `/sys/fs/cgroup`, and cgroup v1's
-/// `memory.limit_in_bytes` (the line whose controllers include `memory`) under `/sys/fs/cgroup/memory`.
+/// A cgroup hierarchy's mount: where it is mounted, and which of the hierarchy's directories is the mount's root
+/// (`/` unless the mount is a bind mount of a subtree, as in a container).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn limit_files(own: &str) -> Vec<String> {
+struct CgroupMount<'a> {
+    point: String,
+    root: &'a str,
+}
+
+/// The mount of the cgroup v1 hierarchy with the `memory` controller (its super options list it, whether it is mounted
+/// alone or beside `cpu,cpuacct`) and of the cgroup v2 hierarchy, from `/proc/self/mountinfo`. A line that is not
+/// well formed is skipped.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn cgroup_mounts(mountinfo: &str) -> (Option<CgroupMount<'_>>, Option<CgroupMount<'_>>) {
+    let (mut v1, mut v2) = (None, None);
+    for line in mountinfo.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        // The optional fields end at the `-`, which cannot come before the sixth field.
+        let Some(dash) = fields.iter().skip(5).position(|field| *field == "-").map(|at| at + 5) else { continue };
+        let (Some(root), Some(point), Some(kind)) = (fields.get(3), fields.get(4), fields.get(dash + 1)) else {
+            continue;
+        };
+        let mount = || CgroupMount { point: unescape(point), root };
+        match *kind {
+            "cgroup2" if v2.is_none() => v2 = Some(mount()),
+            "cgroup" if v1.is_none() => {
+                let options = fields.get(dash + 3).copied().unwrap_or_default();
+                if options.split(',').any(|option| option == "memory") {
+                    v1 = Some(mount());
+                }
+            }
+            _ => {}
+        }
+    }
+    (v1, v2)
+}
+
+/// A mountinfo path with its octal escapes (`\040` for a space) decoded.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn unescape(path: &str) -> String {
+    let (bytes, mut out, mut at) = (path.as_bytes(), Vec::with_capacity(path.len()), 0);
+    while at < bytes.len() {
+        let octal = bytes.get(at + 1..at + 4).filter(|_| bytes[at] == b'\\');
+        match octal.and_then(|digits| u8::from_str_radix(std::str::from_utf8(digits).ok()?, 8).ok()) {
+            Some(byte) => {
+                out.push(byte);
+                at += 4;
+            }
+            None => {
+                out.push(bytes[at]);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The files that hold the memory limits of the cgroups `/proc/self/cgroup` (`own`) lists, each cgroup's and every
+/// ancestor's up to the root of its mount: cgroup v2's `memory.max` (the `0::` line) and cgroup v1's
+/// `memory.limit_in_bytes` (the line whose controllers include `memory`), each under the mount point `mountinfo` gives
+/// for that hierarchy ([`cgroup_mounts`]). The process's cgroup path is relative to the hierarchy's root, so a mount
+/// whose root is a subtree shows only the cgroups under it, and a cgroup outside it has no files. A hierarchy with no
+/// mount has none.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn limit_files(own: &str, mountinfo: &str) -> Vec<String> {
+    let (v1, v2) = cgroup_mounts(mountinfo);
     let mut files = Vec::new();
     for line in own.lines() {
         let mut fields = line.splitn(3, ':');
         let (Some(_), Some(controllers), Some(path)) = (fields.next(), fields.next(), fields.next()) else { continue };
-        let (root, file) = match controllers {
-            "" => ("/sys/fs/cgroup", "memory.max"),
-            _ if controllers.split(',').any(|controller| controller == "memory") => {
-                ("/sys/fs/cgroup/memory", "memory.limit_in_bytes")
-            }
+        let (mount, file) = match controllers {
+            "" => (&v2, "memory.max"),
+            _ if controllers.split(',').any(|controller| controller == "memory") => (&v1, "memory.limit_in_bytes"),
             _ => continue,
         };
-        let mut dir = path.trim_end_matches('/');
+        let Some(mount) = mount else { continue };
+        let root = mount.root.trim_end_matches('/');
+        let path = path.trim_end_matches('/');
+        let Some(mut dir) = path.strip_prefix(root).filter(|rest| rest.is_empty() || rest.starts_with('/')) else {
+            continue;
+        };
+        let point = mount.point.trim_end_matches('/');
         loop {
-            files.push(format!("{root}{dir}/{file}"));
+            files.push(format!("{point}{dir}/{file}"));
             match dir.rfind('/') {
                 Some(parent) => dir = &dir[..parent],
                 None => break,
-            }
-            if dir.is_empty() {
-                files.push(format!("{root}/{file}"));
-                break;
             }
         }
     }
@@ -255,11 +318,16 @@ impl Watch {
 mod tests {
     use super::*;
 
+    const V2: &str = "29 22 0:26 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup2 rw,nsdelegate\n";
+    const V1_COMOUNTED: &str = "30 23 0:27 / /sys/fs/cgroup/cpu,cpuacct,memory rw,nosuid,relatime shared:12 - cgroup cgroup rw,cpu,cpuacct,memory\n";
+    const V1_SEPARATE: &str = "31 23 0:28 / /sys/fs/cgroup/cpu,cpuacct rw,relatime - cgroup cgroup rw,cpu,cpuacct\n\
+                               32 23 0:29 / /sys/fs/cgroup/memory rw,relatime - cgroup cgroup rw,memory\n";
+
     /// A cgroup v2 process (a container, a systemd unit) reads `memory.max` in its own cgroup and every ancestor's.
     #[test]
     fn a_v2_cgroup_reads_memory_max_up_to_the_root() {
         assert_eq!(
-            limit_files("0::/system.slice/docker-1.scope\n"),
+            limit_files("0::/system.slice/docker-1.scope\n", V2),
             [
                 "/sys/fs/cgroup/system.slice/docker-1.scope/memory.max",
                 "/sys/fs/cgroup/system.slice/memory.max",
@@ -267,23 +335,72 @@ mod tests {
             ]
         );
         // Inside a container's own namespace the cgroup is the root.
-        assert_eq!(limit_files("0::/\n"), ["/sys/fs/cgroup/memory.max"]);
+        assert_eq!(limit_files("0::/\n", V2), ["/sys/fs/cgroup/memory.max"]);
     }
 
-    /// A cgroup v1 process reads `memory.limit_in_bytes` of the hierarchy whose controllers include `memory`, and no
-    /// other hierarchy's.
+    /// A v1 memory controller comounted with others is found at that mount, not at `/sys/fs/cgroup/memory`.
+    #[test]
+    fn a_comounted_v1_memory_controller_is_found_at_its_mount() {
+        let own = "12:cpu,cpuacct,memory:/docker/abc\n1:name=systemd:/docker/abc\n";
+        assert_eq!(
+            limit_files(own, V1_COMOUNTED),
+            [
+                "/sys/fs/cgroup/cpu,cpuacct,memory/docker/abc/memory.limit_in_bytes",
+                "/sys/fs/cgroup/cpu,cpuacct,memory/docker/memory.limit_in_bytes",
+                "/sys/fs/cgroup/cpu,cpuacct,memory/memory.limit_in_bytes",
+            ]
+        );
+    }
+
+    /// A v1 process reads the `memory` hierarchy only, from the mount whose options list `memory`.
     #[test]
     fn a_v1_cgroup_reads_the_memory_hierarchy_only() {
         let own = "12:cpu,cpuacct:/docker/abc\n11:memory:/docker/abc\n1:name=systemd:/docker/abc\n";
         assert_eq!(
-            limit_files(own),
+            limit_files(own, V1_SEPARATE),
             [
                 "/sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes",
                 "/sys/fs/cgroup/memory/docker/memory.limit_in_bytes",
                 "/sys/fs/cgroup/memory/memory.limit_in_bytes",
             ]
         );
-        assert!(limit_files("garbage\n\n").is_empty());
+        assert!(limit_files("garbage\n\n", V1_SEPARATE).is_empty());
+    }
+
+    /// With no cgroup mount, or none for the process's hierarchy, there is nothing to read.
+    #[test]
+    fn no_cgroup_mount_gives_no_files() {
+        let proc = "22 1 8:1 / / rw - ext4 /dev/sda1 rw\n";
+        assert!(limit_files("0::/a\n", proc).is_empty());
+        assert!(limit_files("11:memory:/a\n", proc).is_empty());
+        assert!(limit_files("11:memory:/a\n", V2).is_empty());
+        assert!(limit_files("0::/a\n", V1_SEPARATE).is_empty());
+    }
+
+    /// A bind-mounted subtree shows the cgroups under its root: the process's path is taken relative to the root, and a
+    /// cgroup outside it has no files.
+    #[test]
+    fn a_bind_mounted_root_is_stripped_from_the_cgroup_path() {
+        let mounts = "40 30 0:26 /docker/abc /sys/fs/cgroup rw - cgroup2 cgroup2 rw\n";
+        assert_eq!(
+            limit_files("0::/docker/abc/sub\n", mounts),
+            ["/sys/fs/cgroup/sub/memory.max", "/sys/fs/cgroup/memory.max"]
+        );
+        assert_eq!(limit_files("0::/docker/abc\n", mounts), ["/sys/fs/cgroup/memory.max"]);
+        assert!(limit_files("0::/docker/abcd\n", mounts).is_empty());
+        assert!(limit_files("0::/other\n", mounts).is_empty());
+    }
+
+    /// Malformed lines are skipped without a panic, and a mount point's octal escapes are decoded.
+    #[test]
+    fn malformed_mountinfo_is_skipped() {
+        for junk in ["", "-", "1 2 3 - cgroup", "1 2 3 / - cgroup2", "1 2 3 / /x - cgroup", "a b c d e - cgroup2"] {
+            let _ = limit_files("0::/a\n11:memory:/a\n", junk);
+        }
+        assert!(limit_files("0::/a\n", "1 2 3 / - cgroup2 x\n").is_empty());
+        let spaced = "1 2 3 / /sys/fs/cg\\040root - cgroup2 cgroup2 rw\n";
+        assert_eq!(limit_files("0::/\n", spaced), ["/sys/fs/cg root/memory.max"]);
+        assert_eq!(unescape("a\\04"), "a\\04");
     }
 
     /// A limit is a byte count; `max` and v1's near-2^63 value mean no limit, and anything unreadable is none.
