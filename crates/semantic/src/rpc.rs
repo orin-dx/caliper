@@ -365,8 +365,8 @@ pub(crate) struct Rpc {
     recording: Option<Arc<Mutex<Vec<Value>>>>,
     calls: Arc<Mutex<BTreeMap<&'static str, u64>>>,
     /// The snapshots of the other lanes [`Rpc::open_programs`] opened beside this one, which [`Rpc::release`] on this
-    /// one releases too.
-    others: Vec<u64>,
+    /// one releases too, unless [`Rpc::release_lanes`] released them already.
+    others: Mutex<Vec<u64>>,
 }
 
 /// A diagnostic the checker reports for a file: where it starts and what it says.
@@ -418,7 +418,7 @@ impl Rpc {
             options: Value::Null,
             recording: None,
             calls: Arc::default(),
-            others: Vec::new(),
+            others: Mutex::default(),
         };
         rpc.call("initialize", &Value::Null).await?;
         Ok(match tsconfig {
@@ -463,7 +463,7 @@ impl Rpc {
             }
         }
         let others = lanes.iter().map(|rpc| rpc.snapshot).collect();
-        lanes.insert(0, Rpc { others, ..first });
+        lanes.insert(0, Rpc { others: Mutex::new(others), ..first });
         Ok(lanes)
     }
 
@@ -486,7 +486,7 @@ impl Rpc {
             options: self.options.clone(),
             recording: self.recording.clone(),
             calls: self.calls.clone(),
-            others: Vec::new(),
+            others: Mutex::default(),
         };
         // The response lists the programs the update made or changed: the one created, not this one's.
         let Some(project) = response.projects.into_iter().find(|project| project.id != self.project) else {
@@ -513,7 +513,7 @@ impl Rpc {
             options: options.clone(),
             recording: record.then(Arc::default),
             calls: Arc::default(),
-            others: Vec::new(),
+            others: Mutex::default(),
         };
         rpc.created(json!({ "createPrograms": [{ "rootFiles": root_files, "compilerOptions": options }] })).await
     }
@@ -534,33 +534,46 @@ impl Rpc {
             options: options.clone(),
             recording: None,
             calls: Arc::default(),
-            others: Vec::new(),
+            others: Mutex::default(),
         };
-        session.layered(&[], files).await
+        let layer = in_memory_layer(files);
+        let roots: Vec<&String> = files.iter().map(|(path, _)| path).collect();
+        session
+            .created(json!({
+                "fileSystem": layer,
+                "createPrograms": [{ "rootFiles": roots, "compilerOptions": options }],
+            }))
+            .await
     }
 
-    /// A new snapshot of the same program with `files` added, held in the checker's memory and never written to disk:
-    /// each is a root file, keyed by its absolute path. The calls on it count, and are recorded, with this one's.
+    /// The snapshot after this one with `files` added, held in the checker's memory and never written to disk (each is
+    /// a root file, keyed by its absolute path), and this one's program rooted at `root_files` and them instead, built at
+    /// once (`updateSnapshot` with `reconfigurePrograms`). It is derived from this snapshot, so it reads every other file
+    /// as this one holds it, from the files this one has read and parsed, and holds one program: a fresh `createSnapshot`
+    /// read and parsed every file again into a second whole program while this one's was still alive. The calls on it
+    /// count, and are recorded, with this one's; it is released on its own, and this one stays alive until it is.
     pub(crate) async fn layered(&self, root_files: &[String], files: &[(String, String)]) -> Result<Rpc, CallError> {
-        let rpc = Rpc {
+        let mut roots = root_files.to_vec();
+        roots.extend(files.iter().map(|(path, _)| path.clone()));
+        let changes = json!({
+            "fileSystem": in_memory_layer(files),
+            "reconfigurePrograms": [{ "id": self.project, "rootFiles": roots, "compilerOptions": self.options }],
+            "ensurePrograms": true,
+        });
+        let response: SnapshotResponse =
+            decode(&self.call("updateSnapshot", &json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
+        // The response lists only the projects it replaced; a reconfigured program may keep its id.
+        let project = response.projects.into_iter().next().map_or_else(|| self.project.clone(), |project| project.id);
+        Ok(Rpc {
             client: self.client.clone(),
             deadline: self.deadline,
-            snapshot: 0,
-            project: String::new(),
+            snapshot: response.snapshot,
+            project,
             options: self.options.clone(),
             recording: self.recording.clone(),
             calls: self.calls.clone(),
-            others: Vec::new(),
-        };
-        let mut roots = root_files.to_vec();
-        roots.extend(files.iter().map(|(path, _)| path.clone()));
-        let layer: serde_json::Map<String, Value> =
-            files.iter().map(|(path, text)| (path.clone(), Value::String(text.clone()))).collect();
-        rpc.created(json!({
-            "fileSystem": { "kind": "layer", "files": layer },
-            "createPrograms": [{ "rootFiles": roots, "compilerOptions": self.options }],
-        }))
-        .await
+            others: Mutex::default(),
+        })
     }
 
     /// The snapshot after this one with `changed` and `deleted` read again from the disk and, given `roots`, its program
@@ -596,7 +609,7 @@ impl Rpc {
             options: self.options.clone(),
             recording: self.recording.clone(),
             calls: Arc::default(),
-            others: Vec::new(),
+            others: Mutex::default(),
         })
     }
 
@@ -621,7 +634,7 @@ impl Rpc {
             options: self.options.clone(),
             recording: self.recording.clone(),
             calls: self.calls.clone(),
-            others: Vec::new(),
+            others: Mutex::default(),
         }
     }
 
@@ -651,9 +664,24 @@ impl Rpc {
 
     /// Releases the snapshot, and those of the lanes opened beside it ([`Rpc::open_programs`]).
     pub(crate) async fn release(&self) {
-        for snapshot in std::iter::once(self.snapshot).chain(self.others.iter().copied()) {
+        let lanes = self.take_lanes();
+        for snapshot in std::iter::once(self.snapshot).chain(lanes) {
             self.call("release", &json!({ "snapshot": snapshot })).await.ok();
         }
+    }
+
+    /// Releases the snapshots of the lanes opened beside this one ([`Rpc::open_programs`]) and keeps this one's: what
+    /// they hold (each lane's program and its checker's caches) is freed before the work that follows the lanes. Each is
+    /// released once, here or by [`Rpc::release`], never by both. Nothing may ask a lane after.
+    pub(crate) async fn release_lanes(&self) {
+        for snapshot in self.take_lanes() {
+            self.call("release", &json!({ "snapshot": snapshot })).await.ok();
+        }
+    }
+
+    /// The lanes' snapshots not yet released, which are then no longer this one's to release.
+    fn take_lanes(&self) -> Vec<u64> {
+        std::mem::take(&mut *self.others.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 
     /// The recorded calls as a JSON array, or `None` when recording was off.
@@ -874,6 +902,13 @@ fn default_options() -> Value {
 }
 
 /// An answer parsed from its text straight into `T`, in one pass.
+/// The `fileSystem` of a request that adds `files` in the checker's memory, keyed by absolute path, over the disk.
+fn in_memory_layer(files: &[(String, String)]) -> Value {
+    let layer: serde_json::Map<String, Value> =
+        files.iter().map(|(path, text)| (path.clone(), Value::String(text.clone()))).collect();
+    json!({ "kind": "layer", "files": layer })
+}
+
 pub(crate) fn decode<T: DeserializeOwned>(answer: &RawValue) -> Result<T, CallError> {
     serde_json::from_str(answer.get())
         .map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
@@ -975,6 +1010,69 @@ mod tests {
             (vec![false], vec![false; 3]),
             "the first program's release releases every lane's"
         );
+    }
+
+    /// The generic components of a run on two lanes are answered in a snapshot derived from the first lane's, whose one
+    /// program is reconfigured to take the probe file, not in a second program built from the disk beside both lanes';
+    /// and the second lane's snapshot is released before that snapshot is made. The instantiation still forms. On the
+    /// base the run made two `createSnapshot`s, the second rooted afresh at every root file, while both lanes lived.
+    #[test]
+    fn instantiations_are_answered_in_a_snapshot_derived_from_the_first_lane_after_the_others_are_released() {
+        let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generic");
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let request = SemanticRequest::new(root.clone(), targets_of(&output));
+        let files = root_files(&request);
+        let tsconfig = root.join("tsconfig.json");
+        let checker = Backend::start(&root, 2).unwrap();
+        let runtime = multi_thread();
+        let deadline = Duration::from_secs(120);
+        let (outcome, lanes, recording, releases) = runtime.block_on(async {
+            let programs =
+                Rpc::open_programs(checker.client(), deadline, Some(tsconfig.as_str()), &files, true, 2).await.unwrap();
+            let programs: Vec<Arc<Rpc>> = programs.into_iter().map(Arc::new).collect();
+            let lanes: Vec<(u64, String)> =
+                programs.iter().map(|program| (program.snapshot, program.project.clone())).collect();
+            let outcome = answer_on(&programs, &request, &files).await.unwrap();
+            let recording = programs[0].recording().unwrap();
+            programs[0].release().await;
+            let releases = programs[0].calls().get("release").copied();
+            (outcome, lanes, recording, releases)
+        });
+        runtime.block_on(checker.shutdown());
+
+        // A generic component comes back only from its instantiation: one that did not form is a fallback.
+        let answered: Vec<&str> = outcome.components.iter().map(|component| component.key.as_str()).collect();
+        assert!(answered.contains(&"Poly") && answered.contains(&"Anchor"), "{outcome:?}");
+        assert!(outcome.fallbacks.iter().all(|fallback| fallback.key == "Configured"), "{:?}", outcome.fallbacks);
+        let calls: Vec<(&str, &Value)> = recording
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|call| (call["method"].as_str().unwrap(), &call["params"]))
+            .collect();
+        let created = calls.iter().filter(|(method, _)| *method == "createSnapshot").count();
+        assert_eq!(created, 1, "only the first lane's program is built from the disk");
+        let layered = calls
+            .iter()
+            .position(|(method, params)| *method == "updateSnapshot" && params["changes"].get("fileSystem").is_some())
+            .expect("the probe file is added by an update");
+        let (first, second) = (&lanes[0], &lanes[1]);
+        let changes = &calls[layered].1["changes"];
+        assert_eq!(calls[layered].1["snapshot"], json!(first.0), "derived from the first lane's snapshot");
+        assert_eq!(changes.get("createPrograms"), None, "no second program beside the first's");
+        let reconfigured = changes["reconfigurePrograms"].as_array().unwrap();
+        assert_eq!(reconfigured.len(), 1);
+        assert_eq!(reconfigured[0]["id"], json!(first.1));
+        let roots = reconfigured[0]["rootFiles"].as_array().unwrap();
+        assert_eq!(roots.len(), files.len() + 1, "every root file and the probe file: {roots:?}");
+        let released_second = calls
+            .iter()
+            .position(|(method, params)| *method == "release" && params["snapshot"] == json!(second.0))
+            .expect("the second lane's snapshot is released");
+        assert!(released_second < layered, "the second lane is released before the instantiation snapshot is made");
+        // The second lane early, the instantiation snapshot, and the first lane; a release is counted even when it fails,
+        // as a second release of the second lane's would.
+        assert_eq!(releases, Some(3), "each snapshot is released once");
     }
 
     /// Stands in for a session: makes snapshot 1 of as many programs as asked on `createSnapshot` (so a run that asked
