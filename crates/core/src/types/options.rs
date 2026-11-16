@@ -74,8 +74,9 @@ impl CollapseInheritedProps {
     /// picks are listed however large the source: neither lane asks about them. The structural resolver expands what a
     /// `Pick` applies to, and counts the members a source declares less the keys the `Omit`s around it take
     /// (`ResolveState::omitted`, so only that source is affected); the checker's merge counts the props of its answer
-    /// whose `parent` is the source, which are exactly the members that reach, less the ones a `Pick` selects
-    /// (`SemanticComponent::picked`, `crate::types::semantic::layer_checker_props`).
+    /// whose `parent` is the source, which are exactly the members that reach, and asks only for a source the checker
+    /// proved the props type reaches whole: one under a `Pick`, a mapped type or a project alias of either is listed
+    /// without asking (`SemanticComponent::whole`, `crate::types::semantic::layer_checker_props`).
     ///
     /// - A dependency source collapses when it is ambient (`crate::types::ambient`: DOM and ARIA attributes, style
     ///   systems) and past [`COLLAPSE_THRESHOLD`] props, or when it is not ambient but past [`LARGE_API_SOURCE`] props.

@@ -19,12 +19,15 @@ pub(crate) enum CallError {
     Fatal(String),
     /// The checker rejected this one call; other components may still resolve.
     Rejected(String),
+    /// The run's heap is past its budget ([`crate::heap`]): the call was not sent, and no later one will be.
+    OverBudget,
 }
 
 impl std::fmt::Display for CallError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CallError::Fatal(message) | CallError::Rejected(message) => f.write_str(message),
+            CallError::OverBudget => f.write_str("the run's heap is past its budget"),
         }
     }
 }
@@ -667,6 +670,10 @@ impl Rpc {
     /// One request, its answer as the JSON text it arrived as: [`decode`] parses it once, into the shape the caller
     /// expects. The parameters are written straight to the text the checker reads.
     async fn call(&self, method: &'static str, params: &impl Serialize) -> Result<Box<RawValue>, CallError> {
+        // A release gives memory back, so it is sent past the heap budget too.
+        if method != "release" {
+            crate::heap::step()?;
+        }
         if let Ok(mut calls) = self.calls.lock() {
             *calls.entry(method).or_default() += 1;
         }
