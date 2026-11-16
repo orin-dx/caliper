@@ -173,6 +173,13 @@ export class FakeBinding implements SessionBinding {
     return keys.length
   }
 
+  /** The keys of each cancel, in order. */
+  cancelled: string[][] = []
+
+  sessionCancel = (_sessionId: number, keys: string[]): void => {
+    this.cancelled.push(keys)
+  }
+
   /** The keys of each wait for the checker; the wait resolves with `settled`. */
   settles: string[][] = []
   settled: Promise<boolean> = Promise.resolve(true)
