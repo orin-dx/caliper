@@ -24,6 +24,10 @@ tsrs_vfs.workspace        = true
 tsrs_core.workspace       = true
 rmp-serde.workspace       = true
 xxhash-rust.workspace     = true
+libmimalloc-sys.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace            = true
 
 [dev-dependencies]
 tempfile.workspace        = true
