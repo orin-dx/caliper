@@ -206,6 +206,27 @@ fn component_props_reads_a_declared_component_member_of_an_imported_value() {
 }
 
 #[test]
+fn a_package_type_named_only_by_a_factory_callback_annotation_is_loaded() {
+    let (_tmp, root) = project(&[
+        ("node_modules/ext-kit/package.json", r#"{ "name": "ext-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/ext-kit/index.d.ts", "export interface ExternalProps { size?: 'S' | 'M'; label: string }\n"),
+        (
+            "src/Widget.tsx",
+            "import type { ExternalProps } from 'ext-kit';\n\
+             import type { FC } from 'react';\n\
+             declare function make<P>(tag: string, render: (props: P) => unknown): FC<{ id?: string }>;\n\
+             export const Widget = make('div', (props: ExternalProps) => <div />);\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "Widget"),
+        [("id".into(), "string".into()), ("label".into(), "string".into()), ("size".into(), "\"S\" | \"M\"".into()),]
+    );
+}
+
+#[test]
 fn component_props_reads_a_call_signature_in_an_imported_namespace() {
     let (_tmp, root) = project(&[
         ("node_modules/call-kit/package.json", r#"{ "name": "call-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
