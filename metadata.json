@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7JNT1P2YGB00TXESMC9A6GG",
+  "strategy": "manual-commit",
+  "branch": "worktree-agent-aa49801b6d8a5a6c1",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/semantic/tests/collapse_model.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 8,
+      "cache_creation_tokens": 3173,
+      "cache_read_tokens": 1347238,
+      "output_tokens": 2275,
+      "api_call_count": 4
+    }
+  },
+  "redaction": {
+    "replacements": 69,
+    "layers": {
+      "betterleaks": 36,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 33,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
