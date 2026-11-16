@@ -754,6 +754,33 @@ fn props_named_by_no_first_parameter_are_handed_on() {
     assert!(!facts("export function C(props: P) { return <i /> }", "C").handed_on);
 }
 
+/// `arguments` is the component's only in the component itself or in arrows nested directly in it; any nested
+/// non-arrow function, method, accessor or class member has its own.
+#[test]
+fn arguments_is_the_components_only_through_arrows() {
+    let handed = |body: &str| facts(&format!("export function C(props: P) {{ {body} return <i /> }}"), "C").handed_on;
+    for own in [
+        "const f = () => arguments[0];",
+        "const f = () => () => arguments[0];",
+        "const f = () => { const g = () => arguments; };",
+        "const f = (a = arguments[0]) => a;",
+    ] {
+        assert!(handed(own), "{own}");
+    }
+    for other in [
+        "function first() { return arguments[0] }",
+        "const first = function () { return arguments[0] };",
+        "const o = { first() { return arguments[0] } };",
+        "const o = { get first() { return arguments[0] } };",
+        "class K { first() { return arguments[0] } }",
+        "function f() { return () => arguments[0] }",
+        "function f(a = arguments[0]) { return a }",
+    ] {
+        assert!(!handed(other), "{other}");
+    }
+    assert!(facts("export function C(props: P, a = arguments[0]) { return <i /> }", "C").handed_on);
+}
+
 /// Every syntactic context a props member can sit in: a read is complete only where the context is known to only
 /// read; every other form hands the object on (unknown), never a silent "read".
 #[test]

@@ -297,8 +297,12 @@ impl<'s, 'a> Reader<'s, 'a> {
             let own = function.span();
             let uses_arguments = self.scoping.root_unresolved_references().get("arguments").is_some_and(|references| {
                 references.iter().any(|&reference| {
-                    let at = self.nodes.kind(self.scoping.get_reference(reference).node_id()).span();
-                    own.start <= at.start && at.end <= own.end
+                    // Arrows inherit `arguments`; the nearest enclosing other function owns it.
+                    let owner =
+                        self.nodes.ancestor_kinds(self.scoping.get_reference(reference).node_id()).find_map(|kind| {
+                            if let AstKind::Function(function) = kind { Some(function.span) } else { None }
+                        });
+                    owner == Some(own)
                 })
             });
             if uses_arguments {
