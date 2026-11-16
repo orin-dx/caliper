@@ -1382,10 +1382,10 @@ fn a_large_dependency_source_collapses_to_a_layer_and_its_notable_props() {
     let tiny = &output.components["Tiny"];
     assert_eq!(keys(&tiny.props), ["own", "radius", "width"]);
     assert_eq!(layers(tiny), []);
-    // A source past `COLLAPSE_THRESHOLD` members is a generated set: narrowed to a layer whatever its name.
+    // A dependency's API source of up to `LARGE_API_SOURCE` members is listed in full too.
     let api = &output.components["Api"];
-    assert_eq!(keys(&api.props), ["own"]);
-    assert_eq!(layers(api), [("ApiProps", 31, None)]);
+    assert_eq!(api.props.len(), 32);
+    assert_eq!(layers(api), []);
 
     // ...unless it is past `LARGE_API_SOURCE`: a style system under a name the rule does not know.
     let huge = &output.components["Huge"];

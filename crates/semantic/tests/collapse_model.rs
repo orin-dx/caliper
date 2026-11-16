@@ -282,11 +282,9 @@ fn a_source_collapses_by_the_members_that_reach_the_component() {
             let entry = &output.components[&key];
             let huge: Vec<_> = entry.inheritance.iter().filter(|layer| layer.type_name == "Huge").collect();
             let listed = entry.props.keys().filter(|prop| prop.starts_with('h')).count();
-            // Relevance lists a dependency's member only where evidence shows it (ADR 0028, A2): these bodies read
-            // nothing and no call site passes anything, so a source under the size rule is a layer of names too,
-            // except the keys a `Pick` names. A source only the checker reads gave relevance no placement: listed whole.
-            let narrowed = lane != "checker only" && !name.starts_with("Pick");
-            if collapses || narrowed {
+            // A source under the size rule is one of the component's main props (ADR 0028, A2): listed whole, with no
+            // evidence needed.
+            if collapses {
                 assert_eq!(huge.len(), 1, "{lane} {key}: one Huge layer");
                 assert_eq!(huge[0].total_props as usize, *reaching, "{lane} {key}: what the layer holds");
                 assert_eq!(listed, 0, "{lane} {key}: listed");

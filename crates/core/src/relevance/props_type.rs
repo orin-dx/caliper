@@ -14,7 +14,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use super::Member;
 use crate::types::collected::{CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, ExtendsRef};
-use crate::types::options::COLLAPSE_THRESHOLD;
+use crate::types::options::LARGE_API_SOURCE;
 use crate::types::output::{InheritedLayer, ParsedProp, PropParent, PropType};
 
 /// How deep [`PropsType::read`] follows aliases of `Pick` keys, so a cyclic alias ends.
@@ -231,9 +231,10 @@ impl PropsType {
 /// The props-type evidence of every member a lane's answer reaches: each prop it lists (`rows`, with its
 /// `notableInherited` ones) in order, then each member of its collapsed `layers` it does not list. `ambient` says
 /// whether a declaring file is ambient (ADR 0028: by path, never by name); a member with no declaring file is not.
-/// `large` says whether the member's source (its `parent`, or the layer holding it) reaches with more than
-/// [`COLLAPSE_THRESHOLD`] members, counted over the listed props of that source and the unlisted members of its layers;
-/// a listed prop with no `parent` has no known source and is not large.
+/// `large` says whether the member is one of a generated set: a member of a layer (a source the resolver collapsed past
+/// its thresholds), a member a mapped type copies from a large interface's keys
+/// ([`ParsedProp::copied_from_large_keys`]), or a member of a source (its `parent`) that has a layer or reaches with
+/// more than [`LARGE_API_SOURCE`] listed props. A listed prop with no `parent` has no known source and is large only when copied.
 ///
 /// A member is own when the props type writes it, and overrides when, besides, a base declares it: its `parent` or a
 /// declaration is not the props type, or a collapsed layer holds it.
@@ -246,17 +247,19 @@ pub(crate) fn members<'a>(
     let layered: BTreeSet<&str> = layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
     let mut listed = BTreeSet::new();
     let rows: Vec<&ParsedProp> = rows.into_iter().filter(|prop| listed.insert(prop.name.as_str())).collect();
-    // Each source's reach: its listed props, then its layers' members not listed.
+    // Each source's reach over the listed props.
     let mut reach: BTreeMap<(&str, &str), usize> = BTreeMap::new();
     for parent in rows.iter().filter_map(|prop| prop.parent.as_ref()) {
         *reach.entry((&parent.name, &parent.file_name)).or_default() += 1;
     }
+    // A listed prop of a source the resolver collapsed (a notable member of its layer) is of that generated set too.
     for layer in layers {
-        let unlisted = layer.members.iter().filter(|name| !listed.contains(name.as_str())).count();
-        *reach.entry((&layer.type_name, &layer.file_name)).or_default() += unlisted;
+        reach.insert((&layer.type_name, &layer.file_name), usize::MAX);
     }
-    let large = |type_name: &str, file_name: &str| {
-        reach.get(&(type_name, file_name)).is_some_and(|reaching| *reaching > COLLAPSE_THRESHOLD)
+    let large = |parent: &PropParent| {
+        reach
+            .get(&(parent.name.as_str(), parent.file_name.as_str()))
+            .is_some_and(|reaching| *reaching > LARGE_API_SOURCE)
     };
     let mut members = Vec::new();
     for prop in rows {
@@ -273,7 +276,7 @@ pub(crate) fn members<'a>(
             literal_union: is_literal_union(&prop.prop_type),
             // The checker states `parent` only for an interface; a declaration in a type literal is still in a file.
             ambient: prop.parent.iter().chain(&prop.declarations).any(|parent| ambient(&parent.file_name)),
-            large: prop.parent.as_ref().is_some_and(|parent| large(&parent.name, &parent.file_name)),
+            large: prop.copied_from_large_keys || prop.parent.as_ref().is_some_and(large),
             ..given
         });
     }
@@ -284,7 +287,7 @@ pub(crate) fn members<'a>(
                 own,
                 overrides: own,
                 ambient: ambient(&layer.file_name),
-                large: large(&layer.type_name, &layer.file_name),
+                large: true,
                 ..member(props_type, name)
             });
         }
@@ -389,6 +392,35 @@ mod tests {
     fn decided(members: Vec<Member>) -> Shown {
         let call_sites = &crate::relevance::NO_CALL_SITES;
         decide(&Evidence { members: &members, body: Some(&Body::default()), call_sites })
+    }
+
+    #[test]
+    fn a_mapped_type_over_the_keys_of_a_large_interface_is_generated_and_over_a_small_one_is_api() {
+        for (keys, large) in [(2, false), (30, false), (31, true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+            let fields: String = (0..keys).map(|i| format!("k{i}: string; ")).collect();
+            std::fs::write(
+                root.join("Box.tsx"),
+                format!(
+                    "interface Keys {{ {fields}}}\n\
+                     type ByKey = {{ [K in keyof Keys]?: number }};\n\
+                     export function Box(props: ByKey & {{ tone?: string }}) {{ return null; }}\n"
+                ),
+            )
+            .unwrap();
+            let options = PipelineOptions {
+                src_dirs: vec![root.clone()],
+                use_cache: false,
+                collapse_inherited_props: CollapseInheritedProps::None,
+                ..PipelineOptions::default()
+            };
+            let entry = &extract(&options).components["Box"];
+            let found = members(&PropsType::default(), entry.props.values().map(AsRef::as_ref), &entry.inheritance);
+            let flags: BTreeSet<(bool, bool)> =
+                found.iter().map(|member| (member.name.starts_with('k'), member.large)).collect();
+            assert_eq!(flags, BTreeSet::from([(true, large), (false, false)]), "{keys} keys");
+        }
     }
 
     #[test]

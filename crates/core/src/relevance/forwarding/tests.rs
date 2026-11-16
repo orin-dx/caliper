@@ -205,7 +205,7 @@ fn the_tag_resolves_by_its_import_not_by_its_name() {
 }
 
 #[test]
-fn a_tag_an_inner_binding_shadows_is_unknown_not_the_module_component() {
+fn a_tag_an_inner_binding_shadows_is_unresolved_not_the_module_component() {
     // `Item` is a component of the file and an import of another; each body renders a different `Item` of its own.
     let item = "export function Item(props: ItemProps) { return <li />; }\n";
     let bodies = [
@@ -326,7 +326,7 @@ fn an_attached_sub_component_resolves_by_its_export_path() {
 }
 
 #[test]
-fn a_spread_onto_a_tag_that_does_not_resolve_is_unknown() {
+fn a_spread_onto_a_tag_that_does_not_resolve_forwards_nothing() {
     let package = "import { Ext } from 'some-package';\n\
                    export function Outer({ label, ...rest }: OuterProps) { return <Ext {...rest} />; }\n";
     let factory = "import { styled } from './styled';\n\
@@ -345,7 +345,7 @@ fn a_spread_onto_a_tag_that_does_not_resolve_is_unknown() {
 }
 
 #[test]
-fn a_component_whose_props_did_not_resolve_is_unknown() {
+fn a_component_whose_props_did_not_resolve_forwards_nothing() {
     // The tag resolves, but the lane has no props for `Inner`: nothing is guessed about what it takes.
     let fixture = Fixture::new(&[("inner.tsx", INNER), ("outer.tsx", &outer("<Inner {...rest} />"))]);
     assert_eq!(fixture.forwarding("outer.tsx", "Outer").elements[0].target, Target::Unresolved);
@@ -353,7 +353,7 @@ fn a_component_whose_props_did_not_resolve_is_unknown() {
 }
 
 #[test]
-fn a_body_that_hands_its_props_on_is_unknown() {
+fn a_body_that_hands_its_props_on_promotes_only_what_it_says() {
     let source = "import { Inner } from './inner';\n\
                   export function Outer(props: OuterProps) { track(props); return <Inner {...props} />; }\n";
     let fixture = project(source);

@@ -536,7 +536,7 @@ fn resolve_mapped_chain(
             .get("default")
             .or_else(|| key.tags.get("defaultValue"))
             .map(|value| DefaultValue { value: value.trim().to_owned(), computed: false });
-        chain.props.push(ctx.share(ParsedProp::new(
+        let mut prop = ParsedProp::new(
             key.name.clone(),
             prop_type,
             optional.map_or(key.required, |optional| !optional),
@@ -545,7 +545,11 @@ fn resolve_mapped_chain(
             key.tags.clone(),
             key.parent.clone(),
             key.parent.iter().cloned().collect(),
-        )));
+        );
+        // Keys of an interface (`keyof Conditions`) copied past the threshold are a generated set; a recipe's few
+        // variant keys (`keyof ButtonVariant`) are the component's API.
+        prop.copied_from_large_keys = key.parent.is_some() && keys.len() > crate::types::options::COLLAPSE_THRESHOLD;
+        chain.props.push(ctx.share(prop));
     }
     chain
 }

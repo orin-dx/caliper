@@ -1,8 +1,8 @@
 //! Which props of a component evidence puts forward (ADR 0028, section A).
 //!
 //! [`decide`] is the one place the rules are combined: it takes the [`Evidence`] gathered for the members a
-//! component's props type reaches and says, for each member, whether it is a typed row, a name in its collapsed
-//! layer's `used` list, left in that layer, or unknown because the body says nothing. It is pure and total: no I/O, no
+//! component's props type reaches and says, for each member, whether it is a typed row or a name in its source's
+//! layer. It is pure and total: no I/O, no
 //! name lists, and its output follows the order of the members it is given.
 //!
 //! [`apply`] is its one caller, where a structural answer becomes output (`pipeline::revision`): the [`Inputs`]
@@ -39,8 +39,8 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
     let members = props_type::members(&inputs.props_type, rows, &entry.inheritance);
     let shown = decide(&Evidence { members: &members, body: inputs.body.as_ref(), call_sites });
-    // A row of a member the answer holds only as a name in a collapsed layer (a source the resolver collapsed, such as
-    // a style system past `LARGE_API_SOURCE` members) has no type to list: it is named in the layer's `used` list
+    // A row of a member the answer holds only as a name in a collapsed layer (a source the resolver collapsed past its
+    // thresholds, such as Chakra's `SystemProperties`) has no type to list: it is named in the layer's `used` list
     // instead, so a member evidence puts forward is never left unnamed.
     let used: BTreeSet<String> = shown
         .rows
@@ -219,10 +219,10 @@ pub(crate) struct Member {
     /// Declared by React's or the shared DOM declarations ([`crate::origin::Origin::is_ambient`]): decided by
     /// the declaring path, never by the name.
     pub(crate) ambient: bool,
-    /// Its source (the interface or layer declaring it) reaches the component with more than
-    /// [`COLLAPSE_THRESHOLD`](crate::types::options::COLLAPSE_THRESHOLD) members: a generated set (a style system's
-    /// properties, the keys a mapped type copies from a large interface), not an API a reader takes in at once.
-    /// Decided by the source's size, never by a name.
+    /// One of a generated set, not an API: a member of a source the resolver collapsed, of a source reaching with more
+    /// than [`LARGE_API_SOURCE`](crate::types::options::LARGE_API_SOURCE) members, or one a mapped type copies from the
+    /// keys of an interface of more than [`COLLAPSE_THRESHOLD`](crate::types::options::COLLAPSE_THRESHOLD) members.
+    /// Decided by structure and size, never by a name.
     pub(crate) large: bool,
 }
 

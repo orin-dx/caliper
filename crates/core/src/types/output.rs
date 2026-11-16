@@ -208,6 +208,12 @@ pub struct ParsedProp {
     /// the kinds of what the checker could not read, since the checker did not confirm the type.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub degraded_by: Vec<String>,
+    /// A member a homomorphic mapped type copies from `keyof` an interface of more than
+    /// [`COLLAPSE_THRESHOLD`](crate::types::options::COLLAPSE_THRESHOLD) members (`{ [K in keyof Conditions]?: V }`,
+    /// Chakra's 130 condition props): one of a generated set, not an API member. Set by the structural resolver, read
+    /// only by relevance (ADR 0028, A2); not part of the output.
+    #[serde(skip)]
+    pub(crate) copied_from_large_keys: bool,
     /// Private, zero-sized, and unconstructible outside this module — its
     /// only purpose is to make a bare `ParsedProp { .. }` struct literal
     /// fail to compile anywhere else, including other modules in this same
@@ -282,6 +288,7 @@ impl ParsedProp {
             parent,
             declarations,
             degraded_by,
+            copied_from_large_keys: false,
             _seal: Seal,
         }
     }
