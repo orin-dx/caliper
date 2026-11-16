@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_012rXV7rj2bokR9y5awbim2t",
+  "agent_id": "af9171696a52d8df2",
+  "subagent_type": "general-purpose",
+  "task_description": "PR 490: list the main props in full plus what the component uses itself",
+  "token_usage": {
+    "input_tokens": 182,
+    "cache_creation_tokens": 231139,
+    "cache_read_tokens": 13164340,
+    "output_tokens": 89977,
+    "api_call_count": 90
+  },
+  "started_at": "2026-11-16T11:14:05.880026-08:00",
+  "completed_at": "2026-11-16T11:41:30.857828-08:00"
+}

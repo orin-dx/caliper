@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01LWNB8Hf2bxEKUvRsgumjGK",
+  "agent_id": "a8d5d2d85bcab4a5b",
+  "subagent_type": "general-purpose",
+  "task_description": "Reusable listing acceptance run: Storybook rows, CLI rows, oracle on antd/shadcn",
+  "started_at": "2026-11-16T13:29:04.450852-08:00"
+}
