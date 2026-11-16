@@ -134,3 +134,67 @@ export const Button = forwardRef(function Button(props: ButtonProps, ref) { retu
     );
     assert_eq!(prop_names(&output, "Button"), ["label", "ref"]);
 }
+
+/// A local factory whose result has the props `{ id?: string }`, taking a callback as its last argument.
+const LOCAL_FACTORY: &str = r#"
+import type { ForwardRefExoticComponent } from "react";
+declare function make<P>(tag: string, callback: (props: P, ref?: unknown) => unknown): ForwardRefExoticComponent<{ id?: string }>;
+type Theme = { color: string; gap: number };
+"#;
+
+#[test]
+fn an_annotated_callback_that_does_not_render_gives_no_props() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+export const AsString = make('div', (theme: Theme) => `${{theme.color}}`);
+export const AsNumber = make('div', (theme: Theme) => theme.gap);
+export const AsObject = make('div', (theme: Theme) => ({{ color: theme.color }}));
+export const AsFunction = make('div', (theme: Theme) => () => theme.gap);
+export const AsVoid = make('div', function (theme: Theme) {{ console.log(theme); }});
+"
+    ));
+    for name in ["AsString", "AsNumber", "AsObject", "AsFunction", "AsVoid"] {
+        assert!(output.components.contains_key(name), "{name} is a component");
+        assert!(!output.components[name].props.contains_key("color"), "{name} took the callback's parameter as props");
+    }
+}
+
+#[test]
+fn an_async_generator_or_rest_callback_gives_no_props() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+export const Async = make('div', async (theme: Theme) => <div>{{theme.color}}</div>);
+export const Generator = make('div', function* (theme: Theme) {{ yield <div />; }});
+export const Rest = make('div', (...theme: Theme[]) => <div />);
+"
+    ));
+    for name in ["Async", "Generator", "Rest"] {
+        assert!(output.components.contains_key(name), "{name} is a component");
+        assert!(!output.components[name].props.contains_key("color"), "{name} took the callback's parameter as props");
+    }
+}
+
+#[test]
+fn an_unannotated_render_callback_with_two_parameters_still_works() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+interface BoxProps {{ tone?: string }}
+export const Box = make('div', (props: BoxProps, ref: unknown) => <div />);
+"
+    ));
+    assert_eq!(prop_names(&output, "Box"), ["id", "tone"]);
+}
+
+#[test]
+fn a_render_callback_annotated_with_a_large_named_interface_keeps_its_props() {
+    let members: String = (0..210).map(|i| format!("  p{i}?: string;\n")).collect();
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+interface WideProps {{
+{members}}}
+export const Wide = make('div', (props: WideProps) => <div />);
+"
+    ));
+    let names = prop_names(&output, "Wide");
+    assert!(names.contains(&"p0".to_owned()) && names.contains(&"p209".to_owned()), "{}", names.len());
+}

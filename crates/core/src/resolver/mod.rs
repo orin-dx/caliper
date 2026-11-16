@@ -1019,7 +1019,14 @@ pub(crate) fn resolve_component_shared(
     // The props a factory call's own arguments give the component, which the props type read above can lack: the
     // variant keys of its style recipe, or the annotated props of its render function (`extractor::factory_props`).
     if let (Some(own), Some(mut branch)) = (&mapping.factory_props, factory_state.take()) {
-        let own = alias::resolve_base_as_chain(own, &mapping.file_path, mapping, ctx, &mut branch, 0);
+        // A named props type is the root of the callback's props, as a function component's is: depth 0, so a large
+        // interface of its own is not collapsed (its inherited sources still can).
+        let own = match own {
+            CollectedType::Named { name, args } => {
+                chain::resolve_props_chain(name.as_str(), args, &mapping.file_path, mapping, ctx, &mut branch, 0)
+            }
+            _ => alias::resolve_base_as_chain(own, &mapping.file_path, mapping, ctx, &mut branch, 0),
+        };
         state.absorb(branch);
         chain.add_absent(own);
     }
