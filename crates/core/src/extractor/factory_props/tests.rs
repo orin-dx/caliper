@@ -236,3 +236,47 @@ export const Wide = make('div', (props: WideProps) => <div />);
     let names = prop_names(&output, "Wide");
     assert!(names.contains(&"p0".to_owned()) && names.contains(&"p209".to_owned()), "{}", names.len());
 }
+
+fn default_of(output: &ExtractionOutput, component: &str, prop: &str) -> Option<String> {
+    output.components[component].props[prop].default_value.as_ref().map(|d| d.value.clone())
+}
+
+#[test]
+fn a_render_callbacks_destructuring_default_is_the_props_default() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+export const Sized = make('div', ({{ size = 'M' }}: {{ size?: 'S' | 'M' }}) => <div />);
+export const Plain = make('div', ({{ size }}: {{ size?: 'S' | 'M' }}) => <div />);
+"
+    ));
+    assert_eq!(prop_names(&output, "Sized"), ["id", "size"]);
+    assert_eq!(default_of(&output, "Sized", "size").as_deref(), Some("'M'"));
+    assert_eq!(default_of(&output, "Plain", "size"), None);
+}
+
+#[test]
+fn an_unannotated_callbacks_defaults_are_not_read() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+export const Loose = make('div', ({{ size = 'M' }}) => <div />);
+export const NoRender = make('div', ({{ size = 'M' }}: {{ size?: string }}) => 'x');
+"
+    ));
+    for name in ["Loose", "NoRender"] {
+        assert!(!output.components[name].props.contains_key("size"), "{name} took the callback's props");
+    }
+}
+
+#[test]
+fn unreadable_destructuring_defaults_are_skipped() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+const key = 'size';
+export const Odd = make('div', ({{ [key]: a = 1, tone: {{ x = 2 }} = {{}}, size: s = 'M', ...rest }}: {{ size?: string; tone?: {{ x?: number }} }}) => <div />);
+"
+    ));
+    assert_eq!(default_of(&output, "Odd", "size").as_deref(), Some("'M'"));
+    // The nested pattern's own default (`x = 2`) is no prop's default; the prop's is the `{}` written after it.
+    assert_eq!(default_of(&output, "Odd", "tone").as_deref(), Some("{}"));
+    assert!(!output.components["Odd"].props.contains_key("x"));
+}

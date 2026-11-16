@@ -10,7 +10,7 @@
 
 use oxc_ast::ast::*;
 
-use crate::types::{CollectedObjectField, CollectedType, TypeName};
+use crate::types::{CollectedObjectField, CollectedType, RawDefault, TypeName};
 
 use super::SourceDataCollector;
 use super::component::peel_expr;
@@ -23,6 +23,8 @@ pub(crate) struct PendingFactoryProps {
     props: CollectedType,
     /// Type parameters of the render function, which its props type names as placeholders.
     type_params: Vec<TypeName>,
+    /// The defaults the render function's destructured props parameter gives, read as for a function component.
+    defaults: rustc_hash::FxHashMap<String, RawDefault>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -53,16 +55,16 @@ impl<'src> SourceDataCollector<'src> {
                 return None;
             }
             let annotation = first.type_annotation.as_ref()?;
-            Some((&annotation.type_annotation, type_parameters))
+            Some((&annotation.type_annotation, type_parameters, self.extract_param_defaults(params)))
         });
-        let (props, type_params) = if let Some((annotation, type_parameters)) = annotated {
-            (self.ts_type_to_collected(annotation), super::type_param_names(type_parameters))
+        let (props, type_params, defaults) = if let Some((annotation, type_parameters, defaults)) = annotated {
+            (self.ts_type_to_collected(annotation), super::type_param_names(type_parameters), defaults)
         } else if let Some(variants) = call.arguments.iter().find_map(recipe_variants) {
-            (CollectedType::Object(variants), Vec::new())
+            (CollectedType::Object(variants), Vec::new(), Default::default())
         } else {
             return;
         };
-        self.pending_factory_props.push(PendingFactoryProps { span_start, props, type_params });
+        self.pending_factory_props.push(PendingFactoryProps { span_start, props, type_params, defaults });
     }
 
     /// Give each mapping a detection rule built from a factory call the own props recorded for that call. A mapping
@@ -73,6 +75,9 @@ impl<'src> SourceDataCollector<'src> {
             for mapping in self.data.component_mappings.iter_mut().filter(|m| m.span_start == pending.span_start) {
                 mapping.factory_type_params.clone_from(&pending.type_params);
                 mapping.factory_props = Some(pending.props.clone());
+                for (name, default) in &pending.defaults {
+                    mapping.param_defaults.entry(name.clone()).or_insert_with(|| default.clone());
+                }
             }
         }
     }
