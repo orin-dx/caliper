@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01SMEZG5nPVH1rNytx8h34JN",
+  "agent_id": "a02829fa385697a7f",
+  "subagent_type": "general-purpose",
+  "task_description": "Red-team collapse decision and layering (no fixes)",
+  "token_usage": {
+    "input_tokens": 116,
+    "cache_creation_tokens": 170084,
+    "cache_read_tokens": 6292028,
+    "output_tokens": 63809,
+    "api_call_count": 58
+  },
+  "started_at": "2026-11-15T17:46:54.761038-08:00",
+  "completed_at": "2026-11-15T18:01:05.758043-08:00"
+}
