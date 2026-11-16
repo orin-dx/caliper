@@ -98,9 +98,9 @@ impl AnswerCache {
     /// props (Chakra's about a thousand style props each), and an answer kept with its own copies held about 6.7 MiB
     /// per Chakra component, so a session that answered a few hundred stories held gigabytes.
     fn shared(&self, component: Arc<SemanticComponent>) -> Arc<SemanticComponent> {
-        let SemanticComponent { key, props, composes, picked } = Arc::unwrap_or_clone(component);
+        let SemanticComponent { key, props, composes, whole } = Arc::unwrap_or_clone(component);
         let props = props.into_iter().map(|prop| self.props.share_arc(prop)).collect();
-        Arc::new(SemanticComponent { key, props, composes, picked })
+        Arc::new(SemanticComponent { key, props, composes, whole })
     }
 }
 
@@ -321,7 +321,7 @@ impl SemanticHook {
             .collect();
         // The props of a collapsed source are its layer's, not listed again.
         let (used, notable) =
-            crate::types::semantic::layer_checker_props(&mut answer.entry, used, &component.picked, cx);
+            crate::types::semantic::layer_checker_props(&mut answer.entry, used, &component.whole, cx);
         // A structural prop the checker did not return keeps its structural type, opaque or not, and a structural
         // diagnostic naming the component may be about it.
         let structural_left = structural
@@ -439,7 +439,7 @@ mod tests {
                 })
             })
             .collect();
-        Arc::new(SemanticComponent { key: key.to_owned(), props, composes: None, picked: Vec::new() })
+        Arc::new(SemanticComponent { key: key.to_owned(), props, composes: None, whole: Vec::new() })
     }
 
     #[test]
