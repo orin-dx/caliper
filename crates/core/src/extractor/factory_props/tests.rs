@@ -2,11 +2,15 @@ use camino::Utf8PathBuf;
 use tempfile::TempDir;
 
 use crate::pipeline::extract;
-use crate::types::options::PipelineOptions;
+use crate::types::options::{CollapseInheritedProps, PipelineOptions};
 use crate::types::{ExtractionOutput, PropType};
 
 /// Extract one `.tsx` file in a temp project with an empty `typescript` install.
 fn extract_file(source: &str) -> ExtractionOutput {
+    extract_file_collapsing(source, CollapseInheritedProps::default())
+}
+
+fn extract_file_collapsing(source: &str, collapse_inherited_props: CollapseInheritedProps) -> ExtractionOutput {
     let tmp = TempDir::new().unwrap();
     let lib = tmp.path().join("node_modules/typescript/lib");
     std::fs::create_dir_all(&lib).unwrap();
@@ -22,6 +26,7 @@ fn extract_file(source: &str) -> ExtractionOutput {
     extract(&PipelineOptions {
         src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        collapse_inherited_props,
         ..Default::default()
     })
 }
@@ -235,6 +240,41 @@ export const Wide = make('div', (props: WideProps) => <div />);
     ));
     let names = prop_names(&output, "Wide");
     assert!(names.contains(&"p0".to_owned()) && names.contains(&"p209".to_owned()), "{}", names.len());
+}
+
+fn members(prefix: &str, count: usize) -> String {
+    (0..count).map(|i| format!("  {prefix}{i}: string;\n")).collect()
+}
+
+#[test]
+fn a_callbacks_named_props_type_lists_its_own_members_in_every_collapse_mode() {
+    let own = members("m", 201);
+    let named =
+        format!("{LOCAL_FACTORY}\ninterface Big {{\n{own}}}\nexport const C = make('div', (props: Big) => <div />);\n");
+    let inline = format!("{LOCAL_FACTORY}\nexport const C = make('div', (props: {{\n{own}}}) => <div />);\n");
+    for mode in [CollapseInheritedProps::Dependencies, CollapseInheritedProps::All] {
+        for source in [&named, &inline] {
+            let output = extract_file_collapsing(source, mode);
+            let names = prop_names(&output, "C");
+            assert_eq!(names.iter().filter(|n| n.starts_with('m')).count(), 201, "{mode:?}");
+        }
+    }
+}
+
+#[test]
+fn a_callbacks_named_props_type_lets_its_extended_source_collapse() {
+    let base = members("b", 201);
+    let own = members("m", 3);
+    let output = extract_file_collapsing(
+        &format!(
+            "{LOCAL_FACTORY}\ninterface Base201 {{\n{base}}}\ninterface Big extends Base201 {{\n{own}}}\nexport const C = make('div', (props: Big) => <div />);\n"
+        ),
+        CollapseInheritedProps::Dependencies,
+    );
+    let names = prop_names(&output, "C");
+    assert_eq!(names.iter().filter(|n| n.starts_with('m')).count(), 3, "{names:?}");
+    assert_eq!(names.iter().filter(|n| n.starts_with('b')).count(), 0);
+    assert!(output.components["C"].inheritance.iter().any(|layer| layer.type_name == "Base201"));
 }
 
 fn default_of(output: &ExtractionOutput, component: &str, prop: &str) -> Option<String> {
