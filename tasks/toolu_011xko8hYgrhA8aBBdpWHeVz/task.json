@@ -1,0 +1,18 @@
+{
+  "tool_use_id": "toolu_011xko8hYgrhA8aBBdpWHeVz",
+  "agent_id": "a10cc16b8ccdc60f5",
+  "subagent_type": "general-purpose",
+  "task_description": "PR 490: stop retaining per-component placement and un-interned layer names",
+  "files": [
+    "crates/core/src/relevance/mod.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 152,
+    "cache_creation_tokens": 141592,
+    "cache_read_tokens": 8047166,
+    "output_tokens": 52008,
+    "api_call_count": 75
+  },
+  "started_at": "2026-11-16T10:29:23.435229-08:00",
+  "completed_at": "2026-11-16T10:50:21.29306-08:00"
+}
