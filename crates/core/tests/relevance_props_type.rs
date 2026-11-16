@@ -50,14 +50,14 @@ fn parent(entry: &ComponentEntry, name: &str) -> Option<String> {
 }
 
 #[test]
-fn a_redeclared_member_is_listed_and_held_by_its_collapsed_base() {
+fn a_redeclared_member_is_listed_and_not_held_by_its_collapsed_base() {
     let output = run();
     let extends = &output.components["ByExtends"];
     assert_eq!(parent(extends, "size").as_deref(), Some("Narrows"));
-    assert!(layered(extends, "size"));
+    assert!(!layered(extends, "size"));
     let intersection = &output.components["ByIntersection"];
     assert_eq!(parent(intersection, "size"), None);
-    assert!(layered(intersection, "size"));
+    assert!(!layered(intersection, "size"));
 }
 
 #[test]
