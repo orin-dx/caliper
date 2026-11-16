@@ -79,7 +79,8 @@ impl Model {
     fn random_site(&self, rng: &mut Lcg) -> (usize, String) {
         let component = rng.below(self.components.len());
         let prefix = if self.components[component].large { "l" } else { "s" };
-        let prop = if rng.below(2) == 0 { format!("d{}", rng.below(3)) } else { format!("{prefix}{}", rng.below(3)) };
+        // Mostly ambient members, which a collapsed layer names in `used` when passed at the floor.
+        let prop = if rng.below(3) > 0 { format!("d{}", rng.below(2)) } else { format!("{prefix}{}", rng.below(3)) };
         (component, prop)
     }
 
@@ -138,15 +139,16 @@ impl Model {
     fn edit(&mut self, rng: &mut Lcg) -> (&'static str, Utf8PathBuf) {
         match rng.below(6) {
             0 => {
+                // Two alike, so a prop can reach the floor of two sites.
                 let site = self.random_site(rng);
-                self.sites.push(site);
+                self.sites.extend([site.clone(), site]);
                 self.write_page();
                 ("add a call site", self.root.join("Page.tsx"))
             }
             1 => {
                 if !self.sites.is_empty() {
-                    let at = rng.below(self.sites.len());
-                    self.sites.remove(at);
+                    let gone = self.sites[rng.below(self.sites.len())].clone();
+                    self.sites.retain(|site| *site != gone);
                 }
                 self.write_page();
                 ("remove a call site", self.root.join("Page.tsx"))
@@ -196,7 +198,7 @@ fn options(root: &Utf8Path) -> PipelineOptions {
 
 #[test]
 fn watch_equals_fresh() {
-    let mut edits = 0;
+    let (mut edits, mut moved) = (0, 0);
     for seed in [1_u64, 7, 42] {
         let dir = tempfile::Builder::new().prefix("RelevanceWatch").tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
@@ -212,6 +214,7 @@ fn watch_equals_fresh() {
         for key in fresh.components.keys() {
             drop(lazy.component(key));
         }
+        let mut previous = fresh;
         let mut history = Vec::new();
         for _ in 0..14 {
             let (edit, file) = model.edit(&mut rng);
@@ -227,8 +230,23 @@ fn watch_equals_fresh() {
                 let answer = lazy.component(key).unwrap_or_else(|| panic!("lazy: no {key}"));
                 assert_eq!(&answer.entry, expected, "lazy: {key}, seed {seed} after {history:?}");
             }
+            // The model is only as strong as the evidence it moves: count the edits that change a `used` list.
+            moved += usize::from(used(&previous) != used(&fresh));
+            previous = fresh;
             edits += 1;
         }
     }
     assert_eq!(edits, 3 * 14);
+    assert!(moved >= 3, "edits changed a `used` list {moved} times: the model does not exercise relevance");
+}
+
+/// Every component's non-empty `used` lists, by component and layer.
+fn used(output: &caliper_docgen_core::types::ExtractionOutput) -> Vec<(String, String, Vec<String>)> {
+    let mut used = Vec::new();
+    for (key, entry) in &output.components {
+        for layer in entry.inheritance.iter().filter(|layer| !layer.used.is_empty()) {
+            used.push((key.clone(), layer.type_name.clone(), layer.used.clone()));
+        }
+    }
+    used
 }
