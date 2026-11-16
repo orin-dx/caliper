@@ -127,6 +127,72 @@ fn required_of_an_optional_undefined_member_is_never() {
     assert_eq!(text_of("Required<{ value?: undefined }>"), "{ value: never }");
 }
 
+/// The type of prop `prop` of component `component` in a project of `files`.
+fn project_type(files: &[(&str, &str)], component: &str, prop: &str) -> String {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
+    for (name, text) in files {
+        std::fs::write(root.join(name), text).unwrap();
+    }
+    let options =
+        PipelineOptions { src_dirs: vec![root.clone()], cache_dir: Some(root.join(".cache")), ..Default::default() };
+    let output = extract(&options);
+    let entry = output.components.iter().find(|(key, _)| key.ends_with(component)).expect("the component").1;
+    entry.props[prop].prop_type.raw_string()
+}
+
+const FIELD: (&str, &str) = ("Field.tsx", "import { make } from './factory';\nexport const Field = make();\n");
+
+#[test]
+fn a_factory_local_alias_shadows_the_module_interface_in_a_utility() {
+    let factory = "interface Data { fromModule: string }\n\
+         export function make() { type Data = { fromFunction: number }; return (p: { value?: Partial<Data> }) => null; }\n";
+    let text = project_type(&[("factory.tsx", factory), FIELD], "Field", "value");
+    assert_ne!(text, "{ fromModule?: string }");
+}
+
+#[test]
+fn a_factory_local_partial_alias_is_not_the_lib_partial() {
+    let factory = "interface Data { x: string }\n\
+         export function make() { type Partial<T> = { wrapped: T }; return (p: { value?: Required<Partial<Data>> }) => null; }\n";
+    let text = project_type(&[("factory.tsx", factory), FIELD], "Field", "value");
+    assert_ne!(text, "{ x: string }");
+}
+
+#[test]
+fn keys_through_a_local_alias_are_read_in_its_scope() {
+    // `K` is the keys of the factory's own `Data`, so `Omit` takes them all away.
+    let factory = "interface Data { fromModule: string }\n\
+         export function make() { interface Data { fromFunction: number; r?: string } type K = keyof Data; return (p: { value?: Omit<Data, K> }) => null; }\n";
+    let text = project_type(&[("factory.tsx", factory), FIELD], "Field", "value");
+    assert!(text == "{  }" || declined(&text, "Omit"), "{text}");
+}
+
+#[test]
+fn a_type_argument_from_another_file_is_read_in_that_files_module_scope() {
+    // The factory reads its props in its own body's scope; `Foo` in the argument is `use.tsx`'s module `Foo`, not the
+    // function-local one at the same position in `use.tsx`.
+    let factory = "export function make<T>() { return (p: { value?: T }) => null; }\n";
+    let used = "import { make } from './factory';\ninterface Foo { m: string }\n\
+         function other() { interface Foo { l: number } return null; }\n\
+         export const Field = make<Partial<Foo>>();\n";
+    let text = project_type(&[("factory.tsx", factory), ("use.tsx", used)], "Field", "value");
+    assert_ne!(text, "{ l?: number }");
+}
+
+#[test]
+fn pick_with_keys_out_of_member_order_is_declined() {
+    // The checker orders the members by when each key's literal type was created, which is not recorded.
+    let text = text_of("Pick<{ a: string; b: number }, \"b\" | \"a\">");
+    assert!(declined(&text, "Pick"), "{text}");
+}
+
+#[test]
+fn a_lone_getter_is_a_readonly_member_under_a_utility() {
+    let source = "interface Sized { get size(): number }\nexport function Box(props: { value?: Partial<Sized> }) { return null; }";
+    assert_eq!(type_text(source, "value"), "{ readonly size?: number }");
+}
+
 #[test]
 fn a_factory_local_interface_shadows_the_module_one_in_a_utility() {
     let tmp = tempfile::TempDir::new().unwrap();

@@ -97,6 +97,13 @@ pub fn resolve_collected_type(
         // ── Generic-alias substitution marker — switch file context to where
         // `inner` was actually written (see the `CollectedType::AtFile` doc
         // comment) and continue resolving from there.
+        // A scope is a position in one file: a type written in another file is read from that file's module scope.
+        CollectedType::AtFile { file, inner } if file != consuming_file => {
+            let site = state.enter_declared_in(&DeclarationScope::default());
+            let resolved = resolve_collected_type(inner, file, ctx, state, depth);
+            state.leave_declared_in(site);
+            resolved
+        }
         CollectedType::AtFile { file, inner } => resolve_collected_type(inner, file, ctx, state, depth),
 
         // ── Indexed access ───────────────────────────────────────────────────

@@ -983,6 +983,8 @@ pub(super) enum Declined {
     OutOfScope,
     /// The keys of `Pick` or `Omit` are not a known set of names.
     UnknownKeys,
+    /// `Pick` lists its keys in an order other than the object's members: the checker's order is not recorded.
+    KeyOrder,
     /// `Pick` names a key the object does not have, an error TypeScript reports.
     MissingKey,
     /// `Required` over an optional member whose type may hold `undefined` through a name.
@@ -1043,22 +1045,23 @@ pub(super) fn structural_expansion(
             Ok(Vec::new())
         }
         ("Pick" | "Omit", [base, keys]) => {
-            let keys: Vec<String> = match keys {
-                // `keyof` of an object is read as the object is, from the same scope and with the same fidelity.
-                CollectedType::KeyOf(target) if !matches!(target.as_ref(), CollectedType::TypeOf(_)) => {
-                    object_fields(target, file, scope, ctx, depth + 1)?.into_iter().map(|f| f.field.name).collect()
-                }
-                other => mapped_keys(other, file, ctx, depth + 1)
-                    .ok_or(Declined::UnknownKeys)?
-                    .into_iter()
-                    .map(|key| key.name)
-                    .collect(),
-            };
+            // The keys are read from the same scope and with the same fidelity as the object.
+            let mut keys = key_names(keys, file, scope, ctx, depth + 1)?;
             // A key union holds each name once (`Keys | "a"` over a `Keys` that has `"a"`).
-            let mut keys = keys;
             let mut seen = std::collections::HashSet::new();
             keys.retain(|key| seen.insert(key.clone()));
             let mut fields = object_fields(base, file, scope, ctx, depth + 1)?;
+            // The checker lists a mapped type's members in the order of its key union, which it sorts by when each
+            // literal type was first created anywhere in the program: not recorded. Keys in the object's own member
+            // order give that order either way; any other order is declined.
+            let in_member_order = fields
+                .iter()
+                .filter(|f| keys.contains(&f.field.name))
+                .map(|f| &f.field.name)
+                .eq(keys.iter().filter(|key| fields.iter().any(|f| &f.field.name == *key)));
+            if name == "Pick" && !in_member_order {
+                return Err(Declined::KeyOrder);
+            }
             if name == "Pick" {
                 // `[P in K]` lists the members in the keys' order. A key the object lacks is an error TypeScript
                 // reports; nothing is guessed for it.
@@ -1116,6 +1119,13 @@ fn object_fields(
             if let Some(local) = ctx.named_types.lookup_local_interface(file, name, scope) {
                 return interface_object(local, args, ctx, depth);
             }
+            // An alias local to an enclosing scope is nearer than a module-level interface of the name.
+            let alias = visible_alias(name, args, file, scope, ctx)?;
+            if let Some((body, body_file, body_scope)) = &alias
+                && !body_scope.is_module()
+            {
+                return object_fields(body, body_file, body_scope, ctx, depth + 1);
+            }
             let (canonical_file, canonical_name) = canonical(name, file, ctx);
             if let Some(iface) = lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name) {
                 // The file's sole local interface of a name is found without a scope; outside that scope it is not
@@ -1125,11 +1135,70 @@ fn object_fields(
                 }
                 return interface_object(iface, args, ctx, depth);
             }
-            let (body, body_file, body_scope) =
-                alias_body_declared(name, args, file, ctx).ok_or(Declined::UnknownObject)?;
+            let (body, body_file, body_scope) = alias.ok_or(Declined::UnknownObject)?;
             object_fields(&body, &body_file, &body_scope, ctx, depth + 1)
         }
         _ => Err(Declined::UnknownObject),
+    }
+}
+
+/// The body of the alias `name` (given `args`) written in `file` within `scope`, with the file and scope it is declared
+/// in; `None` when no alias of the name has a body. An alias local to a function body, block or `switch` case is stored
+/// under its bare name, so one whose scope does not enclose the reference is not this name's declaration and may hide
+/// the one that is: declined.
+fn visible_alias(
+    name: &CompactString,
+    args: &[CollectedType],
+    file: &Utf8Path,
+    scope: &DeclarationScope,
+    ctx: &ResolutionContext,
+) -> Result<Option<(CollectedType, Utf8PathBuf, DeclarationScope)>, Declined> {
+    let Some(found) = alias_body_declared(name, args, file, ctx) else { return Ok(None) };
+    if !found.2.is_module() && (found.1 != file || !found.2.encloses(scope)) {
+        return Err(Declined::OutOfScope);
+    }
+    Ok(Some(found))
+}
+
+/// The names a key type of `Pick` or `Omit`, written in `file` within `scope`, denotes: literals, unions of them,
+/// `keyof` of an object read as `object_fields` reads it, and aliases of these found from the scope. A `typeof` or
+/// indexed-access form is read by `mapped_keys`; anything else is not a known set of names.
+fn key_names(
+    keys: &CollectedType,
+    file: &Utf8Path,
+    scope: &DeclarationScope,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Result<Vec<String>, Declined> {
+    if depth > MAX_DEPTH {
+        return Err(Declined::TooDeep);
+    }
+    match keys {
+        CollectedType::AtFile { file: at, inner } if at != file => {
+            key_names(inner, at, &DeclarationScope::default(), ctx, depth + 1)
+        }
+        CollectedType::AtFile { inner, .. } => key_names(inner, file, scope, ctx, depth + 1),
+        CollectedType::StringLiteral(name) => Ok(vec![name.to_string()]),
+        CollectedType::Union(members) => {
+            let mut names = Vec::new();
+            for member in members {
+                names.extend(key_names(member, file, scope, ctx, depth + 1)?);
+            }
+            Ok(names)
+        }
+        CollectedType::KeyOf(target) if !matches!(target.as_ref(), CollectedType::TypeOf(_)) => {
+            Ok(object_fields(target, file, scope, ctx, depth + 1)?.into_iter().map(|f| f.field.name).collect())
+        }
+        CollectedType::Named { name, args } => {
+            let (body, body_file, body_scope) =
+                visible_alias(name, args, file, scope, ctx)?.ok_or(Declined::UnknownKeys)?;
+            key_names(&body, &body_file, &body_scope, ctx, depth + 1)
+        }
+        other => Ok(mapped_keys(other, file, ctx, depth + 1)
+            .ok_or(Declined::UnknownKeys)?
+            .into_iter()
+            .map(|key| key.name)
+            .collect()),
     }
 }
 

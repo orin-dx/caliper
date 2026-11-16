@@ -196,7 +196,12 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             .body
             .iter()
             .filter(|sig| !accessors.is_shadowed_setter(sig))
-            .filter_map(|sig| self.collect_property_signature(sig))
+            .filter_map(|sig| {
+                // A getter with no setter declares a `readonly` property.
+                let mut prop = self.collect_property_signature(sig)?;
+                prop.readonly |= accessors.is_lone_getter(sig);
+                Some(prop)
+            })
             .collect();
 
         // A member `props` cannot list: its keys are then not known one by one (`CollectedInterface::unlisted_members`).

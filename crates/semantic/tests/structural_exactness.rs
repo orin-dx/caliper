@@ -25,17 +25,34 @@ interface Aliased { a?: Maybe; b: boolean }
 type Undef = { a?: undefined; b?: string | undefined };
 type Lit = { readonly a: string; b?: number };
 type Indexed = { a: string; [k: string]: unknown };
+interface Sized { a: string; get size(): number; get both(): string; set both(v: string) }
+interface Left extends Plain { l: number }
+interface Right extends Plain { r: number }
+interface Diamond extends Left, Right {}
 "#;
 
 /// The bases the generator applies the utilities to.
-const BASES: &[&str] =
-    &["Plain", "Ro", "Dict", "Mixed", "Child", "Aliased", "Undef", "Lit", "Indexed", "{ value?: undefined }"];
+const BASES: &[&str] = &[
+    "Plain",
+    "Ro",
+    "Dict",
+    "Mixed",
+    "Child",
+    "Aliased",
+    "Undef",
+    "Lit",
+    "Indexed",
+    "{ value?: undefined }",
+    "Sized",
+    "Diamond",
+];
 
 /// Each utility over a base `B`, alone and nested.
 const SHAPES: &[&str] = &[
     "Partial<B>",
     "Required<B>",
     "Pick<B, \"a\">",
+    "Pick<B, \"b\" | \"a\">",
     "Omit<B, \"a\">",
     "Omit<B, keyof Plain>",
     "Omit<B, keyof { [k: string]: unknown }>",
@@ -64,6 +81,25 @@ const SHADOWS: &[(&str, &str)] = &[
            interface Data { fromFunction: number; readonly r?: string }\n\
            return (p: { a?: Partial<Data>; b?: Required<Data>; c?: Omit<Data, \"r\">; d?: Pick<Partial<Data>, \"r\"> }) => null;\n\
          }\n",
+    ),
+    (
+        "localalias.tsx",
+        "interface Data { fromModule: string }\n\
+         export function makeAlias() {\n\
+           type Data = { fromFunction: number };\n\
+           type Partial<T> = { wrapped: T };\n\
+           interface Keyed { k: number; j?: string }\n\
+           type K = keyof Keyed;\n\
+           return (p: { a?: Omit<Data, \"x\">; b?: Required<Partial<Data>>; c?: Omit<Keyed, K>; d?: Pick<Keyed, K> }) => null;\n\
+         }\n",
+    ),
+    ("aliasfield.tsx", "import { makeAlias } from './localalias';\nexport const AliasField = makeAlias();\n"),
+    ("generic.tsx", "export function makeGeneric<T>() { return (p: { value?: T }) => null; }\n"),
+    (
+        "crossfile.tsx",
+        "import { makeGeneric } from './generic';\ninterface Foo { m: string }\n\
+         function other() { interface Foo { l: number } return null; }\n\
+         export const Cross = makeGeneric<Partial<Foo>>();\n",
     ),
     ("field.tsx", "import { make } from './factory';\nexport const Field = make();\n"),
 ];
