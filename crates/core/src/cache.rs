@@ -54,7 +54,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 38: `ComponentMapping::local_name`: a component its module exports under another name is named by the export.
 /// 39: `ComponentMapping::body` and `SourceData::jsx_usages`: what component bodies and the rest of a file write in JSX
 /// (trail 405).
-const CACHE_SCHEMA_VERSION: u32 = 39;
+/// 40: `JsxTag::Scoped`: a body's tag bound in an inner scope is no longer recorded as the module binding's name.
+const CACHE_SCHEMA_VERSION: u32 = 40;
 
 const DATA_FILE: &str = "dts.msgpack";
 

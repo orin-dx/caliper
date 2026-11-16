@@ -283,9 +283,11 @@ fn a_nested_component_keeps_its_props_uses_and_its_elements_go_to_the_file() {
          }",
     );
     let facts = data.component_mappings[0].body.clone().unwrap();
+    // Both are bound in the body's scope, not the module's: recorded as scoped, never as a module binding's name.
+    let scoped = |tag: &str, attributes| JsxElementFact { tag: JsxTag::Scoped(tag.into()), attributes };
     assert_eq!(
         facts.elements,
-        [intrinsic("ul", vec![]), component("Row", vec![named("item", None)]), component("Empty", vec![])]
+        [intrinsic("ul", vec![]), scoped("Row", vec![named("item", None)]), scoped("Empty", vec![])]
     );
     assert_eq!(reads(&facts), ["label", "items"]);
     let tags: Vec<&JsxTag> = data.jsx_usages.iter().map(|usage| &usage.tag).collect();
@@ -581,12 +583,14 @@ fn a_nested_components_wrapper_arguments_are_the_parents() {
         "export function C(props: P) { const Item = withX(() => <li />, { a: <Icon /> }); return <Item /> }",
         "C",
     );
-    assert_eq!(facts.elements, [component("Icon", vec![]), component("Item", vec![])]);
+    // `Item` is bound inside `C`, so its tag is scoped, not the module's binding of that name.
+    let item = || JsxElementFact { tag: JsxTag::Scoped("Item".into()), attributes: vec![] };
+    assert_eq!(facts.elements, [component("Icon", vec![]), item()]);
     let class = parse(
         "export function C(props: P) { const Item = observer(class extends Component { render() { return <li /> } }); \
          return <Item /> }",
     );
-    assert_eq!(class.component_mappings[0].body.as_ref().unwrap().elements, [component("Item", vec![])]);
+    assert_eq!(class.component_mappings[0].body.as_ref().unwrap().elements, [item()]);
     assert_eq!(class.jsx_usages, [usage(JsxTag::Intrinsic("li".into()))]);
 }
 
@@ -687,7 +691,9 @@ impl Gen {
 
 fn tag_name(tag: &JsxTag) -> String {
     match tag {
-        JsxTag::Identifier(name) | JsxTag::Intrinsic(name) | JsxTag::Member(name) => name.clone(),
+        JsxTag::Identifier(name) | JsxTag::Intrinsic(name) | JsxTag::Member(name) | JsxTag::Scoped(name) => {
+            name.clone()
+        }
     }
 }
 
