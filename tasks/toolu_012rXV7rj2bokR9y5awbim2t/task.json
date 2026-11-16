@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_012rXV7rj2bokR9y5awbim2t",
+  "agent_id": "af9171696a52d8df2",
+  "subagent_type": "general-purpose",
+  "task_description": "PR 490: list the main props in full plus what the component uses itself",
+  "started_at": "2026-11-16T11:14:05.880026-08:00"
+}
