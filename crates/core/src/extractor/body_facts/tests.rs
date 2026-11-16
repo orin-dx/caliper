@@ -729,3 +729,201 @@ fn generated_components_place_every_element_once_and_read_in_source_order() {
     }
     assert!(with_body > 600, "the generator mostly yields components: {with_body}");
 }
+
+#[test]
+fn an_attribute_value_read_through_any_chain_form_names_the_prop() {
+    for value in ["props.a", "props['a']", "props?.a", "props?.['a']", r#"props?.["a"]"#, "props!.a", "(props?.a)!"] {
+        let source = format!("export function C(props: P) {{ return <Child value={{{value}}} /> }}");
+        let body = facts(&source, "C");
+        assert_eq!(reads(&body), ["a"], "{value}");
+        assert_eq!(body.elements, [component("Child", vec![named("value", Some("a"))])], "{value}");
+    }
+    // An optional call is not one prop's value.
+    let called = facts("export function C(props: P) { return <Child value={props?.f()} /> }", "C");
+    assert_eq!(called.elements, [component("Child", vec![named("value", None)])]);
+}
+
+#[test]
+fn a_declaration_without_an_implementation_has_no_body_facts() {
+    assert_eq!(body_of("export declare function Button(props: P): JSX.Element;", "Button"), None);
+    for source in ["declare const Button: FC<P>;", "export declare const Button: FC<P>;"] {
+        assert!(parse(source).component_mappings.iter().all(|mapping| mapping.body.is_none()), "{source}");
+    }
+    // Overload signatures carry no facts; the implementation does.
+    let overloaded = "export function Button(props: A): JSX.Element;\n\
+                      export function Button(props: P) { return <i /> }";
+    let data = parse(overloaded);
+    assert!(data.component_mappings.iter().any(|mapping| mapping.body.is_some()));
+    assert!(data.component_mappings.iter().all(|mapping| mapping.body.as_ref().is_none_or(|body| !body.handed_on)));
+}
+
+#[test]
+fn props_named_by_no_first_parameter_are_handed_on() {
+    assert!(facts("export function C(props: P) { use(arguments[0]); return <i /> }", "C").handed_on);
+    assert!(!facts("export function C(props: P) { return <i /> }", "C").handed_on);
+}
+
+/// `arguments` is the component's only in the component itself or in arrows nested directly in it; any nested
+/// non-arrow function, method, accessor or class member has its own.
+#[test]
+fn arguments_is_the_components_only_through_arrows() {
+    let handed = |body: &str| facts(&format!("export function C(props: P) {{ {body} return <i /> }}"), "C").handed_on;
+    for own in [
+        "const f = () => arguments[0];",
+        "const f = () => () => arguments[0];",
+        "const f = () => { const g = () => arguments; };",
+        "const f = (a = arguments[0]) => a;",
+    ] {
+        assert!(handed(own), "{own}");
+    }
+    for other in [
+        "function first() { return arguments[0] }",
+        "const first = function () { return arguments[0] };",
+        "const o = { first() { return arguments[0] } };",
+        "const o = { get first() { return arguments[0] } };",
+        "class K { first() { return arguments[0] } }",
+        "function f() { return () => arguments[0] }",
+        "function f(a = arguments[0]) { return a }",
+    ] {
+        assert!(!handed(other), "{other}");
+    }
+    assert!(facts("export function C(props: P, a = arguments[0]) { return <i /> }", "C").handed_on);
+}
+
+/// Every syntactic context a props member can sit in: a read is complete only where the context is known to only
+/// read; every other form hands the object on (unknown), never a silent "read".
+#[test]
+fn a_member_in_each_syntax_context_is_a_read_only_where_known_and_never_silently_complete() {
+    let reads_only = [
+        "use(props.a)",
+        "const v = props.a",
+        "x = props.a",
+        "[props.a]",
+        "({ k: props.a })",
+        "`${props.a}`",
+        "props.a ? 1 : 2",
+        "props.a && 1",
+        "props.a + 1",
+        "typeof props.a",
+        "await props.a",
+        "!props.a",
+        "new F(props.a)",
+        "(props.a as any)",
+        "props.a!",
+        "(props.a satisfies any)",
+        "props?.a",
+        "props?.['a']",
+        "props['a']",
+        "if (props.a) {}",
+        "for (;props.a;) {}",
+        "const { x = props.a } = o",
+        "const { [props.a]: x } = o",
+        "<i {...props.a} />",
+        "<i a={props.a} />",
+    ];
+    for context in reads_only {
+        let source = format!("export async function C(props: P) {{ let o: any, x: any; {context}; return <i /> }}");
+        let body = facts(&source, "C");
+        assert!(!body.handed_on && reads(&body).first() == Some(&"a"), "{context}: {body:?}");
+    }
+    let hands_on = [
+        "props.f()",
+        "props?.f()",
+        "props.f?.()",
+        "(props.f)()",
+        "(props?.f)()",
+        "props.a = 1",
+        "props.a += 1",
+        "props.a++",
+        "delete props.a",
+        "delete props?.a",
+        "for (props.a of o) {}",
+        "for (props.a in o) {}",
+        "[props.a] = o",
+        "({ k: props.a } = o)",
+        "({ ...props.a } = o)",
+        "props.f`t`",
+        "props[k]",
+        "props?.[k]",
+        "use(props)",
+        "const p = props",
+        "const [p] = props",
+        "({ ...props })",
+        "[...props]",
+        // Contexts not known to only read: unknown, even though they do only read.
+        "@props.a class X {}",
+        "enum E { A = props.a }",
+    ];
+    for context in hands_on {
+        let source = format!("export function C(props: P) {{ let o: any, k: any; {context}; return <i /> }}");
+        let body = facts(&source, "C");
+        assert!(body.handed_on, "{context}: {body:?}");
+    }
+}
+
+#[test]
+fn an_arguments_use_in_another_function_is_not_this_ones() {
+    let other = "function other() { return arguments[0] }\nexport function C(props: P) { return <i /> }";
+    assert!(!facts(other, "C").handed_on);
+}
+
+/// A props binding that is ever written holds no known value where it is read: the body is unknown for it.
+#[test]
+fn a_written_props_binding_hands_the_object_on_and_records_nothing_through_it() {
+    for body in [
+        "props = other; return <Child value={props.value} />",
+        "props += x; return <Child value={props.value} />",
+        "props++; return <Child value={props.value} />",
+        "for (props of xs) {} return <Child value={props.value} />",
+        "props = { ...props }; return <Child value={props.value} />",
+        "({ props } = obj); return <Child value={props.value} />",
+        "[props] = xs; return <Child value={props.value} />",
+        "var props = other; return <Child value={props.value} />",
+        "delete props.a; return <Child />",
+        "x = props; return <Child />",
+        "[a] = props; return <Child />",
+    ] {
+        let source = format!("export function C(props: P) {{ let a, x; {body} }}");
+        let facts = facts(&source, "C");
+        assert!(facts.handed_on, "{body}");
+        assert!(!facts.reads.iter().any(|read| read == "value"), "{body}");
+        for attribute in facts.elements.iter().flat_map(|element| &element.attributes) {
+            assert!(!matches!(attribute, JsxAttributeFact::Named { prop: Some(_), .. }), "{body}");
+        }
+    }
+}
+
+#[test]
+fn a_written_rest_binding_is_not_the_props_object() {
+    let facts = facts("export function C({ a, ...r }: P) { r = other; return <Child {...r} v={r.v} /> }", "C");
+    assert!(facts.handed_on);
+    for attribute in facts.elements.iter().flat_map(|element| &element.attributes) {
+        assert!(!matches!(
+            attribute,
+            JsxAttributeFact::Spread(SpreadOf::Props | SpreadOf::Rest) | JsxAttributeFact::Named { prop: Some(_), .. }
+        ));
+    }
+}
+
+#[test]
+fn a_destructuring_assignment_reads_its_keys_only_when_its_value_is_discarded() {
+    let discarded = facts("export function C(props: P) { let a; ({ a } = props); return <i /> }", "C");
+    assert!(!discarded.handed_on);
+    assert_eq!(reads(&discarded), ["a"]);
+    for source in [
+        "let a; use(({ a } = props)); return <i />",
+        "let a; const q = ({ a } = props); return <i />",
+        "let a; return <i x={({ a } = props)} />;",
+    ] {
+        let facts = facts(&format!("export function C(props: P) {{ {source} }}"), "C");
+        assert!(facts.handed_on, "{source}");
+    }
+}
+
+#[test]
+fn a_default_parameter_and_a_declaration_destructuring_are_not_writes() {
+    let facts =
+        facts("export function C(props: P = defaults) { const { a } = props; return <i title={props.b} /> }", "C");
+    assert!(!facts.handed_on);
+    assert_eq!(reads(&facts), ["a", "b"]);
+}

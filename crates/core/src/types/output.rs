@@ -464,8 +464,8 @@ pub enum PropType {
     },
 
     // ── React-specific terminals
-    /// React's `ReactNode`. The checker keeps `ReactElement` and `JSX.Element`, which are narrower, as
-    /// [`Named`](PropType::Named); the structural resolver collapses them into this terminal.
+    /// React's `ReactNode`. `ReactElement` and `JSX.Element`, which are narrower, stay
+    /// [`Named`](PropType::Named) in both the checker's answer and the structural one.
     ReactNode,
     /// React.CSSProperties
     CssProperties,

@@ -17,12 +17,25 @@
 //! - the object of a member read with a static or string-literal key (`props.x`, `props?.['x']`) that is not called
 //!   (`props.f()` passes the object as `this`), written, deleted or destructured into: `x` is read;
 //! - the initializer of an object destructuring (`const { a, b = 1, ...r } = props`) or the right side of a
-//!   destructuring assignment: its static keys are read, and a rest binding is the props object again;
+//!   destructuring assignment that is a statement of its own (its value is the props object): its static keys are read, and a rest binding is the props object again;
 //! - a JSX spread attribute (`{...props}`): recorded as a spread, and the whole props object spread is handed on.
 //!
 //! Any other reference (a call argument, `new`, an attribute value, an object or array literal, a `return`, a
 //! computed key, an assignment, `typeof`, a type query) hands the object on, so `reads` is complete only when
 //! `handed_on` is false.
+//!
+//! # Invariants
+//!
+//! - Unknown unless proven: a component with no function body to read (`declare function`, an overload signature,
+//!   `declare const`) has no facts at all; `reads` is complete only while `handed_on` is false. The props object
+//!   named by no parameter (`arguments`, a rest parameter) hands it on.
+//! - The contexts that only read a member are an allow-list ([`Reader::is_read`]); a parent node kind not named there
+//!   hands the object on, so a form the parser adds later is unknown, not a silent read.
+//! - By binding, never by spelling: references resolve through `oxc_semantic` symbols.
+//! - A props binding that is ever written or redeclared is unknown: the body hands it on and records nothing through it.
+//! - Every read is recorded: an attribute's prop is named for each form of the member (`props.x`, `props['x']`,
+//!   `props?.x`, `props?.['x']`, `props!.x`) by the same rule that records the read.
+//! - One owner: an element belongs to the function node it is written in.
 //!
 //! A function or class the body binds and renders as a JSX tag, by symbol (`const Item = () => <li/>; return
 //! <Item/>`), is a component of its own: its references to the props object still count, but its elements are the
@@ -168,7 +181,15 @@ impl Finder<'_> {
     /// Notes the function a wanted node holds.
     fn record(&mut self, span: oxc_span::Span, function: Option<ComponentFn<'_, '_>>) {
         let key = (span.start, span.end);
-        let Some(function) = function.filter(|_| self.wanted.contains(&key)) else { return };
+        // A declaration without a body (`declare function`, an overload signature) has no behaviour to record: its
+        // component has no facts, which means unknown.
+        let has_body = |function: &ComponentFn<'_, '_>| match function {
+            ComponentFn::Function(function) => function.body.is_some(),
+            ComponentFn::Arrow(_) => true,
+        };
+        let Some(function) = function.filter(|function| self.wanted.contains(&key) && has_body(function)) else {
+            return;
+        };
         let function = function.span();
         let holders = self.functions.entry((function.start, function.end)).or_default();
         if !holders.contains(&key) {
@@ -271,8 +292,38 @@ impl<'s, 'a> Reader<'s, 'a> {
         };
         if let Some(first) = params.items.first() {
             self.props_param(&first.pattern);
+        } else if params.rest.is_some() {
+            // `function C(...args)`: the props object is `args[0]`, which no key names.
+            self.facts.handed_on = true;
+        }
+        // `arguments[0]` is the props object, named by no parameter.
+        if matches!(function, ComponentFn::Function(_)) {
+            let own = function.span();
+            let uses_arguments = self.scoping.root_unresolved_references().get("arguments").is_some_and(|references| {
+                references.iter().any(|&reference| {
+                    // Arrows inherit `arguments`; the nearest enclosing other function owns it.
+                    let owner =
+                        self.nodes.ancestor_kinds(self.scoping.get_reference(reference).node_id()).find_map(|kind| {
+                            if let AstKind::Function(function) = kind { Some(function.span) } else { None }
+                        });
+                    owner == Some(own)
+                })
+            });
+            if uses_arguments {
+                self.facts.handed_on = true;
+            }
         }
         while let Some(symbol) = self.queue.pop_front() {
+            // A binding that is ever written (`props = other`, `props++`, `for (props of xs)`, `({ props } = o)`) or
+            // redeclared (`var props`) need not hold the props object where it is read: nothing is known of it.
+            let written = self.scoping.symbol_is_mutated(symbol)
+                || !self.scoping.symbol_redeclarations(symbol).is_empty()
+                || self.scoping.get_resolved_references(symbol).any(|reference| reference.is_write());
+            if written {
+                self.facts.handed_on = true;
+                self.whole.remove(&symbol);
+                continue;
+            }
             for reference in self.scoping.get_resolved_references(symbol) {
                 self.classify(reference.node_id());
             }
@@ -423,8 +474,11 @@ impl<'s, 'a> Reader<'s, 'a> {
                 return;
             }
             AstKind::AssignmentExpression(assignment) if assignment.right.span() == child => {
+                // The assignment evaluates to the props object: only a statement of its own drops that value.
+                let (outer, _) = self.through_wrappers(parent);
+                let discarded = matches!(self.nodes.kind(outer), AstKind::ExpressionStatement(_));
                 match &assignment.left {
-                    AssignmentTarget::ObjectAssignmentTarget(object) if object.rest.is_none() => {
+                    AssignmentTarget::ObjectAssignmentTarget(object) if object.rest.is_none() && discarded => {
                         for property in &object.properties {
                             match property {
                                 AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(property) => {
@@ -467,6 +521,7 @@ impl<'s, 'a> Reader<'s, 'a> {
         };
         match self.nodes.kind(parent) {
             AstKind::CallExpression(call) => call.callee.span() != child,
+            AstKind::NewExpression(new) => new.callee.span() != child,
             AstKind::TaggedTemplateExpression(tagged) => tagged.tag.span() != child,
             AstKind::AssignmentExpression(assignment) => assignment.left.span() != child,
             AstKind::UnaryExpression(unary) => unary.operator != UnaryOperator::Delete,
@@ -478,7 +533,42 @@ impl<'s, 'a> Reader<'s, 'a> {
             | AstKind::AssignmentTargetRest(_)
             | AstKind::AssignmentTargetWithDefault(_)
             | AstKind::AssignmentTargetPropertyProperty(_) => false,
-            _ => true,
+            // An allow-list of the contexts that only read a value; any other parent (a form not named here, or one a
+            // later parser version adds) is not known to be a read and hands the object on.
+            AstKind::StaticMemberExpression(_)
+            | AstKind::ComputedMemberExpression(_)
+            | AstKind::PrivateFieldExpression(_)
+            | AstKind::VariableDeclarator(_)
+            | AstKind::ReturnStatement(_)
+            | AstKind::ThrowStatement(_)
+            | AstKind::ExpressionStatement(_)
+            | AstKind::JSXExpressionContainer(_)
+            | AstKind::JSXSpreadChild(_)
+            | AstKind::BinaryExpression(_)
+            | AstKind::LogicalExpression(_)
+            | AstKind::ConditionalExpression(_)
+            | AstKind::TemplateLiteral(_)
+            | AstKind::ArrayExpression(_)
+            | AstKind::ObjectProperty(_)
+            | AstKind::SpreadElement(_)
+            | AstKind::SequenceExpression(_)
+            | AstKind::AwaitExpression(_)
+            | AstKind::YieldExpression(_)
+            | AstKind::IfStatement(_)
+            | AstKind::WhileStatement(_)
+            | AstKind::DoWhileStatement(_)
+            | AstKind::ForStatement(_)
+            | AstKind::SwitchStatement(_)
+            | AstKind::SwitchCase(_)
+            | AstKind::ArrowFunctionExpression(_)
+            | AstKind::AssignmentPattern(_)
+            | AstKind::PropertyDefinition(_)
+            | AstKind::MethodDefinition(_)
+            | AstKind::BindingProperty(_)
+            | AstKind::JSXSpreadAttribute(_)
+            | AstKind::ImportExpression(_)
+            | AstKind::ExportDefaultDeclaration(_) => true,
+            _ => false,
         }
     }
 
@@ -507,6 +597,10 @@ impl<'s, 'a> Reader<'s, 'a> {
             },
             Expression::ChainExpression(chain) => match &chain.expression {
                 ChainElement::StaticMemberExpression(member) => (&member.object, member.property.name.to_string()),
+                ChainElement::ComputedMemberExpression(member) => match &member.expression {
+                    Expression::StringLiteral(key) => (&member.object, js_text::lossy(key.value).into_owned()),
+                    _ => return None,
+                },
                 _ => return None,
             },
             _ => return None,
