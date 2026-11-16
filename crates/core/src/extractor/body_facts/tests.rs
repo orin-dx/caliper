@@ -857,3 +857,64 @@ fn an_arguments_use_in_another_function_is_not_this_ones() {
     let other = "function other() { return arguments[0] }\nexport function C(props: P) { return <i /> }";
     assert!(!facts(other, "C").handed_on);
 }
+
+/// A props binding that is ever written holds no known value where it is read: the body is unknown for it.
+#[test]
+fn a_written_props_binding_hands_the_object_on_and_records_nothing_through_it() {
+    for body in [
+        "props = other; return <Child value={props.value} />",
+        "props += x; return <Child value={props.value} />",
+        "props++; return <Child value={props.value} />",
+        "for (props of xs) {} return <Child value={props.value} />",
+        "props = { ...props }; return <Child value={props.value} />",
+        "({ props } = obj); return <Child value={props.value} />",
+        "[props] = xs; return <Child value={props.value} />",
+        "var props = other; return <Child value={props.value} />",
+        "delete props.a; return <Child />",
+        "x = props; return <Child />",
+        "[a] = props; return <Child />",
+    ] {
+        let source = format!("export function C(props: P) {{ let a, x; {body} }}");
+        let facts = facts(&source, "C");
+        assert!(facts.handed_on, "{body}");
+        assert!(!facts.reads.iter().any(|read| read == "value"), "{body}");
+        for attribute in facts.elements.iter().flat_map(|element| &element.attributes) {
+            assert!(!matches!(attribute, JsxAttributeFact::Named { prop: Some(_), .. }), "{body}");
+        }
+    }
+}
+
+#[test]
+fn a_written_rest_binding_is_not_the_props_object() {
+    let facts = facts("export function C({ a, ...r }: P) { r = other; return <Child {...r} v={r.v} /> }", "C");
+    assert!(facts.handed_on);
+    for attribute in facts.elements.iter().flat_map(|element| &element.attributes) {
+        assert!(!matches!(
+            attribute,
+            JsxAttributeFact::Spread(SpreadOf::Props | SpreadOf::Rest) | JsxAttributeFact::Named { prop: Some(_), .. }
+        ));
+    }
+}
+
+#[test]
+fn a_destructuring_assignment_reads_its_keys_only_when_its_value_is_discarded() {
+    let discarded = facts("export function C(props: P) { let a; ({ a } = props); return <i /> }", "C");
+    assert!(!discarded.handed_on);
+    assert_eq!(reads(&discarded), ["a"]);
+    for source in [
+        "let a; use(({ a } = props)); return <i />",
+        "let a; const q = ({ a } = props); return <i />",
+        "let a; return <i x={({ a } = props)} />;",
+    ] {
+        let facts = facts(&format!("export function C(props: P) {{ {source} }}"), "C");
+        assert!(facts.handed_on, "{source}");
+    }
+}
+
+#[test]
+fn a_default_parameter_and_a_declaration_destructuring_are_not_writes() {
+    let facts =
+        facts("export function C(props: P = defaults) { const { a } = props; return <i title={props.b} /> }", "C");
+    assert!(!facts.handed_on);
+    assert_eq!(reads(&facts), ["a", "b"]);
+}
