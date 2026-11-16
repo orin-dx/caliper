@@ -45,7 +45,6 @@ fn test_simple_interface_resolution() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
@@ -60,7 +59,6 @@ fn test_simple_interface_resolution() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -125,7 +123,6 @@ fn test_extends_clause_prefers_project_defined_sx_props_over_known_shortcut() {
         format!("{}:SxProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:SxProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "SxProps".into(),
             file_path: file_path.clone(),
@@ -137,7 +134,6 @@ fn test_extends_clause_prefers_project_defined_sx_props_over_known_shortcut() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -148,7 +144,6 @@ fn test_extends_clause_prefers_project_defined_sx_props_over_known_shortcut() {
         format!("{}:ThemeButtonProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:ThemeButtonProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ThemeButtonProps".into(),
             file_path: file_path.clone(),
@@ -193,7 +188,6 @@ fn test_field_typed_as_project_defined_sx_props_is_not_replaced_by_known_shortcu
         format!("{}:SxProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:SxProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "SxProps".into(),
             file_path: file_path.clone(),
@@ -205,7 +199,6 @@ fn test_field_typed_as_project_defined_sx_props_is_not_replaced_by_known_shortcu
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -216,7 +209,6 @@ fn test_field_typed_as_project_defined_sx_props_is_not_replaced_by_known_shortcu
         format!("{}:WidgetProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:WidgetProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "WidgetProps".into(),
             file_path: file_path.clone(),
@@ -228,7 +220,6 @@ fn test_field_typed_as_project_defined_sx_props_is_not_replaced_by_known_shortcu
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -300,7 +291,6 @@ fn test_indexed_access_into_generic_interface_field_substitutes_type_arg() {
         format!("{}:RenderableProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:RenderableProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "RenderableProps".into(),
             file_path: file_path.clone(),
@@ -312,7 +302,6 @@ fn test_indexed_access_into_generic_interface_field_substitutes_type_arg() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -355,7 +344,6 @@ fn test_indexed_access_into_ambient_dom_interface_walks_extends_chain() {
         format!("{}:HTMLDivElement", lib_file),
         CollectedInterface {
             scoped_key: format!("{}:HTMLDivElement", lib_file),
-            unlisted_members: false,
             scope: Default::default(),
             name: "HTMLDivElement".into(),
             file_path: lib_file.clone(),
@@ -369,7 +357,6 @@ fn test_indexed_access_into_ambient_dom_interface_walks_extends_chain() {
         format!("{}:HTMLElement", lib_file),
         CollectedInterface {
             scoped_key: format!("{}:HTMLElement", lib_file),
-            unlisted_members: false,
             scope: Default::default(),
             name: "HTMLElement".into(),
             file_path: lib_file.clone(),
@@ -381,7 +368,6 @@ fn test_indexed_access_into_ambient_dom_interface_walks_extends_chain() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -527,7 +513,6 @@ fn test_default_value_jsdoc_mismatch_emits_diagnostic() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
@@ -539,7 +524,6 @@ fn test_default_value_jsdoc_mismatch_emits_diagnostic() {
                 tags: prop_tags,
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -631,7 +615,6 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
         format!("{}:PropsBase", file_path),
         CollectedInterface {
             scoped_key: format!("{}:PropsBase", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "PropsBase".into(),
             file_path: file_path.clone(),
@@ -643,7 +626,6 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -654,7 +636,6 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
         format!("{}:PropsSingle", file_path),
         CollectedInterface {
             scoped_key: format!("{}:PropsSingle", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "PropsSingle".into(),
             file_path: file_path.clone(),
@@ -667,7 +648,6 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
                 RawProp {
                     name: "selected".into(),
@@ -677,7 +657,6 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
             ],
             extends: vec![],
@@ -689,7 +668,6 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
         format!("{}:PropsMulti", file_path),
         CollectedInterface {
             scoped_key: format!("{}:PropsMulti", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "PropsMulti".into(),
             file_path: file_path.clone(),
@@ -702,7 +680,6 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
                 RawProp {
                     name: "selected".into(),
@@ -712,7 +689,6 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
             ],
             extends: vec![],
@@ -786,7 +762,6 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
             format!("{}:{}", file_path, iface_name),
             CollectedInterface {
                 scoped_key: format!("{}:{}", file_path, iface_name),
-                unlisted_members: false,
                 scope: Default::default(),
                 name: iface_name.into(),
                 file_path: file_path.clone(),
@@ -799,7 +774,6 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
                         tags: BTreeMap::new(),
                         span_start: 0,
                         span_end: 0,
-                        readonly: false,
                     },
                     RawProp {
                         name: "required".into(),
@@ -809,7 +783,6 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
                         tags: BTreeMap::new(),
                         span_start: 0,
                         span_end: 0,
-                        readonly: false,
                     },
                     RawProp {
                         name: "selected".into(),
@@ -819,7 +792,6 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
                         tags: BTreeMap::new(),
                         span_start: 0,
                         span_end: 0,
-                        readonly: false,
                     },
                 ],
                 extends: vec![],
@@ -833,7 +805,6 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
         format!("{}:PropsBase", file_path),
         CollectedInterface {
             scoped_key: format!("{}:PropsBase", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "PropsBase".into(),
             file_path: file_path.clone(),
@@ -845,7 +816,6 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -907,7 +877,6 @@ fn test_extends_builtin_html_attrs_creates_inherited_layer() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
@@ -956,7 +925,6 @@ fn test_html_attribute_mode_curated_does_not_expand_real_button_attrs() {
         format!("{}:ButtonHTMLAttributes", react_file),
         CollectedInterface {
             scoped_key: format!("{}:ButtonHTMLAttributes", react_file),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonHTMLAttributes".into(),
             file_path: react_file.clone().into(),
@@ -968,7 +936,6 @@ fn test_html_attribute_mode_curated_does_not_expand_real_button_attrs() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -979,7 +946,6 @@ fn test_html_attribute_mode_curated_does_not_expand_real_button_attrs() {
         format!("{}:ButtonProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:ButtonProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
@@ -1030,7 +996,6 @@ fn test_html_attribute_mode_full_expands_real_button_attrs() {
         format!("{}:ButtonHTMLAttributes", react_file),
         CollectedInterface {
             scoped_key: format!("{}:ButtonHTMLAttributes", react_file),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonHTMLAttributes".into(),
             file_path: react_file.clone().into(),
@@ -1042,7 +1007,6 @@ fn test_html_attribute_mode_full_expands_real_button_attrs() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -1053,7 +1017,6 @@ fn test_html_attribute_mode_full_expands_real_button_attrs() {
         format!("{}:ButtonProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:ButtonProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
@@ -1100,7 +1063,6 @@ fn test_html_attribute_mode_none_suppresses_notable_inherited() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
@@ -1176,7 +1138,6 @@ fn test_component_props_without_ref_in_intersection_alias() {
         iface_key,
         CollectedInterface {
             scoped_key: format!("{}:ButtonProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
@@ -1242,7 +1203,6 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
         format!("{}:RowHeights", file_path),
         CollectedInterface {
             scoped_key: format!("{}:RowHeights", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "RowHeights".into(),
             file_path: file_path.clone(),
@@ -1254,7 +1214,6 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -1265,7 +1224,6 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
         format!("{}:ColumnWidths", file_path),
         CollectedInterface {
             scoped_key: format!("{}:ColumnWidths", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "ColumnWidths".into(),
             file_path: file_path.clone(),
@@ -1277,7 +1235,6 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -1288,7 +1245,6 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
         format!("{}:TableProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:TableProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "TableProps".into(),
             file_path: file_path.clone(),
@@ -1353,7 +1309,6 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
         format!("{}:SiblingA", types_file),
         CollectedInterface {
             scoped_key: format!("{}:SiblingA", types_file),
-            unlisted_members: false,
             scope: Default::default(),
             name: "SiblingA".into(),
             file_path: types_file.clone(),
@@ -1365,7 +1320,6 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -1376,7 +1330,6 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
         format!("{}:SiblingB", types_file),
         CollectedInterface {
             scoped_key: format!("{}:SiblingB", types_file),
-            unlisted_members: false,
             scope: Default::default(),
             name: "SiblingB".into(),
             file_path: types_file.clone(),
@@ -1388,7 +1341,6 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -1418,7 +1370,6 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
         format!("{}:WidgetProps", consumer_file),
         CollectedInterface {
             scoped_key: format!("{}:WidgetProps", consumer_file),
-            unlisted_members: false,
             scope: Default::default(),
             name: "WidgetProps".into(),
             file_path: consumer_file.clone(),
@@ -1430,7 +1381,6 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -1482,7 +1432,6 @@ fn test_generic_interface_own_type_params_suppress_diagnostic() {
         format!("{}:WidgetProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:WidgetProps", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "WidgetProps".into(),
             file_path: file_path.clone(),
@@ -1498,7 +1447,6 @@ fn test_generic_interface_own_type_params_suppress_diagnostic() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
                 RawProp {
                     name: "getValue".into(),
@@ -1508,7 +1456,6 @@ fn test_generic_interface_own_type_params_suppress_diagnostic() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
             ],
             extends: vec![],
@@ -1566,7 +1513,6 @@ fn test_generic_type_alias_substitution() {
         base_key,
         CollectedInterface {
             scoped_key: format!("{}:Base", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "Base".into(),
             file_path: file_path.clone(),
@@ -1579,7 +1525,6 @@ fn test_generic_type_alias_substitution() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
                 RawProp {
                     name: "title".into(),
@@ -1589,7 +1534,6 @@ fn test_generic_type_alias_substitution() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
             ],
             extends: vec![],
@@ -1604,7 +1548,6 @@ fn test_generic_type_alias_substitution() {
         overrides_key,
         CollectedInterface {
             scoped_key: format!("{}:Overrides", file_path),
-            unlisted_members: false,
             scope: Default::default(),
             name: "Overrides".into(),
             file_path: file_path.clone(),
@@ -1617,7 +1560,6 @@ fn test_generic_type_alias_substitution() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
                 RawProp {
                     name: "extra".into(),
@@ -1627,7 +1569,6 @@ fn test_generic_type_alias_substitution() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
             ],
             extends: vec![],
@@ -2186,7 +2127,6 @@ fn test_self_referential_extends_emits_diagnostic_instead_of_silent_default() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
-            unlisted_members: false,
             scope: Default::default(),
             name: "LoopProps".into(),
             file_path: file_path.clone(),
@@ -2198,7 +2138,6 @@ fn test_self_referential_extends_emits_diagnostic_instead_of_silent_default() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             // Self-referential — LoopProps extends itself.
             extends: vec![ExtendsRef::SameFile { name: "LoopProps".into(), type_args: vec![] }],
@@ -2259,7 +2198,6 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
         key("Base"),
         CollectedInterface {
             scoped_key: key("Base"),
-            unlisted_members: false,
             scope: Default::default(),
             name: "Base".into(),
             file_path: file_path.clone(),
@@ -2271,7 +2209,6 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -2283,7 +2220,6 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
             key(name),
             CollectedInterface {
                 scoped_key: key(name),
-                unlisted_members: false,
                 scope: Default::default(),
                 name: name.into(),
                 file_path: file_path.clone(),
@@ -2295,7 +2231,6 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 }],
                 extends: vec![ExtendsRef::SameFile { name: "Base".into(), type_args: vec![] }],
                 description: String::new(),
@@ -2307,7 +2242,6 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
         key("C"),
         CollectedInterface {
             scoped_key: key("C"),
-            unlisted_members: false,
             scope: Default::default(),
             name: "C".into(),
             file_path: file_path.clone(),
@@ -2319,7 +2253,6 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![
                 ExtendsRef::SameFile { name: "A".into(), type_args: vec![] },
@@ -2384,7 +2317,6 @@ fn self_referential_type_alias_used_directly_as_a_field_type_is_caught_immediate
         key("Props"),
         CollectedInterface {
             scoped_key: key("Props"),
-            unlisted_members: false,
             scope: Default::default(),
             name: "Props".into(),
             file_path: file_path.clone(),
@@ -2396,7 +2328,6 @@ fn self_referential_type_alias_used_directly_as_a_field_type_is_caught_immediate
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -2450,7 +2381,6 @@ fn two_unrelated_fields_sharing_the_same_type_are_not_falsely_flagged_as_a_cycle
         key("Shared"),
         CollectedInterface {
             scoped_key: key("Shared"),
-            unlisted_members: false,
             scope: Default::default(),
             name: "Shared".into(),
             file_path: file_path.clone(),
@@ -2462,7 +2392,6 @@ fn two_unrelated_fields_sharing_the_same_type_are_not_falsely_flagged_as_a_cycle
                 tags: BTreeMap::new(),
                 span_start: 0,
                 span_end: 0,
-                readonly: false,
             }],
             extends: vec![],
             description: String::new(),
@@ -2473,7 +2402,6 @@ fn two_unrelated_fields_sharing_the_same_type_are_not_falsely_flagged_as_a_cycle
         key("Props"),
         CollectedInterface {
             scoped_key: key("Props"),
-            unlisted_members: false,
             scope: Default::default(),
             name: "Props".into(),
             file_path: file_path.clone(),
@@ -2486,7 +2414,6 @@ fn two_unrelated_fields_sharing_the_same_type_are_not_falsely_flagged_as_a_cycle
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
                 RawProp {
                     name: "b".into(),
@@ -2496,7 +2423,6 @@ fn two_unrelated_fields_sharing_the_same_type_are_not_falsely_flagged_as_a_cycle
                     tags: BTreeMap::new(),
                     span_start: 0,
                     span_end: 0,
-                    readonly: false,
                 },
             ],
             extends: vec![],
@@ -2555,7 +2481,6 @@ fn test_non_cyclic_depth_exhaustion_emits_max_depth_diagnostic() {
             format!("{}:{}", file_path, name),
             CollectedInterface {
                 scoped_key: format!("{}:{}", file_path, name),
-                unlisted_members: false,
                 scope: Default::default(),
                 name: name.clone().into(),
                 file_path: file_path.clone(),

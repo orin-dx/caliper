@@ -73,21 +73,9 @@ fn an_alias_of_a_utility_type_reaches_the_output_as_the_utility_does_written_in_
         json!("Partial<Record<\"root\" | \"item\", string>>"),
         "projects as Partial, not Record"
     );
-    // Over an object whose members are known, `Omit`, `Pick` and `Required` read as the object TypeScript computes,
-    // each member's optionality as the wrapper sets it.
-    let members = |prop: &str| -> Vec<(String, bool)> {
-        let ty = &out.canonical[prop]["type"];
-        assert_eq!(ty["kind"], json!("object"), "{prop}: {ty}");
-        ty["fields"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|f| (f["name"].as_str().unwrap().to_owned(), f["required"].as_bool().unwrap()))
-            .collect()
-    };
-    assert_eq!(members("without"), [("y".to_owned(), true), ("z".to_owned(), false)]);
-    assert_eq!(members("only"), [("x".to_owned(), true)]);
-    assert_eq!(members("all"), [("x".to_owned(), true), ("y".to_owned(), true), ("z".to_owned(), true)]);
+    assert_eq!(out.canonical["without"]["type"]["name"], json!("Omit"));
+    assert_eq!(out.canonical["only"]["type"]["name"], json!("Pick"));
+    assert_eq!(out.canonical["all"]["type"]["name"], json!("Required"));
 }
 
 #[test]

@@ -196,21 +196,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             .body
             .iter()
             .filter(|sig| !accessors.is_shadowed_setter(sig))
-            .filter_map(|sig| {
-                // A getter with no setter declares a `readonly` property.
-                let mut prop = self.collect_property_signature(sig)?;
-                prop.readonly |= accessors.is_lone_getter(sig);
-                Some(prop)
-            })
+            .filter_map(|sig| self.collect_property_signature(sig))
             .collect();
-
-        // A member `props` cannot list: its keys are then not known one by one (`CollectedInterface::unlisted_members`).
-        let unlisted_members = node.body.body.iter().any(|sig| match sig {
-            TSSignature::TSIndexSignature(_) => true,
-            TSSignature::TSPropertySignature(ps) => ps.key.static_name().is_none(),
-            TSSignature::TSMethodSignature(ms) => ms.key.static_name().is_none(),
-            _ => false,
-        });
 
         // Declarations of one name in one scope merge, as TypeScript merges them: members and `extends` accumulate,
         // and the first description stands. The key carries the scope, so a declaration in another scope is an entry
@@ -222,7 +209,6 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 }
             }
             merged.extends.extend(extends);
-            merged.unlisted_members |= unlisted_members;
             if merged.description.is_empty() {
                 merged.description = description;
             }
@@ -238,7 +224,6 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     scope,
                     file_path: self.file_path.clone(),
                     props,
-                    unlisted_members,
                     extends,
                     description,
                     tags,

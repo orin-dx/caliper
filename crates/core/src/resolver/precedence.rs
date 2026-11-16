@@ -143,7 +143,6 @@ mod tests {
             scoped_key.clone(),
             CollectedInterface {
                 scoped_key: scoped_key.clone(),
-                unlisted_members: false,
                 scope: Default::default(),
                 name: "SxProps".into(),
                 file_path: file_path.clone(),
