@@ -89,7 +89,12 @@ fn schema_value() -> serde_json::Value {
                                     "omitted": { "$ref": "#/definitions/nameListId" },
                                     "htmlElement": { "type": ["string", "null"] },
                                     "totalProps": { "type": "integer" },
-                                    "members": { "$ref": "#/definitions/nameListId" }
+                                    "members": { "$ref": "#/definitions/nameListId" },
+                                    "used": {
+                                        "description": "The members of this collapsed layer relevance evidence puts forward (ADR 0028): ambient members consumers pass at the call-site floor or the body reads, in the order of `members`. Absent when none is",
+                                        "type": "array",
+                                        "items": { "type": "string" }
+                                    }
                                 }
                             }
                         },
@@ -327,6 +332,7 @@ mod tests {
                     html_element: Some("button".into()),
                     total_props: 3,
                     members: vec![],
+                    used: Vec::new(),
                 }],
                 notable_inherited: BTreeMap::from([(
                     "onClick".to_string(),

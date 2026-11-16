@@ -75,7 +75,12 @@ pub(super) fn attach<'a>(program: &'a Program<'a>, mappings: &mut [ComponentMapp
     if mappings.is_empty() && !jsx {
         return Vec::new();
     }
+    // The nodes are what a reference's parent is read from; the scoping tells a file-level tag's binding apart from an
+    // inner one of the same name.
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
+    let (scoping, nodes) = (semantic.scoping(), semantic.nodes());
     let mut finder = Finder {
+        scoping,
         wanted: mappings.iter().map(|mapping| (mapping.span_start, mapping.span_end)).collect(),
         functions: FxHashMap::default(),
         reached: FxHashMap::default(),
@@ -87,10 +92,6 @@ pub(super) fn attach<'a>(program: &'a Program<'a>, mappings: &mut [ComponentMapp
     if functions.is_empty() {
         return usages;
     }
-
-    // The nodes are what a reference's parent is read from.
-    let semantic = SemanticBuilder::new().with_build_nodes(true).build(program).semantic;
-    let (scoping, nodes) = (semantic.scoping(), semantic.nodes());
     let mut found = FxHashMap::default();
     // Elements of nested components, each at the place in `usages` its component function was reached.
     let mut nested: Vec<(usize, Vec<JsxUsage>)> = Vec::new();
@@ -164,7 +165,8 @@ type SpanKey = (u32, u32);
 ///
 /// A mapping owns exactly the function [`Reader::facts_of`] reads, never the declaration or wrapper call around it:
 /// JSX in a wrapper's other arguments or callee (`withOptions(fn, { fallback: <Icon /> })`) is the file's.
-struct Finder {
+struct Finder<'s> {
+    scoping: &'s Scoping,
     wanted: FxHashSet<SpanKey>,
     /// The span of each component function, to the spans of the mappings that hold it.
     functions: FxHashMap<SpanKey, Vec<SpanKey>>,
@@ -175,7 +177,7 @@ struct Finder {
     usages: Vec<JsxUsage>,
 }
 
-impl Finder {
+impl Finder<'_> {
     /// Notes the function a wanted node holds.
     fn record(&mut self, span: oxc_span::Span, function: Option<ComponentFn<'_, '_>>) {
         let key = (span.start, span.end);
@@ -209,7 +211,7 @@ impl Finder {
     }
 }
 
-impl<'a> Visit<'a> for Finder {
+impl<'a> Visit<'a> for Finder<'_> {
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
         self.record(it.span, it.init.as_ref().and_then(unwrap));
         walk::walk_variable_declarator(self, it);
@@ -232,13 +234,14 @@ impl<'a> Visit<'a> for Finder {
 
     fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
         if self.owned == 0 {
-            self.usages.push(usage_of(it));
+            self.usages.push(usage_of(it, self.scoping));
         }
         walk::walk_jsx_opening_element(self, it);
     }
 }
 
-fn usage_of(it: &JSXOpeningElement<'_>) -> JsxUsage {
+/// One file-level element: its tag keyed by binding ([`scoped`]), and its attributes.
+fn usage_of(it: &JSXOpeningElement<'_>, scoping: &Scoping) -> JsxUsage {
     let attributes = it
         .attributes
         .iter()
@@ -247,7 +250,7 @@ fn usage_of(it: &JSXOpeningElement<'_>) -> JsxUsage {
             JSXAttributeItem::SpreadAttribute(_) => JsxUsageAttribute::Spread,
         })
         .collect();
-    JsxUsage { tag: tag_of(&it.name), attributes }
+    JsxUsage { tag: scoped(scoping, tag_of(&it.name), &it.name), attributes }
 }
 
 /// Reads one component function against the file's semantic model.
@@ -341,6 +344,7 @@ impl<'s, 'a> Reader<'s, 'a> {
             nested: 0,
             elements: Vec::new(),
             nested_usages: Vec::new(),
+            spreads_nested: false,
         };
         // The parameters too: a default or a computed key can hold JSX (`{ icon = <Icon /> }`).
         match function {
@@ -365,8 +369,10 @@ impl<'s, 'a> Reader<'s, 'a> {
                 elements.visit_arrow_function_body(&arrow.body);
             }
         }
-        let (found, nested_usages) = (elements.elements, elements.nested_usages);
+        let (found, nested_usages, spreads_nested) =
+            (elements.elements, elements.nested_usages, elements.spreads_nested);
         self.facts.elements = found;
+        self.facts.handed_on |= spreads_nested;
         (self.facts, nested_usages)
     }
 
@@ -491,13 +497,10 @@ impl<'s, 'a> Reader<'s, 'a> {
                 }
                 return;
             }
-            AstKind::JSXSpreadAttribute(_) => {
-                // Spreading the whole props object passes every prop on; a rest binding's spread is recorded only.
-                if self.is_props(reference) {
-                    self.facts.handed_on = true;
-                }
-                return;
-            }
+            // A spread of the props object or a rest binding is recorded as an element's attribute (`SpreadOf`), and what
+            // it means is decided from its tag: onto a DOM tag no evidence, onto a component a forward, onto a tag
+            // that does not resolve unknown. It is not an escape.
+            AstKind::JSXSpreadAttribute(_) => return,
             _ => None,
         };
         let is_jsx_tag = matches!(self.nodes.kind(parent), AstKind::JSXMemberExpression(_));
@@ -505,12 +508,6 @@ impl<'s, 'a> Reader<'s, 'a> {
             Some(key) if is_jsx_tag || self.is_read(parent) => self.read(self.nodes.kind(reference).span(), key),
             Some(_) | None => self.facts.handed_on = true,
         }
-    }
-
-    /// Whether the reference at `node` is to the first parameter itself rather than a rest binding.
-    fn is_props(&self, node: NodeId) -> bool {
-        let AstKind::IdentifierReference(id) = self.nodes.kind(node) else { return false };
-        self.symbol_of(id).and_then(|symbol| self.whole.get(&symbol)) == Some(&SpreadOf::Props)
     }
 
     /// Whether a member expression is only read: not called with its object as `this`, written, deleted or
@@ -646,6 +643,8 @@ struct Elements<'r, 's, 'a> {
     nested: u32,
     elements: Vec<JsxElementFact>,
     nested_usages: Vec<JsxUsage>,
+    /// A nested component spreads the props object or a rest binding: an escape this body's elements do not record.
+    spreads_nested: bool,
 }
 
 impl Elements<'_, '_, '_> {
@@ -691,7 +690,13 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
 
     fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
         if self.nested > 0 {
-            self.nested_usages.push(usage_of(it));
+            // A nested component's elements are not this body's: a spread of the props or a rest binding there is
+            // recorded nowhere, so it hands them on.
+            self.spreads_nested |= it.attributes.iter().any(|attribute| {
+                matches!(attribute, JSXAttributeItem::SpreadAttribute(spread)
+                    if self.reader.whole_expr(&spread.argument).is_some())
+            });
+            self.nested_usages.push(usage_of(it, self.reader.scoping));
         } else {
             let attributes = it
                 .attributes
@@ -706,37 +711,37 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
                     }
                 })
                 .collect();
-            self.elements.push(JsxElementFact { tag: self.reader.scoped(tag_of(&it.name), &it.name), attributes });
+            self.elements
+                .push(JsxElementFact { tag: scoped(self.reader.scoping, tag_of(&it.name), &it.name), attributes });
         }
         walk::walk_jsx_opening_element(self, it);
     }
 }
 
-impl Reader<'_, '_> {
-    /// `tag`, as [`JsxTag::Scoped`] when the symbol its first name refers to is bound in a scope other than the
-    /// module's (a parameter, a local `const`, an inner function or class): not the module binding of that name.
-    fn scoped(&self, tag: JsxTag, name: &JSXElementName<'_>) -> JsxTag {
-        let first = match name {
-            JSXElementName::IdentifierReference(id) => Some(&**id),
-            JSXElementName::MemberExpression(member) => Some(&member.object).and_then(|mut object| {
-                loop {
-                    match object {
-                        JSXMemberExpressionObject::IdentifierReference(id) => break Some(&**id),
-                        JSXMemberExpressionObject::MemberExpression(inner) => object = &inner.object,
-                        JSXMemberExpressionObject::ThisExpression(_) => break None,
-                    }
+/// `tag`, as [`JsxTag::Scoped`] when the symbol its first name refers to is bound in a scope other than the module's (a
+/// parameter, a local `const`, an inner function or class): not the module binding of that name, so never counted as the
+/// component an import or a top-level declaration of the same name is.
+fn scoped(scoping: &Scoping, tag: JsxTag, name: &JSXElementName<'_>) -> JsxTag {
+    let first = match name {
+        JSXElementName::IdentifierReference(id) => Some(&**id),
+        JSXElementName::MemberExpression(member) => Some(&member.object).and_then(|mut object| {
+            loop {
+                match object {
+                    JSXMemberExpressionObject::IdentifierReference(id) => break Some(&**id),
+                    JSXMemberExpressionObject::MemberExpression(inner) => object = &inner.object,
+                    JSXMemberExpressionObject::ThisExpression(_) => break None,
                 }
-            }),
-            _ => None,
-        };
-        let inner = first
-            .and_then(|id| id.reference_id.get())
-            .and_then(|reference| self.scoping.get_reference(reference).symbol_id())
-            .is_some_and(|symbol| self.scoping.symbol_scope_id(symbol) != self.scoping.root_scope_id());
-        match tag {
-            JsxTag::Identifier(name) | JsxTag::Member(name) if inner => JsxTag::Scoped(name),
-            tag => tag,
-        }
+            }
+        }),
+        _ => None,
+    };
+    let inner = first
+        .and_then(|id| id.reference_id.get())
+        .and_then(|reference| scoping.get_reference(reference).symbol_id())
+        .is_some_and(|symbol| scoping.symbol_scope_id(symbol) != scoping.root_scope_id());
+    match tag {
+        JsxTag::Identifier(name) | JsxTag::Member(name) if inner => JsxTag::Scoped(name),
+        tag => tag,
     }
 }
 

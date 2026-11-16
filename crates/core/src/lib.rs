@@ -14,6 +14,7 @@ pub(crate) mod extractor;
 pub(crate) mod import_map;
 pub(crate) mod known;
 pub(crate) mod named_type_index;
+pub mod origin;
 pub mod panic_guard;
 pub(crate) mod path_key;
 pub mod pipeline;

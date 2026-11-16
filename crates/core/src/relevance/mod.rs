@@ -1,30 +1,61 @@
 //! Which props of a component evidence puts forward (ADR 0028, section A).
 //!
-//! [`decide`] is the one place the rules are combined: it takes the [`Evidence`] each lane gathers for the members a
+//! [`decide`] is the one place the rules are combined: it takes the [`Evidence`] gathered for the members a
 //! component's props type reaches and says, for each member, whether it is a typed row, a name in its collapsed
-//! layer's `used` list, left in that layer, or decided as today because the body says nothing. It is pure and total:
-//! no I/O, no name lists, and its output follows the order of the members it is given. Nothing calls it yet; the
-//! lanes are wired after the collapse PR merges (ADR 0028, slice T7).
-#![cfg_attr(not(test), expect(dead_code, reason = "wired into both lanes by ADR 0028 slice T7"))]
+//! layer's `used` list, left in that layer, or unknown because the body says nothing. It is pure and total: no I/O, no
+//! name lists, and its output follows the order of the members it is given.
+//!
+//! [`apply`] is its one caller, where a structural answer becomes output (`pipeline::revision`): the [`Inputs`]
+//! gathered with the answer's resolution (so their reads are its dependencies) and the revision's call-site counts
+//! (counted again each revision, so an edit to a consumer reaches every component it renders). The checker's merges
+//! keep the inheritance layers, and so the `used` lists, of the structural answer.
 
-mod call_sites;
-mod forwarding;
-mod props_type;
+pub(crate) mod call_sites;
+pub(crate) mod forwarding;
+pub(crate) mod props_type;
 
 use std::collections::BTreeSet;
 
+use crate::types::output::ComponentEntry;
+
+/// The evidence about one component gathered with its resolution: what its props type writes and what its body does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Inputs {
+    /// The component's place in the project, which its call-site count is looked up by.
+    pub(crate) site: call_sites::SiteKey,
+    /// What the props type writes itself.
+    pub(crate) props_type: props_type::PropsType,
+    /// What the component's body does with its props; `None` when it has no function of its own.
+    pub(crate) body: Option<Body>,
+}
+
+/// Decides where each member of `entry`'s props goes, from `inputs`, the revision's `call_sites` of the component and
+/// the members its listed props and layers reach, and writes each collapsed layer's `used` list: the members of that
+/// layer evidence names. Which props are listed or collapsed does not change.
+pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &CallSites) {
+    let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
+    let members = props_type::members(&inputs.props_type, rows, &entry.inheritance);
+    let shown = decide(&Evidence { members: &members, body: inputs.body.as_ref(), call_sites });
+    // A collapsed ambient member the signature defaults (`{ className = 'x' }`) is read by the body, which a row does
+    // not record for a name left in its layer: it is `used` too. Nothing else in `rows` is added.
+    let defaulted =
+        members.iter().filter(|member| member.ambient && member.default_tag).map(|member| member.name.as_str());
+    let used: BTreeSet<&str> = shown.used.iter().map(String::as_str).chain(defaulted).collect();
+    for layer in &mut entry.inheritance {
+        layer.used = layer.members.iter().filter(|name| used.contains(name.as_str())).cloned().collect();
+    }
+}
+
 /// Everything known about the members one component's props type reaches.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Evidence {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Evidence<'a> {
     /// The members, in the order the props type reaches them; [`Shown`] keeps this order. A name repeated is placed
     /// once, by its first member.
-    pub(crate) members: Vec<Member>,
+    pub(crate) members: &'a [Member],
     /// What the component's own function body does with its props; `None` when it has no function of its own.
-    pub(crate) body: Option<Body>,
+    pub(crate) body: Option<&'a Body>,
     /// The props passed at the component's JSX call sites across the project.
-    pub(crate) call_sites: CallSites,
-    /// The names set in the `args` of the component's stories. Any one of them counts: stories have no floor.
-    pub(crate) story_args: Vec<String>,
+    pub(crate) call_sites: &'a CallSites,
 }
 
 /// One member the props type reaches, with the signals its declaration gives.
@@ -46,18 +77,16 @@ pub(crate) struct Member {
     pub(crate) documented: bool,
     /// Its type is a union of literals: orders the rows, never shows a member.
     pub(crate) literal_union: bool,
-    /// Declared by `@types/react`, or reaching the component only through a spread onto a DOM tag. Computed by the
-    /// lane from the declaring path, never from the name.
+    /// Declared by React's or the shared DOM declarations ([`crate::origin::Origin::is_ambient`]): decided by
+    /// the declaring path, never by the name.
     pub(crate) ambient: bool,
 }
 
 /// What a component's function body does with its props, read from the syntax alone.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Body {
-    /// The props the body reads. Complete only when `handed_on` is false.
+    /// The props the body reads. Complete only when [`Body::is_complete`].
     pub(crate) reads: Vec<String>,
-    /// The props destructured with a default value.
-    pub(crate) defaulted: Vec<String>,
     /// The JSX elements the body writes, in source order.
     pub(crate) elements: Vec<Element>,
     /// The props object or a rest binding escapes in a way the syntax cannot follow: what the body says still holds,
@@ -88,14 +117,8 @@ pub(crate) enum Target {
 /// One attribute of a JSX element.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Attribute {
-    /// `name={value}`, with the component's own prop the value is, when it is exactly one.
-    Named {
-        /// The attribute's name.
-        name: String,
-        /// The component's prop the value is, if it is exactly one. Kept from the extractor's facts; [`decide`] gives
-        /// it no weight (an attribute valued with an own prop adds nothing).
-        prop: Option<String>,
-    },
+    /// `name={value}`: set after a spread, it fixes `name`; its value adds nothing.
+    Named(String),
     /// `{...value}`.
     Spread(SpreadOf),
 }
@@ -120,6 +143,9 @@ pub(crate) struct CallSites {
     pub(crate) passed: Vec<(String, u32)>,
 }
 
+/// No call sites: no evidence.
+pub(crate) static NO_CALL_SITES: CallSites = CallSites { sites: 0, passed: Vec::new() };
+
 impl CallSites {
     /// Whether `count` of the sites reach the floor of `max(2, 20%)` of them.
     fn at_floor(&self, count: u32) -> bool {
@@ -133,23 +159,20 @@ impl CallSites {
 pub(crate) struct Shown {
     /// Typed rows.
     pub(crate) rows: Vec<String>,
-    /// Ambient members named in their collapsed layer's `used` list.
+    /// Ambient members named in their collapsed layer's `used` list: passed at the floor or read.
     pub(crate) used: Vec<String>,
     /// Members left in their collapsed layer.
     pub(crate) collapsed: Vec<String>,
-    /// Members with no signal whose body evidence is incomplete: listed or collapsed as today, so missing evidence
-    /// never hides more than today does.
-    pub(crate) as_today: Vec<String>,
+    /// Members with no signal whose body evidence is incomplete or absent: listed or collapsed by the collapse rule
+    /// alone, so missing evidence never hides more than that rule does.
+    pub(crate) unknown: Vec<String>,
 }
 
 /// Decides, from the evidence alone, where each member of a component's props goes.
-pub(crate) fn decide(evidence: &Evidence) -> Shown {
-    let body = evidence.body.as_ref();
+pub(crate) fn decide(evidence: &Evidence<'_>) -> Shown {
+    let body = evidence.body;
     let complete = body.is_some_and(Body::is_complete);
-    let facts = |names: fn(&Body) -> &[String]| -> BTreeSet<&str> {
-        body.map(|body| names(body).iter().map(String::as_str).collect()).unwrap_or_default()
-    };
-    let (reads, defaulted) = (facts(|body| &body.reads), facts(|body| &body.defaulted));
+    let reads: BTreeSet<&str> = body.map(|body| body.reads.iter().map(String::as_str).collect()).unwrap_or_default();
     let forwarded = body.map(Body::forwarded).unwrap_or_default();
     let passed: BTreeSet<&str> = evidence
         .call_sites
@@ -157,26 +180,26 @@ pub(crate) fn decide(evidence: &Evidence) -> Shown {
         .iter()
         .filter(|(_, count)| evidence.call_sites.at_floor(*count))
         .map(|(name, _)| name.as_str())
-        .chain(evidence.story_args.iter().map(String::as_str))
         .collect();
     let mut shown = Shown::default();
     let mut ordered_rows = Vec::new();
     let mut placed = BTreeSet::new();
-    for member in &evidence.members {
+    for member in evidence.members {
         let name = member.name.as_str();
         if !placed.insert(name) {
             continue;
         }
-        let read = reads.contains(name);
-        let defaulted = member.default_tag || defaulted.contains(name);
-        let declared = member.own || member.picked || member.overrides || member.required || defaulted;
-        let list = if declared || passed.contains(name) || (!member.ambient && (read || forwarded.contains(name))) {
+        let declared = member.own || member.picked || member.overrides || member.required || member.default_tag;
+        // Passed at the floor or read puts a member forward: a typed row unless ambient, then a name in its layer's
+        // `used` list (ADR 0028, Combination).
+        let wanted = passed.contains(name) || reads.contains(name);
+        let list = if declared || (!member.ambient && (wanted || forwarded.contains(name))) {
             ordered_rows.push((!(member.documented || member.literal_union), member.name.clone()));
             continue;
-        } else if member.ambient && read {
+        } else if member.ambient && wanted {
             &mut shown.used
         } else if !complete {
-            &mut shown.as_today
+            &mut shown.unknown
         } else {
             &mut shown.collapsed
         };
@@ -212,7 +235,7 @@ impl Body {
                 let fixed: BTreeSet<&str> = element.attributes[at + 1..]
                     .iter()
                     .filter_map(|after| match after {
-                        Attribute::Named { name, .. } => Some(name.as_str()),
+                        Attribute::Named(name) => Some(name.as_str()),
                         Attribute::Spread(_) => None,
                     })
                     .collect();
@@ -240,7 +263,7 @@ mod tests {
         Row,
         Used,
         Collapsed,
-        AsToday,
+        Unknown,
     }
 
     fn inherited(name: &str) -> Member {
@@ -259,16 +282,30 @@ mod tests {
         Body { reads: strings(names), ..Body::default() }
     }
 
-    fn named(name: &str, prop: Option<&str>) -> Attribute {
-        Attribute::Named { name: name.to_owned(), prop: prop.map(str::to_owned) }
+    fn named(name: &str) -> Attribute {
+        Attribute::Named(name.to_owned())
     }
 
     fn element(target: Target, attributes: Vec<Attribute>) -> Element {
         Element { target, attributes }
     }
 
-    fn with(members: Vec<Member>, body: Option<Body>) -> Evidence {
-        Evidence { members, body, ..Evidence::default() }
+    /// The evidence of one case, owned: [`Evidence`] borrows it.
+    #[derive(Default)]
+    struct Owned {
+        members: Vec<Member>,
+        body: Option<Body>,
+        call_sites: CallSites,
+    }
+
+    impl Owned {
+        fn decide(&self) -> Shown {
+            decide(&Evidence { members: &self.members, body: self.body.as_ref(), call_sites: &self.call_sites })
+        }
+    }
+
+    fn with(members: Vec<Member>, body: Option<Body>) -> Owned {
+        Owned { members, body, ..Owned::default() }
     }
 
     fn placed(shown: &Shown, name: &str) -> Option<Placed> {
@@ -276,18 +313,18 @@ mod tests {
             (&shown.rows, Placed::Row),
             (&shown.used, Placed::Used),
             (&shown.collapsed, Placed::Collapsed),
-            (&shown.as_today, Placed::AsToday),
+            (&shown.unknown, Placed::Unknown),
         ];
         lists.into_iter().find(|(list, _)| list.iter().any(|n| n == name)).map(|(_, placed)| placed)
     }
 
     /// One case of a table: its label, its evidence, and where each named member must go.
-    type Case<'a> = (&'a str, Evidence, &'a [(&'a str, Placed)]);
+    type Case<'a> = (&'a str, Owned, &'a [(&'a str, Placed)]);
 
     /// Runs each case and checks where every named member went.
     fn table(cases: Vec<Case<'_>>) {
         for (case, evidence, expected) in cases {
-            let shown = decide(&evidence);
+            let shown = evidence.decide();
             for (name, want) in expected {
                 assert_eq!(placed(&shown, name), Some(*want), "{case}: {name}");
             }
@@ -297,7 +334,7 @@ mod tests {
     #[test]
     fn an_inherited_member_the_body_never_reads_stays_in_its_layer() {
         let evidence = with(vec![inherited("tone"), inherited("size")], Some(reading(&["size"])));
-        let shown = decide(&evidence);
+        let shown = evidence.decide();
         assert_eq!(shown.collapsed, ["tone"]);
         assert_eq!(shown.rows, ["size"]);
     }
@@ -334,12 +371,11 @@ mod tests {
     #[test]
     fn a_required_or_defaulted_member_is_a_row() {
         let required = Member { required: true, ..inherited("a") };
-        let tagged = Member { default_tag: true, ..inherited("b") };
-        let destructured = Body { defaulted: strings(&["c"]), ..Body::default() };
+        let defaulted = Member { default_tag: true, ..inherited("b") };
         table(vec![(
-            "required, @default, destructuring default",
-            with(vec![required, tagged, inherited("c"), inherited("d")], Some(destructured)),
-            &[("a", Placed::Row), ("b", Placed::Row), ("c", Placed::Row), ("d", Placed::Collapsed)],
+            "required, defaulted (a `@default` tag or a destructuring default)",
+            with(vec![required, defaulted, inherited("d")], Some(Body::default())),
+            &[("a", Placed::Row), ("b", Placed::Row), ("d", Placed::Collapsed)],
         )]);
     }
 
@@ -353,7 +389,7 @@ mod tests {
             &[("a", Placed::Collapsed), ("b", Placed::Collapsed), ("c", Placed::Collapsed)],
         )]);
         let evidence = with(vec![inherited("plain"), union("u"), documented("d")], Some(reading(&["plain", "u", "d"])));
-        assert_eq!(decide(&evidence).rows, ["u", "d", "plain"]);
+        assert_eq!(evidence.decide().rows, ["u", "d", "plain"]);
     }
 
     #[test]
@@ -387,7 +423,7 @@ mod tests {
             ),
             (
                 "<Inner tone=\"x\" {...rest} size=\"y\" />: before kept, after subtracted",
-                with(members(), Some(spread(vec![named("tone", None), rest(), named("size", None)]))),
+                with(members(), Some(spread(vec![named("tone"), rest(), named("size")]))),
                 &[("tone", Placed::Row), ("size", Placed::Collapsed), ("variant", Placed::Row)],
             ),
             (
@@ -401,7 +437,7 @@ mod tests {
     #[test]
     fn an_attribute_valued_with_an_own_prop_adds_nothing() {
         let body = Body {
-            elements: vec![element(Target::Component(strings(&["tone"])), vec![named("tone", Some("size"))])],
+            elements: vec![element(Target::Component(strings(&["tone"])), vec![named("tone")])],
             ..Body::default()
         };
         table(vec![(
@@ -421,36 +457,24 @@ mod tests {
     }
 
     #[test]
-    fn a_prop_passed_at_a_fifth_of_the_call_sites_is_a_typed_row() {
-        let passed = |sites: u32, count: u32| Evidence {
+    fn a_prop_passed_at_a_fifth_of_the_call_sites_is_a_row_or_an_ambient_used_name() {
+        let passed = |sites: u32, count: u32| Owned {
             members: vec![inherited("a"), ambient("b")],
             body: Some(Body::default()),
             call_sites: CallSites { sites, passed: vec![("a".to_owned(), count), ("b".to_owned(), count)] },
-            story_args: Vec::new(),
         };
         table(vec![
-            ("2 of 10", passed(10, 2), &[("a", Placed::Row), ("b", Placed::Row)]),
+            ("2 of 10", passed(10, 2), &[("a", Placed::Row), ("b", Placed::Used)]),
             ("1 of 10", passed(10, 1), &[("a", Placed::Collapsed), ("b", Placed::Collapsed)]),
             ("1 of 2: under the floor of 2", passed(2, 1), &[("a", Placed::Collapsed)]),
             ("2 of 11: under 20%", passed(11, 2), &[("a", Placed::Collapsed)]),
-            ("3 of 11", passed(11, 3), &[("a", Placed::Row)]),
+            ("3 of 11", passed(11, 3), &[("a", Placed::Row), ("b", Placed::Used)]),
         ]);
     }
 
     #[test]
-    fn any_story_arg_is_a_typed_row() {
-        let evidence = Evidence {
-            members: vec![inherited("a"), ambient("b"), inherited("c")],
-            body: Some(Body::default()),
-            call_sites: CallSites { sites: 50, passed: Vec::new() },
-            story_args: strings(&["a", "b"]),
-        };
-        table(vec![("one story", evidence, &[("a", Placed::Row), ("b", Placed::Row), ("c", Placed::Collapsed)])]);
-    }
-
-    #[test]
     fn an_unknown_body_is_never_guessed() {
-        let said = || Body { defaulted: strings(&["e"]), ..reading(&["a"]) };
+        let said = || reading(&["a"]);
         let handed_on = Body { handed_on: true, ..said() };
         let unresolved =
             Body { elements: vec![element(Target::Unresolved, vec![Attribute::Spread(SpreadOf::Rest)])], ..said() };
@@ -460,23 +484,23 @@ mod tests {
                 inherited("b"),
                 ambient("c"),
                 Member { required: true, ..inherited("d") },
-                inherited("e"),
+                Member { default_tag: true, ..inherited("e") },
             ]
         };
         // What an incomplete body says still holds; only its silence is unknown, ambient or not.
         let incomplete: &[(&str, Placed)] = &[
             ("a", Placed::Row),
-            ("b", Placed::AsToday),
-            ("c", Placed::AsToday),
+            ("b", Placed::Unknown),
+            ("c", Placed::Unknown),
             ("d", Placed::Row),
             ("e", Placed::Row),
         ];
         let none: &[(&str, Placed)] = &[
-            ("a", Placed::AsToday),
-            ("b", Placed::AsToday),
-            ("c", Placed::AsToday),
+            ("a", Placed::Unknown),
+            ("b", Placed::Unknown),
+            ("c", Placed::Unknown),
             ("d", Placed::Row),
-            ("e", Placed::AsToday),
+            ("e", Placed::Row),
         ];
         table(vec![
             ("handed on", with(members(), Some(handed_on)), incomplete),
@@ -493,14 +517,14 @@ mod tests {
                 Some(reading(&[names[2], names[3]])),
             )
         };
-        let plain = decide(&evidence(["a", "b", "c", "d"]));
-        let familiar = decide(&evidence(["className", "style", "onClick", "children"]));
+        let plain = evidence(["a", "b", "c", "d"]).decide();
+        let familiar = evidence(["className", "style", "onClick", "children"]).decide();
         assert_eq!((plain.rows, plain.used, plain.collapsed), (strings(&["c"]), strings(&["d"]), strings(&["a", "b"])));
         assert_eq!(familiar.rows, ["onClick"]);
         assert_eq!(familiar.used, ["children"]);
         assert_eq!(familiar.collapsed, ["className", "style"]);
-        assert_eq!(decide(&Evidence::default()), Shown::default());
-        let twice = decide(&with(vec![inherited("a"), ambient("a")], Some(reading(&["a"]))));
+        assert_eq!(Owned::default().decide(), Shown::default());
+        let twice = with(vec![inherited("a"), ambient("a")], Some(reading(&["a"]))).decide();
         assert_eq!((twice.rows, twice.used), (strings(&["a"]), Vec::new()));
     }
 }

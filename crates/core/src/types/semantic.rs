@@ -745,6 +745,7 @@ fn checker_sources<'p>(
             html_element: None,
             total_props: u32::try_from(members.len()).unwrap_or(u32::MAX),
             members,
+            used: Vec::new(),
         });
     }
     (layers, notable)

@@ -36,8 +36,9 @@ pub(crate) struct Props {
 /// own and never React's. One a dependency declares again over React's (a library's `className`, its DOM handlers)
 /// stays React's: the element layer stands for it.
 fn is_react_declared(property: &SymbolInfo) -> bool {
+    use caliper_docgen_core::origin::{Origin, declaration_origin};
     let files = || property.declarations.iter().map(|declaration| declared_in(declaration));
-    files().any(|file| file.contains("/@types/react/")) && files().all(|file| file.contains("/node_modules/"))
+    files().any(|file| declaration_origin(file) == Origin::React) && files().all(|file| file.contains("/node_modules/"))
 }
 
 fn fallback(reason: &str) -> Result<Answer, CallError> {

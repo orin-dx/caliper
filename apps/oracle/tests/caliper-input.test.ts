@@ -26,8 +26,8 @@ describe('the oracle input checks', () => {
     expect(() => checkCaliperShape({ ...good, schemaVersion: 3 })).toThrow(
       `caliper output has schemaVersion 3, the oracle reads ${SUPPORTED_SCHEMA_VERSION}`,
     )
-    expect(() => checkCaliperShape({ ...good, schemaVersion: 6 })).toThrow(
-      'caliper output has schemaVersion 6, the oracle reads 7',
+    expect(() => checkCaliperShape({ ...good, schemaVersion: SUPPORTED_SCHEMA_VERSION - 1 })).toThrow(
+      `caliper output has schemaVersion ${SUPPORTED_SCHEMA_VERSION - 1}, the oracle reads ${SUPPORTED_SCHEMA_VERSION}`,
     )
     expect(() => checkCaliperShape({ components: {} })).toThrow('has schemaVersion undefined')
   })

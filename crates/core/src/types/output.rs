@@ -19,7 +19,9 @@ pub(crate) mod interned;
 /// Version 6 writes `bigint` as `{ "kind": "bigint" }`, where version 5 wrote `{ "kind": "named", "name": "bigint" }`.
 /// Version 7 gives each component `exports`, the names its module exports it under (ADR 0027): a reader of version 6
 /// has no way to tell which export a component is, and joined on the display name instead.
-pub const SCHEMA_VERSION: u32 = 7;
+/// Version 8 gives a collapsed inheritance layer `used`, the names of its members relevance evidence puts forward
+/// (ADR 0028): a reader of version 7 would leave every member of a collapsed layer hidden alike.
+pub const SCHEMA_VERSION: u32 = 8;
 
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
@@ -96,6 +98,11 @@ pub struct InheritedLayer {
     /// notable ones are listed as props). Empty for a layer whose props are expanded.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<String>,
+    /// The members of this collapsed layer that relevance evidence puts forward (ADR 0028): ambient members consumers
+    /// pass at the call-site floor or the body reads. Names, not typed rows, in the order of `members`; always a subset
+    /// of them. Empty when nothing is put forward or the layer is expanded.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub used: Vec<String>,
 }
 
 /// A single React component with its resolved props.

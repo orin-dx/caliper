@@ -37,6 +37,7 @@ mod named;
 mod precedence;
 mod primitives;
 mod react;
+pub(crate) mod relevance_inputs;
 mod substitute;
 mod template;
 
@@ -287,6 +288,8 @@ pub struct ResolutionContext {
     /// Positions in `global.component_mappings` by component name (`component_mapping`), built on first use and shared
     /// by the contexts derived from this one, which have the same `global`.
     mapping_index: Arc<std::sync::OnceLock<FxHashMap<CompactString, Vec<usize>>>>,
+    /// Every component's call-site counts (ADR 0028), built on first use and shared like `mapping_index`.
+    pub(crate) relevance_sites: Arc<std::sync::OnceLock<Arc<relevance_inputs::ProjectSites>>>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
     /// `resolve_cva_variant_props` (VariantProps<typeof X>) can do an O(1)
@@ -396,6 +399,7 @@ impl ResolutionContext {
             tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
             mapping_index: Default::default(),
+            relevance_sites: Default::default(),
             enum_bare_index: Arc::new(enum_bare_index),
             const_array_bare_index: Arc::new(const_array_bare_index),
             html_attributes: options.html_attributes,
@@ -558,6 +562,7 @@ impl ResolutionContext {
             props_reads: Default::default(),
             extra_builtins: self.extra_builtins.clone(),
             mapping_index: self.mapping_index.clone(),
+            relevance_sites: self.relevance_sites.clone(),
             enum_bare_index: self.enum_bare_index.clone(),
             const_array_bare_index: self.const_array_bare_index.clone(),
             html_attributes: self.html_attributes,
@@ -926,10 +931,18 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
 pub(crate) fn resolve_component_tracked(
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
-) -> (ComponentEntry, ResolvedDiagnostics, Dependencies) {
-    let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component_shared(mapping, ctx));
+) -> (ComponentEntry, ResolvedDiagnostics, Dependencies, Option<Arc<crate::relevance::Inputs>>) {
+    let ((entry, mut diagnostics, evidence), mut deps) = deps::recording(|| {
+        let (entry, diagnostics) = resolve_component_shared(mapping, ctx);
+        // The evidence reads other files (the props type's declarations, a forwarding target's props), so it is read
+        // while the answer's dependencies are recorded. A panic gathering it leaves it unknown, never the answer lost.
+        let label = format!("relevance:{}", mapping.component_name);
+        let evidence = crate::panic_guard::contain_panic(&label, || relevance_inputs::evidence(mapping, ctx));
+        (entry, diagnostics, evidence)
+    });
     deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
-    (entry, diagnostics, deps)
+    let evidence = evidence.map_err(|diagnostic| diagnostics.own.push(diagnostic)).ok();
+    (entry, diagnostics, deps, evidence)
 }
 
 /// Resolve a `ComponentMapping` to a complete `ComponentEntry`.

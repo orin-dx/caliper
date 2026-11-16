@@ -121,7 +121,7 @@ $ caliper-docgen schema
     "schemaVersion": {
       "description": "The shape of this JSON (ADR 0017). A reader checks it equals the version it was written for",
       "type": "integer",
-      "const": 7
+      "const": 8
     },
     "components": {
       "type": "object",
@@ -177,6 +177,13 @@ $ caliper-docgen schema
                 },
                 "members": {
                   "$ref": "#/definitions/nameListId"
+                },
+                "used": {
+                  "description": "The members of this collapsed layer relevance evidence puts forward (ADR 0028): ambient members consumers pass at the call-site floor or the body reads, in the order of `members`. Absent when none is",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             }

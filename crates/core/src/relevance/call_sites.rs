@@ -1,5 +1,5 @@
-//! The props consumers pass to each component, counted at its JSX call sites and read from its stories' `args`
-//! (ADR 0028, section A, slice T6).
+//! The props consumers pass to each component, counted at its JSX call sites (ADR 0028, section A, slice T6). A stories
+//! file is a consumer like any other: its JSX counts, and its `args` objects are not read.
 //!
 //! A tag is resolved to a component by symbol and import, never by its display name: a tag naming a binding of a
 //! component its own file declares is that component; any other is asked of the import machinery
@@ -9,8 +9,8 @@
 //! import, the member the namespace's module declares. A tag that does not resolve is counted nowhere.
 //!
 //! Only named attributes count; a spread passes names the syntax does not know. A component with fewer than
-//! [`MIN_SITES`] resolved sites yields no call-site evidence at all ([`CallSites::default`]), and a prop is used when it
-//! is passed at the floor [`CallSites::used`] applies. Stories have no floor: every key of an `args` object counts.
+//! [`MIN_SITES`] resolved sites yields no call-site evidence at all ([`CallSites::default`]); the floor a prop must be
+//! passed at is [`decide`](super::decide)'s.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,6 +19,14 @@ use rustc_hash::FxHashMap;
 
 use super::CallSites;
 use crate::types::{ComponentExport, ComponentMapping, JsxAttributeFact, JsxTag, JsxUsage, JsxUsageAttribute};
+
+/// A component's place in `global.component_mappings`: its file, name and span, which tell two mappings apart.
+pub(crate) type SiteKey = (Utf8PathBuf, String, u32);
+
+/// The [`SiteKey`] of `mapping`: the one constructor, so a count and its lookup cannot drift apart.
+pub(crate) fn site_key(mapping: &ComponentMapping) -> SiteKey {
+    (mapping.file_path.clone(), mapping.component_name.clone(), mapping.span_start)
+}
 
 /// The fewest resolved call sites a component needs for its counts to be evidence.
 pub(crate) const MIN_SITES: u32 = 3;
@@ -38,17 +46,6 @@ pub(crate) struct FileUsages<'a> {
     pub(crate) file: &'a Utf8Path,
     /// Its elements.
     pub(crate) usages: &'a [JsxUsage],
-}
-
-/// The `args` one stories file sets (`extractor::story_args`), with the tag-like path its meta's `component` names.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct FileStories<'a> {
-    /// The stories file.
-    pub(crate) file: &'a Utf8Path,
-    /// What `meta.component` names, as written (`Button`, `Menu.Item`).
-    pub(crate) component: &'a str,
-    /// The keys of the meta's and every story's `args`.
-    pub(crate) args: &'a [String],
 }
 
 /// Counts, for each of `components`, its call sites across `files` and the elements inside every component body, and
@@ -87,30 +84,6 @@ pub(crate) fn count<'a>(
             false => CallSites::default(),
         })
         .collect()
-}
-
-/// The `args` keys set in stories for each of `components`, parallel to it and sorted: every key counts, with no floor.
-/// A stories file whose `component` does not resolve gives nothing.
-pub(crate) fn story_args<'a>(
-    components: &'a [ComponentMapping],
-    stories: &[FileStories<'a>],
-    canonical: impl Canonical,
-) -> Vec<Vec<String>> {
-    let mut resolver = Resolver::new(components, canonical);
-    let mut args: Vec<BTreeSet<&str>> = vec![BTreeSet::new(); components.len()];
-    for story in stories {
-        if let Some(at) = resolver.path(story.file, story.component) {
-            args[at].extend(story.args.iter().map(String::as_str));
-        }
-    }
-    args.into_iter().map(|names| names.into_iter().map(str::to_owned).collect()).collect()
-}
-
-impl CallSites {
-    /// The props passed at the floor: at 20% or more of the sites, and at two at least.
-    pub(crate) fn used(&self) -> Vec<&str> {
-        self.passed.iter().filter(|(_, count)| self.at_floor(*count)).map(|(name, _)| name.as_str()).collect()
-    }
 }
 
 impl JsxUsageAttribute {
@@ -153,7 +126,7 @@ impl<'c, F: Canonical> Resolver<'c, F> {
     /// The component a tag in `file` is, if it is one that resolves.
     fn tag(&mut self, file: &'c Utf8Path, tag: &'c JsxTag) -> Option<usize> {
         match tag {
-            // A tag an inner binding shadows is not the module's component of that name: no call site of it.
+            // A tag bound in an inner scope holds whatever it holds at run time: no module binding to resolve.
             JsxTag::Intrinsic(_) | JsxTag::Scoped(_) => None,
             JsxTag::Identifier(path) | JsxTag::Member(path) => self.path(file, path),
         }
@@ -270,7 +243,6 @@ mod tests {
         usages.extend(sites(13, &id("Button"), &[]));
         let counted = count(&[button], &[FileUsages { file: "/b.tsx".into(), usages: &usages }], nothing);
         assert_eq!(counted[0].sites, 20);
-        assert_eq!(counted[0].used(), ["tone"]);
         assert_eq!(counted[0].passed, [("size".to_owned(), 2), ("tone".to_owned(), 5)]);
     }
 
@@ -352,7 +324,7 @@ mod tests {
         let usages = sites(3, &JsxTag::Member("Dialog.Root".to_owned()), &["open"]);
         let table = [("/app.tsx", "Dialog.Root", "/dialog.tsx", "DialogRoot")];
         let counted = count(&[root], &[FileUsages { file: "/app.tsx".into(), usages: &usages }], imports(&table));
-        assert_eq!(counted[0].used(), ["open"]);
+        assert_eq!(counted[0].passed, [("open".to_owned(), 3)]);
     }
 
     #[test]
@@ -370,21 +342,5 @@ mod tests {
         let table = [("/card.tsx", "Button", "/button.tsx", "Button")];
         let counted = count(&components, &[], imports(&table));
         assert_eq!(counted[1].passed, [("tone".to_owned(), 3)]);
-    }
-
-    #[test]
-    fn any_story_arg_is_used_with_no_floor() {
-        let components = [component("/button.tsx", "Button", &[ComponentExport::named("Button")])];
-        let (one, two) = (["tone".to_owned()], ["size".to_owned(), "tone".to_owned()]);
-        let stories = [
-            FileStories { file: "/button.stories.tsx".into(), component: "Button", args: &one },
-            FileStories { file: "/x.stories.tsx".into(), component: "Button", args: &two },
-            FileStories { file: "/y.stories.tsx".into(), component: "Unknown", args: &two },
-        ];
-        let table = [
-            ("/button.stories.tsx", "Button", "/button.tsx", "Button"),
-            ("/x.stories.tsx", "Button", "/button.tsx", "Button"),
-        ];
-        assert_eq!(story_args(&components, &stories, imports(&table)), [["size", "tone"]]);
     }
 }

@@ -60,8 +60,8 @@ fn wire(output: &ExtractionOutput, component: &str, prop: &str) -> serde_json::V
 }
 
 #[test]
-fn the_output_is_schema_version_7() {
-    assert_eq!(SCHEMA_VERSION, 7);
+fn the_output_is_schema_version_8() {
+    assert_eq!(SCHEMA_VERSION, 8);
 }
 
 #[test]

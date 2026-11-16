@@ -86,11 +86,10 @@ fn is_word(text: &str) -> bool {
     text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Whether `file` declares the DOM's ambient attributes and handlers (`@types/react`, Spectrum's shared DOM types): by
+/// path, never by name ([`crate::origin::declaration_origin`]).
 fn is_dom_file(file: &str) -> bool {
-    file.contains("/@types/react/")
-        || file
-            .rsplit_once("/@react-types/shared/src/")
-            .is_some_and(|(_, name)| matches!(name, "dom.d.ts" | "dom.d.mts" | "dom.d.cts"))
+    crate::origin::declaration_origin(file).is_ambient()
 }
 
 fn is_dom_type(type_name: &str) -> bool {

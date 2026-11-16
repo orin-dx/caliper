@@ -87,7 +87,7 @@ fn declared_name(ctx: &ResolutionContext, file: &Utf8Path, name: &str) -> Option
 /// run out of chain to follow — in which case the original (barrel_file,
 /// name) is returned unchanged, so the caller's existing "cannot resolve"
 /// diagnostic still fires exactly as it did before this existed.
-fn follow_reexports(
+pub(super) fn follow_reexports(
     file: Utf8PathBuf,
     name: String,
     ctx: &ResolutionContext,

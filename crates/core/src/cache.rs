@@ -55,9 +55,11 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 39: `ComponentMapping::body` and `SourceData::jsx_usages`: what component bodies and the rest of a file write in JSX
 /// (trail 405).
 /// 40: `JsxTag::Scoped`: a body's tag bound in an inner scope is no longer recorded as the module binding's name.
-/// 41: `ComponentMapping::factory_props`: the props a factory call's own arguments give the component it builds, and
-///     `factory_type_params`, the type parameters of its render function.
-const CACHE_SCHEMA_VERSION: u32 = 41;
+/// 41: `ComponentMapping::factory_props`: the props a factory call's own arguments give the component it builds.
+/// 42: a file-level tag bound in an inner scope is `JsxTag::Scoped` too, and a JSX spread of the whole props object no
+///     longer sets `BodyFacts::handed_on`.
+/// 43: `ComponentMapping::factory_type_params`: the type parameters of a factory call's render function.
+const CACHE_SCHEMA_VERSION: u32 = 43;
 
 const DATA_FILE: &str = "dts.msgpack";
 

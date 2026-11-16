@@ -33,6 +33,7 @@ fn layer(omitted: &[&str]) -> InheritedLayer {
         html_element: Some("button".to_string()),
         total_props: 3,
         members: vec![],
+        used: Vec::new(),
     }
 }
 
@@ -45,6 +46,7 @@ fn collapsed(members: &[&str]) -> InheritedLayer {
         html_element: None,
         total_props: members.len() as u32,
         members: members.iter().map(|name| name.to_string()).collect(),
+        used: Vec::new(),
     }
 }
 

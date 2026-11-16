@@ -16,6 +16,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::cache::DtsCache;
 use crate::dependency_types::{self, Demand, DependencyLayer};
 use crate::named_type_index::NamedTypeIndex;
+use crate::resolver::relevance_inputs::{self, ProjectSites};
 use crate::resolver::{Dependencies, ResolutionContext};
 use crate::types::output::severity_rank;
 use crate::types::*;
@@ -99,20 +100,44 @@ pub(crate) struct ComponentId {
     ordinal: u32,
 }
 
-/// A resolved component, the diagnostics its resolution produced, and what that resolution depended on.
+/// A resolved component, the diagnostics its resolution produced, what that resolution depended on, and the relevance
+/// evidence read with it.
 pub(crate) struct Resolved {
     entry: ComponentEntry,
     diagnostics: ResolvedDiagnostics,
     depends_on: Dependencies,
+    evidence: Option<Arc<crate::relevance::Inputs>>,
 }
 
 impl Resolved {
-    /// The entry and diagnostics, moved out when nothing else shares this resolution.
-    fn into_parts(shared: Arc<Resolved>) -> (ComponentEntry, ResolvedDiagnostics) {
+    /// The entry as output, with the `used` lists relevance decides from its evidence and `sites`, the call sites of
+    /// the revision it is published in. The one place an answer becomes output: a kept resolution is decided again
+    /// against each revision's call sites, so an edit to a consumer reaches it without resolving it again.
+    fn answer(&self, sites: &ProjectSites) -> ComponentEntry {
+        let mut entry = self.entry.clone();
+        decide(self.evidence.as_deref(), &mut entry, sites);
+        entry
+    }
+
+    /// [`Resolved::answer`] and the diagnostics, moved out when nothing else shares this resolution.
+    fn into_parts(shared: Arc<Resolved>, sites: &ProjectSites) -> (ComponentEntry, ResolvedDiagnostics) {
         match Arc::try_unwrap(shared) {
-            Ok(resolved) => (resolved.entry, resolved.diagnostics),
-            Err(shared) => (shared.entry.clone(), shared.diagnostics.clone()),
+            Ok(Resolved { mut entry, diagnostics, evidence, .. }) => {
+                decide(evidence.as_deref(), &mut entry, sites);
+                (entry, diagnostics)
+            }
+            Err(shared) => (shared.answer(sites), shared.diagnostics.clone()),
         }
+    }
+
+    /// Whether this kept resolution answers differently against the call sites `after` than against `before`: an edit
+    /// to a consumer re-decides its `used` lists without resolving it again. Decided by [`layers_differ`], the rule an
+    /// eager revision reports a kept component by.
+    fn redecided(&self, before: &ProjectSites, after: &ProjectSites) -> bool {
+        let Some(inputs) = self.evidence.as_deref() else { return false };
+        // The decision reads only the component's own call sites; the same sites decide the same lists.
+        before.get(&inputs.site) != after.get(&inputs.site)
+            && layers_differ(Some(&self.answer(before)), Some(&self.answer(after)))
     }
 
     /// Whether this resolution can differ after `change`.
@@ -121,6 +146,21 @@ impl Resolved {
             || (change.created && self.depends_on.resolves_modules)
             || (change.react_namespace && self.depends_on.reads_augmentations)
             || change.bare_names.iter().any(|name| self.depends_on.bare_names.contains(name.as_str()))
+    }
+}
+
+/// Whether `before` and `after` publish different layers. Relevance writes only the layers' `used` lists, so this is
+/// how a kept resolution's answer can move between revisions: the one rule both kinds of revision report it by.
+fn layers_differ(before: Option<&ComponentEntry>, after: Option<&ComponentEntry>) -> bool {
+    before.map(|entry| entry.inheritance.as_slice()) != after.map(|entry| entry.inheritance.as_slice())
+}
+
+/// Writes the `used` lists relevance decides for `entry` from its `evidence` and the revision's `sites`; without
+/// evidence (a panic gathering it), none.
+fn decide(evidence: Option<&crate::relevance::Inputs>, entry: &mut ComponentEntry, sites: &ProjectSites) {
+    if let Some(inputs) = evidence {
+        let call_sites = sites.get(&inputs.site).unwrap_or(&crate::relevance::NO_CALL_SITES);
+        crate::relevance::apply(entry, inputs, call_sites);
     }
 }
 
@@ -159,6 +199,8 @@ pub(crate) struct Revision {
     /// The parse-cache save result.
     tail_diagnostics: Vec<Diagnostic>,
     resolved: FxHashMap<ComponentId, Arc<Resolved>>,
+    /// Every component's call sites in this revision, which its answers are decided against when they become output.
+    sites: Arc<ProjectSites>,
     /// The project's source files.
     files: Arc<FxHashSet<Utf8PathBuf>>,
     /// `.d.ts` files the cold run parsed or loaded from the parse cache, and how many the cache answered.
@@ -245,8 +287,8 @@ fn resolve_all(
     resolve_guarded(&borrowed, ctx)
         .into_iter()
         .zip(mappings)
-        .map(|((entry, diagnostics, depends_on), (id, _))| {
-            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on }))
+        .map(|((entry, diagnostics, depends_on, evidence), (id, _))| {
+            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, evidence }))
         })
         .collect()
 }
@@ -445,8 +487,9 @@ impl Revision {
     /// Discover, parse, merge, resolve and assemble every source file.
     pub(crate) fn cold(options: &PipelineOptions, id: u64) -> Revision {
         let mut revision = Revision::resolve_cold(options, id, None);
-        let (output, keys) = revision
-            .assemble(options, |id| revision.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
+        let (output, keys) = revision.assemble(options, |id| {
+            revision.resolved.get(id).map(|r| (r.answer(&revision.sites), r.diagnostics.clone()))
+        });
         revision.output = Arc::new(output);
         revision.keys = keys;
         revision
@@ -465,7 +508,8 @@ impl Revision {
     ) -> ExtractionOutput {
         let mut revision = Revision::resolve_cold(options, 0, on_roots);
         let mut resolved = std::mem::take(&mut revision.resolved);
-        let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(Resolved::into_parts));
+        let sites = revision.sites.clone();
+        let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(|r| Resolved::into_parts(r, &sites)));
         free_in_background(revision);
         output
     }
@@ -508,6 +552,7 @@ impl Revision {
         .with_react_types(react_types.clone());
         lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
+        let sites = relevance_inputs::project_sites(&ctx);
         // Every component is resolved, so the memos are garbage: free them beside output assembly. A failed spawn
         // drops the context on this thread instead.
         drop(std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(ctx)));
@@ -534,6 +579,7 @@ impl Revision {
             lib_diagnostics,
             tail_diagnostics,
             resolved,
+            sites,
             files,
             dts_files_parsed,
             dts_cache_hits,
@@ -574,6 +620,8 @@ impl Revision {
         .with_dependencies(dependencies.clone())
         .with_react_types(self.react_types.clone());
         let fresh = resolve_all(&stale, &ctx);
+        // Call sites are counted again for every revision: an edit to any consumer can change them.
+        let sites = relevance_inputs::project_sites(&ctx);
         let mut resolved: FxHashMap<ComponentId, Arc<Resolved>> =
             kept.into_iter().filter_map(|(id, _)| self.resolved.get(&id).map(|r| (id, r.clone()))).collect();
         let fresh_ids: Vec<ComponentId> = fresh.keys().cloned().collect();
@@ -591,6 +639,7 @@ impl Revision {
             lib_diagnostics: self.lib_diagnostics.clone(),
             tail_diagnostics: self.tail_diagnostics.clone(),
             resolved,
+            sites,
             files: Arc::new(files),
             dts_files_parsed: self.dts_files_parsed,
             dts_cache_hits: self.dts_cache_hits,
@@ -600,17 +649,22 @@ impl Revision {
             lazy: None,
         };
         let (output, keys) =
-            next.assemble(options, |id| next.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
+            next.assemble(options, |id| next.resolved.get(id).map(|r| (r.answer(&next.sites), r.diagnostics.clone())));
         next.output = Arc::new(output);
         next.keys = keys;
 
-        // Updated: every key whose component this revision re-resolved, plus every kept component whose key moved (a
-        // same-named component elsewhere appeared or disappeared, so the bare and disambiguated keys swapped).
+        // Updated: every key whose component this revision re-resolved, every kept component whose key moved (a
+        // same-named component elsewhere appeared or disappeared, so the bare and disambiguated keys swapped), and every
+        // kept component whose layers' `used` lists the revision's call sites changed.
         let fresh: FxHashSet<&ComponentId> = fresh_ids.iter().collect();
         let mut updated_keys: Vec<&String> = next
             .keys
             .iter()
-            .filter(|(id, key)| fresh.contains(id) || self.keys.get(*id) != Some(*key))
+            .filter(|(id, key)| {
+                fresh.contains(id)
+                    || self.keys.get(*id) != Some(*key)
+                    || layers_differ(self.output.components.get(*key), next.output.components.get(*key))
+            })
             .map(|(_, key)| key)
             .collect();
         updated_keys.sort();
