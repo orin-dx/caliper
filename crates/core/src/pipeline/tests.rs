@@ -4041,10 +4041,11 @@ export function List(props: {
     let output = extract(&options);
 
     let props = &output.components["List"].props;
-    let element = PropType::Union(vec![PropType::ReactNode, PropType::Null]);
+    let react_element = PropType::Named { name: "ReactElement".into(), args: Vec::new() };
+    let element = PropType::Union(vec![react_element.clone(), PropType::Null]);
     assert_eq!(
         props["children"].prop_type,
-        PropType::Union(vec![PropType::ReactNode, PropType::Null, PropType::Array(Box::new(element))])
+        PropType::Union(vec![react_element, PropType::Null, PropType::Array(Box::new(element))])
     );
     let strings = PropType::Array(Box::new(PropType::String));
     let readonly_strings = PropType::Readonly(Box::new(strings.clone()));
