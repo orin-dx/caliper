@@ -73,7 +73,7 @@ pub(crate) struct Member {
     pub(crate) documented: bool,
     /// Its type is a union of literals: orders the rows, never shows a member.
     pub(crate) literal_union: bool,
-    /// Declared by React's or the shared DOM declarations ([`crate::types::ambient::Origin::is_ambient`]): decided by
+    /// Declared by React's or the shared DOM declarations ([`crate::origin::Origin::is_ambient`]): decided by
     /// the declaring path, never by the name.
     pub(crate) ambient: bool,
 }

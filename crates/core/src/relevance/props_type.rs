@@ -107,7 +107,7 @@ impl PropsType {
             return;
         }
         if let Some((Declaration::Interface(base), declared)) = lookup(name, from)
-            && !crate::types::ambient::is_dom_file(declared.as_str())
+            && !crate::origin::declaration_origin(declared.as_str()).is_ambient()
         {
             self.inherited.extend(base.props.iter().map(|prop| prop.name.clone()));
             self.bases(base, lookup, depth + 1);
@@ -183,7 +183,7 @@ pub(crate) fn members<'a>(
     rows: impl IntoIterator<Item = &'a ParsedProp>,
     layers: &[InheritedLayer],
 ) -> Vec<Member> {
-    let ambient = crate::types::ambient::is_dom_file;
+    let ambient = |file: &str| crate::origin::declaration_origin(file).is_ambient();
     let layered: BTreeSet<&str> = layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
     let mut listed = BTreeSet::new();
     let mut members = Vec::new();

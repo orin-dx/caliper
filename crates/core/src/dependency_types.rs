@@ -510,8 +510,7 @@ impl Loader<'_> {
 
     /// React's own types stay with the resolver's React handling (builtins, curated HTML attributes).
     fn is_react(file: &Utf8Path) -> bool {
-        let path = file.as_str();
-        path.contains("/node_modules/@types/react/") || path.contains("/node_modules/react/")
+        crate::origin::declaration_origin(file.as_str()) == crate::origin::Origin::React
     }
 
     /// The `(file, name)` declaring `name` as exported from `module`.
