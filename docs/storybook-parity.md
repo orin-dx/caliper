@@ -13,7 +13,7 @@ Variants of the addon:
 
 | Variant                | `loadDependencies` | `collapseInheritedProps` | `fallback`                           |
 | ---------------------- | ------------------ | ------------------------ | ------------------------------------ |
-| `caliper`              | on                 | none                     | degraded (the addon's defaults)      |
+| `caliper`              | on                 | none                     | degraded (the addon's defaults then) |
 | `caliper-nodeps`       | off                | none                     | degraded (what the addon did before) |
 | `caliper-curated`      | on                 | dependencies             | degraded                             |
 | `caliper-never`        | on                 | none                     | never                                |

@@ -5,6 +5,6 @@ cargo/caliper-docgen-napi: minor
 npm/caliper-docgen: minor
 ---
 
-The structural answer (`--no-checker`, and what the checker lane keeps from it) now reads more prop types the way the checker does:
+**`ReactElement` and `JSX.Element` props keep their names.** The structural answer (`--no-checker`, and what the checker lane keeps from it) shows them as the checker does, instead of widening them to `reactNode`.
 
-- `React.ReactElement` and `JSX.Element` stay named `ReactElement` / `JSX.Element` instead of widening to `reactNode`.
+- Limit: structural `Partial`, `Required`, `Pick` and `Omit` are not expanded; the checker answers them.
