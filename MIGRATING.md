@@ -68,3 +68,19 @@ If you set `curated` or `none`, the attribute set is smaller than RDT's; that is
 `scripts/weekly.py` compares this tool's output against a real `react-docgen-typescript` run, prop by prop, on five pinned public libraries (Mantine, Chakra, shadcn, Ant Design, React Spectrum), and `docs/measurement.md` explains how to read it. To see the difference on your own components, run `caliper-docgen extract --src <dir> --format rdt` and compare its props with your current RDT output.
 
 `docs/rdt-coverage.md` tracks which pattern each fixture exercises and the bugs found along the way (almost all now fixed).
+
+## Upgrading the Storybook addon
+
+The addon's `collapseInheritedProps` default changed from `'none'` to `'dependencies'`, the default of the CLI, the NAPI binding and the Vite plugin. In Controls:
+
+- A source of more than 200 props, or an ambient DOM, ARIA or style source of more than 30, becomes one inheritance layer of names. It gets no Controls row per prop.
+- Own props and notable inherited props (`onClick`, `onFocus`, `onBlur`, `className`, `style`, `id`, `tabIndex`, `aria-label`) stay listed.
+- A story arg that names a collapsed prop shows as undocumented.
+
+To keep every inherited prop listed, as before:
+
+```ts
+addons: [{ name: 'caliper-docgen-storybook', options: { collapseInheritedProps: 'none' } }],
+```
+
+The values are `'dependencies'` (the default), `'all'` (also collapses the project's own sources of more than 30 props) and `'none'` (expands every source).

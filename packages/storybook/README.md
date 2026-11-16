@@ -55,3 +55,12 @@ React's docgen in Storybook 11 asks the TypeScript checker for each component. O
 
 - A string default keeps caliper-docgen's quotes: `"md"` where React's docgen shows the source text, `'md'`.
 - Type text is printed as written: `MouseEvent<HTMLButtonElement>` where the checker prints `MouseEvent<HTMLButtonElement, MouseEvent>`, and `{ date?: string }` where it prints `{ date?: string | undefined; }`.
+
+## Known limits (alpha)
+
+- A prop inside a collapsed inheritance layer has no Controls row, and a story arg naming one shows as undocumented. Set `collapseInheritedProps: 'none'` to list every inherited prop.
+- A story shows caliper-docgen's structural props first and the checker's replace them when they arrive. Without the prefetch, Chakra's `Button` had the checker's props 0.7 to 2.9 s after its request.
+- The output schema (version 8) changes when its shape does, so it can change between alpha releases.
+- Wrapper calls with no type argument (`createIconLoader('x')`, `lazy(() => import(...))`) are not recognized, so a story for one goes to React's docgen.
+- Edits to dependency declarations outside the source directories, including a symlinked workspace package, are not noticed until Storybook restarts.
+- Symlinked directories under a source directory are not followed, and no diagnostic says so: their components are never documented.
