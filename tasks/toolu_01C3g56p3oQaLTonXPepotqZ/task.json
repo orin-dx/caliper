@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01C3g56p3oQaLTonXPepotqZ",
+  "agent_id": "a3da331bf42b87e18",
+  "subagent_type": "general-purpose",
+  "task_description": "278: conservative factory callback recognition",
+  "token_usage": {
+    "input_tokens": 76,
+    "cache_creation_tokens": 86209,
+    "cache_read_tokens": 2922168,
+    "output_tokens": 19951,
+    "api_call_count": 38
+  },
+  "started_at": "2026-11-15T17:55:27.496358-08:00",
+  "completed_at": "2026-11-15T18:08:54.179284-08:00"
+}

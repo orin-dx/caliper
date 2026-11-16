@@ -1,0 +1,19 @@
+{
+  "tool_use_id": "toolu_01VBHikJMWzfZChfwK4JoLxG",
+  "agent_id": "a503ea935daddf9ee",
+  "subagent_type": "general-purpose",
+  "task_description": "273: delete structural utility expansion",
+  "files": [
+    "crates/core/tests/structural_utility_types.rs",
+    "crates/semantic/tests/structural_exactness.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 108,
+    "cache_creation_tokens": 94021,
+    "cache_read_tokens": 4143982,
+    "output_tokens": 17207,
+    "api_call_count": 53
+  },
+  "started_at": "2026-11-15T17:55:27.553285-08:00",
+  "completed_at": "2026-11-15T18:05:02.174423-08:00"
+}
