@@ -87,8 +87,9 @@ export interface JsExtractOptions {
   /** Load the dependency type declarations project types reference (default `true`). */
   loadDependencies?: boolean
   /**
-   * Which inherited sources to list as one layer of names: large ambient dependency sources (`'dependencies'`, the
-   * default), those and project sources of more than 30 props (`'all'`), or none.
+   * Which inherited sources to list as one layer of names: large ambient dependency sources and any source of more
+   * than 200 props, the project's own included (`'dependencies'`, the default), those and project sources of more
+   * than 30 props (`'all'`), or none.
    */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
   /**

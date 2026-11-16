@@ -208,8 +208,8 @@ async fn answer_layered(
             }
         };
         match read {
-            Ok(component::Props { props, composes }) => {
-                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes });
+            Ok(component::Props { props, composes, whole }) => {
+                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes, whole });
             }
             Err(reason) => outcome.fallbacks.push(fallback_of(target, &reason)),
         }
@@ -269,6 +269,7 @@ mod tests {
             exports: vec![caliper_docgen_core::types::ComponentExport::named("Poly")],
             described: Default::default(),
             react_wanted: None,
+            layering: None,
         };
         let at = |export: &str, element: &str| Instantiation {
             export: export.to_string(),

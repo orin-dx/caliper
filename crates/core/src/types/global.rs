@@ -79,6 +79,10 @@ pub(crate) struct ResolveState {
     /// Expand every source, collapsing none (collapse): set while resolving `Pick`'s base or a `keyof` operand, whose
     /// props are selected or counted by name. Interface chains are not shared while it is set.
     pub(crate) expand_all: bool,
+    /// The keys the `Omit`s around the type being read take away: a source collapses by the members that reach the
+    /// component (`CollapseInheritedProps::collapses`), so a source an `Omit` leaves small is listed and every other
+    /// source of the same base still collapses. `None` when no `Omit` is open.
+    pub(crate) omitted: Option<Arc<rustc_hash::FxHashSet<String>>>,
     /// Only prop names are wanted (a `keyof` operand): members' types are not resolved. Interface chains recorded with
     /// it set answer only states with it set.
     pub(crate) keys_only: bool,
@@ -186,6 +190,7 @@ impl ResolveState {
             declared_in: self.declared_in.clone(),
             named_unevaluated: false,
             expand_all: self.expand_all,
+            omitted: self.omitted.clone(),
             keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
         }
@@ -199,6 +204,7 @@ impl ResolveState {
             closure: self.closure.clone(),
             declared_in: self.declared_in.clone(),
             expand_all: self.expand_all,
+            omitted: self.omitted.clone(),
             keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
             ..Self::default()

@@ -42,7 +42,9 @@ export function createDocgenProvider(
     cache: options.cache,
     // Richer than Storybook's own docgen by default: caliper-docgen is fast enough to read the dependencies' types.
     loadDependencies: options.loadDependencies ?? true,
-    collapseInheritedProps: options.collapseInheritedProps ?? 'none',
+    // Collapse by relevance: a source too large to read as an API (DOM attribute sets, a style system) is one layer
+    // of names, not hundreds of Controls rows. `'none'` lists every inherited prop.
+    collapseInheritedProps: options.collapseInheritedProps ?? 'dependencies',
     lazy: options.lazy,
     checker: options.checker,
     semanticWaitMs: options.semanticWaitMs,

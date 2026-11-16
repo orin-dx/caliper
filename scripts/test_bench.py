@@ -24,7 +24,7 @@ class BenchConfiguration(unittest.TestCase):
         provider = open(os.path.join(ROOT, 'packages/storybook/src/provider.ts')).read()
         collapse = re.search(r"collapseInheritedProps: options\.collapseInheritedProps \?\? '(\w+)'", provider)
         load = re.search(r'loadDependencies: options\.loadDependencies \?\? (\w+)', provider)
-        self.assertEqual((collapse.group(1), load.group(1)), ('none', 'true'))
+        self.assertEqual((collapse.group(1), load.group(1)), ('dependencies', 'true'))
         command = self.command()
         self.assertEqual(command[command.index('--collapse-inherited-props') + 1], collapse.group(1))
 
