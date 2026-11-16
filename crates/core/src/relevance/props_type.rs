@@ -111,7 +111,7 @@ impl PropsType {
             return;
         }
         if let Some((Declaration::Interface(base), declared)) = lookup(name, from)
-            && !crate::origin::declaration_origin(declared.as_str()).is_ambient()
+            && !crate::origin::is_ambient_declaration(declared.as_str(), Some(&base.tags))
         {
             self.inherited.extend(base.props.iter().map(|prop| prop.name.clone()));
             self.bases(base, lookup, depth + 1);
@@ -229,8 +229,9 @@ impl PropsType {
 }
 
 /// The props-type evidence of every member a lane's answer reaches: each prop it lists (`rows`, with its
-/// `notableInherited` ones) in order, then each member of its collapsed `layers` it does not list. `ambient` says
-/// whether a declaring file is ambient (ADR 0028: by path, never by name); a member with no declaring file is not.
+/// `notableInherited` ones) in order, then each member of its collapsed `layers` it does not list. A member is ambient
+/// when every declaration of it is: React's own, or one of the `private` sources its library marks private (ADR 0028:
+/// by provenance, never by name); a member with no declaration is not.
 /// `large` says whether the member is one of a generated set: a member of a layer (a source the resolver collapsed past
 /// its thresholds), a member a mapped type copies from a large interface's keys
 /// ([`ParsedProp::copied_from_large_keys`]), or a member of a source (its `parent`) that has a layer or reaches with
@@ -242,8 +243,12 @@ pub(crate) fn members<'a>(
     props_type: &PropsType,
     rows: impl IntoIterator<Item = &'a ParsedProp>,
     layers: &[InheritedLayer],
+    private: &BTreeSet<(String, String)>,
 ) -> Vec<Member> {
-    let ambient = |file: &str| crate::origin::declaration_origin(file).is_ambient();
+    let ambient = |type_name: &str, file: &str| {
+        crate::origin::declaration_origin(file).is_ambient()
+            || private.contains(&(type_name.to_owned(), file.to_owned()))
+    };
     let layered: BTreeSet<&str> = layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
     let mut listed = BTreeSet::new();
     let rows: Vec<&ParsedProp> = rows.into_iter().filter(|prop| listed.insert(prop.name.as_str())).collect();
@@ -256,10 +261,14 @@ pub(crate) fn members<'a>(
     for layer in layers {
         reach.insert((&layer.type_name, &layer.file_name), usize::MAX);
     }
+    // A project source's size is the resolver's to judge: it collapses one past its threshold into a layer, whose members
+    // not listed are generated below. A listed prop of the project's own (the props type itself, of any size) is
+    // generated only when a mapped type copies it from a large key set.
     let large = |parent: &PropParent| {
-        reach
-            .get(&(parent.name.as_str(), parent.file_name.as_str()))
-            .is_some_and(|reaching| *reaching > LARGE_API_SOURCE)
+        crate::origin::declaration_origin(&parent.file_name) != crate::origin::Origin::Project
+            && reach
+                .get(&(parent.name.as_str(), parent.file_name.as_str()))
+                .is_some_and(|reaching| *reaching > LARGE_API_SOURCE)
     };
     let mut members = Vec::new();
     for prop in rows {
@@ -274,8 +283,11 @@ pub(crate) fn members<'a>(
             default_tag: given.default_tag || prop.default_value.is_some() || prop.tags.contains_key("default"),
             documented: !prop.description.is_empty(),
             literal_union: is_literal_union(&prop.prop_type),
+            // Ambient only when every declaration is: a member a library's API declares too (React Aria's `onFocus`
+            // in `FocusEvents`, beside React's `DOMAttributes`) is API. With no declaration it is unknown: not ambient.
             // The checker states `parent` only for an interface; a declaration in a type literal is still in a file.
-            ambient: prop.parent.iter().chain(&prop.declarations).any(|parent| ambient(&parent.file_name)),
+            ambient: (prop.parent.is_some() || !prop.declarations.is_empty())
+                && prop.parent.iter().chain(&prop.declarations).all(|parent| ambient(&parent.name, &parent.file_name)),
             large: prop.copied_from_large_keys || prop.parent.as_ref().is_some_and(large),
             ..given
         });
@@ -286,7 +298,7 @@ pub(crate) fn members<'a>(
             members.push(Member {
                 own,
                 overrides: own,
-                ambient: ambient(&layer.file_name),
+                ambient: ambient(&layer.type_name, &layer.file_name),
                 large: true,
                 ..member(props_type, name)
             });
@@ -416,7 +428,12 @@ mod tests {
                 ..PipelineOptions::default()
             };
             let entry = &extract(&options).components["Box"];
-            let found = members(&PropsType::default(), entry.props.values().map(AsRef::as_ref), &entry.inheritance);
+            let found = members(
+                &PropsType::default(),
+                entry.props.values().map(AsRef::as_ref),
+                &entry.inheritance,
+                &BTreeSet::new(),
+            );
             let flags: BTreeSet<(bool, bool)> =
                 found.iter().map(|member| (member.name.starts_with('k'), member.large)).collect();
             assert_eq!(flags, BTreeSet::from([(true, large), (false, false)]), "{keys} keys");
@@ -435,7 +452,7 @@ mod tests {
             members: ["size", "tone"].into_iter().map(str::to_owned).chain((0..31).map(|i| format!("p{i}"))).collect(),
             used: Vec::new(),
         };
-        let members = members(&props_type("ByIntersection"), [], &[layer]);
+        let members = members(&props_type("ByIntersection"), [], &[layer], &BTreeSet::new());
         let size = members.iter().find(|member| member.name == "size").unwrap();
         assert!(size.own && size.overrides, "{size:?}");
         let shown = decided(members);
@@ -509,7 +526,7 @@ mod tests {
 
     fn evidence(read: &PropsType, entry: &ComponentEntry) -> Vec<Member> {
         let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
-        members(read, rows, &entry.inheritance)
+        members(read, rows, &entry.inheritance, &BTreeSet::new())
     }
 
     #[test]
@@ -551,7 +568,7 @@ mod tests {
             Some(PropParent { name: "Base".into(), file_name: "/base.ts".into() }),
             Vec::new(),
         );
-        let members = members(&PropsType::default(), [&documented], &[]);
+        let members = members(&PropsType::default(), [&documented], &[], &BTreeSet::new());
         assert!(members[0].documented && members[0].literal_union && !members[0].own, "{members:?}");
         // `Base` declares one member: an API source, listed whatever the evidence.
         assert!(!members[0].large, "{members:?}");
@@ -570,7 +587,7 @@ mod tests {
             None,
             vec![react],
         );
-        assert!(super::members(&PropsType::default(), [&handler], &[])[0].ambient);
+        assert!(super::members(&PropsType::default(), [&handler], &[], &BTreeSet::new())[0].ambient);
     }
 
     /// Two files: the component's, and one declaring its props type and what that type names.

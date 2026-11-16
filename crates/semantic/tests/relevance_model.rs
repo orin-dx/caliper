@@ -253,3 +253,116 @@ fn used(entry: &ComponentEntry) -> Vec<(String, Vec<String>)> {
     used.sort();
     used
 }
+
+/// Both lanes over `files` (each `(path, source)` under a new project), with `collapse`: the structural answer and the
+/// checker's merged over it.
+fn both_lanes(
+    files: &[(&str, String)],
+    collapse: CollapseInheritedProps,
+) -> (tempfile::TempDir, [caliper_docgen_core::types::ExtractionOutput; 2]) {
+    let dir = tempfile::Builder::new().prefix("RelevanceProbe").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "preserve", "strict": true, "skipLibCheck": true, "noEmit": true, "types": [] } }"#,
+    )
+    .unwrap();
+    for (path, source) in files {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, source).unwrap();
+    }
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        use_cache: false,
+        collapse_inherited_props: collapse,
+        html_attributes: HtmlAttributeMode::None,
+        ..PipelineOptions::default()
+    };
+    let structural = extract(&options);
+    let mut request = SemanticRequest::new(root.clone(), targets_of(&structural));
+    request.request_timeout = Duration::from_secs(60);
+    let outcome = resolve(request);
+    assert_eq!(outcome.fallbacks, [], "the checker answers every component");
+    let mut checker = structural.clone();
+    merge_semantic_in(&mut checker, outcome, Default::default(), CollapseContext::of(&options));
+    (dir, [structural, checker])
+}
+
+/// `n` optional string members `{prefix}0` to `{prefix}{n-1}`.
+fn fields(prefix: &str, n: usize) -> String {
+    (0..n).map(|i| format!("{prefix}{i}?: string; ")).collect()
+}
+
+#[test]
+fn ambient_is_decided_per_declaration_and_the_generated_rule_holds_in_the_project() {
+    // Pattern evaluation of PR 490, probe (ix) and the Step 1 changes, over generated components:
+    // - a library file declaring both a `@private` copy of DOM members (`GlobalEvents`, 40) and documented API
+    //   (`DomApi`: `id`, `excludeFromTabOrder`): only the private interface is ambient, as in `@react-types/shared`;
+    // - a member a small API interface declares that React's `ReactDom` declares too (`d5` in `FocusApi`): API;
+    // - a project mapped copy over the keys of a 40-key interface (`Conds`, Chakra's `Conditions`): generated, a layer
+    //   in the project too; a project source of at most 200 members stays listed (`Small`).
+    let mut checked = 0;
+    for seed in [5, 13, 31] {
+        let mut rng = Lcg(seed);
+        let shared = format!(
+            "export interface DomApi {{ /** The element's id. */ id?: string; excludeFromTabOrder?: boolean; }}\n\
+             /**\n * Events every element has.\n *\n * @private\n */\n// NOTES, as React Aria writes them between the doc comment and the interface:\n\
+             //   - Drag and drop events are omitted for now.\n\
+             //   - Keyboard and focus events are supported directly on focusable elements.\n\
+             //   - Media events should be handled directly on the media element.\n\
+             export interface GlobalEvents {{ {} }}\n\
+             export interface FocusApi {{ d5?: string; }}\n",
+            fields("e", 40)
+        );
+        let mut text = String::from(
+            "import type { DomApi, GlobalEvents, FocusApi } from './lib/shared/dom';\n\
+             import type { ReactDom } from './vendor/@types/react/dom';\n\
+             export interface Conds { ",
+        );
+        text.push_str(&fields("c", 40));
+        text.push_str("}\nexport interface Small { s0?: string; s1?: string; }\n");
+        text.push_str("export type CondProps = { [K in keyof Conds]?: string };\n");
+        let mut expected = Vec::new();
+        for c in 0..8 {
+            let name = format!("P{c}");
+            let mut parts = vec!["{ own?: string }"];
+            let mut rows = vec!["own".to_owned()];
+            let mut body = String::new();
+            if rng.below(2) == 0 {
+                parts.push("DomApi & GlobalEvents");
+                rows.extend(["excludeFromTabOrder".to_owned(), "id".to_owned()]);
+                // A read of a private member is a row, as a read of React's is.
+                let read = rng.below(40);
+                write!(body, "{{String(props.e{read})}}").unwrap();
+                rows.push(format!("e{read}"));
+            }
+            if rng.below(2) == 0 {
+                parts.push("FocusApi & ReactDom");
+                rows.push("d5".to_owned());
+            }
+            if rng.below(2) == 0 {
+                parts.push("CondProps & Small");
+                rows.extend(["s0".to_owned(), "s1".to_owned()]);
+            }
+            let props = parts.join(" & ");
+            writeln!(text, "export function {name}(props: {props}) {{ return <div {{...props}}>{body}</div>; }}")
+                .unwrap();
+            rows.sort();
+            expected.push((name, rows));
+        }
+        let files = [
+            ("lib/shared/dom.ts", shared),
+            ("vendor/@types/react/dom.ts", format!("export interface ReactDom {{ {}}}\n", fields("d", 40))),
+            ("Components.tsx", text),
+        ];
+        let (_dir, lanes) = both_lanes(&files, CollapseInheritedProps::Dependencies);
+        for (name, want) in &expected {
+            for (lane, output) in ["structural", "checker"].iter().zip(&lanes) {
+                assert_eq!(&rows(&output.components[name]), want, "{name} seed={seed} {lane}");
+            }
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 24);
+}

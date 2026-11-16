@@ -86,10 +86,14 @@ fn is_word(text: &str) -> bool {
     text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Whether `file` declares the DOM's ambient attributes and handlers (`@types/react`, Spectrum's shared DOM types): by
-/// path, never by name ([`crate::origin::declaration_origin`]).
+/// Whether `file` declares DOM attributes and handlers (`@types/react`, Spectrum's shared DOM types): by path, never by
+/// name ([`crate::origin::declaration_origin`]). This is the collapse threshold's question only (a large source here
+/// may be a layer at 30 members, not 200); whether a member is listed is decided per declaration
+/// ([`crate::origin::is_ambient_declaration`]), and the only source of `dom.d.ts` past 30 members, `GlobalDOMEvents`, is
+/// one React Aria marks private.
 fn is_dom_file(file: &str) -> bool {
-    crate::origin::declaration_origin(file).is_ambient()
+    use crate::origin::Origin;
+    matches!(crate::origin::declaration_origin(file), Origin::React | Origin::SharedDom)
 }
 
 fn is_dom_type(type_name: &str) -> bool {

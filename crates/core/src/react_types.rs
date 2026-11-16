@@ -418,18 +418,38 @@ pub fn is_curated_html_attr(element: &str, name: &str) -> bool {
         || notable_html_attrs(element).contains(&name)
 }
 
-/// Whether the checker's answer for a prop is used. The structural pass keeps the props the checker does not return
-/// either way, so this decides only what the checker adds: its own props always, and the props `@types/react` declares
-/// (`children`, `aria-*`, handlers, `className`) only where the structural answer lists them. Which of those it lists
-/// is relevance's decision (ADR 0028), made once on the structural answer, whatever the mode: `htmlAttributes` says
-/// which attributes are known, not which are rows, so `_mode` no longer changes the answer.
+/// Whether the checker's answer for a prop is used, under `mode` ([`react_attribute_mode`] gives it). The structural
+/// pass keeps the props the checker does not return either way, so this decides only what the checker adds: its own
+/// props always, and the props `@types/react` declares (`children`, `aria-*`, handlers, `className`) as `mode` defines
+/// them. `Full` takes all of them; `Curated` and `None` take those the structural pass lists.
 pub fn checker_prop_used(
-    _mode: crate::pipeline::HtmlAttributeMode,
+    mode: crate::pipeline::HtmlAttributeMode,
     name: &str,
     react_declared: bool,
     structural_props: &std::collections::BTreeMap<String, std::sync::Arc<crate::types::ParsedProp>>,
 ) -> bool {
-    react_prop_listed(name, react_declared, structural_props)
+    match mode {
+        crate::pipeline::HtmlAttributeMode::Full => !react_declared || !REACT_SPECIAL_PROPS.contains(&name),
+        crate::pipeline::HtmlAttributeMode::Curated | crate::pipeline::HtmlAttributeMode::None => {
+            react_prop_listed(name, react_declared, structural_props)
+        }
+    }
+}
+
+/// The `htmlAttributes` mode the checker's React props are taken by, from the run's `mode` and `collapse`. Under
+/// `collapseInheritedProps: none`, the expanded view that lists every inherited prop, the run's own mode: `Full` takes
+/// every React prop the checker finds, also where the structural pass found none (props written
+/// `ReturnType<typeof makeProps>`). Otherwise `Curated`: which React props are rows is relevance's decision (ADR 0028),
+/// made once on the structural answer.
+pub fn react_attribute_mode(
+    mode: crate::pipeline::HtmlAttributeMode,
+    collapse: crate::types::options::CollapseInheritedProps,
+) -> crate::pipeline::HtmlAttributeMode {
+    match collapse {
+        crate::types::options::CollapseInheritedProps::None => mode,
+        crate::types::options::CollapseInheritedProps::Dependencies
+        | crate::types::options::CollapseInheritedProps::All => crate::pipeline::HtmlAttributeMode::Curated,
+    }
 }
 
 /// [`checker_prop_used`] without the mode it no longer reads: the one rule both merges of the checker's props take a
@@ -442,14 +462,19 @@ pub(crate) fn react_prop_listed(
     !react_declared || (!REACT_SPECIAL_PROPS.contains(&name) && structural_props.contains_key(name))
 }
 
-/// The `@types/react` props the checker is asked to report: the names the structural answer lists, which are all
-/// [`checker_prop_used`] takes, so the types of the DOM attributes relevance leaves to a layer are never converted.
-/// Always `Some`; `_mode` no longer changes the answer.
+/// The `@types/react` props the checker is asked to report under `mode` ([`react_attribute_mode`] gives it): `None`
+/// for all of them under `Full`, else the names the structural answer lists, which are all [`checker_prop_used`] takes,
+/// so the types of the DOM attributes relevance leaves to a layer are never converted.
 pub fn react_props_wanted(
-    _mode: crate::pipeline::HtmlAttributeMode,
+    mode: crate::pipeline::HtmlAttributeMode,
     structural_props: &std::collections::BTreeMap<String, std::sync::Arc<crate::types::ParsedProp>>,
 ) -> Option<rustc_hash::FxHashSet<String>> {
-    Some(structural_props.keys().cloned().collect())
+    match mode {
+        crate::pipeline::HtmlAttributeMode::Full => None,
+        crate::pipeline::HtmlAttributeMode::Curated | crate::pipeline::HtmlAttributeMode::None => {
+            Some(structural_props.keys().cloned().collect())
+        }
+    }
 }
 
 /// Returns the curated list of notable HTML attribute prop names for a given element.

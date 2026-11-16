@@ -588,7 +588,8 @@ fn a_checker_only_source_collapses_only_where_it_is_proven_to_reach_whole() {
 /// The red team's repros of change 267 (`redteam-collapse.md`), in both lanes:
 /// - D1: a prop a project file declares is the component's own, never React's, so an own prop of a React name beside an
 ///   element layer is kept (`OwnOverReact`, `KeyRef`); a dependency's redeclaration of a React name stays React's, left
-///   to the element layer (`CpwrAndDep`, `LegendLike`);
+///   to the element layer, unless the dependency's own small source declares it too: then it is API, listed
+///   (`CpwrAndDep`, `LegendLike`);
 /// - D2, D3, D4, D7: a prop is shown once, the listed one wins over a layer member and a name sits in one layer
 ///   (`assert_shown_once`);
 /// - D5: an `Omit` whose keys are not a finite union of string literals collapses nothing, so no layer holds a member
@@ -645,8 +646,9 @@ fn redteam_each_prop_is_shown_once_and_never_lost() {
         if !props(output, "LegendLike").contains("payload") {
             wrong.push(format!("{lane} LegendLike: payload not listed"));
         }
-        // A dependency's redeclaration of a React name stays React's, left to the element layer (the structural lane
-        // lists React's attributes for these forms, out of scope here).
+        // A dependency's redeclaration of a React name is the dependency's API (ADR 0028, A2: a member is ambient only
+        // when every declaration of it is), so it is listed: `DepLegend` declares 4, and `Omit<DepBig, 'onClick'>`
+        // reaches with 200, not past `LARGE_API_SOURCE`.
         if lane == "checker" {
             for (key, react) in [
                 ("CpwrAndDep", &["className", "style", "id", "children"][..]),
@@ -656,8 +658,8 @@ fn redteam_each_prop_is_shown_once_and_never_lost() {
                 wrong.extend(
                     react
                         .iter()
-                        .filter(|name| listed.contains(**name))
-                        .map(|name| format!("{lane} {key}: {name} listed")),
+                        .filter(|name| !listed.contains(**name))
+                        .map(|name| format!("{lane} {key}: {name} not listed")),
                 );
             }
         }

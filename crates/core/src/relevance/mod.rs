@@ -30,6 +30,10 @@ pub(crate) struct Inputs {
     /// Whether the listing follows the decision ([`narrow`]): off when every inherited prop is asked for expanded
     /// (`collapseInheritedProps: none`, ADR 0028's `relevance: 'all'`); the `used` lists are written either way.
     pub(crate) narrows: bool,
+    /// The sources outside React's types the answer reaches whose declaration its library marks private
+    /// ([`crate::origin::marked_private`]): ambient, as React's own are ([`crate::origin::is_ambient_declaration`]).
+    /// Read with the answer's resolution, so an edit to a declaring file refreshes it.
+    pub(crate) private: BTreeSet<Source>,
 }
 
 /// Decides where each member of `entry`'s props goes, from `inputs`, the revision's `call_sites` of the component and
@@ -37,7 +41,7 @@ pub(crate) struct Inputs {
 /// lists by it ([`narrow`]).
 pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &CallSites) {
     let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
-    let members = props_type::members(&inputs.props_type, rows, &entry.inheritance);
+    let members = props_type::members(&inputs.props_type, rows, &entry.inheritance, &inputs.private);
     let shown = decide(&Evidence { members: &members, body: inputs.body.as_ref(), call_sites });
     // A row of a member the answer holds only as a name in a collapsed layer (a source the resolver collapsed past its
     // thresholds, such as Chakra's `SystemProperties`) has no type to list: it is named in the layer's `used` list
@@ -68,21 +72,24 @@ type Source = (String, String);
 
 /// Each of `names` with the source the structural answer gives it, grouped by source: the `parent` of the listed prop,
 /// and the layer of each collapsed layer holding the name. A name the answer gives no source (a listed prop with no
-/// `parent`) has no entry: its source is unknown, so no lane narrows it. A source of the project has no entry either:
-/// [`narrow`] never moves a prop of the project's own sources, so naming them would only hold memory.
+/// `parent`) has no entry: its source is unknown, so no lane narrows it. The project's own sources are held too: a
+/// generated one (Chakra's `Conditions` in Chakra's own repo) is a layer there as it is when installed.
 fn sources<'n>(entry: &'n ComponentEntry, names: impl Iterator<Item = &'n String>) -> Vec<(Source, Box<[Box<str>]>)> {
     let mut sourced: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
     let mut add = |name: &'n str, type_name: &'n str, file_name: &'n str| {
-        if crate::origin::declaration_origin(file_name) != crate::origin::Origin::Project {
-            sourced.entry((type_name, file_name)).or_default().insert(name);
-        }
+        sourced.entry((type_name, file_name)).or_default().insert(name);
     };
-    for name in names {
-        let listed = entry.props.get(name).or_else(|| entry.notable_inherited.get(name));
+    let names: BTreeSet<&'n str> = names.map(String::as_str).collect();
+    for name in &names {
+        let listed = entry.props.get(*name).or_else(|| entry.notable_inherited.get(*name));
         if let Some(parent) = listed.and_then(|prop| prop.parent.as_ref()) {
             add(name, &parent.name, &parent.file_name);
         }
-        for layer in entry.inheritance.iter().filter(|layer| layer.members.contains(name)) {
+    }
+    // Each layer's members are walked once against the set of names, never the layer once per name: a layer of
+    // thousands of members with every member left out is linear, not quadratic (Entire finding on change 288).
+    for layer in &entry.inheritance {
+        for name in wanted_members(layer, |name| names.contains(name)) {
             add(name, &layer.type_name, &layer.file_name);
         }
     }
@@ -94,6 +101,11 @@ fn sources<'n>(entry: &'n ComponentEntry, names: impl Iterator<Item = &'n String
         .collect()
 }
 
+/// The members of `layer` that `wanted` takes, in the layer's order, each member asked once.
+fn wanted_members(layer: &InheritedLayer, mut wanted: impl FnMut(&str) -> bool) -> impl Iterator<Item = &str> {
+    layer.members.iter().map(String::as_str).filter(move |name| wanted(name))
+}
+
 /// What [`decide`] said of one component, kept on its entry so that every merge of the checker's props into it lists by
 /// the same decision ([`narrow`]): the decision is made once, from the structural answer's evidence.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -101,8 +113,7 @@ pub struct Placement {
     /// The members evidence leaves out of the listing ([`Shown::collapsed`]), by name under the
     /// source the structural answer gives each, sources in order and each source's names sorted: a listed prop is left
     /// out only when both match, so a prop of another source with the same name, or one the structural answer gave no
-    /// source, is never hidden by it. Only sources outside the project are held, the only ones [`narrow`] moves from,
-    /// and each source's type name and path once per component, not once per name.
+    /// source, is never hidden by it. Each source's type name and path is held once per component, not once per name.
     left: Vec<(Source, Box<[Box<str>]>)>,
     /// The rows [`decide`] puts forward that the structural answer holds only as names in a collapsed layer: named in
     /// that layer's `used` list.
@@ -122,8 +133,8 @@ impl Placement {
 }
 
 /// Lists `entry` by its kept [`Placement`]: a listed prop (in `props` or `notableInherited`) the decision leaves out
-/// and that a source outside the project declares (a dependency's, or React's and the DOM's) moves to the layer of
-/// its source, as a name, when the placement left out that name from that same source. Its home is the layer of its
+/// moves to the layer of its source, as a name, when the placement left out that name from that same source, whoever
+/// declares it (the project, a dependency or React): [`decide`] leaves out only ambient or generated members. Its home is the layer of its
 /// `parent` (by type name and file), else, for an ambient source, the entry's HTML element layer, else a new layer of
 /// its `parent`. A prop with no `parent` has no known source and stays listed: no name is ever lost. Then each
 /// layer's `used` list is written. Without a placement (no evidence was gathered) nothing changes. Run by [`apply`] and at the end of each merge of the
@@ -131,19 +142,16 @@ impl Placement {
 pub(crate) fn narrow(entry: &mut ComponentEntry) {
     let Some(placement) = entry.relevance.clone() else { return };
     let ComponentEntry { props, notable_inherited, inheritance, .. } = entry;
+    // The names the layers hold, read once: a prop left out joins a layer only when none holds its name yet.
+    let mut layered: BTreeSet<String> = inheritance.iter().flat_map(|layer| layer.members.iter().cloned()).collect();
     for listing in [props, notable_inherited] {
         listing.retain(|name, prop| {
             let Some(parent) = prop.parent.as_ref() else { return true };
             if !placement.leaves(name, parent) {
                 return true;
             }
-            // Only a source outside the project is narrowed: a dependency's or an ambient one, decided by the
-            // declaring path. The project's own sources stay as the collapse rule lists them.
-            if crate::origin::declaration_origin(&parent.file_name) == crate::origin::Origin::Project {
-                return true;
-            }
             // Each name is held once: a layer already holding it keeps it (`listed_props_leave_layers`' rule).
-            if !inheritance.iter().any(|layer| layer.members.contains(name)) {
+            if layered.insert(name.clone()) {
                 home(inheritance, parent).members.push(name.clone());
             }
             false
@@ -216,8 +224,9 @@ pub(crate) struct Member {
     pub(crate) documented: bool,
     /// Its type is a union of literals: orders the rows, never shows a member.
     pub(crate) literal_union: bool,
-    /// Declared by React's or the shared DOM declarations ([`crate::origin::Origin::is_ambient`]): decided by
-    /// the declaring path, never by the name.
+    /// Every declaration of it is ambient ([`crate::origin::is_ambient_declaration`]): React's own, or one its library
+    /// marks private. A member a library's API declares too, or with no known declaration, is not. Never decided by the
+    /// name.
     pub(crate) ambient: bool,
     /// One of a generated set, not an API: a member of a source the resolver collapsed, of a source reaching with more
     /// than [`LARGE_API_SOURCE`](crate::types::options::LARGE_API_SOURCE) members, or one a mapped type copies from the
@@ -411,6 +420,52 @@ mod tests {
 
     fn reading(names: &[&str]) -> Body {
         Body { reads: strings(names), ..Body::default() }
+    }
+
+    fn layer(type_name: &str, file_name: &str, members: Vec<String>) -> InheritedLayer {
+        InheritedLayer {
+            type_name: type_name.to_owned(),
+            file_name: file_name.to_owned(),
+            omitted: Vec::new(),
+            html_element: None,
+            total_props: u32::try_from(members.len()).unwrap(),
+            members,
+            used: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_layer_is_walked_once_whatever_number_of_names_it_leaves_out() {
+        // Entire finding on change 288: a layer of 4,000 members with every member left out was rescanned once per
+        // name (16 million comparisons). Each member is asked once.
+        let members: Vec<String> = (0..4_000).map(|i| format!("m{i}")).collect();
+        let big = layer("Big", "/p/node_modules/lib/big.d.ts", members.clone());
+        let mut asked = 0;
+        let wanted: BTreeSet<&str> = members.iter().map(String::as_str).collect();
+        let found = wanted_members(&big, |name| {
+            asked += 1;
+            wanted.contains(name)
+        })
+        .count();
+        assert_eq!((found, asked), (4_000, 4_000));
+        let entry = ComponentEntry { inheritance: vec![big], ..button(vec![]) };
+        let left = sources(&entry, members.iter());
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].1.len(), 4_000);
+    }
+
+    #[test]
+    fn a_project_source_is_narrowed_like_a_dependency_s() {
+        // The generated rule holds in the project too (Chakra's own repo): a project source's left-out names are held.
+        let entry = ComponentEntry {
+            inheritance: vec![layer("Conditions", "/p/src/conditions.ts", strings(&["_hover", "_active"]))],
+            ..button(vec![])
+        };
+        let left = sources(&entry, strings(&["_hover"]).iter());
+        assert_eq!(
+            left,
+            vec![(("Conditions".to_owned(), "/p/src/conditions.ts".to_owned()), vec!["_hover".into()].into())]
+        );
     }
 
     fn named(name: &str) -> Attribute {
@@ -714,16 +769,17 @@ mod tests {
     }
 
     #[test]
-    fn a_placement_holds_each_source_outside_the_project_once_and_lists_by_name_and_source() {
-        // `onClick` and `onBlur` of one React source, `title` of another, `variant` of the project's own: the placement
-        // holds each React source once with its names sorted, and not the project's, which `narrow` never moves.
+    fn a_placement_holds_each_source_once_and_lists_by_name_and_source() {
+        // `onClick` and `onBlur` of one React source, `title` of another, and `variant` of the project's own, which the
+        // decision lists (a project source is never ambient, and this one is not generated): the placement holds each
+        // React source once with its names sorted.
         let mut entry = button(vec![
             listed("onClick", "DOMAttributes", REACT),
             listed("onBlur", "DOMAttributes", REACT),
             listed("title", "HTMLAttributes", REACT),
             listed("variant", "ButtonProps", OWN),
         ]);
-        let left = sources(&entry, strings(&["variant", "title", "onClick", "onBlur"]).iter());
+        let left = sources(&entry, strings(&["title", "onClick", "onBlur"]).iter());
         let names = |names: &[&str]| names.iter().map(|name| Box::from(*name)).collect::<Box<[Box<str>]>>();
         assert_eq!(
             left,

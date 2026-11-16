@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, WatchSession};
 use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget, SourceChange};
 use caliper_docgen_core::types::{ComponentExport, DiagnosticCode, DiagnosticSeverity, PropType};
 use camino::Utf8PathBuf;
@@ -304,6 +304,45 @@ fn every_mode_takes_the_checkers_react_props_only_where_the_structural_pass_list
             let children = &checked.component(key).unwrap().entry.props["children"];
             assert_eq!(children.prop_type, PropType::String, "{key} under {mode:?}");
         }
+    }
+}
+
+/// As the checker answers: [`reports_react_props`], less the React props the request does not ask for.
+fn reports_wanted_react_props(target: &SemanticTarget) -> SemanticOutcome {
+    let mut outcome = reports_react_props(target);
+    for component in &mut outcome.components {
+        component.props.retain(|prop| {
+            !prop.react_declared || target.react_wanted.as_ref().is_none_or(|wanted| wanted.contains(&prop.name))
+        });
+    }
+    outcome
+}
+
+#[test]
+fn the_expanded_view_keeps_the_react_props_only_the_checker_finds() {
+    // Entire finding on change 288: props written `ReturnType<typeof makeProps>` give the structural pass no props, so
+    // a request for only the React props it lists asks for none. `collapseInheritedProps: none` (the expanded view)
+    // under `full` takes every React prop the checker finds; a collapsing mode leaves them to relevance's decision.
+    let project = project(&[(
+        "Made.tsx",
+        "import type { HTMLAttributes } from 'react';\n\
+         function makeProps() { return {} as HTMLAttributes<HTMLDivElement> & { label: string }; }\n\
+         export function Made(props: ReturnType<typeof makeProps>) { return null; }",
+    )]);
+    for (collapse, want) in [
+        (CollapseInheritedProps::None, vec!["children", "className", "id", "label", "ref"]),
+        (CollapseInheritedProps::Dependencies, vec!["label"]),
+    ] {
+        let options = PipelineOptions {
+            src_dirs: vec![project.root.clone()],
+            html_attributes: HtmlAttributeMode::Full,
+            collapse_inherited_props: collapse,
+            ..Default::default()
+        };
+        let checked = WatchSession::lazy(options)
+            .with_semantic(Fake::new(Duration::ZERO, reports_wanted_react_props), Duration::from_secs(5));
+        drop(checked.initialize());
+        assert_eq!(names(&checked, "Made"), want, "{collapse:?}");
     }
 }
 

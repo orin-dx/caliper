@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use caliper_docgen_core::pipeline::{CollapseInheritedProps, ComponentAnswer, PipelineOptions, WatchSession};
-use caliper_docgen_core::react_types::react_props_wanted;
+use caliper_docgen_core::react_types::{react_attribute_mode, react_props_wanted};
 use caliper_docgen_core::types::DiagnosticSeverity;
 use caliper_docgen_core::types::semantic::{SemanticProvider, SemanticTarget};
 use caliper_docgen_semantic::{OnDemand, OnDemandConfig};
@@ -360,7 +360,10 @@ fn watch(src: &Utf8PathBuf, run: WatchRun) -> bool {
         display_name: entry.display_name.clone(),
         exports: entry.exports.clone(),
         described: entry.props.values().filter(|p| !p.description.is_empty()).map(|p| p.name.clone()).collect(),
-        react_wanted: react_props_wanted(session.options.html_attributes, &entry.props),
+        react_wanted: react_props_wanted(
+            react_attribute_mode(session.options.html_attributes, session.options.collapse_inherited_props),
+            &entry.props,
+        ),
         // Every prop converted: the session's request decides its layering from the structural answer, which this
         // merged entry no longer is, so this times at most the work the session's request does.
         layering: None,

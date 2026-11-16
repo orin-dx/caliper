@@ -34,13 +34,18 @@ impl<'src> SourceDataCollector<'src> {
 
         let upper = self.comments.partition_point(|c| c.span_end <= span_start);
         let mut found: Option<usize> = None;
+        // The gap is measured to what follows each comment: the declaration, or the next comment of a run. A doc
+        // comment followed by a run of `//` notes still documents the declaration after them, as TypeScript reads it
+        // (React Aria's `@private` `GlobalDOMEvents` has eight lines of notes in between).
+        let mut next_start = span_start;
         for i in (0..upper).rev() {
             let c = &self.comments[i];
-            if span_start - c.span_end > PROXIMITY_THRESHOLD {
+            if next_start - c.span_end > PROXIMITY_THRESHOLD {
                 // Comments are sorted ascending by span, so every earlier comment
                 // is farther still — nothing left in range.
                 break;
             }
+            next_start = c.span_start;
             // Only `/** */` documents; a plain `/* */` note is skipped so the doc comment before it still counts.
             let is_doc_comment = c.is_block && self.source[c.span_start as usize..].starts_with("/**");
             if is_doc_comment && !self.consumed_jsdoc.contains(&c.span_end) {
