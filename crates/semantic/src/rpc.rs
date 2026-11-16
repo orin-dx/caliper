@@ -562,8 +562,22 @@ impl Rpc {
         });
         let response: SnapshotResponse =
             decode(&self.call("updateSnapshot", &json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
-        // The response lists only the projects it replaced; a reconfigured program may keep its id.
-        let project = response.projects.into_iter().next().map_or_else(|| self.project.clone(), |project| project.id);
+        // The response lists the projects the update replaced: the reconfigured one, which may keep its id.
+        let mut projects = response.projects.into_iter().map(|project| project.id);
+        let project = match projects.len() {
+            0 => self.project.clone(),
+            1 => projects.next().unwrap_or_default(),
+            _ => match projects.find(|id| *id == self.project) {
+                Some(id) => id,
+                None => {
+                    // Nothing will hold this snapshot to release it later.
+                    self.call("release", &json!({ "snapshot": response.snapshot })).await.ok();
+                    return Err(CallError::Rejected(
+                        "updateSnapshot changed programs other than the one reconfigured".to_string(),
+                    ));
+                }
+            },
+        };
         Ok(Rpc {
             client: self.client.clone(),
             deadline: self.deadline,
@@ -901,7 +915,6 @@ fn default_options() -> Value {
     json!({ "jsx": 1, "module": 99, "moduleResolution": 100, "target": 9, "strict": true, "skipLibCheck": true, "noEmit": true })
 }
 
-/// An answer parsed from its text straight into `T`, in one pass.
 /// The `fileSystem` of a request that adds `files` in the checker's memory, keyed by absolute path, over the disk.
 fn in_memory_layer(files: &[(String, String)]) -> Value {
     let layer: serde_json::Map<String, Value> =
@@ -909,6 +922,7 @@ fn in_memory_layer(files: &[(String, String)]) -> Value {
     json!({ "kind": "layer", "files": layer })
 }
 
+/// An answer parsed from its text straight into `T`, in one pass.
 pub(crate) fn decode<T: DeserializeOwned>(answer: &RawValue) -> Result<T, CallError> {
     serde_json::from_str(answer.get())
         .map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
@@ -1073,6 +1087,22 @@ mod tests {
         // The second lane early, the instantiation snapshot, and the first lane; a release is counted even when it fails,
         // as a second release of the second lane's would.
         assert_eq!(releases, Some(3), "each snapshot is released once");
+        // A release that succeeded is recorded; the recording was read before the first lane's own release. The second
+        // lane's and the instantiation snapshot's, each once.
+        let mut released: Vec<u64> = calls
+            .iter()
+            .filter(|(method, _)| *method == "release")
+            .filter_map(|(_, params)| params["snapshot"].as_u64())
+            .collect();
+        released.sort_unstable();
+        let layered_snapshot = recording.as_array().unwrap()[0..]
+            .iter()
+            .filter(|call| call["method"] == "updateSnapshot" && call["params"]["changes"].get("fileSystem").is_some())
+            .find_map(|call| call["result"]["snapshot"].as_u64())
+            .unwrap();
+        let mut expected = vec![second.0, layered_snapshot];
+        expected.sort_unstable();
+        assert_eq!(released, expected);
     }
 
     /// Stands in for a session: makes snapshot 1 of as many programs as asked on `createSnapshot` (so a run that asked

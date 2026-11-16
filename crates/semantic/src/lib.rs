@@ -570,7 +570,8 @@ async fn session(
     let mut converters = Some(converters);
     if !generic.is_empty() {
         // Every lane is done and nothing reads the converters' memos again: the instantiations are answered by a
-        // program and converter of their own, so what the lanes built is freed before it is built, not after.
+        // program and converter of their own, so what the lanes built is freed before it is built, not after. This is
+        // freed in a one-shot run too, where the end of the process would free it: it is the run's peak otherwise.
         drop(converters.take());
         rpc.release_lanes().await;
         let keys = generic.iter().map(|(target, _)| target.key.clone()).collect::<Vec<_>>();
