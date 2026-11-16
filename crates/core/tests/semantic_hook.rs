@@ -450,6 +450,7 @@ fn an_answer_that_arrives_after_an_edit_is_not_kept_for_the_edited_project() {
         exports: vec![ComponentExport::named("Button")],
         described: Default::default(),
         react_wanted: None,
+        layering: None,
     };
     let stale = types_file_outcome(&target, TYPES_ONE_PROP);
     gated.held.lock().unwrap().pop().unwrap().send(stale).unwrap();
@@ -537,6 +538,7 @@ fn the_whole_project_merge_and_the_session_merge_agree_on_every_prop_the_checker
         exports: batch.components["Button"].exports.clone(),
         described: Default::default(),
         react_wanted: None,
+        layering: None,
     };
     caliper_docgen_core::types::semantic::merge_semantic(&mut batch, label_size_and_class_name(&target));
     let batch = &batch.components["Button"];

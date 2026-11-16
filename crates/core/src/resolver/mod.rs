@@ -22,7 +22,6 @@ use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 mod alias;
-pub(crate) mod ambient;
 mod callee;
 mod chain;
 mod collected;
@@ -323,6 +322,9 @@ pub struct ResolutionContext {
     /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
     pub(crate) react_types: Option<Arc<crate::named_type_index::NamedTypeIndex>>,
     pub(crate) collapse_inherited_props: crate::types::options::CollapseInheritedProps,
+    /// Whether the project declares a source of more than `LARGE_API_SOURCE` props, which the default mode collapses
+    /// with no dependency loaded (`can_collapse`). Read once from `global`.
+    pub(crate) large_project_source: bool,
 }
 
 impl ResolutionContext {
@@ -384,6 +386,7 @@ impl ResolutionContext {
                 .or_insert_with(|| CompactString::from(key.as_str()));
         }
 
+        let large_project_source = declares_large_source(&global);
         Self {
             import_map: Arc::new(ImportResolutionMap::build(&global)),
             named_types,
@@ -409,6 +412,7 @@ impl ResolutionContext {
             dependencies: None,
             react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
+            large_project_source,
         }
     }
 
@@ -566,6 +570,7 @@ impl ResolutionContext {
             dependencies: layer,
             react_types: self.react_types.clone(),
             collapse_inherited_props: self.collapse_inherited_props,
+            large_project_source: self.large_project_source,
         }
     }
 
@@ -574,69 +579,75 @@ impl ResolutionContext {
         self.dependencies.as_ref().is_some_and(|layer| layer.is_dependency_file(file))
     }
 
-    /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains.
+    /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains. In the
+    /// default mode that is a loaded dependency, or a project source past `LARGE_API_SOURCE` props.
     pub(crate) fn can_collapse(&self) -> bool {
         use crate::types::options::CollapseInheritedProps;
         match self.collapse_inherited_props {
-            CollapseInheritedProps::Dependencies => self.dependencies.is_some(),
+            CollapseInheritedProps::Dependencies => self.dependencies.is_some() || self.large_project_source,
             CollapseInheritedProps::All => true,
             CollapseInheritedProps::None => false,
         }
     }
 
-    /// Whether a source of type `type_name` declaring `declared` props in `file`, reached at `depth`, is recorded as a
-    /// layer instead of expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own
-    /// declarations stay with `html_attributes` even under `All`.
-    ///
-    /// A dependency source collapses when it is ambient (`ambient`: DOM and ARIA attributes, style systems) and past
-    /// `COLLAPSE_THRESHOLD` props, or when it is not ambient but past `LARGE_API_SOURCE` props. Otherwise it is listed:
-    /// what a dependency's component exposes is the API a reader needs typed, and a small ambient source costs more as
-    /// a layer than as props. A project source (`All` only) collapses past `COLLAPSE_THRESHOLD` props, as before.
-    pub(crate) fn collapses(
+    /// Whether a source of type `type_name` declaring `members` in `file`, reached at `depth`, is recorded as a
+    /// layer instead of expanded (collapse). Depth 0 is the component's own props type. The rule is
+    /// [`CollapseInheritedProps::collapses`](crate::types::options::CollapseInheritedProps::collapses), with a loaded dependency file as the dependency; React's and TypeScript's own declarations
+    /// (in `node_modules`, not loaded as a dependency) stay with `html_attributes`.
+    pub(crate) fn collapses<'a>(
         &self,
         file: &Utf8Path,
         type_name: &str,
-        declared: usize,
+        members: impl Iterator<Item = &'a str>,
         depth: u8,
         state: &ResolveState,
     ) -> bool {
-        use crate::types::options::CollapseInheritedProps;
-        let large = declared > COLLAPSE_THRESHOLD;
-        let dependency = || {
-            self.is_dependency_file(file)
-                && if ambient::is_ambient_source(file.as_str(), type_name) {
-                    large
-                } else {
-                    declared > LARGE_API_SOURCE
-                }
+        if depth == 0 || state.expand_all {
+            return false;
+        }
+        let reaching = match &state.omitted {
+            Some(omitted) => members.filter(|name| !omitted.contains(*name)).count(),
+            None => members.count(),
         };
-        depth > 0
-            && !state.expand_all
-            && match self.collapse_inherited_props {
-                CollapseInheritedProps::Dependencies => dependency(),
-                CollapseInheritedProps::All => {
-                    if self.is_dependency_file(file) {
-                        dependency()
-                    } else {
-                        large && !crate::dependency_types::in_node_modules(file.as_str())
-                    }
-                }
-                CollapseInheritedProps::None => false,
-            }
+        self.collapse_inherited_props.collapses(self.is_dependency_file(file), file.as_str(), type_name, reaching)
     }
 }
 
-/// A source declaring more than this many props can collapse: an ambient dependency source (see `ambient`), or a
-/// project source under `CollapseInheritedProps::All`. Storybook's react-component-meta hides a dependency source
-/// contributing more than this many props, whatever it contains; here an API source is hidden only past
-/// `LARGE_API_SOURCE`.
-pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
+/// `layers` with each collapsed source once: a source reached through two paths (`Big & Omit<Big, "a">`) holds the
+/// members that reach through either, and omits only what every path omits. A member counts once, as the collapse
+/// decision counts it (`CollapseInheritedProps::collapses`).
+fn one_layer_per_collapsed_source(layers: Vec<InheritedLayer>) -> Vec<InheritedLayer> {
+    let mut merged: Vec<InheritedLayer> = Vec::with_capacity(layers.len());
+    for layer in layers {
+        let same = merged.iter_mut().find(|seen| {
+            !seen.members.is_empty() && seen.type_name == layer.type_name && seen.file_name == layer.file_name
+        });
+        match same {
+            Some(seen) if !layer.members.is_empty() => {
+                for member in layer.members {
+                    if !seen.members.contains(&member) {
+                        seen.members.push(member);
+                    }
+                }
+                seen.omitted.retain(|key| layer.omitted.contains(key) && !seen.members.contains(key));
+                seen.total_props = u32::try_from(seen.members.len()).unwrap_or(u32::MAX);
+            }
+            _ => merged.push(layer),
+        }
+    }
+    merged
+}
 
-/// A dependency source that is not ambient by name still collapses past this many props: it is a style system under
-/// a name the rule does not know, not an API. Chakra v3's `SystemProperties` declares 705 and, listed, took a
-/// four-component app from 516 KB to 1.96 MB; the largest source that is an API in the pinned corpora and in apps
-/// on Chakra, Mantine and MUI declares 75 (`docs/measurement.md`, "Collapse by relevance").
-pub(crate) const LARGE_API_SOURCE: usize = 200;
+/// Whether `global` declares an interface, or an object-literal alias, of more than `LARGE_API_SOURCE` members: a
+/// project source the default mode collapses.
+fn declares_large_source(global: &GlobalSourceData) -> bool {
+    use crate::types::options::LARGE_API_SOURCE;
+    global.interfaces.values().any(|interface| interface.props.len() > LARGE_API_SOURCE)
+        || global.type_aliases.values().any(|alias| {
+            matches!(alias, CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. }
+                if fields.len() > LARGE_API_SOURCE)
+        })
+}
 
 /// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
 /// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index.
@@ -1077,12 +1088,16 @@ pub(crate) fn resolve_component_shared(
             );
         }
     }
-    // A collapsed source's notable props (collapse); the only non-HTML layers.
+    // A collapsed source's notable props (collapse); the only non-HTML layers. Each is the component's prop as one it
+    // lists is, so a destructuring default reaches it too (`Box({ className = "base" }: BoxProps)`).
+    let mut collapsed_notable: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for prop in &chain.notable {
         if !props.contains_key(&prop.name) && !notable_inherited.contains_key(&prop.name) {
-            notable_inherited.insert(prop.name.clone(), prop.clone());
+            collapsed_notable.entry(prop.name.clone()).or_insert_with(|| prop.clone());
         }
     }
+    apply_param_defaults(mapping, &mut collapsed_notable, ctx);
+    notable_inherited.extend(collapsed_notable);
 
     // Detect discriminated union if applicable.
     let discriminant_prop = chain.discriminant_prop;
@@ -1093,7 +1108,7 @@ pub(crate) fn resolve_component_shared(
             file_path: mapping.file_path.clone(),
             description: mapping.description.clone(),
             props,
-            inheritance: chain.inheritance,
+            inheritance: one_layer_per_collapsed_source(chain.inheritance),
             notable_inherited,
             discriminant_prop,
             composes: chain.composes,

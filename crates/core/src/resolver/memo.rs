@@ -116,6 +116,8 @@ struct Recording<T> {
     deps: Dependencies,
     /// `ResolveState::expand_all` while recording: a chain with collapsed sources must not answer an expanding state.
     expand_all: bool,
+    /// `ResolveState::omitted` while recording: which sources collapse depends on it.
+    omitted: Option<Arc<rustc_hash::FxHashSet<String>>>,
     keys_only: bool,
     /// The depth the resolution started at, and how much deeper than that it checked against the limit. Depth decides
     /// the result only through the limit and `depth > 0` (collapse, which the key holds), so a state that
@@ -151,6 +153,7 @@ impl<T: Clone> Recording<T> {
         depth_fits
             && state.named_in_progress.len() + self.reach <= MAX_NAMED_NESTING
             && self.expand_all == state.expand_all
+            && self.omitted == state.omitted
             && self.keys_only == state.keys_only
             && reads.visited.iter().all(|(key, present)| state.visited.contains(key) == *present)
             && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(key) == *present)
@@ -287,6 +290,7 @@ impl<T: Clone> Memo<T> {
             deps,
             reads,
             expand_all: state.expand_all,
+            omitted: state.omitted.clone(),
             keys_only: state.keys_only,
             entry_depth: depth,
             depth_reach: depth_high.saturating_sub(depth),
@@ -295,6 +299,7 @@ impl<T: Clone> Memo<T> {
         let mut recordings = self.recordings.entry(map_key).or_default();
         let same = |r: &Recording<T>| {
             r.expand_all == recording.expand_all
+                && r.omitted == recording.omitted
                 && r.keys_only == recording.keys_only
                 && r.depth_fired == recording.depth_fired
                 && r.reads.visited == recording.reads.visited
