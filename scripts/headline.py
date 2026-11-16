@@ -19,11 +19,18 @@ import oracle_data
 WRONG_GATE = 0.001
 
 # Budgets for one whole run (process start included) of the checker, the default, over a pinned corpus with dependencies
-# loaded, per corpus: `ms` and `rss_mib`. None is "record on first run": no checker run of the five corpora has been
-# measured, so none has a budget, and a run over nothing opens nothing. The rule that fills them in once a scheduled run
-# is recorded is in docs/measurement.md ("The budgets"). They are not week-over-week limits: a shared CI machine drifts
-# by 10% or more on its own, and a drift that stays inside the budget is not a problem.
-BUDGETS = {corpus: {'ms': None, 'rss_mib': None} for corpus in ('mantine', 'chakra', 'shadcn', 'antd', 'spectrum')}
+# loaded, per corpus: `ms` and `rss_mib`. They are "something is badly wrong" limits, not tuning: 4 times the time and 2
+# times the peak memory measured on the fixed build (docs/measurement.md, "The budgets"), since a CI runner is slower
+# and smaller than the machine that measured. The `corpora-budget` job of the Callisto release pull request fails on
+# one, and the weekly opens its issue. They are not week-over-week limits: a shared CI machine drifts by 10% or more on
+# its own, and a drift that stays inside the budget is not a problem.
+BUDGETS = {
+    'chakra': {'ms': 18000, 'rss_mib': 14336},
+    'mantine': {'ms': 4000, 'rss_mib': 2048},
+    'antd': {'ms': 6000, 'rss_mib': 2048},
+    'shadcn': {'ms': 5600, 'rss_mib': 2048},
+    'spectrum': {'ms': 6800, 'rss_mib': 2048},
+}
 BUDGET_LABELS = {'ms': 'time', 'rss_mib': 'peak memory'}
 BUDGET_UNITS = {'ms': 'ms', 'rss_mib': 'MiB'}
 
@@ -104,7 +111,14 @@ def findings(name, entry, previous):
                        f"{100 * rate:.2f}%{was}; the gate is {100 * WRONG_GATE:.1f}%")
         elif rose:
             out.append(f"{name}: wrong types rose to {h['wrong']:,} of {judged(h):,}, {100 * rate:.2f}%{was}")
-    for key, budget in BUDGETS.get(name, {}).items():
+    return out + over_budget(name, entry)
+
+
+def over_budget(name, entry, budgets=None):
+    """One line per budget a corpus entry's whole run is over: the corpus, the metric, its value and the limit.
+    `budgets` is BUDGETS unless a test passes its own."""
+    out = []
+    for key, budget in (BUDGETS if budgets is None else budgets).get(name, {}).items():
         value = own_metric(entry, key)
         if budget is not None and value is not None and value > budget:
             out.append(f"{name}: a whole run's {BUDGET_LABELS[key]} is {value:,} {BUDGET_UNITS[key]}, over the "
@@ -119,8 +133,8 @@ HOW_TO_READ = (
     'for it, so it is counted apart. Recall against react-docgen-typescript (RDT) asks a different question, how much '
     'of what RDT reports Caliper also reports; it is information, because RDT is itself wrong on some props. Gates, '
     f'which open an issue: more than {100 * WRONG_GATE:.1f}% wrong (or any rise), a silent-wrong answer to a question a '
-    "reader is asked, or a whole run over its corpus's time or memory budget (a corpus has none until its first run is "
-    'recorded). Time and memory drift from week to week is shown, not alarmed on.'
+    "reader is asked, or a whole run over its corpus's time or memory budget "
+    '(BUDGETS: limits for something badly wrong, not a tuning target). Time and memory drift from week to week is shown, not alarmed on.'
 )
 
 DEFINITIONS = (

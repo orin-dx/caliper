@@ -412,7 +412,12 @@ impl WatchSession {
     /// gives it.
     fn refined(&self, answer: Option<ComponentAnswer>, priority: Priority) -> Option<ComponentAnswer> {
         match (&self.semantic, answer) {
-            (Some(hook), Some(answer)) => Some(hook.refine(answer, self.options.html_attributes, priority)),
+            (Some(hook), Some(answer)) => Some(hook.refine(
+                answer,
+                self.options.html_attributes,
+                crate::types::options::CollapseContext::of(&self.options),
+                priority,
+            )),
             (_, answer) => answer,
         }
     }

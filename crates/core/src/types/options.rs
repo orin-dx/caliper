@@ -37,11 +37,13 @@ impl HtmlAttributeMode {
 
 /// Which inherited sources are recorded as an `InheritedLayer` of names instead of expanded prop by prop (collapse).
 /// A component's own props type is always expanded. A dependency source collapses when it is ambient (DOM and ARIA
-/// attributes, style systems) and declares more than 30 props; a dependency's own API is listed unless it declares more than 200 props.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// attributes, style systems) and declares more than 30 props; a dependency's own API is listed unless it declares more
+/// than 200 props. By default a project source declaring more than 200 props collapses too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CollapseInheritedProps {
-    /// Large ambient sources declared in a loaded dependency (`load_dependencies`).
+    /// Large ambient sources declared in a loaded dependency (`load_dependencies`), a dependency's sources of more than
+    /// 200 props, and the project's own sources of more than 200 props. The default.
     #[default]
     Dependencies,
     /// Those, and the project's own sources of more than 30 props.
@@ -60,6 +62,92 @@ impl CollapseInheritedProps {
             other => Err(other),
         }
     }
+
+    /// Whether an inherited source of type `type_name` in `file`, of which `reaching` props reach the component, is
+    /// recorded as a layer of names instead of listed prop by prop. `dependency` says the file is a loaded dependency's.
+    /// A component's own props type is never asked.
+    ///
+    /// The one owner of the decision, and both lanes give it the same input, `reaching`; no declared member count is
+    /// read anywhere. `reaching` is the number of distinct
+    /// members of the source that reach the component after `Omit` and `Pick` (a member reached through two paths counts
+    /// once). For a plain `extends` it is what the source declares. A `Pick` names its keys on purpose, so the props it
+    /// picks are listed however large the source: neither lane asks about them. The structural resolver expands what a
+    /// `Pick` applies to, and counts the members a source declares less the keys the `Omit`s around it take
+    /// (`ResolveState::omitted`, so only that source is affected); the checker's merge counts the props of its answer
+    /// whose `parent` is the source, which are exactly the members that reach, and asks only for a source the checker
+    /// proved the props type reaches whole: one under a `Pick`, a mapped type or a project alias of either is listed
+    /// without asking (`SemanticComponent::whole`, `crate::types::semantic::layer_checker_props`).
+    ///
+    /// - A dependency source collapses when it is ambient (`crate::types::ambient`: DOM and ARIA attributes, style
+    ///   systems) and past [`COLLAPSE_THRESHOLD`] props, or when it is not ambient but past [`LARGE_API_SOURCE`] props.
+    ///   Otherwise it is listed: what a dependency's component exposes is the API a reader needs typed, and a small
+    ///   ambient source costs more as a layer than as props.
+    /// - A project source collapses past [`LARGE_API_SOURCE`] props in the default mode, as a dependency source that is
+    ///   not ambient does: a style system is as large in the project's own source (Chakra's `SystemProperties`
+    ///   declares 705) as installed. Its name is not read. Under [`Self::All`] it collapses past
+    ///   [`COLLAPSE_THRESHOLD`].
+    /// - A file in `node_modules` that is not a dependency's (`@types/react`, TypeScript's libraries) never collapses:
+    ///   React's attributes follow `htmlAttributes`.
+    /// - Under [`Self::None`] nothing collapses.
+    pub(crate) fn collapses(self, dependency: bool, file: &str, type_name: &str, reaching: usize) -> bool {
+        let project_threshold = match self {
+            Self::None => return false,
+            Self::Dependencies => LARGE_API_SOURCE,
+            Self::All => COLLAPSE_THRESHOLD,
+        };
+        if dependency {
+            let ambient = crate::types::ambient::is_ambient_source(file, type_name);
+            reaching > if ambient { COLLAPSE_THRESHOLD } else { LARGE_API_SOURCE }
+        } else {
+            reaching > project_threshold && !in_node_modules(file)
+        }
+    }
+}
+
+/// What a merge of the checker's answer needs to decide a collapse of a source only the checker read: the run's mode
+/// and whether it loads dependencies, so a source in `node_modules` is a dependency's exactly when the structural pass
+/// would have loaded it (`CollapseInheritedProps::collapses`'s `dependency`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CollapseContext {
+    /// The run's `collapseInheritedProps`.
+    pub mode: CollapseInheritedProps,
+    /// The run's `loadDependencies`.
+    pub load_dependencies: bool,
+}
+
+impl CollapseContext {
+    /// Collapses nothing the structural answer did not: what a merge whose caller gives no options uses.
+    pub const OFF: Self = Self { mode: CollapseInheritedProps::None, load_dependencies: false };
+
+    /// The run's choices.
+    pub fn of(options: &PipelineOptions) -> Self {
+        Self { mode: options.collapse_inherited_props, load_dependencies: options.load_dependencies }
+    }
+
+    /// Whether a source only the checker read collapses: `reaching` of its members reach the component
+    /// ([`CollapseInheritedProps::collapses`]), and its file is a dependency's when it is in `node_modules` and the run
+    /// loads dependencies.
+    pub(crate) fn collapses(self, file: &str, type_name: &str, reaching: usize) -> bool {
+        let dependency = self.load_dependencies && in_node_modules(file);
+        (dependency || !in_node_modules(file)) && self.mode.collapses(dependency, file, type_name, reaching)
+    }
+}
+
+/// A source declaring more than this many props can collapse: an ambient dependency source (`crate::types::ambient`),
+/// or a project source under [`CollapseInheritedProps::All`]. Storybook's react-component-meta hides a dependency
+/// source contributing more than this many props, whatever it contains; here an API source is hidden only past
+/// [`LARGE_API_SOURCE`].
+pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
+
+/// Any other source collapses past this many props by default: a dependency source that is not ambient by name, or a
+/// project source. It is a style system, not an API. Chakra v3's `SystemProperties` declares 705 and, listed, took a
+/// four-component app from 516 KB to 1.96 MB; the largest source that is an API in the pinned corpora and in apps on
+/// Chakra, Mantine and MUI declares 75 (`docs/measurement.md`, "Collapse by relevance").
+pub(crate) const LARGE_API_SOURCE: usize = 200;
+
+/// Whether `path` is inside a `node_modules` directory.
+pub(crate) fn in_node_modules(path: &str) -> bool {
+    path.contains("/node_modules/") || path.contains(r"\node_modules\")
 }
 
 /// Configuration for a single extraction run.

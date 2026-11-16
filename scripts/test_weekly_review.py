@@ -327,24 +327,30 @@ class MeasureHelperErrors(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, r'exited with 3: oops'):
             corpora.run_once([sys.executable, '-c', 'import sys; sys.stderr.write("oops"); sys.exit(3)'])
 
+    @staticmethod
+    def helper(returncode, stderr, on_start=None):
+        """A stand-in for the helper process `run_once` starts."""
+        def popen(command, **_):
+            if on_start:
+                on_start(command)
+            return mock.Mock(returncode=returncode, communicate=mock.Mock(return_value=(None, stderr)))
+        return mock.patch.object(corpora.subprocess, 'Popen', side_effect=popen)
+
     def test_helper_failure_is_a_runtime_error(self):
-        failed = subprocess.CompletedProcess([], 1, stderr='Traceback: boom\n')
-        with mock.patch.object(corpora.subprocess, 'run', return_value=failed):
+        with self.helper(1, 'Traceback: boom\n'):
             with self.assertRaisesRegex(RuntimeError, r'helper failed \(exit 1\) running x y: Traceback: boom'):
                 corpora.run_once(['x', 'y'])
 
     def test_missing_result_is_a_runtime_error(self):
-        wrote_nothing = subprocess.CompletedProcess([], 0, stderr='')
-        with mock.patch.object(corpora.subprocess, 'run', return_value=wrote_nothing):
+        with self.helper(0, ''):
             with self.assertRaisesRegex(RuntimeError, r'wrote no result for x'):
                 corpora.run_once(['x'])
 
     def test_result_is_parsed(self):
-        def write(command, **_):
+        def write(command):
             with open(command[command.index('measure') + 1], 'w') as f:
                 f.write('[1.5, 42.0, 0]')
-            return subprocess.CompletedProcess([], 0, stderr='')
-        with mock.patch.object(corpora.subprocess, 'run', side_effect=write):
+        with self.helper(0, '', write):
             self.assertEqual(corpora.run_once(['x']), (1.5, 42.0))
 
 
