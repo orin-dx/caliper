@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_0172H5vkMDVkrp61EFg5c3F1",
+  "agent_id": "a12c44706baf7f5d1",
+  "subagent_type": "general-purpose",
+  "task_description": "480: factory callback props declaration resolves at depth zero",
+  "token_usage": {
+    "input_tokens": 42,
+    "cache_creation_tokens": 65944,
+    "cache_read_tokens": 1137651,
+    "output_tokens": 7101,
+    "api_call_count": 21
+  },
+  "started_at": "2026-11-15T22:19:52.823833-08:00",
+  "completed_at": "2026-11-15T22:23:05.111555-08:00"
+}
