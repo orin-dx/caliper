@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01DwCpNDpChx77LTM4V7dmiL",
+  "agent_id": "af7be012eadb22aa5",
+  "subagent_type": "general-purpose",
+  "task_description": "480: keep callback generics local to factory props",
+  "token_usage": {
+    "input_tokens": 74,
+    "cache_creation_tokens": 85426,
+    "cache_read_tokens": 2858015,
+    "output_tokens": 14279,
+    "api_call_count": 37
+  },
+  "started_at": "2026-11-15T20:07:05.653841-08:00",
+  "completed_at": "2026-11-15T20:15:16.79005-08:00"
+}
