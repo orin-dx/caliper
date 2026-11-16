@@ -1804,6 +1804,9 @@ pub struct ComponentMapping {
     /// the annotated props type of the render function it is given, or the variant keys of the style recipe it is
     /// given. The resolver adds those its props type lacks.
     pub(crate) factory_props: Option<CollectedType>,
+    /// The type parameters of that render function (`<T,>(props: { v: T }) => ...`). They are in scope for
+    /// `factory_props` only, never for the callee's result type, where the same name may be a module-level declaration.
+    pub(crate) factory_type_params: Vec<TypeName>,
 }
 
 /// What a component's function body does with its props, read from the syntax alone (`extractor::body_facts`). Facts
@@ -1920,6 +1923,7 @@ impl ComponentMapping {
             local_name: None,
             body: None,
             factory_props: None,
+            factory_type_params: Vec::new(),
         }
     }
 

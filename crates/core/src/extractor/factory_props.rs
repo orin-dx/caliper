@@ -71,11 +71,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn attach_factory_props(&mut self) {
         for pending in std::mem::take(&mut self.pending_factory_props) {
             for mapping in self.data.component_mappings.iter_mut().filter(|m| m.span_start == pending.span_start) {
-                for param in &pending.type_params {
-                    if !mapping.type_params.contains(param) {
-                        mapping.type_params.push(param.clone());
-                    }
-                }
+                mapping.factory_type_params.clone_from(&pending.type_params);
                 mapping.factory_props = Some(pending.props.clone());
             }
         }

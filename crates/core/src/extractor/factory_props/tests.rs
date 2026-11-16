@@ -102,6 +102,31 @@ export const Trigger = createLeaf(SeparatorNode, (props: TriggerProps, ref) => <
 }
 
 #[test]
+fn a_render_callback_type_parameter_does_not_shadow_a_declaration_in_the_result() {
+    let output = extract_file(
+        r#"
+interface Base { label: string }
+declare function make<P>(tag: P, render: unknown): React.FC<Base>;
+export const Widget = make('div', <Base,>(props: { value: Base }) => <div />);
+"#,
+    );
+    assert!(output.components.contains_key("Widget"), "{:?}", output.components.keys().collect::<Vec<_>>());
+    assert!(prop_names(&output, "Widget").contains(&"label".to_owned()));
+}
+
+#[test]
+fn a_render_callback_type_parameter_stays_a_placeholder_in_its_own_props() {
+    let output = extract_file(
+        r#"
+declare function make<P>(tag: P, render: unknown): React.FC<{ id?: string }>;
+export const Widget = make('div', <T,>(props: { v: T }) => <div />);
+"#,
+    );
+    assert_eq!(prop_names(&output, "Widget"), ["id", "v"]);
+    assert!(format!("{:?}", output.components["Widget"].props["v"].prop_type).contains('T'));
+}
+
+#[test]
 fn a_hook_call_given_a_function_is_no_component() {
     let output = extract_file(
         r#"

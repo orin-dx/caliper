@@ -645,7 +645,8 @@ impl<'src> SourceDataCollector<'src> {
             for (start, end, params) in &self.function_type_params {
                 if *start >= mapping.span_start && *end <= mapping.span_end {
                     for param in params {
-                        if !mapping.type_params.contains(param) {
+                        // The render callback's own parameters are in scope for its props only (`factory_type_params`).
+                        if !mapping.type_params.contains(param) && !mapping.factory_type_params.contains(param) {
                             mapping.type_params.push(param.clone());
                         }
                     }

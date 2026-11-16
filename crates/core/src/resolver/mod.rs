@@ -999,7 +999,12 @@ pub(crate) fn resolve_component_shared(
     // A component a generic call builds has the props its callee's result type declares; the props type the extractor
     // selected is for a callee whose result isn't known.
     // The factory's own props resolve beside the main chain, not inside it: a type both reach is shared, not a cycle.
-    let mut factory_state = mapping.factory_props.as_ref().map(|_| state.branch());
+    // The render function's own type parameters are in scope for these props only, not for the callee's result.
+    let mut factory_state = mapping.factory_props.as_ref().map(|_| {
+        let mut branch = state.branch();
+        branch.scope = TypeScope::new(mapping.type_params.iter().chain(&mapping.factory_type_params));
+        branch
+    });
     let result = callee::result_chain(mapping, ctx, &mut state);
     // A call to a function whose result is no component is no component: nothing to document, nothing to report.
     if result.is_none() && mapping.rule == DetectionRule::FactoryResult {
