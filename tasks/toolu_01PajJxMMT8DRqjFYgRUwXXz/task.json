@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01PajJxMMT8DRqjFYgRUwXXz",
+  "agent_id": "a187d00923dc15ff1",
+  "subagent_type": "general-purpose",
+  "task_description": "281: lazy delta reports changed relevance of retained answers",
+  "token_usage": {
+    "input_tokens": 70,
+    "cache_creation_tokens": 98741,
+    "cache_read_tokens": 2568384,
+    "output_tokens": 19060,
+    "api_call_count": 35
+  },
+  "started_at": "2026-11-15T21:49:06.460092-08:00",
+  "completed_at": "2026-11-15T21:58:11.437954-08:00"
+}
