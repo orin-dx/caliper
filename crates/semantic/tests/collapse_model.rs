@@ -199,7 +199,11 @@ fn the_structural_and_the_checker_lane_give_the_same_layers_and_props() {
                         Layers::new()
                     };
                     assert_eq!(layers(&checker, &key), expected, "layers of {case}");
-                    if load_dependencies {
+                    // `With{name}` gets relevance's placement from the structural answer, which narrows a
+                    // dependency's members its body never reads into a layer of names (ADR 0028, A2); the structural
+                    // answer gives `Only{name}` no member of this source, so it has no placement and the size rule
+                    // alone decides. They agree where nothing narrows.
+                    if load_dependencies && (collapse == CollapseInheritedProps::None || collapses) {
                         assert_eq!(layers(&checker, &key), layers(&checker, &format!("With{name}")), "{case}");
                     }
                     let listed = props(&checker, &key);
