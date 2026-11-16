@@ -30,10 +30,13 @@ pub(crate) struct Props {
     pub(crate) whole: Vec<PropParent>,
 }
 
-/// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
-/// flag set when the request asks for the name; what to do with them is the session's policy, not ours.
+/// What `@types/react` alone declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with
+/// the flag set when the request asks for the name; what to do with them is the session's policy, not ours. A property
+/// the project or a dependency also declares (`ComponentProps<'div'> & { className: 'mine' }`) is theirs too: one
+/// declaration in `@types/react` is no proof the prop is React's, every one must be.
 fn is_react_declared(property: &SymbolInfo) -> bool {
-    property.declarations.iter().any(|declaration| declared_in(declaration).contains("/@types/react/"))
+    !property.declarations.is_empty()
+        && property.declarations.iter().all(|declaration| declared_in(declaration).contains("/@types/react/"))
 }
 
 fn fallback(reason: &str) -> Result<Answer, CallError> {

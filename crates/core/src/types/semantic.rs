@@ -382,7 +382,26 @@ fn apply_props(
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
     move_notable(entry, &notable);
+    listed_props_leave_layers(entry);
     merged
+}
+
+/// Each prop shown once: a collapsed layer never holds a name `entry` lists (the listed prop wins), and a name only
+/// the first collapsed layer holding it keeps. The collapse decision stands, only the names go: a layer left with none
+/// is dropped. A notable member copied to `notableInherited` stays its layer's (the layer contract). Run wherever a
+/// component's layers are final: the structural answer and each merge of the checker's.
+pub(crate) fn listed_props_leave_layers(entry: &mut ComponentEntry) {
+    let mut held: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    entry.inheritance.retain_mut(|layer| {
+        if layer.members.is_empty() {
+            return true;
+        }
+        let before = layer.members.len();
+        layer.members.retain(|name| !entry.props.contains_key(name) && held.insert(name.clone()));
+        let removed = u32::try_from(before - layer.members.len()).unwrap_or(u32::MAX);
+        layer.total_props = layer.total_props.saturating_sub(removed);
+        !layer.members.is_empty()
+    });
 }
 
 /// The checker's `props` for `entry` without those an inherited source collapsed into a layer holds, and the notable

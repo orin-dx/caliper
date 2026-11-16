@@ -108,6 +108,32 @@ fn props(output: &ExtractionOutput, key: &str) -> BTreeSet<String> {
     output.components[key].props.keys().cloned().collect()
 }
 
+/// Every prop is shown once: no collapsed layer holds a name the component lists, and no name is held by two layers.
+/// A notable member copied to `notableInherited` from its own layer is the layer contract, not a second showing.
+fn assert_shown_once(output: &ExtractionOutput, lane: &str) {
+    let twice = shown_twice(output, lane);
+    assert!(twice.is_empty(), "{twice:#?}");
+}
+
+/// Each name a component shows twice (see [`assert_shown_once`]).
+fn shown_twice(output: &ExtractionOutput, lane: &str) -> Vec<String> {
+    let mut twice = Vec::new();
+    for (key, entry) in &output.components {
+        let mut held = BTreeSet::new();
+        for layer in &entry.inheritance {
+            for member in &layer.members {
+                if entry.props.contains_key(member) {
+                    twice.push(format!("{lane} {key}: {member} listed and in {}", layer.type_name));
+                }
+                if !held.insert(member.clone()) {
+                    twice.push(format!("{lane} {key}: {member} in two layers"));
+                }
+            }
+        }
+    }
+    twice
+}
+
 #[test]
 fn the_structural_and_the_checker_lane_give_the_same_layers_and_props() {
     let (_dir, root) = project();
@@ -142,6 +168,8 @@ fn the_structural_and_the_checker_lane_give_the_same_layers_and_props() {
                     skipping.components, checker.components,
                     "load={load_dependencies} {collapse:?} {html_attributes:?}: converting only what is kept"
                 );
+                assert_shown_once(&structural, "structural");
+                assert_shown_once(&checker, "checker");
 
                 for (name, _, _, package) in SOURCES {
                     for key in [format!("With{name}"), format!("Omit{name}"), format!("Pick{name}")] {
@@ -272,6 +300,11 @@ fn both_lanes(package: &str, project: &[(&str, String)]) -> (tempfile::TempDir, 
     std::fs::write(pkg.join("package.json"), r#"{ "name": "pkg", "version": "1.0.0", "types": "index.d.ts" }"#)
         .unwrap();
     std::fs::write(pkg.join("index.d.ts"), package).unwrap();
+    // The workspace's `@types/react`, so a project file can import `react` (the checker reads its real path).
+    let react = std::fs::canonicalize(concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/@types/react"))
+        .expect("the workspace's @types/react (pnpm install)");
+    std::fs::create_dir_all(root.join("node_modules/@types")).unwrap();
+    std::os::unix::fs::symlink(react, root.join("node_modules/@types/react")).unwrap();
     for (file, text) in project {
         std::fs::write(root.join(file), text).unwrap();
     }
@@ -540,6 +573,69 @@ fn a_checker_only_source_collapses_only_where_it_is_proven_to_reach_whole() {
         };
         if ends != *expected {
             wrong.push(format!("{key}: {ends:?}, expected {expected:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// The red team's repros of change 267 (`redteam-collapse.md`), in both lanes:
+/// - D1: a prop is React's only when every declaration of it is in `@types/react`, so an own or a dependency's prop of a
+///   React name beside an element layer is kept (`OwnOverReact`, `KeyRef`, `CpwrAndDep`);
+/// - D2, D3, D4, D7: a prop is shown once, the listed one wins over a layer member and a name sits in one layer
+///   (`assert_shown_once`);
+/// - D5: an `Omit` whose keys are not a finite union of string literals collapses nothing, so no layer holds a member
+///   that does not reach and no notable prop is made up.
+#[test]
+fn redteam_each_prop_is_shown_once_and_never_lost() {
+    // `DepBig`: 196 members and 5 of React's names, 201 in all.
+    let package = format!(
+        "export interface DepBig {{ {}className?: string; style?: object; id?: string; onClick?: () => void; \
+         children?: string }}\n\
+         export interface DepOther {{ {}a5?: string; className?: string }}\n\
+         export type DepAlias = {{ {}}};\n",
+        members("a", 196),
+        members("b", 199),
+        members("t", 201),
+    );
+    let components = "import type * as React from 'react';\n\
+        import type { DepBig, DepOther, DepAlias } from 'pkg';\n\
+        export function OwnOverReact(props: React.ComponentProps<'div'> & { className: 'mine'; \
+          onClick: (x: number) => void; title: 'own'; own: string }) { return null; }\n\
+        export function KeyRef(props: DepBig & React.RefAttributes<HTMLDivElement> & { key?: string }) { return null; }\n\
+        export function CpwrAndDep(props: React.ComponentPropsWithoutRef<'button'> & Omit<DepBig, 'onClick'>) { \
+          return null; }\n\
+        export function AliasSource(props: DepAlias & { own?: boolean }) { return null; }\n\
+        interface Redeclare extends DepBig { a1: 'narrow'; className: 'mine' }\n\
+        export function Redeclared(props: Redeclare) { return null; }\n\
+        export function TwoPaths(props: DepBig & Omit<DepBig, 'a0'>) { return null; }\n\
+        export function Shared(props: DepBig & DepOther) { return null; }\n\
+        export function OmitString(props: Omit<DepBig, string>) { return null; }\n\
+        export function OmitBranded(props: Omit<DepBig, 'a0' | (string & {})>) { return null; }\n\
+        export function OmitTemplate(props: Omit<DepBig, `a${1 | 2}`>) { return null; }\n"
+        .to_string();
+    let (_dir, structural, checker) = both_lanes(&package, &[("Components.tsx", components)]);
+    let mut wrong = shown_twice(&structural, "structural");
+    wrong.extend(shown_twice(&checker, "checker"));
+    for (lane, output) in [("structural", &structural), ("checker", &checker)] {
+        for (key, own) in [
+            ("OwnOverReact", &["className", "onClick", "title", "own"][..]),
+            ("KeyRef", &["key"]),
+            ("CpwrAndDep", &["className", "style", "id", "children"]),
+            ("Redeclared", &["a1", "className"]),
+        ] {
+            let listed = props(output, key);
+            wrong.extend(
+                own.iter().filter(|name| !listed.contains(**name)).map(|name| format!("{lane} {key}: {name} dropped")),
+            );
+        }
+        for key in ["OmitString", "OmitBranded", "OmitTemplate"] {
+            let entry = &output.components[key];
+            if entry.inheritance.iter().any(|layer| layer.type_name == "DepBig") {
+                wrong.push(format!("{lane} {key}: a DepBig layer"));
+            }
+            if !entry.notable_inherited.is_empty() {
+                wrong.push(format!("{lane} {key}: notable {:?}", entry.notable_inherited.keys().collect::<Vec<_>>()));
+            }
         }
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
