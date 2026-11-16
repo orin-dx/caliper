@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_013q8FyAuF6jhPq8i2jUnCcr",
+  "agent_id": "a81bedda095ac9b82",
+  "subagent_type": "general-purpose",
+  "task_description": "267: fix silent loss and double listing found by red-team",
+  "token_usage": {
+    "input_tokens": 176,
+    "cache_creation_tokens": 178738,
+    "cache_read_tokens": 11654261,
+    "output_tokens": 57419,
+    "api_call_count": 88
+  },
+  "started_at": "2026-11-15T18:01:16.007849-08:00",
+  "completed_at": "2026-11-15T18:21:50.005207-08:00"
+}
