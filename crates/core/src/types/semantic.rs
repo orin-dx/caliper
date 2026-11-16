@@ -246,6 +246,9 @@ pub enum Priority {
 /// The bit of a [`SharedPriority`] set once its request is cancelled; the bits below it hold the [`Priority`].
 const CANCELLED: u8 = 0b100;
 
+/// The bit set once the checker took the request to convert it; it is never cancelled after that.
+const STARTED: u8 = 0b1000;
+
 /// The priority of one queued request, shared between the caller and the checker so that a later caller can raise it
 /// ([`SharedPriority::raise`]) while the request waits, or cancel it ([`SharedPriority::cancel`]) when nobody will
 /// read its answer. Clones share one priority.
@@ -272,7 +275,7 @@ impl SharedPriority {
     }
 
     fn class(bits: u8) -> Priority {
-        match bits & !CANCELLED {
+        match bits & !(CANCELLED | STARTED) {
             0 => Priority::Interactive,
             1 => Priority::Neighbour,
             _ => Priority::Background,
@@ -287,20 +290,27 @@ impl SharedPriority {
     /// Raises the request to `priority`, or leaves it where it is when it already goes before `priority`. A caller
     /// asked for it again, so it is no longer cancelled.
     pub fn raise_to(&self, priority: Priority) {
-        let raise = |bits: u8| Some(Self::bits(Self::class(bits).min(priority)));
+        let raise = |bits: u8| Some(bits & STARTED | Self::bits(Self::class(bits).min(priority)));
         self.0.try_update(std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire, raise).ok();
     }
 
     /// Cancels the request: nobody will read its answer (the client no longer shows its component, or an edit
     /// superseded the revision it was asked at), so a checker that has not started it drops it, and its delivery
-    /// receives `None`. A checker already converting it finishes. An interactive request is waited for and is never
-    /// cancelled; returns whether this one was.
+    /// receives `None`. A checker already converting it ([`SharedPriority::start`]) finishes, and the request is not
+    /// cancelled. An interactive request is waited for and is never cancelled; returns whether this one was.
     pub fn cancel(&self) -> bool {
-        let cancel = |bits: u8| match Self::class(bits) {
-            Priority::Interactive => None,
-            Priority::Neighbour | Priority::Background => Some(bits | CANCELLED),
+        let cancel = |bits: u8| match (bits & STARTED != 0, Self::class(bits)) {
+            (true, _) | (false, Priority::Interactive) => None,
+            (false, Priority::Neighbour | Priority::Background) => Some(bits | CANCELLED),
         };
         self.0.try_update(std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire, cancel).is_ok()
+    }
+
+    /// Marks the request as being converted, so it can no longer be cancelled; returns false, marking nothing, when it
+    /// was cancelled first and is to be dropped instead.
+    pub fn start(&self) -> bool {
+        let start = |bits: u8| (bits & CANCELLED == 0).then_some(bits | STARTED);
+        self.0.try_update(std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire, start).is_ok()
     }
 
     /// Whether the request was cancelled and not raised since.

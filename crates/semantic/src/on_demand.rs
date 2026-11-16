@@ -181,8 +181,17 @@ impl<T> Queue<T> {
         self.waiting.is_empty()
     }
 
-    /// The request the checker answers next.
+    /// The request the checker answers next, marked as started so a cancel after this no longer drops it.
     fn next(&mut self) -> Option<T> {
+        loop {
+            let (_, item, priority) = self.pick()?;
+            if priority.start() {
+                return Some(item);
+            }
+        }
+    }
+
+    fn pick(&mut self) -> Option<(u64, T, SharedPriority)> {
         self.waiting.retain(|(_, _, priority)| !priority.is_cancelled());
         // Each priority is read once, so a request raised during the pick does not change the class it is picked by.
         let classes: Vec<Priority> = self.waiting.iter().map(|(_, _, priority)| priority.get()).collect();
@@ -196,7 +205,7 @@ impl<T> Queue<T> {
             false => oldest(&mut (0..classes.len()).filter(|index| classes[*index] == first)),
         }?;
         self.bypassed = if lesser_waits && !starving { self.bypassed + 1 } else { 0 };
-        Some(self.waiting.remove(index).1)
+        Some(self.waiting.remove(index))
     }
 }
 
@@ -1118,6 +1127,17 @@ mod tests {
             [("prefetch", false), ("fill", false), ("story", true), ("prefetch opened", true)]
         );
         assert!(!story.is_cancelled() && !raised.is_cancelled());
+    }
+
+    /// A request the checker took is being converted: a cancel after that leaves it, and it stays answered.
+    #[test]
+    fn a_request_the_checker_took_is_not_cancelled() {
+        let mut queue = Queue::default();
+        let taken = push(&mut queue, "prefetch", Priority::Neighbour);
+        assert_eq!(queue.next(), Some("prefetch"));
+
+        assert!(!taken.cancel());
+        assert!(!taken.is_cancelled());
     }
 
     /// The streak bound holds across three classes: after a run of the first class while lesser ones wait, the oldest

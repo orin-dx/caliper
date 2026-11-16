@@ -202,7 +202,8 @@ impl SemanticHook {
 
     /// Cancels the requests in flight for `keys` that nobody waits for: the client no longer shows those components,
     /// so a checker that has not started them drops them. A later request asks again rather than joining a cancelled
-    /// one; a request someone waits for, or one the checker is already converting, is answered (and kept) as before.
+    /// one; a request someone waits for, or one the checker is already converting, stays registered, so a later request
+    /// joins it, and is answered (and kept) as before.
     pub(crate) fn cancel(&self, keys: &[String]) {
         let keys: FxHashSet<&str> = keys.iter().map(String::as_str).collect();
         let mut cache = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
@@ -490,6 +491,11 @@ mod tests {
             held.iter().map(|(key, priority, _)| (key.clone(), priority.get(), priority.is_cancelled())).collect()
         }
 
+        /// What the worker does when it takes request `n` to convert it.
+        fn start(&self, n: usize) {
+            assert!(self.0.lock().unwrap()[n].1.start());
+        }
+
         fn answer(&self, n: usize) {
             let (key, delivery) = {
                 let mut held = self.0.lock().unwrap();
@@ -562,6 +568,30 @@ mod tests {
         drop(session.components_as_neighbours(&["Button".to_string()]));
         assert_eq!(checker.asked().len(), 3, "a cancelled request is not joined");
         assert_eq!(checker.asked()[2], ("Button".to_string(), Priority::Neighbour, false));
+    }
+
+    /// A neighbour request the checker already took is converted whatever the client shows now: a cancel leaves it
+    /// registered, so a request for the component joins it, and its one delivery settles both callers. On the base the
+    /// cancel removed the entry and the second request started a second conversion.
+    #[test]
+    fn a_request_being_converted_survives_a_cancel_and_is_joined() {
+        let (_dir, session, checker) = session(&[("Button.tsx", BUTTON)]);
+        drop(session.components_as_neighbours(&["Button".to_string()]));
+        checker.start(0);
+
+        session.cancel_components(&["Button".to_string()]);
+        let story = {
+            let session = session.clone();
+            std::thread::spawn(move || session.component("Button").unwrap())
+        };
+        while checker.asked()[0].1 != Priority::Interactive {
+            std::thread::yield_now();
+        }
+
+        assert_eq!(checker.asked(), [("Button".to_string(), Priority::Interactive, false)]);
+        checker.answer(0);
+        assert!(story.join().unwrap().entry.props.contains_key("label"));
+        assert_eq!(checker.asked().len(), 1, "one conversion served both");
     }
 
     /// A checker that drops each request as cancelled the moment it is asked: a cancel that lands between a caller
