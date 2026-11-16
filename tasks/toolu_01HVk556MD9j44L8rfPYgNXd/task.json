@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01HVk556MD9j44L8rfPYgNXd",
+  "agent_id": "ab007d2dc7b6de4f7",
+  "subagent_type": "general-purpose",
+  "task_description": "481: keep pending entry for a running request",
+  "token_usage": {
+    "input_tokens": 36,
+    "cache_creation_tokens": 53124,
+    "cache_read_tokens": 1035329,
+    "output_tokens": 7549,
+    "api_call_count": 18
+  },
+  "started_at": "2026-11-15T20:07:05.626897-08:00",
+  "completed_at": "2026-11-15T20:12:33.168185-08:00"
+}

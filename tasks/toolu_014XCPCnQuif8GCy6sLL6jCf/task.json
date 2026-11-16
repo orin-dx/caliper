@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_014XCPCnQuif8GCy6sLL6jCf",
+  "agent_id": "a7a19b4e296c26db3",
+  "subagent_type": "general-purpose",
+  "task_description": "483: failing CI and the destructuring-default finding",
+  "started_at": "2026-11-15T20:07:05.694603-08:00"
+}
