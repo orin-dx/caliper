@@ -52,7 +52,9 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 36: `ComponentMapping::exports` replaces `exported`: how the module exports each component (ADR 0027).
 /// 37: `ComponentMapping::bound`: an anonymous default export is no binding of the name it takes from its file.
 /// 38: `ComponentMapping::local_name`: a component its module exports under another name is named by the export.
-const CACHE_SCHEMA_VERSION: u32 = 38;
+/// 39: `ComponentMapping::body` and `SourceData::jsx_usages`: what component bodies and the rest of a file write in JSX
+/// (trail 405).
+const CACHE_SCHEMA_VERSION: u32 = 39;
 
 const DATA_FILE: &str = "dts.msgpack";
 
