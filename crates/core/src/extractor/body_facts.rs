@@ -17,7 +17,7 @@
 //! - the object of a member read with a static or string-literal key (`props.x`, `props?.['x']`) that is not called
 //!   (`props.f()` passes the object as `this`), written, deleted or destructured into: `x` is read;
 //! - the initializer of an object destructuring (`const { a, b = 1, ...r } = props`) or the right side of a
-//!   destructuring assignment: its static keys are read, and a rest binding is the props object again;
+//!   destructuring assignment that is a statement of its own (its value is the props object): its static keys are read, and a rest binding is the props object again;
 //! - a JSX spread attribute (`{...props}`): recorded as a spread, and the whole props object spread is handed on.
 //!
 //! Any other reference (a call argument, `new`, an attribute value, an object or array literal, a `return`, a
@@ -32,6 +32,7 @@
 //! - The contexts that only read a member are an allow-list ([`Reader::is_read`]); a parent node kind not named there
 //!   hands the object on, so a form the parser adds later is unknown, not a silent read.
 //! - By binding, never by spelling: references resolve through `oxc_semantic` symbols.
+//! - A props binding that is ever written or redeclared is unknown: the body hands it on and records nothing through it.
 //! - Every read is recorded: an attribute's prop is named for each form of the member (`props.x`, `props['x']`,
 //!   `props?.x`, `props?.['x']`, `props!.x`) by the same rule that records the read.
 //! - One owner: an element belongs to the function node it is written in.
@@ -310,6 +311,16 @@ impl<'s, 'a> Reader<'s, 'a> {
             }
         }
         while let Some(symbol) = self.queue.pop_front() {
+            // A binding that is ever written (`props = other`, `props++`, `for (props of xs)`, `({ props } = o)`) or
+            // redeclared (`var props`) need not hold the props object where it is read: nothing is known of it.
+            let written = self.scoping.symbol_is_mutated(symbol)
+                || !self.scoping.symbol_redeclarations(symbol).is_empty()
+                || self.scoping.get_resolved_references(symbol).any(|reference| reference.is_write());
+            if written {
+                self.facts.handed_on = true;
+                self.whole.remove(&symbol);
+                continue;
+            }
             for reference in self.scoping.get_resolved_references(symbol) {
                 self.classify(reference.node_id());
             }
@@ -457,8 +468,11 @@ impl<'s, 'a> Reader<'s, 'a> {
                 return;
             }
             AstKind::AssignmentExpression(assignment) if assignment.right.span() == child => {
+                // The assignment evaluates to the props object: only a statement of its own drops that value.
+                let (outer, _) = self.through_wrappers(parent);
+                let discarded = matches!(self.nodes.kind(outer), AstKind::ExpressionStatement(_));
                 match &assignment.left {
-                    AssignmentTarget::ObjectAssignmentTarget(object) if object.rest.is_none() => {
+                    AssignmentTarget::ObjectAssignmentTarget(object) if object.rest.is_none() && discarded => {
                         for property in &object.properties {
                             match property {
                                 AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(property) => {
