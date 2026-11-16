@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01SBFeD7jtjrUq565ar3h16X",
+  "agent_id": "a97377c7f15dc985f",
+  "subagent_type": "general-purpose",
+  "task_description": "Red-team structural utility-type expansion (no fixes)",
+  "token_usage": {
+    "input_tokens": 86,
+    "cache_creation_tokens": 160487,
+    "cache_read_tokens": 4514427,
+    "output_tokens": 66446,
+    "api_call_count": 43
+  },
+  "started_at": "2026-11-15T17:21:44.508086-08:00",
+  "completed_at": "2026-11-15T17:34:11.073804-08:00"
+}

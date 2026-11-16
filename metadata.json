@@ -1,0 +1,51 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7H07P0Z929GYWCW9ZFW8EB7",
+  "strategy": "manual-commit",
+  "branch": "fix/collapse-never-hide-on-silence",
+  "checkpoints_count": 6,
+  "files_touched": [
+    "crates/core/src/pipeline/semantic_hook.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/component.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/tests/collapse_model.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 34,
+    "cache_creation_tokens": 37577,
+    "cache_read_tokens": 4450429,
+    "output_tokens": 14761,
+    "api_call_count": 12,
+    "subagent_tokens": {
+      "input_tokens": 234,
+      "cache_creation_tokens": 306018,
+      "cache_read_tokens": 22200701,
+      "output_tokens": 110723,
+      "api_call_count": 116
+    }
+  },
+  "redaction": {
+    "replacements": 44,
+    "layers": {
+      "betterleaks": 28,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 16,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
