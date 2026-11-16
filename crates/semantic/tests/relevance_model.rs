@@ -17,7 +17,7 @@ use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, P
 use caliper_docgen_core::types::ComponentEntry;
 use caliper_docgen_core::types::options::CollapseContext;
 use caliper_docgen_core::types::semantic::merge_semantic_in;
-use caliper_docgen_semantic::{SemanticRequest, resolve, targets_of};
+use caliper_docgen_semantic::{SemanticRequest, resolve, targets_collapsing, targets_of};
 use camino::Utf8PathBuf;
 
 /// A small deterministic generator: the model is reproducible without a dependency.
@@ -267,6 +267,11 @@ fn both_lanes(
         r#"{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "preserve", "strict": true, "skipLibCheck": true, "noEmit": true, "types": [] } }"#,
     )
     .unwrap();
+    // The workspace's `@types/react`, so a project file can import `react` (the checker reads its real path).
+    let react = std::fs::canonicalize(concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/@types/react"))
+        .expect("the workspace's @types/react (pnpm install)");
+    std::fs::create_dir_all(root.join("node_modules/@types")).unwrap();
+    std::os::unix::fs::symlink(react, root.join("node_modules/@types/react")).unwrap();
     for (path, source) in files {
         let path = root.join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -280,12 +285,13 @@ fn both_lanes(
         ..PipelineOptions::default()
     };
     let structural = extract(&options);
-    let mut request = SemanticRequest::new(root.clone(), targets_of(&structural));
+    let cx = CollapseContext::of(&options);
+    let mut request = SemanticRequest::new(root.clone(), targets_collapsing(&structural, cx));
     request.request_timeout = Duration::from_secs(60);
     let outcome = resolve(request);
     assert_eq!(outcome.fallbacks, [], "the checker answers every component");
     let mut checker = structural.clone();
-    merge_semantic_in(&mut checker, outcome, Default::default(), CollapseContext::of(&options));
+    merge_semantic_in(&mut checker, outcome, Default::default(), cx);
     (dir, [structural, checker])
 }
 
@@ -321,7 +327,8 @@ fn ambient_is_decided_per_declaration_and_the_generated_rule_holds_in_the_projec
              export interface Conds { ",
         );
         text.push_str(&fields("c", 40));
-        text.push_str("}\nexport interface Small { s0?: string; s1?: string; }\n");
+        // A project's own `@internal` interface is still its API: only typings (`.d.ts`, a dependency's) mark ambient.
+        text.push_str("}\n/** @internal */\nexport interface Small { s0?: string; s1?: string; }\n");
         text.push_str("export type CondProps = { [K in keyof Conds]?: string };\n");
         let mut expected = Vec::new();
         for c in 0..8 {
@@ -352,7 +359,7 @@ fn ambient_is_decided_per_declaration_and_the_generated_rule_holds_in_the_projec
             expected.push((name, rows));
         }
         let files = [
-            ("lib/shared/dom.ts", shared),
+            ("lib/shared/dom.d.ts", shared),
             ("vendor/@types/react/dom.ts", format!("export interface ReactDom {{ {}}}\n", fields("d", 40))),
             ("Components.tsx", text),
         ];
@@ -365,4 +372,25 @@ fn ambient_is_decided_per_declaration_and_the_generated_rule_holds_in_the_projec
         }
     }
     assert_eq!(checked, 24);
+}
+
+#[test]
+fn the_expanded_view_keeps_the_react_props_only_the_checker_finds_in_the_cli_merge() {
+    // Entire finding on change 288 (react_types.rs:452), the CLI's whole-project merge: props written
+    // `ReturnType<typeof makeProps>` give the structural pass none, so asking for the React props it lists asks for
+    // none. `collapseInheritedProps: none` takes every React prop the checker finds; a collapsing mode stays narrowed.
+    let made = "import type { HTMLAttributes } from 'react';\n\
+                function makeProps() { return {} as HTMLAttributes<HTMLDivElement> & { label: string }; }\n\
+                export function Made(props: ReturnType<typeof makeProps>) { return null; }\n"
+        .to_owned();
+    let files = [("Made.tsx", made)];
+    let (_dir, [structural, checker]) = both_lanes(&files, CollapseInheritedProps::None);
+    let expanded = rows(&checker.components["Made"]);
+    for name in ["className", "id", "label", "onClick"] {
+        assert!(expanded.iter().any(|row| row == name), "none: {name} in {expanded:?}");
+    }
+    // The structural lane cannot read the form: it lists nothing, in either mode.
+    assert_eq!(rows(&structural.components["Made"]), Vec::<String>::new());
+    let (_dir, [_, narrowed]) = both_lanes(&files, CollapseInheritedProps::Dependencies);
+    assert_eq!(rows(&narrowed.components["Made"]), ["label"]);
 }

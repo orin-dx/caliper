@@ -1,15 +1,15 @@
 //! Where a declaration comes from, read from its file's path: the one place both lanes decide it (ADR 0028, Ambient).
 //!
-//! Relevance reads [`Origin::is_ambient`] with [`marked_private`] ([`is_ambient_declaration`]), the checker merge reads
-//! [`Origin::React`] (what `@types/react` declares it leaves to the inheritance layers) and the dependency loader leaves
-//! [`Origin::React`] files to the resolver's React handling. Each reads its own question of the same answer, so a path
-//! cannot be ambient to one and plain to another.
+//! Relevance reads [`is_ambient_declaration`], the checker merge reads [`Origin::React`] (what `@types/react` declares
+//! it leaves to the inheritance layers) and the dependency loader leaves [`Origin::React`] files to the resolver's
+//! React handling. Each reads its own question of the same answer, so a path cannot be ambient to one and plain to
+//! another.
 //!
 //! Ambient is decided per declaration, not per file: React's own types are ambient by provenance, and a library's
-//! declaration is ambient only when its own JSDoc says it is not the library's API ([`marked_private`]). React Aria's
-//! `@react-types/shared/src/dom.d.ts` declares both kinds: `GlobalDOMAttributes` and `GlobalDOMEvents` (`@private`,
-//! copies of React's DOM attributes and events) and the API every React Aria component documents (`DOMProps`'s `id`,
-//! `AriaLabelingProps`, `FocusableDOMProps`'s `excludeFromTabOrder`, `LinkDOMProps`'s `routerOptions`).
+//! declaration only when its typings say it is not the library's API ([`marked_private`]). React Aria's
+//! `@react-types/shared/src/dom.d.ts` declares both kinds: `GlobalDOMAttributes` and `GlobalDOMEvents` (`@private`
+//! copies of React's DOM attributes and events) and its documented API (`DOMProps`'s `id`, `AriaLabelingProps`,
+//! `FocusableDOMProps`'s `excludeFromTabOrder`, `LinkDOMProps`'s `routerOptions`).
 
 use std::collections::BTreeMap;
 
@@ -54,11 +54,14 @@ pub fn marked_private(tags: &BTreeMap<String, String>) -> bool {
     tags.contains_key("private") || tags.contains_key("internal")
 }
 
-/// Whether a declaration in `file` whose JSDoc tags are `tags` is ambient: React's own (by provenance), or one its library
-/// marks private ([`marked_private`]). Every other declaration, React Aria's `dom.d.ts` API included, is a source of the
-/// library's API. `tags` is `None` when the declaration was not found: not proven private, so not ambient.
+/// Whether a declaration in `file` whose JSDoc tags are `tags` is ambient: React's own (by provenance), or one marked
+/// private ([`marked_private`]) in a library's typings: a dependency's file or a declaration file (`.d.ts`), as React
+/// Aria's `dom.d.ts` is in its own repository. A project's own source file is never ambient: an `@internal` base of the
+/// project's props is still its API. `tags` is `None` when the declaration was not found: not proven, so not ambient.
 pub fn is_ambient_declaration(file: &str, tags: Option<&BTreeMap<String, String>>) -> bool {
-    declaration_origin(file).is_ambient() || tags.is_some_and(marked_private)
+    let origin = declaration_origin(file);
+    let typings = origin != Origin::Project || [".d.ts", ".d.mts", ".d.cts"].iter().any(|ext| file.ends_with(ext));
+    origin.is_ambient() || (typings && tags.is_some_and(marked_private))
 }
 
 /// The [`Origin`] of a declaration in `file`, an absolute path with `/` separators.

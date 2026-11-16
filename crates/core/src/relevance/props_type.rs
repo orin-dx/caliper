@@ -243,11 +243,11 @@ pub(crate) fn members<'a>(
     props_type: &PropsType,
     rows: impl IntoIterator<Item = &'a ParsedProp>,
     layers: &[InheritedLayer],
-    private: &BTreeSet<(String, String)>,
+    private: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<Member> {
     let ambient = |type_name: &str, file: &str| {
         crate::origin::declaration_origin(file).is_ambient()
-            || private.contains(&(type_name.to_owned(), file.to_owned()))
+            || private.get(file).is_some_and(|names| names.contains(type_name))
     };
     let layered: BTreeSet<&str> = layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
     let mut listed = BTreeSet::new();
@@ -261,9 +261,9 @@ pub(crate) fn members<'a>(
     for layer in layers {
         reach.insert((&layer.type_name, &layer.file_name), usize::MAX);
     }
-    // A project source's size is the resolver's to judge: it collapses one past its threshold into a layer, whose members
-    // not listed are generated below. A listed prop of the project's own (the props type itself, of any size) is
-    // generated only when a mapped type copies it from a large key set.
+    // A project source's size is the resolver's to judge: it collapses one past its threshold into a layer, whose
+    // members not listed are generated below. A listed prop of the project's own (the props type itself, of any size)
+    // is generated only when a mapped type copies it from a large key set.
     let large = |parent: &PropParent| {
         crate::origin::declaration_origin(&parent.file_name) != crate::origin::Origin::Project
             && reach
@@ -293,12 +293,13 @@ pub(crate) fn members<'a>(
         });
     }
     for layer in layers {
+        let layer_ambient = ambient(&layer.type_name, &layer.file_name);
         for name in layer.members.iter().filter(|name| !listed.contains(name.as_str())) {
             let own = props_type.own.contains(name);
             members.push(Member {
                 own,
                 overrides: own,
-                ambient: ambient(&layer.type_name, &layer.file_name),
+                ambient: layer_ambient,
                 large: true,
                 ..member(props_type, name)
             });
@@ -432,7 +433,7 @@ mod tests {
                 &PropsType::default(),
                 entry.props.values().map(AsRef::as_ref),
                 &entry.inheritance,
-                &BTreeSet::new(),
+                &BTreeMap::new(),
             );
             let flags: BTreeSet<(bool, bool)> =
                 found.iter().map(|member| (member.name.starts_with('k'), member.large)).collect();
@@ -452,7 +453,7 @@ mod tests {
             members: ["size", "tone"].into_iter().map(str::to_owned).chain((0..31).map(|i| format!("p{i}"))).collect(),
             used: Vec::new(),
         };
-        let members = members(&props_type("ByIntersection"), [], &[layer], &BTreeSet::new());
+        let members = members(&props_type("ByIntersection"), [], &[layer], &BTreeMap::new());
         let size = members.iter().find(|member| member.name == "size").unwrap();
         assert!(size.own && size.overrides, "{size:?}");
         let shown = decided(members);
@@ -526,7 +527,7 @@ mod tests {
 
     fn evidence(read: &PropsType, entry: &ComponentEntry) -> Vec<Member> {
         let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
-        members(read, rows, &entry.inheritance, &BTreeSet::new())
+        members(read, rows, &entry.inheritance, &BTreeMap::new())
     }
 
     #[test]
@@ -568,7 +569,7 @@ mod tests {
             Some(PropParent { name: "Base".into(), file_name: "/base.ts".into() }),
             Vec::new(),
         );
-        let members = members(&PropsType::default(), [&documented], &[], &BTreeSet::new());
+        let members = members(&PropsType::default(), [&documented], &[], &BTreeMap::new());
         assert!(members[0].documented && members[0].literal_union && !members[0].own, "{members:?}");
         // `Base` declares one member: an API source, listed whatever the evidence.
         assert!(!members[0].large, "{members:?}");
@@ -587,7 +588,7 @@ mod tests {
             None,
             vec![react],
         );
-        assert!(super::members(&PropsType::default(), [&handler], &[], &BTreeSet::new())[0].ambient);
+        assert!(super::members(&PropsType::default(), [&handler], &[], &BTreeMap::new())[0].ambient);
     }
 
     /// Two files: the component's, and one declaring its props type and what that type names.

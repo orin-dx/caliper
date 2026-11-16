@@ -436,24 +436,24 @@ pub fn checker_prop_used(
     }
 }
 
-/// The `htmlAttributes` mode the checker's React props are taken by, from the run's `mode` and `collapse`. Under
-/// `collapseInheritedProps: none`, the expanded view that lists every inherited prop, the run's own mode: `Full` takes
-/// every React prop the checker finds, also where the structural pass found none (props written
-/// `ReturnType<typeof makeProps>`). Otherwise `Curated`: which React props are rows is relevance's decision (ADR 0028),
-/// made once on the structural answer.
+/// The `htmlAttributes` mode the checker's React props are taken by, from the run's `mode` and whether the structural
+/// answer is the `expanded` view (`collapseInheritedProps: none`, which lists every resolved prop). Expanded, the
+/// run's own mode: `Full` takes every React prop the checker finds, also where the structural pass found none (props
+/// written `ReturnType<typeof makeProps>`). Otherwise `Curated`: which React props are rows is relevance's decision
+/// (ADR 0028), made once on the structural answer.
 pub fn react_attribute_mode(
     mode: crate::pipeline::HtmlAttributeMode,
-    collapse: crate::types::options::CollapseInheritedProps,
+    expanded: bool,
 ) -> crate::pipeline::HtmlAttributeMode {
-    match collapse {
-        crate::types::options::CollapseInheritedProps::None => mode,
-        crate::types::options::CollapseInheritedProps::Dependencies
-        | crate::types::options::CollapseInheritedProps::All => crate::pipeline::HtmlAttributeMode::Curated,
-    }
+    if expanded { mode } else { crate::pipeline::HtmlAttributeMode::Curated }
 }
 
-/// [`checker_prop_used`] without the mode it no longer reads: the one rule both merges of the checker's props take a
-/// prop by.
+/// Whether `entry` is the expanded view: relevance decided it and lists every resolved prop ([`react_attribute_mode`]).
+pub(crate) fn expanded(entry: &crate::types::ComponentEntry) -> bool {
+    entry.relevance.as_ref().is_some_and(|placement| placement.expanded())
+}
+
+/// [`checker_prop_used`] under `Curated` or `None`: a `@types/react` prop only where the structural answer lists it.
 pub(crate) fn react_prop_listed(
     name: &str,
     react_declared: bool,

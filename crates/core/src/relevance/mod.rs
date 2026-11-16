@@ -30,10 +30,10 @@ pub(crate) struct Inputs {
     /// Whether the listing follows the decision ([`narrow`]): off when every inherited prop is asked for expanded
     /// (`collapseInheritedProps: none`, ADR 0028's `relevance: 'all'`); the `used` lists are written either way.
     pub(crate) narrows: bool,
-    /// The sources outside React's types the answer reaches whose declaration its library marks private
-    /// ([`crate::origin::marked_private`]): ambient, as React's own are ([`crate::origin::is_ambient_declaration`]).
-    /// Read with the answer's resolution, so an edit to a declaring file refreshes it.
-    pub(crate) private: BTreeSet<Source>,
+    /// The sources outside React's types the answer reaches that are ambient by their typings
+    /// ([`crate::origin::is_ambient_declaration`]): type names by declaring file. Read with the answer's resolution, so
+    /// an edit to a declaring file refreshes it.
+    pub(crate) private: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// Decides where each member of `entry`'s props goes, from `inputs`, the revision's `call_sites` of the component and
@@ -63,7 +63,7 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     } else {
         Vec::new()
     };
-    entry.relevance = Some(std::sync::Arc::new(Placement { left, used }));
+    entry.relevance = Some(std::sync::Arc::new(Placement { left, used, narrows: inputs.narrows }));
     narrow(entry);
 }
 
@@ -87,7 +87,7 @@ fn sources<'n>(entry: &'n ComponentEntry, names: impl Iterator<Item = &'n String
         }
     }
     // Each layer's members are walked once against the set of names, never the layer once per name: a layer of
-    // thousands of members with every member left out is linear, not quadratic (Entire finding on change 288).
+    // thousands of members with every member left out is linear, not quadratic.
     for layer in &entry.inheritance {
         for name in wanted_members(layer, |name| names.contains(name)) {
             add(name, &layer.type_name, &layer.file_name);
@@ -118,9 +118,17 @@ pub struct Placement {
     /// The rows [`decide`] puts forward that the structural answer holds only as names in a collapsed layer: named in
     /// that layer's `used` list.
     used: BTreeSet<String>,
+    /// Whether the listing follows the decision ([`Inputs::narrows`]); off in the expanded view.
+    narrows: bool,
 }
 
 impl Placement {
+    /// Whether the answer is the expanded view (`collapseInheritedProps: none`): it lists every resolved prop, so a
+    /// checker merge takes every `@types/react` prop the checker finds.
+    pub(crate) fn expanded(&self) -> bool {
+        !self.narrows
+    }
+
     /// Whether the decision leaves `name`, declared by `parent`, out of the listing.
     fn leaves(&self, name: &str, parent: &PropParent) -> bool {
         let source = (parent.name.as_str(), parent.file_name.as_str());
@@ -134,16 +142,18 @@ impl Placement {
 
 /// Lists `entry` by its kept [`Placement`]: a listed prop (in `props` or `notableInherited`) the decision leaves out
 /// moves to the layer of its source, as a name, when the placement left out that name from that same source, whoever
-/// declares it (the project, a dependency or React): [`decide`] leaves out only ambient or generated members. Its home is the layer of its
-/// `parent` (by type name and file), else, for an ambient source, the entry's HTML element layer, else a new layer of
-/// its `parent`. A prop with no `parent` has no known source and stays listed: no name is ever lost. Then each
-/// layer's `used` list is written. Without a placement (no evidence was gathered) nothing changes. Run by [`apply`] and at the end of each merge of the
-/// checker's props, which may list again what the structural answer left out.
+/// declares it: [`decide`] leaves out only ambient or generated members. Its home is the layer of its `parent` (by
+/// type name and file), else, for a source of React's, the entry's HTML element layer, else a new layer of its
+/// `parent` (a library's private source keeps its own layer). A prop with no `parent` has no known source and stays
+/// listed: no name is ever lost. Then each layer's `used` list is written. Without a placement nothing changes. Run by
+/// [`apply`] and at the end of each merge of the checker's props, which may list again what the structural answer
+/// left out.
 pub(crate) fn narrow(entry: &mut ComponentEntry) {
     let Some(placement) = entry.relevance.clone() else { return };
     let ComponentEntry { props, notable_inherited, inheritance, .. } = entry;
-    // The names the layers hold, read once: a prop left out joins a layer only when none holds its name yet.
-    let mut layered: BTreeSet<String> = inheritance.iter().flat_map(|layer| layer.members.iter().cloned()).collect();
+    // The names the layers hold, read once and only when a prop is left out: it joins a layer only when none holds
+    // its name yet.
+    let mut layered: Option<BTreeSet<String>> = None;
     for listing in [props, notable_inherited] {
         listing.retain(|name, prop| {
             let Some(parent) = prop.parent.as_ref() else { return true };
@@ -151,7 +161,9 @@ pub(crate) fn narrow(entry: &mut ComponentEntry) {
                 return true;
             }
             // Each name is held once: a layer already holding it keeps it (`listed_props_leave_layers`' rule).
-            if layered.insert(name.clone()) {
+            let held = layered
+                .get_or_insert_with(|| inheritance.iter().flat_map(|layer| layer.members.iter().cloned()).collect());
+            if held.insert(name.clone()) {
                 home(inheritance, parent).members.push(name.clone());
             }
             false
@@ -788,7 +800,7 @@ mod tests {
                 (("HTMLAttributes".to_owned(), REACT.to_owned()), names(&["title"])),
             ]
         );
-        let placement = Placement { left, used: BTreeSet::from(["title".to_owned()]) };
+        let placement = Placement { left, used: BTreeSet::from(["title".to_owned()]), narrows: true };
         assert!(placement.leaves("onClick", &parent("DOMAttributes", REACT)));
         assert!(!placement.leaves("onClick", &parent("HTMLAttributes", REACT)), "a name of another source");
         assert!(!placement.leaves("onFocus", &parent("DOMAttributes", REACT)), "a name the decision did not leave");

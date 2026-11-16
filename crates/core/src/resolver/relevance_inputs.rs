@@ -4,7 +4,7 @@
 //! counted once per resolution context ([`project_sites`]) and joined where the answer becomes output, never kept with
 //! a resolution: an edit to any consumer changes them.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -37,23 +37,24 @@ pub(crate) fn evidence(mapping: &ComponentMapping, ctx: &ResolutionContext, entr
     Arc::new(Inputs { site: site_key(mapping), props_type, body, narrows, private })
 }
 
-/// The sources outside React's types that `entry` reaches (its props' `parent` and declarations, its layers) whose
-/// interface its library marks private ([`crate::origin::marked_private`]), each found where it is declared. A source
-/// not found is not proven private.
-fn private_sources(entry: &ComponentEntry, ctx: &ResolutionContext) -> BTreeSet<(String, String)> {
+/// The sources outside React's types that `entry` reaches (its props' `parent` and declarations, its layers) that are
+/// ambient by their typings ([`crate::origin::is_ambient_declaration`]), type names by declaring file, each found
+/// where it is declared. A source not found is not proven ambient.
+fn private_sources(entry: &ComponentEntry, ctx: &ResolutionContext) -> BTreeMap<String, BTreeSet<String>> {
     let props = entry.props.values().chain(entry.notable_inherited.values());
     let declared = props.flat_map(|prop| prop.parent.iter().chain(&prop.declarations));
     let named = declared
         .map(|parent| (parent.name.as_str(), parent.file_name.as_str()))
         .chain(entry.inheritance.iter().map(|layer| (layer.type_name.as_str(), layer.file_name.as_str())));
     let mut seen = BTreeSet::new();
-    let mut private = BTreeSet::new();
+    let mut private: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for (name, file) in named {
         if !seen.insert((name, file)) || crate::origin::declaration_origin(file).is_ambient() {
             continue;
         }
-        if lookup_interface(ctx, file, name).is_some_and(|interface| crate::origin::marked_private(&interface.tags)) {
-            private.insert((name.to_owned(), file.to_owned()));
+        let interface = lookup_interface(ctx, file, name);
+        if interface.is_some_and(|interface| crate::origin::is_ambient_declaration(file, Some(&interface.tags))) {
+            private.entry(file.to_owned()).or_default().insert(name.to_owned());
         }
     }
     private

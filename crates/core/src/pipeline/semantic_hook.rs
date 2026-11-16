@@ -218,7 +218,7 @@ impl SemanticHook {
         cx: CollapseContext,
         priority: Priority,
     ) -> ComponentAnswer {
-        let mode = crate::react_types::react_attribute_mode(mode, cx.mode);
+        let mode = crate::react_types::react_attribute_mode(mode, crate::react_types::expanded(&answer.entry));
         // The checker converts only the props this merge keeps, decided from the structural answer and `cx`: an answer
         // is kept and joined for those too, so another structural answer is never merged with props left unconverted.
         let layering = Layering::of(&answer.entry, cx);

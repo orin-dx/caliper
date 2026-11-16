@@ -361,7 +361,10 @@ fn watch(src: &Utf8PathBuf, run: WatchRun) -> bool {
         exports: entry.exports.clone(),
         described: entry.props.values().filter(|p| !p.description.is_empty()).map(|p| p.name.clone()).collect(),
         react_wanted: react_props_wanted(
-            react_attribute_mode(session.options.html_attributes, session.options.collapse_inherited_props),
+            react_attribute_mode(
+                session.options.html_attributes,
+                session.options.collapse_inherited_props == caliper_docgen_core::pipeline::CollapseInheritedProps::None,
+            ),
             &entry.props,
         ),
         // Every prop converted: the session's request decides its layering from the structural answer, which this

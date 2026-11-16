@@ -427,11 +427,15 @@ fn apply_props(
 ) -> MergedProps {
     // The whole-project merge replaces the props. Of `@types/react`'s it takes those the structural answer lists, as
     // the session's merge does (`checker_prop_used`): relevance decided them there (ADR 0028), and the rest are names
-    // in the inheritance layers.
+    // in the inheritance layers. The expanded view (`collapseInheritedProps: none`) takes every one the checker finds,
+    // also where the structural pass found none (`ReturnType<typeof makeProps>`): this merge reads no
+    // `htmlAttributes`, so it is `full`'s answer.
+    let expanded = crate::react_types::expanded(entry);
+    let mode = crate::react_types::react_attribute_mode(crate::types::options::HtmlAttributeMode::Full, expanded);
     let own: Vec<&Arc<SemanticProp>> = semantic
         .props
         .iter()
-        .filter(|prop| crate::react_types::react_prop_listed(&prop.name, prop.react_declared, &entry.props))
+        .filter(|prop| crate::react_types::checker_prop_used(mode, &prop.name, prop.react_declared, &entry.props))
         .collect();
     let (own, notable) = layer_checker_props(entry, own, &semantic.whole, cx);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
