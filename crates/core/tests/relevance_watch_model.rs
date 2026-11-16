@@ -40,6 +40,8 @@ struct Model {
     sites: Vec<(usize, String)>,
     /// The props the story passes to `C0`.
     story: Vec<String>,
+    /// `Consumer.tsx`: the component its `Tag` import names, and whether it renders two `<Tag d2>` sites.
+    consumer: (usize, bool),
 }
 
 impl Model {
@@ -52,7 +54,8 @@ impl Model {
                 reads: (0..rng.below(2)).map(|_| format!("d{}", rng.below(3))).collect(),
             })
             .collect();
-        let mut model = Model { root, components, sites: Vec::new(), story: vec!["d1".to_owned()] };
+        let mut model =
+            Model { root, components, sites: Vec::new(), story: vec!["d1".to_owned()], consumer: (1, true) };
         for _ in 0..6 {
             let site = model.random_site(rng);
             model.sites.push(site);
@@ -73,6 +76,7 @@ impl Model {
         model.write_components();
         model.write_page();
         model.write_story();
+        model.write_consumer();
         model
     }
 
@@ -135,9 +139,19 @@ impl Model {
         std::fs::write(self.root.join("C0.stories.tsx"), story).unwrap();
     }
 
+    /// A second consumer: two sites of `d2` (a prop no other site passes) on whichever component `Tag` imports.
+    fn write_consumer(&self) {
+        let (target, renders) = self.consumer;
+        let mut source = format!("import {{ {} as Tag }} from './Components';\n", self.components[target].name);
+        if renders {
+            source.push_str("export const a = <Tag d2=\"v\" />;\nexport const b = <Tag d2=\"v\" />;\n");
+        }
+        std::fs::write(self.root.join("Consumer.tsx"), source).unwrap();
+    }
+
     /// Applies one random edit and returns the file it rewrote.
     fn edit(&mut self, rng: &mut Lcg) -> (&'static str, Utf8PathBuf) {
-        match rng.below(6) {
+        match rng.below(8) {
             0 => {
                 // Two alike, so a prop can reach the floor of two sites.
                 let site = self.random_site(rng);
@@ -172,6 +186,17 @@ impl Model {
                 self.write_components();
                 ("edit the props type", self.root.join("Components.tsx"))
             }
+            5 => {
+                self.consumer.1 = !self.consumer.1;
+                self.write_consumer();
+                (CONSUMER_JSX, self.root.join("Consumer.tsx"))
+            }
+            6 => {
+                // Only the import changes: the same `<Tag>` sites now count for another component.
+                self.consumer.0 = 1 + self.consumer.0 % (self.components.len() - 1);
+                self.write_consumer();
+                (CONSUMER_IMPORT, self.root.join("Consumer.tsx"))
+            }
             _ => {
                 let prop = format!("d{}", rng.below(3));
                 if let Some(at) = self.story.iter().position(|p| *p == prop) {
@@ -186,6 +211,9 @@ impl Model {
     }
 }
 
+const CONSUMER_JSX: &str = "edit only a consumer's JSX";
+const CONSUMER_IMPORT: &str = "edit only a consumer's import";
+
 fn options(root: &Utf8Path) -> PipelineOptions {
     PipelineOptions {
         src_dirs: vec![root.to_owned()],
@@ -198,7 +226,7 @@ fn options(root: &Utf8Path) -> PipelineOptions {
 
 #[test]
 fn watch_equals_fresh() {
-    let (mut edits, mut moved) = (0, 0);
+    let (mut edits, mut moved, mut consumer_moved) = (0, 0, 0);
     for seed in [1_u64, 7, 42] {
         let dir = tempfile::Builder::new().prefix("RelevanceWatch").tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
@@ -220,7 +248,7 @@ fn watch_equals_fresh() {
             let (edit, file) = model.edit(&mut rng);
             history.push(edit);
             drop(watch.update_file(&file));
-            drop(lazy.update_file(&file));
+            let delta = lazy.update_file(&file);
             let fresh = extract(&options);
             let watched = watch.snapshot();
             let keys: Vec<&String> = fresh.components.keys().collect();
@@ -232,12 +260,29 @@ fn watch_equals_fresh() {
             }
             // The model is only as strong as the evidence it moves: count the edits that change a `used` list.
             moved += usize::from(used(&previous) != used(&fresh));
+            // A lazy delta names every key whose entry changed, a kept answer re-decided against the new call sites
+            // included; after an edit that only moves call sites, it names nothing else.
+            let changed: Vec<&String> = fresh
+                .components
+                .iter()
+                .filter(|(key, entry)| previous.components.get(*key) != Some(entry))
+                .map(|(key, _)| key)
+                .collect();
+            let reported: Vec<&String> = delta.updated_keys.iter().collect();
+            for key in &changed {
+                assert!(reported.contains(key), "lazy delta misses {key}: {reported:?}, seed {seed} after {history:?}");
+            }
+            if file.ends_with("Page.tsx") || file.ends_with("Consumer.tsx") {
+                assert_eq!(reported, changed, "lazy delta after a consumer edit, seed {seed} after {history:?}");
+                consumer_moved += usize::from(!changed.is_empty() && [CONSUMER_JSX, CONSUMER_IMPORT].contains(&edit));
+            }
             previous = fresh;
             edits += 1;
         }
     }
     assert_eq!(edits, 3 * 14);
     assert!(moved >= 3, "edits changed a `used` list {moved} times: the model does not exercise relevance");
+    assert!(consumer_moved >= 2, "consumer-only edits changed an entry {consumer_moved} times");
 }
 
 /// Every component's non-empty `used` lists, by component and layer.

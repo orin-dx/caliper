@@ -321,6 +321,15 @@ impl Revision {
 
         let layer = previous.engine.load().layer.clone();
         let engine = Engine::new(&global, options, &self.ambient_global_files, &named_types, layer, &self.react_types);
+        // A kept answer is decided again against the new call sites, so an edit to a consumer can change its `used`
+        // lists without touching its resolution. The new sites are the ones the next answer reads.
+        if memo.iter().any(|entry| entry.value().evidence.is_some()) {
+            let before = relevance_inputs::project_sites(&previous.engine.load().ctx);
+            let after = relevance_inputs::project_sites(&engine.ctx);
+            for entry in memo.iter().filter(|entry| entry.value().redecided(&before, &after)) {
+                touched.insert(entry.key().name.clone());
+            }
+        }
         let next = Revision {
             id: self.id + 1,
             global,

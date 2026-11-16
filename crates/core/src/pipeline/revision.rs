@@ -130,6 +130,16 @@ impl Resolved {
         }
     }
 
+    /// Whether this kept resolution answers differently against the call sites `after` than against `before`: an edit
+    /// to a consumer re-decides its `used` lists without resolving it again. Decided by [`layers_differ`], the rule an
+    /// eager revision reports a kept component by.
+    fn redecided(&self, before: &ProjectSites, after: &ProjectSites) -> bool {
+        let Some(inputs) = self.evidence.as_deref() else { return false };
+        // The decision reads only the component's own call sites; the same sites decide the same lists.
+        before.get(&inputs.site) != after.get(&inputs.site)
+            && layers_differ(Some(&self.answer(before)), Some(&self.answer(after)))
+    }
+
     /// Whether this resolution can differ after `change`.
     fn affected_by(&self, change: &Change<'_>) -> bool {
         self.depends_on.files.contains(change.file.as_str())
@@ -137,6 +147,12 @@ impl Resolved {
             || (change.react_namespace && self.depends_on.reads_augmentations)
             || change.bare_names.iter().any(|name| self.depends_on.bare_names.contains(name.as_str()))
     }
+}
+
+/// Whether `before` and `after` publish different layers. Relevance writes only the layers' `used` lists, so this is
+/// how a kept resolution's answer can move between revisions: the one rule both kinds of revision report it by.
+fn layers_differ(before: Option<&ComponentEntry>, after: Option<&ComponentEntry>) -> bool {
+    before.map(|entry| entry.inheritance.as_slice()) != after.map(|entry| entry.inheritance.as_slice())
 }
 
 /// Writes the `used` lists relevance decides for `entry` from its `evidence` and the revision's `sites`; without
@@ -641,16 +657,13 @@ impl Revision {
         // same-named component elsewhere appeared or disappeared, so the bare and disambiguated keys swapped), and every
         // kept component whose layers' `used` lists the revision's call sites changed.
         let fresh: FxHashSet<&ComponentId> = fresh_ids.iter().collect();
-        fn layers<'o>(output: &'o ExtractionOutput, key: &str) -> Option<&'o [InheritedLayer]> {
-            output.components.get(key).map(|entry| entry.inheritance.as_slice())
-        }
         let mut updated_keys: Vec<&String> = next
             .keys
             .iter()
             .filter(|(id, key)| {
                 fresh.contains(id)
                     || self.keys.get(*id) != Some(*key)
-                    || layers(&self.output, key) != layers(&next.output, key)
+                    || layers_differ(self.output.components.get(*key), next.output.components.get(*key))
             })
             .map(|(_, key)| key)
             .collect();
