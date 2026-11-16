@@ -355,6 +355,7 @@ impl SemanticHook {
             &mut FxHashMap::default(),
         );
         crate::types::semantic::move_notable(&mut answer.entry, &notable);
+        crate::types::semantic::listed_props_leave_layers(&mut answer.entry, true);
         let superseding = Superseding::new(&answer.key, &answer.entry, structural_left);
         drop_superseded(&mut answer.diagnostics, &[superseding]);
         answer.diagnostics.extend(diagnostics);
