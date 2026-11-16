@@ -42,13 +42,21 @@ pub(super) fn resolve_type_alias_chain(
             let mut detached = state.detached();
             let known = resolve_key_set(keys, file_path, mapping, ctx, &mut detached, depth);
             let outer = state.omitted.clone();
-            if let Some(known) = known {
-                let mut all: FxHashSet<String> = outer.as_deref().cloned().unwrap_or_default();
-                all.extend(known);
-                state.omitted = Some(Arc::new(all));
+            let expand_all = state.expand_all;
+            match known {
+                Some(known) => {
+                    let mut all: FxHashSet<String> = outer.as_deref().cloned().unwrap_or_default();
+                    all.extend(known);
+                    state.omitted = Some(Arc::new(all));
+                }
+                // Keys that are not a finite union of string literals (`string`, `string & {}`, a template literal):
+                // what reaches is unknown, so no source of the base collapses (`ResolutionContext::collapses`). It is
+                // listed, and the checker, which knows the keys, answers what reaches.
+                None => state.expand_all = expand_all || ctx.can_collapse(),
             }
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
             state.omitted = outer;
+            state.expand_all = expand_all;
             let Some(omitted) = resolve_key_set_or_warn("Omit", keys, file_path, mapping, ctx, state, depth) else {
                 return chain;
             };

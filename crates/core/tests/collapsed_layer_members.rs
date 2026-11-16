@@ -103,15 +103,15 @@ fn an_omit_that_leaves_a_source_at_its_threshold_lists_what_reaches() {
 #[test]
 fn a_union_layer_keeps_a_prop_that_one_branch_omits_and_another_keeps() {
     let output = run(CollapseInheritedProps::All);
+    // The `Omit` arm lists the 30 that reach it (not past the threshold); the `Big` arm collapses. A listed prop is not
+    // also a layer member, so the layer holds only the `p0` that no listed prop shows.
     let layer = &output.components["WithUnion"].inheritance[0];
     assert_eq!(layer.type_name, "Big");
-    let mut expected = names("p");
-    expected.sort();
-    let mut members = layer.members.clone();
-    members.sort();
-    assert_eq!(members, expected);
-    assert_eq!(layer.total_props, 31);
+    assert_eq!(layer.members, ["p0"]);
+    assert_eq!(layer.total_props, 1);
     assert!(layer.omitted.is_empty());
+    let listed = props(&output, "WithUnion");
+    assert!(names("p").iter().filter(|name| *name != "p0").all(|name| listed.contains(name)), "{listed:?}");
 }
 
 #[test]
