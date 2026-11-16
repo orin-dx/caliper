@@ -56,13 +56,17 @@ No new sh, py or mjs script unless a CI job, the weekly or a documented recipe c
 
 ## Plugins
 
-Start work through these commands so their checks run:
+Start work with `/wisp:work`, or the mode directly so its checks run:
 
-- Options before deciding: `/guide:explore`. Does it work: `/guide:spike`.
-- Bug or review findings: `/guide:fix`. Real feature or shared change: `/guide:build`.
-- Verify or find bugs: `/guide:check`. Commit message: `/guide:ship`.
+- Options before deciding: `/wisp:explore`. Does it work: `/wisp:spike`.
+- Bug or review findings: `/wisp:fix`. Real feature or shared change: `/wisp:build`.
+- Verify or find bugs: `/wisp:check`. Commit, changeset or release: `/wisp:ship`.
 
-Pull requests are opened by Entire from the branch's trail, so `/guide:ship` stops at the commit: push the branch and create or link its trail (`entire trail create`). Do not open the PR with `gh`.
+State the tier, the brief and the evidence bar first; end with the evidence and a "Not verified:" list.
+
+Packs: rust-house, ts-house
+
+Pull requests are opened by Entire from the branch's trail, so `/wisp:ship` stops at the commit: push the branch and create or link its trail (`entire trail create`). Do not open the PR with `gh`.
 
 ## Writing and commits
 
