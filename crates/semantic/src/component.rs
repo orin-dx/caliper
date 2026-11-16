@@ -26,6 +26,8 @@ pub(crate) struct Props {
     pub(crate) props: Vec<Arc<SemanticProp>>,
     /// See [`caliper_docgen_core::types::semantic::SemanticComponent::composes`].
     pub(crate) composes: Option<Vec<String>>,
+    /// See [`caliper_docgen_core::types::semantic::SemanticComponent::whole`].
+    pub(crate) whole: Vec<PropParent>,
 }
 
 /// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
@@ -155,7 +157,11 @@ pub(crate) async fn props_of_type(
                 || target.react_wanted.as_ref().is_none_or(|wanted| wanted.contains(&property.name))
         })
         .collect();
-    let (own, layered) = leave_to_layers(converter, interner, own, target).await?;
+    // Only a source the props type reaches whole can be left to a layer the answer adds (`Layering::kept` is asked with
+    // them), so they are read before what is left to a layer.
+    let (composes, whole) = converter.composes(props_type).await?;
+    let whole = converter.as_parents(whole).await?;
+    let (own, layered) = leave_to_layers(converter, interner, own, &whole, target).await?;
     let references: Vec<_> = own.iter().map(|property| &property.reference).collect();
     let types = if references.is_empty() { Vec::new() } else { converter.types_of_symbols(&references).await? };
 
@@ -213,8 +219,7 @@ pub(crate) async fn props_of_type(
     let mut converted = props.into_iter();
     let props: Vec<Arc<SemanticProp>> =
         layered.into_iter().filter_map(|slot| slot.or_else(|| converted.next().flatten())).collect();
-    let composes = converter.composes(props_type).await?;
-    Ok(Ok(Props { props, composes }))
+    Ok(Ok(Props { props, composes, whole }))
 }
 
 /// Of a component's props `own`, in order, those to convert, and a slot per prop of `own`: `Some` for one the merge
@@ -225,6 +230,7 @@ async fn leave_to_layers(
     converter: &Converter,
     interner: &PropInterner,
     own: Vec<SymbolInfo>,
+    whole: &[PropParent],
     target: &Target,
 ) -> Result<(Vec<SymbolInfo>, Vec<Option<Arc<SemanticProp>>>), CallError> {
     // The merge leaves to a layer only a prop the structural answer does not list: when it lists every prop, where
@@ -244,7 +250,7 @@ async fn leave_to_layers(
         .zip(&declared)
         .map(|(property, declared)| (property.name.as_str(), declared.parent.as_ref(), is_react_declared(property)))
         .collect();
-    let kept = layering.kept(&answer);
+    let kept = layering.kept(&answer, whole);
     if kept.iter().all(|kept| *kept) {
         let slots = vec![None; own.len()];
         return Ok((own, slots));

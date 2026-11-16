@@ -130,6 +130,13 @@ pub struct SemanticComponent {
     /// and `Some` of an empty list says the props type is made of none. `None` says the checker could not tell (a type
     /// it cannot read the bases of), and the structural `composes` stays.
     pub composes: Option<Vec<String>>,
+    /// The interfaces the checker proved the props type reaches whole, each as a prop's `parent` names it: every member
+    /// of one can reach the component, so nothing was selected away. Found as `composes` finds its types, through only
+    /// the edges that keep every member: intersections, bases, and the lib's `Partial`, `Required`, `Readonly` and
+    /// `Omit`. One under a `Pick`, a mapped type, a project alias of either, a conditional or a union is not here. A
+    /// source the structural answer does not read collapses only when it is here (`layer_checker_props`): not proven,
+    /// it is listed.
+    pub whole: Vec<PropParent>,
 }
 
 /// A component the backend left to the structural result, and why.
@@ -418,7 +425,7 @@ fn apply_props(
         .iter()
         .filter(|prop| !prop.react_declared || (!layered && entry.props.contains_key(&prop.name)))
         .collect();
-    let (own, notable) = layer_checker_props(entry, own, cx);
+    let (own, notable) = layer_checker_props(entry, own, &semantic.whole, cx);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
     move_notable(entry, &notable);
@@ -434,36 +441,67 @@ fn apply_props(
 /// its source) is decided by `cx` ([`CollapseContext::collapses`]). [`Layering::kept`] makes the same decision from a
 /// [`LayerFacts`] of `entry`, before the answer's types are converted.
 ///
-/// 1. A prop a collapsed layer names (`InheritedLayer::members`) is left to it, unless the structural answer lists the
-///    prop itself (the component declares it again).
-/// 2. A source only the checker read becomes a collapsed layer when the owner collapses it, asked with the members
-///    that reach the component: the props of the answer whose `parent` is the source, after any `Omit` or `Pick`, each
-///    name once (the structural resolver counts the same; no declared count is asked of the checker). `members` are those props and `totalProps` their number,
-///    what the layer holds. Its notable props move to `notableInherited`, as the structural resolver keeps a collapsed
-///    source's notable members.
-///
-/// Applying it again to the entry it changed gives the same props and layers: a layer made here is then a layer of the
-/// entry, which the first rule follows.
+/// 1. A prop a collapsed layer holds, by (source, name): its `parent` is the layer's source and the layer names it
+///    (`InheritedLayer::members`), is left to it, unless the structural answer lists the prop itself (the component
+///    declares it again), or it is one of the layer's notable members: that one is merged as any prop is (the
+///    component's default, the checker's type and JSDoc) and then moved to `notableInherited`, replacing the structural
+///    entry, as for a layer made here. A prop of the same name another source declares is not the layer's: it is kept.
+/// 2. A source only the checker read becomes a collapsed layer only when the checker proved the props type reaches it
+///    whole (`whole`, [`SemanticComponent::whole`]) and the owner collapses it, asked with the members that reach the
+///    component: the props of the answer whose `parent` is the source, each name once (the structural resolver counts
+///    the same; no declared count is asked of the checker). Never hide on silence: a source reached through a `Pick`, a
+///    mapped type, a project alias of either, a conditional or a union, or one the checker said nothing of, is listed,
+///    whatever its size. `members` are those that reach and `totalProps` their number, what the layer holds. Its notable
+///    props move to `notableInherited`, as the structural resolver keeps a collapsed source's notable members.
 pub(crate) fn layer_checker_props<'a>(
     entry: &mut ComponentEntry,
     props: Vec<&'a Arc<SemanticProp>>,
+    whole: &[PropParent],
     cx: CollapseContext,
 ) -> (Vec<&'a Arc<SemanticProp>>, Vec<(String, PropParent)>) {
-    let (layers, notable) = checker_sources(
+    // The notable members of the layers the entry has (rule 1), then those of the layers made here (rule 2).
+    let of_entry = layer_notable(entry);
+    let (layers, made) = checker_sources(
         &*entry,
         props.iter().map(|prop| (prop.name.as_str(), prop.parent.as_ref(), prop.react_declared)),
+        whole,
         cx,
     );
     entry.inheritance.extend(layers);
-    let layered: rustc_hash::FxHashSet<&str> =
-        entry.inheritance.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
+    let layered: Held<'_> = entry
+        .inheritance
+        .iter()
+        .flat_map(|layer| {
+            layer.members.iter().map(|name| (name.as_str(), layer.type_name.as_str(), layer.file_name.as_str()))
+        })
+        .collect();
     let unconverted = unconverted_type();
     let kept: Vec<&'a Arc<SemanticProp>> = props
         .into_iter()
         .filter(|prop| {
-            layered.is_empty() || keeps(&prop.name, &notable, entry.props.contains_key(&prop.name), &layered)
+            layered.is_empty()
+                || keeps(
+                    &prop.name,
+                    prop.parent.as_ref(),
+                    (&of_entry, &made),
+                    entry.props.contains_key(&prop.name),
+                    &layered,
+                )
         })
         .collect();
+    // A kept notable member of a layer the entry has is merged over its structural entry (of that same source), which
+    // keeps a description or tags only the structural pass has; `move_notable` moves the merged prop back.
+    for (name, source) in &of_entry {
+        if kept.iter().any(|prop| prop.name == *name && prop.parent.as_ref() == Some(source))
+            && !entry.props.contains_key(name)
+            && entry.notable_inherited.get(name).is_some_and(|structural| structural.parent.as_ref() == Some(source))
+            && let Some(structural) = entry.notable_inherited.remove(name)
+        {
+            entry.props.insert(name.clone(), structural);
+        }
+    }
+    let mut notable = of_entry;
+    notable.extend(made);
     // A prop the checker left unconverted is one this decision leaves to a layer ([`Layering::kept`]). Keeping one means
     // the target's layering was made from another structural answer or context than this merge's: it is never merged
     // as a type, so the structural prop stays.
@@ -487,8 +525,30 @@ pub struct LayerFacts {
     parents: Vec<PropParent>,
     /// Each inheritance layer's source, by type name and file.
     sources: Vec<(String, String)>,
-    /// The members of every inheritance layer.
-    members: std::collections::BTreeSet<String>,
+    /// The members of every inheritance layer, each by (name, the layer's type name, its file) ([`Held`]).
+    members: std::collections::BTreeSet<(String, String, String)>,
+    /// The notable members of its collapsed layers it does not list, with their source ([`layer_notable`]).
+    notable: Vec<(String, PropParent)>,
+}
+
+/// The notable members (`className`, `style`, …) of `entry`'s collapsed layers that it does not list itself, each with
+/// its layer's source: the merge merges the checker's answer for each and moves it back to `notableInherited`.
+fn layer_notable(entry: &ComponentEntry) -> Vec<(String, PropParent)> {
+    let notable_names = crate::react_types::notable_html_attrs("");
+    entry
+        .inheritance
+        .iter()
+        .filter(|layer| layer.html_element.is_none())
+        .flat_map(|layer| {
+            layer
+                .members
+                .iter()
+                .filter(|name| notable_names.contains(&name.as_str()) && !entry.props.contains_key(*name))
+                .map(|name| {
+                    (name.clone(), PropParent { name: layer.type_name.clone(), file_name: layer.file_name.clone() })
+                })
+        })
+        .collect()
 }
 
 impl LayerFacts {
@@ -504,7 +564,14 @@ impl LayerFacts {
             listed: entry.props.keys().cloned().collect(),
             parents,
             sources: entry.inheritance.iter().map(|layer| (layer.type_name.clone(), layer.file_name.clone())).collect(),
-            members: entry.inheritance.iter().flat_map(|layer| layer.members.iter().cloned()).collect(),
+            members: entry
+                .inheritance
+                .iter()
+                .flat_map(|layer| {
+                    layer.members.iter().map(|name| (name.clone(), layer.type_name.clone(), layer.file_name.clone()))
+                })
+                .collect(),
+            notable: layer_notable(entry),
         }
     }
 }
@@ -541,20 +608,24 @@ impl Layering {
     /// For each prop of a checker's answer, by name, `parent` and whether `@types/react` declares it, in the answer's
     /// order: whether the merge (`layer_checker_props`) keeps it. The same decision from the same inputs, read from the
     /// [`LayerFacts`] instead of the entry. An `@types/react` prop is always reported kept: whether the merge sees it at
-    /// all is decided by its own filter first.
-    pub fn kept(&self, props: &[(&str, Option<&PropParent>, bool)]) -> Vec<bool> {
-        let (layers, notable) = checker_sources(&self.facts, props.iter().copied(), self.cx);
-        let layered: rustc_hash::FxHashSet<&str> = self
+    /// all is decided by its own filter first. `whole` is the answer's [`SemanticComponent::whole`]: only those sources
+    /// can be left to a layer the answer adds, as in the merge.
+    pub fn kept(&self, props: &[(&str, Option<&PropParent>, bool)], whole: &[PropParent]) -> Vec<bool> {
+        let (layers, made) = checker_sources(&self.facts, props.iter().copied(), whole, self.cx);
+        let layered: Held<'_> = self
             .facts
             .members
             .iter()
-            .map(String::as_str)
-            .chain(layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)))
+            .map(|(name, type_name, file_name)| (name.as_str(), type_name.as_str(), file_name.as_str()))
+            .chain(layers.iter().flat_map(|layer| {
+                layer.members.iter().map(|name| (name.as_str(), layer.type_name.as_str(), layer.file_name.as_str()))
+            }))
             .collect();
         props
             .iter()
-            .map(|(name, _, react_declared)| {
-                *react_declared || keeps(name, &notable, self.facts.listed.contains(*name), &layered)
+            .map(|(name, parent, react_declared)| {
+                *react_declared
+                    || keeps(name, *parent, (&self.facts.notable, &made), self.facts.listed.contains(*name), &layered)
             })
             .collect()
     }
@@ -594,10 +665,11 @@ impl Structural for LayerFacts {
 
 /// The layers a checker's answer adds to `structural`'s, and the notable props they hold, to move to
 /// `notableInherited` ([`layer_checker_props`]'s second rule). `props` are the answer's, by name, `parent` and whether
-/// `@types/react` declares it, in its order.
+/// `@types/react` declares it, in its order. Only a source in `whole` can become a layer (the second rule).
 fn checker_sources<'p>(
     structural: &impl Structural,
     props: impl Iterator<Item = (&'p str, Option<&'p PropParent>, bool)>,
+    whole: &[PropParent],
     cx: CollapseContext,
 ) -> (Vec<InheritedLayer>, Vec<(String, PropParent)>) {
     // Each source the answer names (a prop's `parent` is an interface), in the order it first names it, with the
@@ -615,7 +687,12 @@ fn checker_sources<'p>(
     let mut notable = Vec::new();
     let mut layers = Vec::new();
     for (source, members) in sources {
-        if structural.reads(source) || !cx.collapses(&source.file_name, &source.name, members.len()) {
+        // The one rule: a source the structural answer did not read collapses only when the checker proved the props
+        // type reaches it whole. Not proven (a selection on the way, or nothing said), it is listed.
+        if structural.reads(source)
+            || !whole.contains(source)
+            || !cx.collapses(&source.file_name, &source.name, members.len())
+        {
             continue;
         }
         notable.extend(
@@ -636,10 +713,30 @@ fn checker_sources<'p>(
     (layers, notable)
 }
 
-/// Whether the merge keeps a checker prop named `name`: a notable member of a layer the answer adds, a prop the
-/// structural answer lists itself (`listed`), or one no layer names (`layered`).
-fn keeps(name: &str, notable: &[(String, PropParent)], listed: bool, layered: &rustc_hash::FxHashSet<&str>) -> bool {
-    notable.iter().any(|(notable, _)| notable == name) || listed || !layered.contains(name)
+/// A notable prop's name and the collapsed source it belongs to.
+type Notable = (String, PropParent);
+
+/// The members of collapsed layers, each by (name, the layer's type name, its file): a layer holds a prop only when the
+/// prop's `parent` is the layer's source, never by its name alone.
+type Held<'a> = rustc_hash::FxHashSet<(&'a str, &'a str, &'a str)>;
+
+/// Whether the merge keeps a checker prop named `name` declared in `parent`: a notable member of a layer the entry has
+/// or the answer adds whose source is `parent` (`notable.0`, [`layer_notable`]; `notable.1`), a prop the structural
+/// answer lists itself (`listed`), or one no layer holds as a member of its own source (`layered`). A prop with no
+/// `parent` is no source's member, so no layer holds it.
+fn keeps(
+    name: &str,
+    parent: Option<&PropParent>,
+    notable: (&[Notable], &[Notable]),
+    listed: bool,
+    layered: &Held<'_>,
+) -> bool {
+    let (of_entry, made) = notable;
+    let of_source = |(notable, source): &Notable| notable == name && parent == Some(source);
+    made.iter().any(of_source)
+        || of_entry.iter().any(of_source)
+        || listed
+        || !parent.is_some_and(|parent| layered.contains(&(name, parent.name.as_str(), parent.file_name.as_str())))
 }
 
 /// Moves each merged prop `notable` names from `entry`'s props to its `notableInherited`, when it is the collapsed

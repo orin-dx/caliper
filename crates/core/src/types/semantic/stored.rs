@@ -22,7 +22,7 @@ use crate::types::output::{
 
 /// Bump when the stored shape changes in a way the source fingerprint would not show (it covers this crate's sources,
 /// so in practice any change to these types already discards what an older build stored).
-const STORED_FORMAT: u32 = 1;
+const STORED_FORMAT: u32 = 2;
 
 #[derive(Serialize, Deserialize, PartialEq)]
 struct Header {
@@ -49,6 +49,7 @@ struct StoredComponent {
     key: String,
     props: Vec<u32>,
     composes: Option<Vec<String>>,
+    whole: Vec<(String, String)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -188,6 +189,7 @@ impl SemanticOutcome {
                 key: component.key.clone(),
                 props: held,
                 composes: component.composes.clone(),
+                whole: component.whole.iter().map(|source| (source.name.clone(), source.file_name.clone())).collect(),
             });
         }
         let stored = Stored {
@@ -225,7 +227,16 @@ impl SemanticOutcome {
                         props.get(at).cloned().ok_or_else(|| "a prop index out of range".to_string())
                     })
                     .collect::<Result<_, String>>()?;
-                Ok(SemanticComponent { key: component.key, props: held, composes: component.composes })
+                Ok(SemanticComponent {
+                    key: component.key,
+                    props: held,
+                    composes: component.composes,
+                    whole: component
+                        .whole
+                        .into_iter()
+                        .map(|(name, file_name)| PropParent { name, file_name })
+                        .collect(),
+                })
             })
             .collect::<Result<_, String>>()?;
         Ok(SemanticOutcome {

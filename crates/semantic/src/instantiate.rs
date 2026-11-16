@@ -208,8 +208,8 @@ async fn answer_layered(
             }
         };
         match read {
-            Ok(component::Props { props, composes }) => {
-                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes });
+            Ok(component::Props { props, composes, whole }) => {
+                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes, whole });
             }
             Err(reason) => outcome.fallbacks.push(fallback_of(target, &reason)),
         }
