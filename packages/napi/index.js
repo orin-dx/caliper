@@ -844,6 +844,7 @@ module.exports.initializeSession = nativeBinding.initializeSession
 module.exports.initializeSessionIndex = nativeBinding.initializeSessionIndex
 module.exports.isResolutionConfig = nativeBinding.isResolutionConfig
 module.exports.resolutionConfigFiles = nativeBinding.resolutionConfigFiles
+module.exports.sessionCancel = nativeBinding.sessionCancel
 module.exports.sessionCheckerSettled = nativeBinding.sessionCheckerSettled
 module.exports.sessionComponentAnswers = nativeBinding.sessionComponentAnswers
 module.exports.sessionComponentToon = nativeBinding.sessionComponentToon
