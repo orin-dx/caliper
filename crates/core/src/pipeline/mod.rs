@@ -256,7 +256,12 @@ pub(super) fn merge_parsed_dts_file(
 pub(super) fn resolve_guarded(
     mappings: &[&ComponentMapping],
     ctx: &ResolutionContext,
-) -> Vec<(ComponentEntry, ResolvedDiagnostics, crate::resolver::Dependencies)> {
+) -> Vec<(
+    ComponentEntry,
+    ResolvedDiagnostics,
+    crate::resolver::Dependencies,
+    Option<std::sync::Arc<crate::relevance::Inputs>>,
+)> {
     mappings
         .par_iter()
         .copied()
@@ -269,21 +274,6 @@ pub(super) fn resolve_guarded(
                 }
 
                 crate::resolver::resolve_component_tracked(mapping, ctx)
-            })
-            .map(|(mut entry, mut diagnostics, deps)| {
-                // Relevance is evidence beside the answer: a panic gathering it leaves `relevance` empty (unknown), never
-                // the resolved component lost.
-                let label = format!("relevance:{}", mapping.component_name);
-                match crate::panic_guard::contain_panic(&label, || {
-                    crate::resolver::relevance_inputs::evidence(mapping, ctx)
-                }) {
-                    Ok(evidence) => {
-                        entry.relevance_evidence = evidence;
-                        crate::relevance::annotate(&mut entry);
-                    }
-                    Err(diagnostic) => diagnostics.own.push(diagnostic),
-                }
-                (entry, diagnostics, deps)
             })
             .unwrap_or_else(|diag| {
                 let stub = ComponentEntry {
@@ -300,13 +290,11 @@ pub(super) fn resolve_guarded(
                     detected_by: mapping.rule,
                     exported: mapping.exported(),
                     exports: mapping.exports.clone(),
-                    relevance: Default::default(),
-                    relevance_evidence: Default::default(),
                 };
                 // A panicked resolution re-runs on any edit to its own file.
                 let mut deps = crate::resolver::Dependencies::default();
                 deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
-                (stub, ResolvedDiagnostics { own: vec![diag], shared: Vec::new() }, deps)
+                (stub, ResolvedDiagnostics { own: vec![diag], shared: Vec::new() }, deps, None)
             })
         })
         .collect()

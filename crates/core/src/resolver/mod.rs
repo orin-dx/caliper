@@ -289,7 +289,7 @@ pub struct ResolutionContext {
     /// by the contexts derived from this one, which have the same `global`.
     mapping_index: Arc<std::sync::OnceLock<FxHashMap<CompactString, Vec<usize>>>>,
     /// Every component's call-site counts (ADR 0028), built on first use and shared like `mapping_index`.
-    pub(crate) relevance_sites: Arc<std::sync::OnceLock<relevance_inputs::ProjectSites>>,
+    pub(crate) relevance_sites: Arc<std::sync::OnceLock<Arc<relevance_inputs::ProjectSites>>>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
     /// `resolve_cva_variant_props` (VariantProps<typeof X>) can do an O(1)
@@ -931,10 +931,18 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
 pub(crate) fn resolve_component_tracked(
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
-) -> (ComponentEntry, ResolvedDiagnostics, Dependencies) {
-    let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component_shared(mapping, ctx));
+) -> (ComponentEntry, ResolvedDiagnostics, Dependencies, Option<Arc<crate::relevance::Inputs>>) {
+    let ((entry, mut diagnostics, evidence), mut deps) = deps::recording(|| {
+        let (entry, diagnostics) = resolve_component_shared(mapping, ctx);
+        // The evidence reads other files (the props type's declarations, a forwarding target's props), so it is read
+        // while the answer's dependencies are recorded. A panic gathering it leaves it unknown, never the answer lost.
+        let label = format!("relevance:{}", mapping.component_name);
+        let evidence = crate::panic_guard::contain_panic(&label, || relevance_inputs::evidence(mapping, ctx));
+        (entry, diagnostics, evidence)
+    });
     deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
-    (entry, diagnostics, deps)
+    let evidence = evidence.map_err(|diagnostic| diagnostics.own.push(diagnostic)).ok();
+    (entry, diagnostics, deps, evidence)
 }
 
 /// Resolve a `ComponentMapping` to a complete `ComponentEntry`.
@@ -962,8 +970,6 @@ fn unpublished_entry(mapping: &ComponentMapping) -> ComponentEntry {
         detected_by: mapping.rule,
         exported: mapping.exported(),
         exports: mapping.exports.clone(),
-        relevance: Default::default(),
-        relevance_evidence: Default::default(),
     }
 }
 
@@ -1133,8 +1139,6 @@ pub(crate) fn resolve_component_shared(
             detected_by: mapping.rule,
             exported: mapping.exported(),
             exports: mapping.exports.clone(),
-            relevance: Default::default(),
-            relevance_evidence: Default::default(),
         },
         ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics },
     )

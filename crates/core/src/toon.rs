@@ -346,8 +346,6 @@ mod tests {
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
             exported: true,
             exports: Vec::new(),
-            relevance: Default::default(),
-            relevance_evidence: Default::default(),
         };
 
         let toon = render_component_toon(&entry);
@@ -600,8 +598,6 @@ mod tests {
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
             exported: true,
             exports: Vec::new(),
-            relevance: Default::default(),
-            relevance_evidence: Default::default(),
         }
     }
 
@@ -665,6 +661,7 @@ mod tests {
             html_element: None,
             total_props: members.len() as u32,
             members,
+            used: Vec::new(),
         };
         let many: Vec<String> = (0..30).map(|n| format!("p{n}")).collect();
         let entry = entry_with(
@@ -692,6 +689,7 @@ mod tests {
             html_element: Some("div".into()),
             total_props: 3,
             members: vec![],
+            used: Vec::new(),
         };
         let toon = render_component_toon(&entry_with(vec![], vec![layer]));
         assert!(toon.contains("inheritance[1] {typeName,htmlElement,totalProps}:\n    Base,div,3\n"), "{toon}");

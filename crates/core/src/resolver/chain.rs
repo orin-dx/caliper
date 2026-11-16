@@ -95,6 +95,7 @@ fn known_chain(
                 html_element: Some(element),
                 total_props: 0,
                 members: vec![],
+                used: Vec::new(),
             };
             ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
         }
@@ -115,6 +116,7 @@ fn known_chain(
                     html_element: Some(element),
                     total_props: 0,
                     members: vec![],
+                    used: Vec::new(),
                 });
             }
             ResolvedChain { inheritance, ..ResolvedChain::empty() }
@@ -398,6 +400,7 @@ pub(super) fn resolve_props_chain(
                 html_element: Some(element.to_owned()),
                 total_props: u32::try_from(all_props.len()).unwrap_or(u32::MAX),
                 members: vec![],
+                used: Vec::new(),
             });
         }
         chain.props = all_props;
@@ -470,6 +473,7 @@ fn collapsed_source(
         html_element: None,
         total_props: u32::try_from(members.len()).unwrap_or(u32::MAX),
         members,
+        used: Vec::new(),
     };
     ResolvedChain { inheritance: vec![layer], notable, ..ResolvedChain::empty() }
 }

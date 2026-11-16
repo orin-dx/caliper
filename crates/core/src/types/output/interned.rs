@@ -358,8 +358,10 @@ struct InternedLayer<'a> {
 impl Serialize for InternedLayer<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Destructured so a new field fails to compile here instead of going missing from the JSON.
-        let InheritedLayer { type_name, file_name, omitted: _, html_element, total_props, members: _ } = self.layer;
-        let mut out = serializer.serialize_struct("InheritedLayer", 5 + usize::from(self.members.is_some()))?;
+        let InheritedLayer { type_name, file_name, omitted: _, html_element, total_props, members: _, used } =
+            self.layer;
+        let fields = 5 + usize::from(self.members.is_some()) + usize::from(!used.is_empty());
+        let mut out = serializer.serialize_struct("InheritedLayer", fields)?;
         out.serialize_field("typeName", type_name)?;
         out.serialize_field("fileName", file_name)?;
         out.serialize_field("omitted", &self.omitted)?;
@@ -367,6 +369,10 @@ impl Serialize for InternedLayer<'_> {
         out.serialize_field("totalProps", total_props)?;
         if let Some(members) = &self.members {
             out.serialize_field("members", members)?;
+        }
+        // A component's own few names: written as they are, not interned.
+        if !used.is_empty() {
+            out.serialize_field("used", used)?;
         }
         out.end()
     }
@@ -407,8 +413,6 @@ impl Serialize for InternedComponent<'_> {
             detected_by,
             exported,
             exports,
-            relevance,
-            relevance_evidence: _,
         } = self.entry;
         let mut out = serializer.serialize_struct("ComponentEntry", 14)?;
         out.serialize_field("displayName", display_name)?;
@@ -427,7 +431,6 @@ impl Serialize for InternedComponent<'_> {
         out.serialize_field("detectedBy", detected_by)?;
         out.serialize_field("exported", exported)?;
         out.serialize_field("exports", exports)?;
-        out.serialize_field("relevance", relevance)?;
         out.end()
     }
 }

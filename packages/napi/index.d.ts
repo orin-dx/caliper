@@ -15,6 +15,11 @@ export interface InheritedLayer {
   totalProps: number
   /** For a collapsed source, the names of the props it declares. Absent when the layer's props are expanded. */
   members?: string[]
+  /**
+   * The members of a collapsed layer relevance evidence puts forward (ADR 0028): ambient members consumers pass at the
+   * call-site floor or the body reads, in the order of `members`. Absent when none is.
+   */
+  used?: string[]
 }
 
 /** An inheritance layer in the canonical JSON: `omitted` is the id of a list in the output's `nameLists`. */
@@ -191,15 +196,7 @@ export interface ComponentEntry {
   exported: boolean
   /** How its module exports it, in source order; `exported` is whether there are any. */
   exports: ComponentExport[]
-  /**
-   * Where relevance evidence puts each listed prop, and each member of a collapsed layer it puts forward (ADR 0028).
-   * A member left out stays in its layer.
-   */
-  relevance: Record<string, Relevance>
 }
-
-/** Where relevance evidence puts a member (ADR 0028): a typed row, a `used` name in its layer, left in its layer, or, with incomplete evidence, as without evidence. */
-export type Relevance = 'row' | 'used' | 'collapsed' | 'asToday'
 
 /**
  * One way a module exports a component: `Card` for `export function Card` and for `export { _Card as Card }`,

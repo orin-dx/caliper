@@ -447,8 +447,6 @@ mod serde_key_casing_tests {
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
             exported: true,
             exports: Vec::new(),
-            relevance: Default::default(),
-            relevance_evidence: Default::default(),
         };
 
         let v = serde_json::to_value(&entry).expect("serialize");

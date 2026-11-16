@@ -2806,7 +2806,7 @@ fn resolve_shared_with(
     let mut results = BTreeMap::new();
     for name in components {
         let fresh = parsed_ctx(dir, files, options);
-        let flat = |(entry, diagnostics, deps): (ComponentEntry, ResolvedDiagnostics, deps::Dependencies)| {
+        let flat = |(entry, diagnostics, deps, _): (ComponentEntry, ResolvedDiagnostics, deps::Dependencies, _)| {
             (entry, diagnostics.flatten(), deps)
         };
         let alone = flat(resolve_component_tracked(&mapping(&fresh, name), &fresh));

@@ -10,6 +10,8 @@
 
 use std::collections::BTreeSet;
 
+use camino::{Utf8Path, Utf8PathBuf};
+
 use super::Member;
 use crate::types::collected::{CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, ExtendsRef};
 use crate::types::output::{InheritedLayer, ParsedProp, PropParent, PropType};
@@ -37,42 +39,47 @@ pub(crate) struct PropsType {
     picked: BTreeSet<String>,
     /// The props the signature gives a default: a destructuring default or `defaultProps`.
     defaulted: BTreeSet<String>,
+    /// The members the interfaces it extends or intersects declare outside the ambient declarations.
+    inherited: BTreeSet<String>,
 }
 
+/// Finds a name written in a file: the declaration it names and the file declaring it, through imports.
+pub(crate) trait Lookup<'a>: Fn(&str, &Utf8Path) -> Option<(Declaration<'a>, Utf8PathBuf)> {}
+
+impl<'a, F: Fn(&str, &Utf8Path) -> Option<(Declaration<'a>, Utf8PathBuf)>> Lookup<'a> for F {}
+
 impl PropsType {
-    /// The members the props type writes itself, as a lane hands a forwarding target's props to `forwarding`: own and
-    /// not ambient, in name order. Read from the syntax, so the same in both lanes.
-    pub(crate) fn own_members(&self) -> Vec<Member> {
-        self.own.iter().map(|name| Member { name: name.clone(), own: true, ..Member::default() }).collect()
+    /// The members a forwarding target's props type reaches outside the ambient declarations, as `forwarding` takes them:
+    /// its own, its picked keys and those of the interfaces it extends or intersects, in name order. Read from the
+    /// syntax, so the same in both lanes, and known before the target is resolved.
+    pub(crate) fn reachable_members(&self) -> Vec<Member> {
+        let names: BTreeSet<&String> = self.own.iter().chain(&self.picked).chain(&self.inherited).collect();
+        names.into_iter().map(|name| Member { name: name.clone(), own: true, ..Member::default() }).collect()
     }
 
-    /// Reads the props type of `mapping`, finding each name it writes with `lookup`. A base it extends or intersects
-    /// is not entered: its members are inherited, and the lanes report them.
-    pub(crate) fn read<'a>(mapping: &ComponentMapping, lookup: impl Fn(&str) -> Option<Declaration<'a>>) -> Self {
+    /// Reads the props type of `mapping`, finding each name it writes with `lookup` from the file that writes it (the
+    /// component's, then the declaring file of each declaration it reaches). The members of a base it extends or
+    /// intersects are inherited: the lanes report them, and only [`PropsType::reachable_members`] reads them.
+    pub(crate) fn read<'a>(mapping: &ComponentMapping, lookup: impl Lookup<'a>) -> Self {
         let mut read = Self { defaulted: mapping.param_defaults.keys().cloned().collect(), ..Self::default() };
+        let from = mapping.file_path.as_path();
         // `props: Pick<Base, Keys>` is the mapping's own name and arguments, not a declaration to look up.
-        read.pick(&mapping.props_type_name, &mapping.props_type_args, &lookup);
-        match lookup(&mapping.props_type_name) {
-            Some(Declaration::Interface(interface)) => {
+        read.pick(&mapping.props_type_name, &mapping.props_type_args, from, &lookup);
+        match lookup(&mapping.props_type_name, from) {
+            Some((Declaration::Interface(interface), _)) => {
                 read.interface = Some((interface.name.to_string(), interface.file_path.to_string()));
                 read.own.extend(interface.props.iter().map(|prop| prop.name.clone()));
-                for base in &interface.extends {
-                    if let ExtendsRef::SameFile { name, type_args }
-                    | ExtendsRef::Imported { local_name: name, type_args, .. } = base
-                    {
-                        read.pick(name, type_args, &lookup);
-                    }
-                }
+                read.bases(interface, &lookup, 0);
             }
-            Some(Declaration::Alias(alias)) => match alias {
-                CollectedTypeAlias::Pick { keys, .. } => read.keys(keys, &lookup, 0),
+            Some((Declaration::Alias(alias), declared)) => match alias {
+                CollectedTypeAlias::Pick { keys, .. } => read.keys(keys, &declared, &lookup, 0),
                 // A union's arms are each the props type (a discriminated union's fields are its own).
                 CollectedTypeAlias::Intersection { members, .. } | CollectedTypeAlias::Union { members, .. } => {
-                    members.iter().for_each(|member| read.part(member, &lookup));
+                    members.iter().for_each(|member| read.part(member, &declared, &lookup));
                 }
                 CollectedTypeAlias::Passthrough { target: part, .. }
                 | CollectedTypeAlias::Partial { base: part, .. }
-                | CollectedTypeAlias::Required { base: part, .. } => read.part(part, &lookup),
+                | CollectedTypeAlias::Required { base: part, .. } => read.part(part, &declared, &lookup),
                 CollectedTypeAlias::Omit { .. } | CollectedTypeAlias::LiteralUnion { .. } => {}
             },
             None => {}
@@ -80,47 +87,81 @@ impl PropsType {
         read
     }
 
-    /// One part of the props type: a type literal's fields are its own, an intersection's parts are parts, a `Pick`
-    /// names its keys; any other name is a base.
-    fn part<'a>(&mut self, part: &CollectedType, lookup: &impl Fn(&str) -> Option<Declaration<'a>>) {
+    /// The members `interface`'s bases declare outside the ambient declarations, through their own bases, each base
+    /// found from the file that names it; and the keys a `Pick` among them names.
+    fn bases<'a>(&mut self, interface: &CollectedInterface, lookup: &impl Lookup<'a>, depth: u8) {
+        for base in &interface.extends {
+            let (ExtendsRef::SameFile { name, type_args } | ExtendsRef::Imported { local_name: name, type_args, .. }) =
+                base
+            else {
+                continue;
+            };
+            self.pick(name, type_args, &interface.file_path, lookup);
+            self.inherit(name, &interface.file_path, lookup, depth);
+        }
+    }
+
+    /// The members the interface `name` written in `from` declares and inherits, unless it is ambient.
+    fn inherit<'a>(&mut self, name: &str, from: &Utf8Path, lookup: &impl Lookup<'a>, depth: u8) {
+        if depth >= MAX_ALIAS_DEPTH {
+            return;
+        }
+        if let Some((Declaration::Interface(base), declared)) = lookup(name, from)
+            && !crate::types::ambient::is_dom_file(declared.as_str())
+        {
+            self.inherited.extend(base.props.iter().map(|prop| prop.name.clone()));
+            self.bases(base, lookup, depth + 1);
+        }
+    }
+
+    /// One part of the props type written in `from`: a type literal's fields are its own, an intersection's parts are
+    /// parts, a `Pick` names its keys; any other name is a base.
+    fn part<'a>(&mut self, part: &CollectedType, from: &Utf8Path, lookup: &impl Lookup<'a>) {
         match part {
             CollectedType::Object(fields) | CollectedType::Callable { fields, .. } => {
                 self.own.extend(fields.iter().map(|field| field.name.clone()));
             }
             CollectedType::Intersection(parts) | CollectedType::Union(parts) => {
-                parts.iter().for_each(|part| self.part(part, lookup));
+                parts.iter().for_each(|part| self.part(part, from, lookup));
             }
-            CollectedType::Named { name, args } => self.pick(name, args, lookup),
+            CollectedType::Named { name, args } => {
+                self.pick(name, args, from, lookup);
+                self.inherit(name, from, lookup, 0);
+            }
             _ => {}
         }
     }
 
-    /// The keys of `name<args>` when it is `Pick<Base, Keys>`.
-    fn pick<'a>(&mut self, name: &str, args: &[CollectedType], lookup: &impl Fn(&str) -> Option<Declaration<'a>>) {
+    /// The keys of `name<args>` written in `from` when it is `Pick<Base, Keys>`.
+    fn pick<'a>(&mut self, name: &str, args: &[CollectedType], from: &Utf8Path, lookup: &impl Lookup<'a>) {
         if let ("Pick", [_, keys]) = (name, args) {
-            self.keys(keys, lookup, 0);
+            self.keys(keys, from, lookup, 0);
         }
     }
 
-    /// The string literal keys `keys` names, through unions and aliases.
-    fn keys<'a>(&mut self, keys: &CollectedType, lookup: &impl Fn(&str) -> Option<Declaration<'a>>, depth: u8) {
+    /// The string literal keys `keys` written in `from` names, through unions and aliases, each alias found from the
+    /// file that names it.
+    fn keys<'a>(&mut self, keys: &CollectedType, from: &Utf8Path, lookup: &impl Lookup<'a>, depth: u8) {
         match keys {
             CollectedType::StringLiteral(key) => {
                 self.picked.insert(key.to_string());
             }
-            CollectedType::Union(keys) => keys.iter().for_each(|key| self.keys(key, lookup, depth)),
-            CollectedType::Named { name, args } if args.is_empty() && depth < MAX_ALIAS_DEPTH => match lookup(name) {
-                Some(Declaration::Alias(CollectedTypeAlias::LiteralUnion { members, .. })) => {
-                    self.picked.extend(members.iter().cloned());
+            CollectedType::Union(keys) => keys.iter().for_each(|key| self.keys(key, from, lookup, depth)),
+            CollectedType::Named { name, args } if args.is_empty() && depth < MAX_ALIAS_DEPTH => {
+                let Some((Declaration::Alias(alias), declared)) = lookup(name, from) else { return };
+                match alias {
+                    CollectedTypeAlias::LiteralUnion { members, .. } => self.picked.extend(members.iter().cloned()),
+                    CollectedTypeAlias::Passthrough { target, .. } => self.keys(target, &declared, lookup, depth + 1),
+                    CollectedTypeAlias::Union { members, .. } => {
+                        members.iter().for_each(|key| self.keys(key, &declared, lookup, depth + 1));
+                    }
+                    CollectedTypeAlias::Pick { .. }
+                    | CollectedTypeAlias::Omit { .. }
+                    | CollectedTypeAlias::Intersection { .. }
+                    | CollectedTypeAlias::Partial { .. }
+                    | CollectedTypeAlias::Required { .. } => {}
                 }
-                Some(Declaration::Alias(CollectedTypeAlias::Passthrough { target, .. })) => {
-                    self.keys(target, lookup, depth + 1);
-                }
-                Some(Declaration::Alias(CollectedTypeAlias::Union { members, .. })) => {
-                    members.iter().for_each(|key| self.keys(key, lookup, depth + 1));
-                }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
@@ -141,8 +182,8 @@ pub(crate) fn members<'a>(
     props_type: &PropsType,
     rows: impl IntoIterator<Item = &'a ParsedProp>,
     layers: &[InheritedLayer],
-    ambient: impl Fn(&str) -> bool,
 ) -> Vec<Member> {
+    let ambient = crate::types::ambient::is_dom_file;
     let layered: BTreeSet<&str> = layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
     let mut listed = BTreeSet::new();
     let mut members = Vec::new();
@@ -246,18 +287,20 @@ mod tests {
         export function ByPickedBase(props: Picks) { return null; }\n\
         export function ByUnion(props: Either) { return null; }\n";
 
-    fn lookup<'a>(data: &'a SourceData, path: &Utf8Path, name: &str) -> Option<Declaration<'a>> {
+    fn lookup<'a>(data: &'a SourceData, path: &Utf8Path, name: &str) -> Option<(Declaration<'a>, Utf8PathBuf)> {
         let key = format!("{path}:{name}");
         data.interfaces
             .get(&key)
             .map(Declaration::Interface)
             .or_else(|| data.type_aliases.get(&key).map(Declaration::Alias))
+            .map(|declaration| (declaration, path.to_owned()))
     }
 
     /// The props type of each component of `text`, read from its syntax.
     fn props_types(path: &Utf8Path, text: &str) -> Vec<(String, PropsType)> {
         let data = parse_file(path, text);
-        let read = |mapping: &ComponentMapping| PropsType::read(mapping, |name| lookup(&data, path, name));
+        let read =
+            |mapping: &ComponentMapping| PropsType::read(mapping, |name: &str, _: &Utf8Path| lookup(&data, path, name));
         data.component_mappings.iter().map(|mapping| (mapping.component_name.clone(), read(mapping))).collect()
     }
 
@@ -273,11 +316,8 @@ mod tests {
 
     /// What `decide` makes of the props type's evidence alone, the body known to read nothing.
     fn decided(members: Vec<Member>) -> Shown {
-        decide(&Evidence { members, body: Some(Body::default()), ..Evidence::default() })
-    }
-
-    fn not_ambient(_: &str) -> bool {
-        false
+        let call_sites = &crate::relevance::NO_CALL_SITES;
+        decide(&Evidence { members: &members, body: Some(&Body::default()), call_sites })
     }
 
     #[test]
@@ -290,8 +330,9 @@ mod tests {
             html_element: None,
             total_props: 3,
             members: vec!["size".to_owned(), "tone".to_owned(), "p0".to_owned()],
+            used: Vec::new(),
         };
-        let members = members(&props_type("ByIntersection"), [], &[layer], not_ambient);
+        let members = members(&props_type("ByIntersection"), [], &[layer]);
         let size = members.iter().find(|member| member.name == "size").unwrap();
         assert!(size.own && size.overrides, "{size:?}");
         let shown = decided(members);
@@ -365,7 +406,7 @@ mod tests {
 
     fn evidence(read: &PropsType, entry: &ComponentEntry) -> Vec<Member> {
         let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
-        members(read, rows, &entry.inheritance, not_ambient)
+        members(read, rows, &entry.inheritance)
     }
 
     #[test]
@@ -408,7 +449,7 @@ mod tests {
             Some(PropParent { name: "Base".into(), file_name: "/base.ts".into() }),
             Vec::new(),
         );
-        let members = members(&PropsType::default(), [&documented], &[], not_ambient);
+        let members = members(&PropsType::default(), [&documented], &[]);
         assert!(members[0].documented && members[0].literal_union && !members[0].own, "{members:?}");
         assert_eq!(decided(members).collapsed, ["tone"]);
         assert!(!is_literal_union(&PropType::Union(vec![PropType::String, PropType::StringLiteral("a".into())])));
@@ -424,7 +465,42 @@ mod tests {
             None,
             vec![react],
         );
-        let ambient = |file: &str| file.contains("/@types/react/");
-        assert!(super::members(&PropsType::default(), [&handler], &[], ambient)[0].ambient);
+        assert!(super::members(&PropsType::default(), [&handler], &[])[0].ambient);
+    }
+
+    /// Two files: the component's, and one declaring its props type and what that type names.
+    fn across_files(component: &str, declarations: &str) -> PropsType {
+        let (here, there) = (Utf8Path::new("/fixtures/Button.tsx"), Utf8Path::new("/fixtures/props.ts"));
+        let (component, declarations) = (parse_file(here, component), parse_file(there, declarations));
+        // Only the props type is imported; every other name is found in the file that writes it.
+        let lookup = |name: &str, from: &Utf8Path| {
+            let (data, path) = match (from == here, name) {
+                (true, "Props") => (&declarations, there),
+                (true, _) => (&component, here),
+                (false, _) => (&declarations, there),
+            };
+            lookup(data, path, name)
+        };
+        PropsType::read(&component.component_mappings[0], lookup)
+    }
+
+    #[test]
+    fn a_pick_of_an_imported_props_type_finds_its_keys_where_the_props_type_is_declared() {
+        let read = across_files(
+            "import type { Props } from './props';\nexport function Button(props: Props) { return null; }\n",
+            "interface Base { a?: string; b?: string; c?: string }\ntype Keys = 'a' | 'b';\n\
+             export type Props = Pick<Base, Keys>;\n",
+        );
+        assert_eq!(read.picked, BTreeSet::from(["a".to_owned(), "b".to_owned()]));
+    }
+
+    #[test]
+    fn a_forwarding_target_that_only_extends_a_base_reaches_the_bases_members() {
+        let read = across_files(
+            "import type { Props } from './props';\nexport function Inner(props: Props) { return null; }\n",
+            "interface Base { tone?: string; size?: string }\nexport interface Props extends Base {}\n",
+        );
+        let names: Vec<String> = read.reachable_members().into_iter().map(|member| member.name).collect();
+        assert_eq!(names, ["size", "tone"]);
     }
 }

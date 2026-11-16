@@ -1,10 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Relevance evidence reaches the output (ADR 0028, slice T7): each listed prop carries where `decide` puts it, and a
-//! member of a collapsed layer that evidence puts forward is named with its placement, while the props listed and the
-//! layers stay as they were.
+//! Relevance evidence reaches the output (ADR 0028, slice T7): a collapsed layer names in `used` its ambient members that
+//! consumers pass at the floor or the body reads, while the props listed and the layers' members stay as they were.
 
 use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, extract};
-use caliper_docgen_core::types::{ExtractionOutput, Relevance};
+use caliper_docgen_core::types::ExtractionOutput;
 use camino::Utf8PathBuf;
 
 /// A component inheriting a 33-member source declared under an `@types/react` path (ambient by path) and a 33-member
@@ -50,25 +49,65 @@ fn a_collapsed_layer_names_the_ambient_members_consumers_pass() {
     let listed: Vec<&str> = button.props.keys().map(String::as_str).collect();
     assert_eq!(listed, ["tone"], "the listed props do not change");
     assert!(button.inheritance.iter().any(|layer| layer.members.iter().any(|m| m == "d1")), "{:?}", button.inheritance);
-    let relevance = &button.relevance;
-    assert_eq!(relevance.get("tone"), Some(&Relevance::Row), "own: {relevance:?}");
-    // Passed at every call site: a typed row, ambient or not.
-    assert_eq!(relevance.get("d1"), Some(&Relevance::Row), "{relevance:?}");
-    assert_eq!(relevance.get("b1"), Some(&Relevance::Row), "{relevance:?}");
-    // Read in the body: an ambient member is a `used` name, a project one a row.
-    assert_eq!(relevance.get("d2"), Some(&Relevance::Used), "{relevance:?}");
-    assert_eq!(relevance.get("b2"), Some(&Relevance::Row), "{relevance:?}");
-    // No signal: left in its layer, not named.
-    assert_eq!(relevance.get("d3"), None, "{relevance:?}");
-    assert_eq!(relevance.get("b3"), None, "{relevance:?}");
+    let used = |type_name: &str| -> Vec<&str> {
+        let layer = button.inheritance.iter().find(|layer| layer.type_name == type_name).unwrap();
+        layer.used.iter().map(String::as_str).collect()
+    };
+    // Ambient and passed at every call site, or read in the body: a `used` name in its layer, in the layer's order.
+    assert_eq!(used("DomBits"), ["d1", "d2"]);
+    // A project member put forward is a typed row, never a `used` name; with nothing put forward, none is named.
+    assert_eq!(used("Big"), [] as [&str; 0]);
 }
 
 #[test]
-fn the_canonical_json_writes_relevance_at_schema_version_8() {
+fn the_canonical_json_writes_used_at_schema_version_8() {
     let (_dir, output) = extract_fixture();
     let json: serde_json::Value =
         serde_json::from_str(&caliper_docgen_core::pipeline::extraction_output_to_json(&output).unwrap()).unwrap();
     assert_eq!(json["schemaVersion"], 8);
-    assert_eq!(json["components"]["Button"]["relevance"]["d2"], "used");
-    assert_eq!(json["components"]["Button"]["relevance"]["tone"], "row");
+    let layers = json["components"]["Button"]["inheritance"].as_array().unwrap();
+    let dom = layers.iter().find(|layer| layer["typeName"] == "DomBits").unwrap();
+    assert_eq!(dom["used"], serde_json::json!(["d1", "d2"]));
+    assert!(json["components"]["Button"].get("relevance").is_none());
+    let big = layers.iter().find(|layer| layer["typeName"] == "Big").unwrap();
+    assert!(big.get("used").is_none(), "an empty `used` is not written");
+}
+
+/// A file-level element whose tag is a local binding of the same name as an imported component is not a call site of
+/// that component: usages are keyed by binding, and an inner binding resolves to nothing.
+#[test]
+fn a_local_binding_named_like_an_imported_component_is_not_its_call_site() {
+    let dir = tempfile::Builder::new().prefix("RelevanceScope").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    let fields: String = (0..33).map(|i| format!("d{i}?: string; ")).collect();
+    std::fs::create_dir_all(root.join("vendor/@types/react")).unwrap();
+    std::fs::write(root.join("vendor/@types/react/dom.ts"), format!("export interface DomBits {{ {fields}}}\n"))
+        .unwrap();
+    std::fs::write(
+        root.join("Button.tsx"),
+        "import type { DomBits } from './vendor/@types/react/dom';\n\
+         export interface ButtonProps extends DomBits { tone?: string }\n\
+         export function Button(props: ButtonProps) { return null; }\n",
+    )
+    .unwrap();
+    let local = "function helper() { const Button = (p: { d1?: string }) => null; \
+                 return [<Button d1=\"x\" />, <Button d1=\"x\" />, <Button d1=\"x\" />]; }";
+    std::fs::write(
+        root.join("Page.tsx"),
+        format!(
+            "import {{ Button }} from './Button';\n{local}\nexport const a = <Button d2=\"x\" />;\n\
+                 export const b = <Button d2=\"x\" />;\nexport const c = <Button d2=\"x\" />;\nhelper();\n"
+        ),
+    )
+    .unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        use_cache: false,
+        html_attributes: HtmlAttributeMode::None,
+        collapse_inherited_props: CollapseInheritedProps::All,
+        ..PipelineOptions::default()
+    };
+    let output = extract(&options);
+    let layer = &output.components["Button"].inheritance[0];
+    assert_eq!(layer.used, ["d2"], "the imported binding's sites only: {layer:?}");
 }

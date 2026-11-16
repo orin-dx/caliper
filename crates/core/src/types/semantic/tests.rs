@@ -38,8 +38,6 @@ fn output() -> ExtractionOutput {
         detected_by: DetectionRule::FunctionDeclaration,
         exported: true,
         exports: vec![ComponentExport::named(name)],
-        relevance: Default::default(),
-        relevance_evidence: Default::default(),
     };
     ExtractionOutput {
         components: BTreeMap::from([
@@ -758,6 +756,7 @@ fn layered_output(members: &[Arc<SemanticProp>]) -> ExtractionOutput {
         html_element: None,
         total_props: u32::try_from(members.len() + 1).unwrap(),
         members: members.iter().map(|prop| prop.name.clone()).chain(["disabled".to_string()]).collect(),
+        used: Vec::new(),
     });
     entry.notable_inherited.insert("disabled".to_string(), structural("disabled", "", None));
     out

@@ -380,7 +380,6 @@ fn apply_props(
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
     move_notable(entry, &notable);
-    crate::relevance::annotate(entry);
     merged
 }
 
@@ -651,6 +650,7 @@ fn checker_sources<'p>(
             html_element: None,
             total_props: u32::try_from(members.len()).unwrap_or(u32::MAX),
             members,
+            used: Vec::new(),
         });
     }
     (layers, notable)

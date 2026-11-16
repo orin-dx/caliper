@@ -48,13 +48,9 @@ impl Fixture {
     fn decide(&self, file: &str, name: &str, members: Vec<Member>) -> Shown {
         let forwarding = self.forwarding(file, name);
         let facts = self.component(file, name).body.clone().unwrap_or_default();
-        let body = Body {
-            reads: facts.reads,
-            defaulted: Vec::new(),
-            elements: forwarding.elements,
-            handed_on: forwarding.handed_on,
-        };
-        decide(&super::super::Evidence { members, body: Some(body), ..Default::default() })
+        let body = Body { reads: facts.reads, elements: forwarding.elements, handed_on: forwarding.handed_on };
+        let call_sites = &super::super::NO_CALL_SITES;
+        decide(&super::super::Evidence { members: &members, body: Some(&body), call_sites })
     }
 }
 
@@ -174,9 +170,8 @@ fn an_attribute_valued_with_an_own_prop_adds_nothing() {
     for jsx in ["<Inner tone={label} />", "<Inner {...rest} tone={label} />"] {
         let fixture = project(&outer(jsx));
         let forwarding = fixture.forwarding("outer.tsx", "Outer");
-        let named =
-            forwarding.elements[0].attributes.iter().find(|attribute| matches!(attribute, Attribute::Named { .. }));
-        assert_eq!(named, Some(&Attribute::Named { name: "tone".to_owned(), prop: Some("label".to_owned()) }), "{jsx}");
+        let named = forwarding.elements[0].attributes.iter().find(|attribute| matches!(attribute, Attribute::Named(_)));
+        assert_eq!(named, Some(&Attribute::Named("tone".to_owned())), "{jsx}");
         let shown = fixture.decide("outer.tsx", "Outer", outer_members());
         assert!(shown.collapsed.contains(&"tone".to_owned()), "{jsx}: {shown:?}");
     }
@@ -232,7 +227,7 @@ fn a_tag_an_inner_binding_shadows_is_unknown_not_the_module_component() {
             let element = forwarding.elements.iter().find(|element| element.attributes.len() == 1).expect("the spread");
             assert_eq!(element.target, Target::Unresolved, "{component}, imported: {import}");
             let shown = fixture.decide("outer.tsx", component, vec![inherited("value")]);
-            assert_eq!(shown.as_today, ["value"], "{component}, imported: {import}");
+            assert_eq!(shown.unknown, ["value"], "{component}, imported: {import}");
         }
     }
 }
@@ -344,7 +339,7 @@ fn a_spread_onto_a_tag_that_does_not_resolve_is_unknown() {
         assert_eq!(fixture.forwarding(file, "Outer").elements[0].target, Target::Unresolved, "{file}");
         let shown = fixture.decide(file, "Outer", outer_members());
         assert_eq!(shown.rows, ["label"], "{file}");
-        assert_eq!(shown.as_today, ["tone", "size", "variant", "other"], "{file}");
+        assert_eq!(shown.unknown, ["tone", "size", "variant", "other"], "{file}");
     }
 }
 
@@ -353,7 +348,7 @@ fn a_component_whose_props_did_not_resolve_is_unknown() {
     // The tag resolves, but the lane has no props for `Inner`: nothing is guessed about what it takes.
     let fixture = Fixture::new(&[("inner.tsx", INNER), ("outer.tsx", &outer("<Inner {...rest} />"))]);
     assert_eq!(fixture.forwarding("outer.tsx", "Outer").elements[0].target, Target::Unresolved);
-    assert_eq!(fixture.decide("outer.tsx", "Outer", outer_members()).as_today, ["tone", "size", "variant", "other"]);
+    assert_eq!(fixture.decide("outer.tsx", "Outer", outer_members()).unknown, ["tone", "size", "variant", "other"]);
 }
 
 #[test]
@@ -366,7 +361,7 @@ fn a_body_that_hands_its_props_on_is_unknown() {
     let shown = fixture.decide("outer.tsx", "Outer", outer_members());
     // What the body says (the spread onto `Inner`) still holds; its silence about `other` is unknown.
     assert_eq!(shown.rows, ["label", "tone", "size", "variant"]);
-    assert_eq!(shown.as_today, ["other"]);
+    assert_eq!(shown.unknown, ["other"]);
 }
 
 #[test]

@@ -332,6 +332,7 @@ mod tests {
                     html_element: Some("button".into()),
                     total_props: 3,
                     members: vec![],
+                    used: Vec::new(),
                 }],
                 notable_inherited: BTreeMap::from([(
                     "onClick".to_string(),
@@ -356,8 +357,6 @@ mod tests {
                     caliper_docgen_core::types::ComponentExport::named("default"),
                     caliper_docgen_core::types::ComponentExport::named("default").member("Item"),
                 ],
-                relevance: Default::default(),
-                relevance_evidence: Default::default(),
             },
         );
 

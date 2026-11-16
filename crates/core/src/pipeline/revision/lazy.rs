@@ -234,6 +234,7 @@ impl Revision {
             lib_diagnostics,
             tail_diagnostics,
             resolved: FxHashMap::default(),
+            sites: Arc::default(),
             files: Arc::new(src_files.into_iter().collect()),
             dts_files_parsed,
             dts_cache_hits,
@@ -332,6 +333,7 @@ impl Revision {
             lib_diagnostics: self.lib_diagnostics.clone(),
             tail_diagnostics: self.tail_diagnostics.clone(),
             resolved: FxHashMap::default(),
+            sites: Arc::default(),
             files: Arc::new(files),
             dts_files_parsed: self.dts_files_parsed,
             dts_cache_hits: self.dts_cache_hits,
@@ -414,7 +416,8 @@ impl Revision {
         let mut asked_for: Vec<dependency_types::Demand> = Vec::new();
         loop {
             let engine = lazy.engine.load_full();
-            let (entry, diagnostics, depends_on) = resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
+            let (entry, diagnostics, depends_on, evidence) =
+                resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
             let missing = match &engine.layer {
                 Some(layer) => {
                     let mut missing = Vec::new();
@@ -431,7 +434,7 @@ impl Revision {
             // A load that left the same names missing answered none of them (a demand whose load panicked stays
             // unanswered), so asking again would never end.
             if missing.is_empty() || missing == asked_for {
-                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on });
+                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence });
                 return Some(lazy.memo.entry(id.clone()).or_insert(resolved).clone());
             }
             self.grow(options, lazy, &missing);
@@ -648,7 +651,9 @@ impl Revision {
     pub(crate) fn lazy_component(&self, options: &PipelineOptions, key: &str) -> Option<ComponentAnswer> {
         let (id, index) = self.lazy_target(options, key)?;
         let resolved = self.lazy_resolved(options, id, index)?;
-        let entry = resolved.entry.clone();
+        // A lazy revision counts call sites with its context, on the first answer that needs them.
+        let sites = self.lazy.as_ref().map(|lazy| relevance_inputs::project_sites(&lazy.engine.load_full().ctx));
+        let entry = resolved.answer(&sites.unwrap_or_default());
         let mut diagnostics = DiagnosticSet::default();
         diagnostics.extend(resolved.diagnostics.own.iter().cloned(), Some(key));
         for chunk in &resolved.diagnostics.shared {

@@ -1820,8 +1820,8 @@ pub(crate) struct BodyFacts {
     /// Every JSX element the body writes, in source order, nested components' excepted.
     pub(crate) elements: Vec<JsxElementFact>,
     /// Whether the props object or a rest binding is used in any way other than a member read with a literal key, a
-    /// destructuring, or a JSX spread of a rest binding: passed to a call, stored, returned, spread whole into JSX
-    /// (`{...props}`) and so on (`extractor::body_facts`). When it is, `reads` is a lower bound.
+    /// destructuring, or a JSX spread: passed to a call, stored, returned and so on (`extractor::body_facts`). When it
+    /// is, `reads` is a lower bound. A JSX spread of either is an element's attribute, not an escape.
     pub(crate) handed_on: bool,
 }
 

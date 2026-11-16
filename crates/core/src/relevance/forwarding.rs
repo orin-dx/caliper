@@ -89,7 +89,7 @@ pub(crate) fn forwarding(component: &ComponentMapping, project: Project<'_>, lan
 /// The extractor's attribute fact as `decide` reads it.
 fn attribute(fact: &JsxAttributeFact) -> Attribute {
     match fact {
-        JsxAttributeFact::Named { name, prop } => Attribute::Named { name: name.clone(), prop: prop.clone() },
+        JsxAttributeFact::Named { name, .. } => Attribute::Named(name.clone()),
         JsxAttributeFact::Spread(of) => Attribute::Spread(match of {
             SpreadFact::Props => SpreadOf::Props,
             SpreadFact::Rest => SpreadOf::Rest,

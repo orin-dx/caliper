@@ -128,7 +128,7 @@ fn every_other_use_of_the_props_object_hands_it_on() {
     assert!(returned.handed_on);
     let spread = facts("export function C(props: P) { return <Inner {...props} /> }", "C");
     assert_eq!(spread.elements, [component("Inner", vec![JsxAttributeFact::Spread(SpreadOf::Props)])]);
-    assert!(spread.handed_on);
+    assert!(!spread.handed_on, "a JSX spread of the props object is an attribute, not an escape");
 }
 
 #[test]
