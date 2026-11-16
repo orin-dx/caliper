@@ -185,3 +185,25 @@ fn jsx_children_pass_children_at_a_call_site() {
         used("export const a = <Box>\n</Box>;\nexport const b = <Box>{/* none */}</Box>;\nexport const c = <Box />;\n");
     assert!(none.is_empty(), "{none:?}");
 }
+
+/// A homomorphic mapped type's member keeps the interface that declares its key as its `parent`, as the checker says
+/// (`{ [K in keyof Conditions]?: V }`, Chakra's condition props): relevance needs the source in both lanes, or a member
+/// the checker gives a source and the structural answer does not stays listed in both.
+#[test]
+fn a_member_of_a_mapped_type_over_keyof_an_interface_has_that_interface_as_parent() {
+    let dir = tempfile::Builder::new().prefix("RelevanceMapped").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    std::fs::write(
+        root.join("Box.tsx"),
+        "export interface Conds { _hover: string; _active: string }\n\
+         type ByCondition = { [K in keyof Conds]?: number };\n\
+         export function Box(props: ByCondition & { tone?: string }) { return null; }\n",
+    )
+    .unwrap();
+    let options = PipelineOptions { src_dirs: vec![root.clone()], use_cache: false, ..PipelineOptions::default() };
+    let output = extract(&options);
+    let hover = &output.components["Box"].props["_hover"];
+    let parent = hover.parent.as_ref().expect("a parent");
+    assert_eq!((parent.name.as_str(), parent.file_name.as_str()), ("Conds", root.join("Box.tsx").as_str()));
+    assert!(output.components["Box"].props["tone"].parent.is_none(), "a type literal's field has none");
+}

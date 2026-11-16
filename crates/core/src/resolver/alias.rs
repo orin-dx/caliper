@@ -543,8 +543,8 @@ fn resolve_mapped_chain(
             default_value,
             key.description.clone(),
             key.tags.clone(),
-            None,
-            vec![],
+            key.parent.clone(),
+            key.parent.iter().cloned().collect(),
         )));
     }
     chain
