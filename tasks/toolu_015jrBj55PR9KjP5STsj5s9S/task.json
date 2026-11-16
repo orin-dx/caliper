@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_015jrBj55PR9KjP5STsj5s9S",
+  "agent_id": "aa49801b6d8a5a6c1",
+  "subagent_type": "general-purpose",
+  "task_description": "T4: list props by usage evidence in both lanes",
+  "token_usage": {
+    "input_tokens": 262,
+    "cache_creation_tokens": 281428,
+    "cache_read_tokens": 23540388,
+    "output_tokens": 101309,
+    "api_call_count": 129
+  },
+  "started_at": "2026-11-16T08:36:36.097613-08:00",
+  "completed_at": "2026-11-16T09:01:08.646459-08:00"
+}
