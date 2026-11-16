@@ -674,6 +674,8 @@ fn full_mode_options_for(tmp: &TempDir) -> PipelineOptions {
         src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
         html_attributes: HtmlAttributeMode::Full,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     }
 }
@@ -722,6 +724,8 @@ export function Button(props: ButtonProps) { return null; }
         src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
         html_attributes: HtmlAttributeMode::Full,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     };
     let output = extract(&options);
@@ -760,6 +764,8 @@ export function Button(props: ButtonProps) { return null; }
         src_dirs: vec![dir],
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
         html_attributes: HtmlAttributeMode::Full,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     };
 
@@ -875,6 +881,8 @@ Icon.displayName = "Icon";
         src_dirs: vec![dir],
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
         html_attributes: HtmlAttributeMode::Full,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     };
 
@@ -1026,6 +1034,8 @@ export function Panel(props: PanelProps) { return null; }
         src_dirs: vec![dir],
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
         html_attributes: HtmlAttributeMode::Full,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     };
 
@@ -1081,6 +1091,8 @@ export function Table(props: TableProps) { return null; }
         src_dirs: vec![dir],
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
         html_attributes: HtmlAttributeMode::Full,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     };
 
@@ -3439,6 +3451,8 @@ export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{pro
     let options = PipelineOptions {
         src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     };
     let output = extract(&options);
