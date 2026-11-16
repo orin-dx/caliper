@@ -790,6 +790,8 @@ impl Converter {
 
     fn convert<'a>(&'a self, info: &'a TypeInfo, cx: &'a Cx) -> Converted<'a> {
         Box::pin(async move {
+            // A memo hit copies the tree it recalls, and a conversion can build gigabytes of them between two requests.
+            crate::heap::step()?;
             if let Some(entry) = self.recall(info.id, cx) {
                 self.state.hits.fetch_add(1, Ordering::Relaxed);
                 if let Some(frame) = &cx.frame {
