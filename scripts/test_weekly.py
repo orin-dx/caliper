@@ -200,6 +200,18 @@ class Unmatched(unittest.TestCase):
 
 
 class Recall(unittest.TestCase):
+    def test_a_react_prop_named_only_in_a_layer_is_recalled_with_layers_not_listed(self):
+        # The checker's whole-project merge keeps `@types/react`'s props in the element layer, named, not listed.
+        items = [{'keys': [('a.tsx', 'a')], 'props': {'onClick': 'react', 'id': 'react', 'x': 'own'}}]
+        count = weekly.recall(items, {('a.tsx', 'a'): {'x'}}, {('a.tsx', 'a'): {'onClick', 'id'}})
+        self.assertEqual((count['react'], count['react_layers']), ([0, 2], [2, 2]))
+        text = weekly.markdown({'caliper': 'x', 'runs': 1, 'reference_version': 3, 'corpora': {'a': {
+            'caliper': {'ms': 1, 'rss_mib': 1, 'json_mb': 1}, 'rdt': {'ms': 1, 'rss_mib': 1},
+            'react_docgen': {'ms': 1, 'rss_mib': 1}, 'reference': {
+                'rdt_with_props': 1, 'excluded_total': 0, 'merged': 0, 'reference': 1, 'exact': 1, 'paired': {}, 'unpaired': 0},
+            'recall': {'caliper': count, 'react_docgen': weekly.recall(items, {})}}}}, [])
+        self.assertIn('| a | caliper | 100.0% | 100.0% | 100.0% | 0.0% | 100.0% |', text)
+
     def test_layers_count_only_in_layer_columns(self):
         items = [{'keys': [('a.tsx', 'a')], 'props': {'x': 'own', 'y': 'own', 'onClick': 'react'}}]
         found = {('a.tsx', 'a'): {'x', 'onClick'}}
@@ -450,6 +462,49 @@ class FailedCorpora(unittest.TestCase):
         with self.assertRaises(weekly.StepFailed) as raised:
             weekly.step('antd Caliper run 1', [binary])
         self.assertEqual(raised.exception.code, -9)
+
+    def test_a_signal_death_says_which_signal(self):
+        self.assertEqual(weekly.exit_text(-9), 'killed by signal SIGKILL (9)')
+        self.assertEqual(weekly.exit_text(143), 'killed by signal SIGTERM (15)')
+        self.assertEqual(weekly.exit_text(134), 'killed by signal SIGABRT (6)')
+        self.assertEqual((weekly.exit_text(0), weekly.exit_text(3), weekly.exit_text(None)), ('', '', 'timed out'))
+        with self.assertRaises(weekly.StepFailed) as raised:
+            weekly.step('chakra Caliper', [self.fake('term', 'exit 143')])
+        self.assertIn('SIGTERM', str(raised.exception))
+        with self.assertRaises(weekly.StepFailed) as raised:
+            weekly.capture('chakra oracle', [self.fake('abort', 'echo heap >&2; exit 134')])
+        self.assertIn('exited with 134 [killed by signal SIGABRT (6)]', str(raised.exception))
+
+    def test_the_oracle_gets_a_big_heap_without_losing_the_callers_node_options(self):
+        self.assertEqual(weekly.ORACLE_HEAP_MIB, 16384)
+        self.assertEqual(weekly.oracle_env({'A': '1'})['NODE_OPTIONS'], '--max-old-space-size=16384')
+        self.assertEqual(weekly.oracle_env({'NODE_OPTIONS': '--trace-warnings'})['NODE_OPTIONS'],
+                         '--trace-warnings --max-old-space-size=16384')
+        seen = {}
+        done = mock.Mock(returncode=0, stdout='', stderr='')
+        with mock.patch.object(subprocess, 'run', side_effect=lambda *a, **k: seen.update(k) or done):
+            weekly.capture('x oracle', ['pnpm'], env=weekly.oracle_env({}))
+        self.assertIn('16384', seen['env']['NODE_OPTIONS'])
+
+    def test_an_oracle_that_runs_out_of_memory_is_a_failed_entry_with_the_log_tail(self):
+        crash = self.fake('crash', 'echo "FATAL ERROR: heap out of memory" >&2; exit 134')
+        out = os.path.join(self.dir.name, 'weekly.json')
+
+        def measure(args, corpus, work):
+            entry = {'caliper': {'ms': 1, 'rss_mib': 1}}
+            try:
+                weekly.capture('chakra oracle', [crash])
+            except weekly.StepFailed as failure:
+                entry['oracle'] = {'error': str(failure), 'step': failure.step, 'exit': failure.code,
+                                   'stderr_tail': failure.tail.splitlines()}
+            return entry
+
+        with mock.patch.object(weekly, 'measure', measure):
+            record = weekly.measure_all(mock.Mock(corpus=['chakra'], out=out, runs=1), self.dir.name, 'caliper 0')
+        failed = record['failed']['chakra oracle']
+        self.assertEqual((failed['exit'], failed['stderr_tail']), (134, ['FATAL ERROR: heap out of memory']))
+        self.assertIn('chakra oracle: failed at chakra oracle, exit 134', weekly.failures(record)[0])
+        self.assertEqual(weekly.errors(record), [])
 
     def test_a_child_that_sleeps_past_the_timeout_is_killed(self):
         binary = self.fake('sleeper', 'sleep 60')
