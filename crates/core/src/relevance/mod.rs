@@ -14,7 +14,7 @@ pub(crate) mod call_sites;
 pub(crate) mod forwarding;
 pub(crate) mod props_type;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::types::output::{ComponentEntry, InheritedLayer, PropParent};
 
@@ -61,42 +61,60 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
         let out = shown.collapsed.iter().chain(&shown.used);
         sources(entry, out.filter(|name| !declined || ambient.contains(name.as_str())))
     } else {
-        BTreeSet::new()
+        Vec::new()
     };
     entry.relevance = Some(std::sync::Arc::new(Placement { left, used }));
     narrow(entry);
 }
 
-/// A member by provenance: its name and the source that declares it, by type name and file.
-type Sourced = (String, String, String);
+/// A source by type name and file, as a prop's `parent` and a layer name it.
+type Source = (String, String);
 
-/// Each of `names` with the source the structural answer gives it: the `parent` of the listed prop, and the layer of
-/// each collapsed layer holding the name. A name the answer gives no source (a listed prop with no `parent`) has no
-/// entry: its source is unknown, so no lane narrows it.
-fn sources<'n>(entry: &ComponentEntry, names: impl Iterator<Item = &'n String>) -> BTreeSet<Sourced> {
-    let mut sourced = BTreeSet::new();
+/// Each of `names` with the source the structural answer gives it, grouped by source: the `parent` of the listed prop,
+/// and the layer of each collapsed layer holding the name. A name the answer gives no source (a listed prop with no
+/// `parent`) has no entry: its source is unknown, so no lane narrows it. A source of the project has no entry either:
+/// [`narrow`] never moves a prop of the project's own sources, so naming them would only hold memory.
+fn sources<'n>(entry: &ComponentEntry, names: impl Iterator<Item = &'n String>) -> Vec<(Source, Box<[Box<str>]>)> {
+    let mut sourced: BTreeMap<Source, BTreeSet<&str>> = BTreeMap::new();
+    let mut add = |name: &'n str, type_name: &str, file_name: &str| {
+        if crate::origin::declaration_origin(file_name) != crate::origin::Origin::Project {
+            sourced.entry((type_name.to_owned(), file_name.to_owned())).or_default().insert(name);
+        }
+    };
     for name in names {
         let listed = entry.props.get(name).or_else(|| entry.notable_inherited.get(name));
         if let Some(parent) = listed.and_then(|prop| prop.parent.as_ref()) {
-            sourced.insert((name.clone(), parent.name.clone(), parent.file_name.clone()));
+            add(name, &parent.name, &parent.file_name);
         }
         for layer in entry.inheritance.iter().filter(|layer| layer.members.contains(name)) {
-            sourced.insert((name.clone(), layer.type_name.clone(), layer.file_name.clone()));
+            add(name, &layer.type_name, &layer.file_name);
         }
     }
-    sourced
+    sourced.into_iter().map(|(source, names)| (source, names.into_iter().map(Box::from).collect())).collect()
 }
 
 /// What [`decide`] said of one component, kept on its entry so that every merge of the checker's props into it lists by
 /// the same decision ([`narrow`]): the decision is made once, from the structural answer's evidence.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Placement {
-    /// The members evidence leaves out of the listing ([`Shown::collapsed`] and [`Shown::used`]), each by name and
-    /// the source the structural answer gives it: a listed prop is left out only when both match, so a prop of
-    /// another source with the same name, or one the structural answer gave no source, is never hidden by it.
-    left: BTreeSet<Sourced>,
+    /// The members evidence leaves out of the listing ([`Shown::collapsed`] and [`Shown::used`]), by name under the
+    /// source the structural answer gives each, sources in order and each source's names sorted: a listed prop is left
+    /// out only when both match, so a prop of another source with the same name, or one the structural answer gave no
+    /// source, is never hidden by it. Only sources outside the project are held, the only ones [`narrow`] moves from,
+    /// and each source's type name and path once per component, not once per name.
+    left: Vec<(Source, Box<[Box<str>]>)>,
     /// The members of `left` named in their layer's `used` list.
     used: BTreeSet<String>,
+}
+
+impl Placement {
+    /// Whether the decision leaves `name`, declared by `parent`, out of the listing.
+    fn leaves(&self, name: &str, parent: &PropParent) -> bool {
+        self.left
+            .iter()
+            .find(|((type_name, file_name), _)| *type_name == parent.name && *file_name == parent.file_name)
+            .is_some_and(|(_, names)| names.binary_search_by(|held| (**held).cmp(name)).is_ok())
+    }
 }
 
 /// Lists `entry` by its kept [`Placement`]: a listed prop (in `props` or `notableInherited`) the decision leaves out
@@ -112,7 +130,7 @@ pub(crate) fn narrow(entry: &mut ComponentEntry) {
     for listing in [props, notable_inherited] {
         listing.retain(|name, prop| {
             let Some(parent) = prop.parent.as_ref() else { return true };
-            if !placement.left.contains(&(name.clone(), parent.name.clone(), parent.file_name.clone())) {
+            if !placement.leaves(name, parent) {
                 return true;
             }
             // Only a source outside the project is narrowed: a dependency's or an ambient one, decided by the
@@ -649,5 +667,86 @@ mod tests {
         assert_eq!(Owned::default().decide(), Shown::default());
         let twice = with(vec![inherited("a"), ambient("a")], Some(reading(&["a"]))).decide();
         assert_eq!((twice.rows, twice.used), (strings(&["a"]), Vec::new()));
+    }
+
+    const REACT: &str = "/p/node_modules/@types/react/index.d.ts";
+    const OWN: &str = "/p/src/button.tsx";
+
+    fn parent(type_name: &str, file_name: &str) -> PropParent {
+        PropParent { name: type_name.to_owned(), file_name: file_name.to_owned() }
+    }
+
+    fn listed(
+        name: &str,
+        type_name: &str,
+        file_name: &str,
+    ) -> (String, std::sync::Arc<crate::types::output::ParsedProp>) {
+        let prop = crate::types::output::ParsedProp::new(
+            name.to_owned(),
+            crate::types::output::PropType::Any,
+            false,
+            None,
+            String::new(),
+            BTreeMap::new(),
+            Some(parent(type_name, file_name)),
+            vec![],
+        );
+        (name.to_owned(), std::sync::Arc::new(prop))
+    }
+
+    fn button(props: Vec<(String, std::sync::Arc<crate::types::output::ParsedProp>)>) -> ComponentEntry {
+        ComponentEntry {
+            relevance: None,
+            display_name: "Button".to_owned(),
+            file_path: OWN.into(),
+            description: String::new(),
+            props: props.into_iter().collect(),
+            inheritance: vec![],
+            notable_inherited: BTreeMap::new(),
+            discriminant_prop: None,
+            composes: vec![],
+            tags: BTreeMap::new(),
+            methods: vec![],
+            detected_by: crate::types::DetectionRule::FunctionDeclaration,
+            exported: true,
+            exports: vec![crate::types::ComponentExport::named("Button")],
+        }
+    }
+
+    #[test]
+    fn a_placement_holds_each_source_outside_the_project_once_and_lists_by_name_and_source() {
+        // `onClick` and `onBlur` of one React source, `title` of another, `variant` of the project's own: the placement
+        // holds each React source once with its names sorted, and not the project's, which `narrow` never moves.
+        let mut entry = button(vec![
+            listed("onClick", "DOMAttributes", REACT),
+            listed("onBlur", "DOMAttributes", REACT),
+            listed("title", "HTMLAttributes", REACT),
+            listed("variant", "ButtonProps", OWN),
+        ]);
+        let left = sources(&entry, strings(&["variant", "title", "onClick", "onBlur"]).iter());
+        let names = |names: &[&str]| names.iter().map(|name| Box::from(*name)).collect::<Box<[Box<str>]>>();
+        assert_eq!(
+            left,
+            vec![
+                (("DOMAttributes".to_owned(), REACT.to_owned()), names(&["onBlur", "onClick"])),
+                (("HTMLAttributes".to_owned(), REACT.to_owned()), names(&["title"])),
+            ]
+        );
+        let placement = Placement { left, used: BTreeSet::from(["title".to_owned()]) };
+        assert!(placement.leaves("onClick", &parent("DOMAttributes", REACT)));
+        assert!(!placement.leaves("onClick", &parent("HTMLAttributes", REACT)), "a name of another source");
+        assert!(!placement.leaves("onFocus", &parent("DOMAttributes", REACT)), "a name the decision did not leave");
+        entry.relevance = Some(std::sync::Arc::new(placement));
+        narrow(&mut entry);
+        assert_eq!(entry.props.keys().collect::<Vec<_>>(), ["variant"]);
+        let layers: Vec<_> =
+            entry.inheritance.iter().map(|layer| (layer.type_name.as_str(), &layer.members, &layer.used)).collect();
+        assert_eq!(
+            layers,
+            [
+                ("DOMAttributes", &strings(&["onBlur", "onClick"]), &Vec::new()),
+                ("HTMLAttributes", &strings(&["title"]), &strings(&["title"])),
+            ]
+        );
     }
 }

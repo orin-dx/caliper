@@ -3,7 +3,7 @@
 //! The backend (`caliper-docgen-semantic`) owns the process, the protocol and the checker walk; this module owns only
 //! the result shape and the merge rules of `docs/type-checker-integration.md`, so `crates/core` stays free of I/O.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
@@ -561,8 +561,10 @@ pub struct LayerFacts {
     parents: Vec<PropParent>,
     /// Each inheritance layer's source, by type name and file.
     sources: Vec<(String, String)>,
-    /// The members of every inheritance layer, each by (name, the layer's type name, its file) ([`Held`]).
-    members: std::collections::BTreeSet<(String, String, String)>,
+    /// The members of every inheritance layer under the layer's source, by type name and file ([`Held`]): sources in
+    /// order, each once with its layers' names sorted and each once, and no source without a name. Grouped so that a
+    /// source's path is held once per component, not once per name.
+    members: Vec<SourceMembers>,
     /// The notable members of its collapsed layers it does not list, with their source ([`layer_notable`]).
     notable: Vec<(String, PropParent)>,
 }
@@ -587,6 +589,24 @@ fn layer_notable(entry: &ComponentEntry) -> Vec<(String, PropParent)> {
         .collect()
 }
 
+/// A layer source, by type name and file, with the names of its members, sorted and each once.
+type SourceMembers = ((String, String), Box<[Box<str>]>);
+
+/// The members of `entry`'s inheritance layers by source, as [`LayerFacts`] holds them.
+fn layer_members(entry: &ComponentEntry) -> Vec<SourceMembers> {
+    let mut members: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
+    for layer in entry.inheritance.iter().filter(|layer| !layer.members.is_empty()) {
+        let names = members.entry((layer.type_name.as_str(), layer.file_name.as_str())).or_default();
+        names.extend(layer.members.iter().map(String::as_str));
+    }
+    members
+        .into_iter()
+        .map(|((type_name, file_name), names)| {
+            ((type_name.to_owned(), file_name.to_owned()), names.into_iter().map(Box::from).collect())
+        })
+        .collect()
+}
+
 impl LayerFacts {
     /// What `entry`, a structural answer, says.
     pub fn of(entry: &ComponentEntry) -> Self {
@@ -600,13 +620,7 @@ impl LayerFacts {
             listed: entry.props.keys().cloned().collect(),
             parents,
             sources: entry.inheritance.iter().map(|layer| (layer.type_name.clone(), layer.file_name.clone())).collect(),
-            members: entry
-                .inheritance
-                .iter()
-                .flat_map(|layer| {
-                    layer.members.iter().map(|name| (name.clone(), layer.type_name.clone(), layer.file_name.clone()))
-                })
-                .collect(),
+            members: layer_members(entry),
             notable: layer_notable(entry),
         }
     }
@@ -652,7 +666,9 @@ impl Layering {
             .facts
             .members
             .iter()
-            .map(|(name, type_name, file_name)| (name.as_str(), type_name.as_str(), file_name.as_str()))
+            .flat_map(|((type_name, file_name), names)| {
+                names.iter().map(|name| (&**name, type_name.as_str(), file_name.as_str()))
+            })
             .chain(layers.iter().flat_map(|layer| {
                 layer.members.iter().map(|name| (name.as_str(), layer.type_name.as_str(), layer.file_name.as_str()))
             }))

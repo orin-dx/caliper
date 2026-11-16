@@ -934,3 +934,40 @@ fn a_prop_the_component_declares_itself_stays_a_prop_beside_a_collapsed_source_o
     assert_eq!(entry.inheritance.len(), 1);
     assert!(!entry.inheritance[0].members.contains(&"onClick".to_string()));
 }
+
+fn dom_layer(type_name: &str, members: &[&str]) -> crate::types::output::InheritedLayer {
+    crate::types::output::InheritedLayer {
+        type_name: type_name.to_string(),
+        file_name: DOM.to_string(),
+        omitted: vec![],
+        html_element: None,
+        total_props: u32::try_from(members.len()).unwrap(),
+        members: members.iter().map(|name| (*name).to_string()).collect(),
+        used: Vec::new(),
+    }
+}
+
+#[test]
+fn layer_facts_hold_each_source_once_with_the_names_of_all_its_layers() {
+    // Two layers of one source hold `c b` and `b a`: the facts name the source once, with `a b c`, the same facts as
+    // one layer of all three; a layer of another source is held apart, and a layer with no names not at all.
+    let mut out = output();
+    let entry = out.components.get_mut("Button").unwrap();
+    entry.inheritance = vec![
+        dom_layer("Events", &["c", "b"]),
+        dom_layer("Aria", &["x"]),
+        dom_layer("Events", &["b", "a"]),
+        dom_layer("Empty", &[]),
+    ];
+    let facts = LayerFacts::of(entry);
+    let names = |names: &[&str]| names.iter().map(|name| Box::from(*name)).collect::<Box<[Box<str>]>>();
+    assert_eq!(
+        facts.members,
+        vec![
+            (("Aria".to_string(), DOM.to_string()), names(&["x"])),
+            (("Events".to_string(), DOM.to_string()), names(&["a", "b", "c"])),
+        ]
+    );
+    entry.inheritance = vec![dom_layer("Events", &["a", "b", "c"]), dom_layer("Aria", &["x"])];
+    assert_eq!(LayerFacts::of(entry).members, facts.members);
+}
