@@ -51,8 +51,15 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
         .filter(|name| !entry.props.contains_key(*name) && !entry.notable_inherited.contains_key(*name))
         .cloned();
     let used: BTreeSet<String> = shown.used.iter().cloned().chain(defaulted).chain(untyped).collect();
-    let left = if inputs.narrows && !inputs.props_type.declined {
-        sources(entry, shown.collapsed.iter().chain(&shown.used))
+    // A `Pick` or `Omit` over keys that are not a closed set of literals leaves which members of a source reach
+    // unproven, so no source is narrowed into a layer that may claim a member that does not reach; React's and the
+    // DOM's attributes still are, as they are never listed for want of evidence.
+    let ambient: BTreeSet<&str> =
+        members.iter().filter(|member| member.ambient).map(|member| member.name.as_str()).collect();
+    let declined = inputs.props_type.declined;
+    let left = if inputs.narrows {
+        let out = shown.collapsed.iter().chain(&shown.used);
+        sources(entry, out.filter(|name| !declined || ambient.contains(name.as_str())))
     } else {
         BTreeSet::new()
     };
@@ -96,8 +103,8 @@ pub struct Placement {
 /// and that a source outside the project declares (a dependency's, or React's and the DOM's) moves to the layer of
 /// its source, as a name, when the placement left out that name from that same source. Its home is the layer of its
 /// `parent` (by type name and file), else, for an ambient source, the entry's HTML element layer, else a new layer of
-/// its `parent`. A prop with no `parent` has no known source and stays listed: no name is ever lost. Then each layer's `used` list is written. Without a
-/// placement (no evidence was gathered) nothing changes. Run by [`apply`] and at the end of each merge of the
+/// its `parent`. A prop with no `parent` has no known source and stays listed: no name is ever lost. Then each
+/// layer's `used` list is written. Without a placement (no evidence was gathered) nothing changes. Run by [`apply`] and at the end of each merge of the
 /// checker's props, which may list again what the structural answer left out.
 pub(crate) fn narrow(entry: &mut ComponentEntry) {
     let Some(placement) = entry.relevance.clone() else { return };

@@ -164,11 +164,17 @@ impl PropsType {
                 let Some((Declaration::Alias(alias), declared)) = lookup(name, from) else { return };
                 let base = match alias {
                     CollectedTypeAlias::Pick { keys, .. } => {
-                        self.keys(keys, &declared, lookup, depth + 1);
+                        self.keys(keys, &declared, lookup, 0);
                         return;
                     }
-                    CollectedTypeAlias::Omit { base, .. }
-                    | CollectedTypeAlias::Partial { base, .. }
+                    CollectedTypeAlias::Omit { base, keys, .. } => {
+                        // As an `Omit` written in place: its keys decide only whether it is declined.
+                        let mut omitted = Self::default();
+                        omitted.keys(keys, &declared, lookup, 0);
+                        self.declined |= omitted.declined;
+                        base
+                    }
+                    CollectedTypeAlias::Partial { base, .. }
                     | CollectedTypeAlias::Required { base, .. }
                     | CollectedTypeAlias::Passthrough { target: base, .. } => base,
                     CollectedTypeAlias::LiteralUnion { .. }

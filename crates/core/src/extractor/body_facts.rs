@@ -245,7 +245,11 @@ impl<'a> Visit<'a> for Finder<'_> {
 /// expressions (`{/* comment */}`), which the transform drops.
 fn passes_children(element: &JSXElement<'_>) -> bool {
     element.children.iter().any(|child| match child {
-        JSXChild::Text(text) => !(text.value.contains('\n') && text.value.trim().is_empty()),
+        JSXChild::Text(text) => {
+            // JSX whitespace is spaces, tabs and line terminators; any other character (a no-break space) is text.
+            let layout = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r');
+            !(text.value.contains(['\n', '\r']) && text.value.chars().all(layout))
+        }
         JSXChild::ExpressionContainer(container) => !matches!(container.expression, JSXExpression::EmptyExpression(_)),
         JSXChild::Element(_) | JSXChild::Fragment(_) | JSXChild::Spread(_) => true,
     })
