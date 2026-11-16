@@ -39,6 +39,16 @@ The owner's rules: returning all resolved props is useless for Storybook and age
 - Rows shown fall: the median rows per component does not rise on any corpus (Mantine 77, Spectrum 74, shadcn 3, antd 17), and total rows fall on Mantine and Spectrum. Chakra `Button`'s typed rows stay at or under 146 (its `used` names come on top and are reported apart).
 - These targets are proposals. Only the extra-entry costs above were measured; the fall in rows is not predicted.
 
+### A2. The listing follows the decision (slice T4, amended 2026-11-16)
+
+Measured at de016f69 (`caliper-fixtures/oracle-run/diagnosis.md`): Storybook listed 437 Controls rows for a demo Chakra `Button` and 280 for a `ComponentProps<'span'>` `Badge`, because `decide` only wrote `used` lists while `htmlAttributes: 'full'` (ADR 0023) and the session merge (`checker_prop_used`) listed every `@types/react` attribute; the CLI merge dropped them all where a layer existed, so the lanes disagreed (Button 150, Badge 2). Changes to section A:
+
+- **One placement, every lane.** `relevance::apply` keeps `decide`'s placement on the entry (`ComponentEntry::relevance`, not serialized) and lists by it (`relevance::narrow`); both checker merges call `narrow` again after laying out the checker's props, and take a `@types/react` prop only where the structural answer lists it (`react_prop_listed`), whatever the mode. A listed prop the placement leaves out moves to its source's layer as a name: the layer of its `parent`, else the element layer for an ambient source, else a new layer of that parent. A prop with no `parent` stays listed, so no name is lost.
+- **Scope.** Only props a source outside the project declares (a dependency's, React's or the DOM's, by declaring path) are narrowed; the project's own sources keep the collapse rule until a later slice measures them. `collapseInheritedProps: none` narrows nothing: it is the expanded view (`relevance: 'all'`).
+- **Rows.** A member passed at the call-site floor is a typed row even when ambient (a story needs its control; open question 2). An ambient member the body only reads is a `used` name. A member evidence puts forward that has no typed row (its source is collapsed) is named in `used`.
+- **Unknown evidence.** An ambient member with unknown body evidence is a name in its layer, not a row: without call sites a component lists its own and declared props, never a whole DOM source. A non-ambient member with unknown evidence is listed as before.
+- **`htmlAttributes`** says which DOM attributes are known (as rows or layer names), not how many rows a reader sees; `full` stays the default because a passed attribute can be a typed row only if it is known. `notable_html_attrs` still feeds `curated` mode only; it no longer decides rows under the default, and R9 deletes it.
+
 ### B. The checker is scheduled by the props that will be shown
 
 The owner asked for a queue. Its parts, against what exists:

@@ -43,7 +43,14 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     // not record for a name left in its layer: it is `used` too. Nothing else in `rows` is added.
     let defaulted =
         members.iter().filter(|member| member.ambient && member.default_tag).map(|member| member.name.clone());
-    let used: BTreeSet<String> = shown.used.iter().cloned().chain(defaulted).collect();
+    // A row of a member the answer holds only as a name in a collapsed layer has no type to list: it is named in the
+    // layer's `used` list instead, so a member evidence puts forward is never left unnamed.
+    let untyped = shown
+        .rows
+        .iter()
+        .filter(|name| !entry.props.contains_key(*name) && !entry.notable_inherited.contains_key(*name))
+        .cloned();
+    let used: BTreeSet<String> = shown.used.iter().cloned().chain(defaulted).chain(untyped).collect();
     let left =
         if inputs.narrows { shown.collapsed.iter().chain(&shown.used).cloned().collect() } else { BTreeSet::new() };
     entry.relevance = Some(std::sync::Arc::new(Placement { left, used }));
@@ -540,18 +547,18 @@ mod tests {
     }
 
     #[test]
-    fn a_prop_passed_at_a_fifth_of_the_call_sites_is_a_row_or_an_ambient_used_name() {
+    fn a_prop_passed_at_a_fifth_of_the_call_sites_is_a_row_ambient_or_not() {
         let passed = |sites: u32, count: u32| Owned {
             members: vec![inherited("a"), ambient("b")],
             body: Some(Body::default()),
             call_sites: CallSites { sites, passed: vec![("a".to_owned(), count), ("b".to_owned(), count)] },
         };
         table(vec![
-            ("2 of 10", passed(10, 2), &[("a", Placed::Row), ("b", Placed::Used)]),
+            ("2 of 10", passed(10, 2), &[("a", Placed::Row), ("b", Placed::Row)]),
             ("1 of 10", passed(10, 1), &[("a", Placed::Collapsed), ("b", Placed::Collapsed)]),
             ("1 of 2: under the floor of 2", passed(2, 1), &[("a", Placed::Collapsed)]),
             ("2 of 11: under 20%", passed(11, 2), &[("a", Placed::Collapsed)]),
-            ("3 of 11", passed(11, 3), &[("a", Placed::Row), ("b", Placed::Used)]),
+            ("3 of 11", passed(11, 3), &[("a", Placed::Row), ("b", Placed::Row)]),
         ]);
     }
 
@@ -570,18 +577,19 @@ mod tests {
                 Member { default_tag: true, ..inherited("e") },
             ]
         };
-        // What an incomplete body says still holds; only its silence is unknown, ambient or not.
+        // What an incomplete body says still holds; only its silence is unknown. An ambient member is never listed
+        // for want of evidence: it stays in its layer.
         let incomplete: &[(&str, Placed)] = &[
             ("a", Placed::Row),
             ("b", Placed::Unknown),
-            ("c", Placed::Unknown),
+            ("c", Placed::Collapsed),
             ("d", Placed::Row),
             ("e", Placed::Row),
         ];
         let none: &[(&str, Placed)] = &[
             ("a", Placed::Unknown),
             ("b", Placed::Unknown),
-            ("c", Placed::Unknown),
+            ("c", Placed::Collapsed),
             ("d", Placed::Row),
             ("e", Placed::Row),
         ];

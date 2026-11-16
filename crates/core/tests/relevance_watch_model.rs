@@ -3,7 +3,9 @@
 //! declarations), so a kept answer is stale unless those reads are dependencies (ADR 0028, Consequences). Over random
 //! edit sequences on a generated project (components over an ambient DOM source and project sources, a forwarding
 //! wrapper, a consumer page and a story), after each edit a [`WatchSession`] and a lazy session must give every
-//! component exactly what a fresh `extract()` of the same files gives, relevance and layers included.
+//! component exactly what a fresh `extract()` of the same files gives, relevance and layers included. It runs with every
+//! source collapsed (`used` lists move) and with the default collapse, where the ambient source is listed and relevance
+//! narrows the listing (rows move between the listing and the layer).
 
 use std::fmt::Write as _;
 
@@ -26,7 +28,7 @@ impl Lcg {
 #[derive(Clone)]
 struct Component {
     name: String,
-    /// `Small` (10 members) or `Large` (40), beside the ambient `DomBits` (33 members).
+    /// `Small` (10 members) or `Large` (40), beside the ambient `DomBits` (24 members: under the size an ambient source collapses at, so the default lists it and relevance narrows it).
     large: bool,
     own: usize,
     reads: Vec<String>,
@@ -63,7 +65,7 @@ impl Model {
         let fields = |prefix: &str, n: usize| -> String { (0..n).map(|i| format!("{prefix}{i}?: string; ")).collect() };
         let dom = model.root.join("vendor/@types/react");
         std::fs::create_dir_all(&dom).unwrap();
-        std::fs::write(dom.join("dom.ts"), format!("export interface DomBits {{ {}}}\n", fields("d", 33))).unwrap();
+        std::fs::write(dom.join("dom.ts"), format!("export interface DomBits {{ {}}}\n", fields("d", 24))).unwrap();
         std::fs::write(
             model.root.join("sources.ts"),
             format!(
@@ -214,25 +216,36 @@ impl Model {
 const CONSUMER_JSX: &str = "edit only a consumer's JSX";
 const CONSUMER_IMPORT: &str = "edit only a consumer's import";
 
-fn options(root: &Utf8Path) -> PipelineOptions {
+fn options(root: &Utf8Path, collapse: CollapseInheritedProps) -> PipelineOptions {
     PipelineOptions {
         src_dirs: vec![root.to_owned()],
         use_cache: false,
         html_attributes: HtmlAttributeMode::None,
-        collapse_inherited_props: CollapseInheritedProps::All,
+        collapse_inherited_props: collapse,
         ..PipelineOptions::default()
     }
 }
 
 #[test]
 fn watch_equals_fresh() {
+    watch_equals_fresh_in(CollapseInheritedProps::All);
+}
+
+/// With the default collapse the ambient source is listed, and relevance narrows the listing: an edit that adds or
+/// removes a call site moves an ambient member between the listing and its layer, and the watch and lazy sessions follow.
+#[test]
+fn watch_equals_fresh_when_relevance_narrows_the_listing() {
+    watch_equals_fresh_in(CollapseInheritedProps::Dependencies);
+}
+
+fn watch_equals_fresh_in(collapse: CollapseInheritedProps) {
     let (mut edits, mut moved, mut consumer_moved) = (0, 0, 0);
     for seed in [1_u64, 7, 42] {
         let dir = tempfile::Builder::new().prefix("RelevanceWatch").tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
         let mut rng = Lcg(seed);
         let mut model = Model::new(root.clone(), &mut rng);
-        let options = options(&root);
+        let options = options(&root, collapse);
         let watch = WatchSession::new(options.clone());
         drop(watch.initialize());
         let lazy = WatchSession::lazy(options.clone());
@@ -259,7 +272,7 @@ fn watch_equals_fresh() {
                 assert_eq!(&answer.entry, expected, "lazy: {key}, seed {seed} after {history:?}");
             }
             // The model is only as strong as the evidence it moves: count the edits that change a `used` list.
-            moved += usize::from(used(&previous) != used(&fresh));
+            moved += usize::from(used(&previous) != used(&fresh) || listed(&previous) != listed(&fresh));
             // A lazy delta names every key whose entry changed, a kept answer re-decided against the new call sites
             // included; after an edit that only moves call sites, it names nothing else.
             let changed: Vec<&String> = fresh
@@ -281,8 +294,80 @@ fn watch_equals_fresh() {
         }
     }
     assert_eq!(edits, 3 * 14);
-    assert!(moved >= 3, "edits changed a `used` list {moved} times: the model does not exercise relevance");
+    assert!(
+        moved >= 3,
+        "edits changed a `used` list or the listing {moved} times: the model does not exercise relevance"
+    );
     assert!(consumer_moved >= 2, "consumer-only edits changed an entry {consumer_moved} times");
+}
+
+/// Every component's listed props, by component.
+fn listed(output: &caliper_docgen_core::types::ExtractionOutput) -> Vec<(String, Vec<String>)> {
+    output.components.iter().map(|(key, entry)| (key.clone(), entry.props.keys().cloned().collect())).collect()
+}
+
+/// The model's own reading of the call-site rule (ADR 0028): a component with at least three resolved sites, and of
+/// those a prop passed at `max(2, 20%)` of them. Counted from what the model wrote, never from the output; for a
+/// component other than `C0`, whose only sites are the page's and the consumer's.
+fn at_floor(model: &Model, at: usize) -> Vec<String> {
+    let mut counts: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
+    let mut sites = 0_u32;
+    for (component, prop) in &model.sites {
+        if *component == at {
+            sites += 1;
+            *counts.entry(prop).or_default() += 1;
+        }
+    }
+    if model.consumer == (at, true) {
+        sites += 2;
+        *counts.entry("d2").or_default() += 2;
+    }
+    if sites < 3 {
+        return Vec::new();
+    }
+    counts.into_iter().filter(|(_, n)| *n >= 2 && n * 5 >= sites).map(|(name, _)| name.to_owned()).collect()
+}
+
+/// Model-based: for generated components whose bodies say all they do, the ambient members put forward (rows and `used`
+/// names) are exactly those passed at the floor, by the model's own count, and those the body reads; every other ambient
+/// member is a name in the layer, so nothing is lost. Own props are always listed.
+#[test]
+fn the_ambient_members_put_forward_are_exactly_those_passed_at_the_floor_or_read() {
+    let mut nonempty = 0;
+    for seed in 0..12_u64 {
+        let dir = tempfile::Builder::new().prefix("RelevanceListing").tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let model = Model::new(root.clone(), &mut Lcg(seed));
+        let output = extract(&options(&root, CollapseInheritedProps::Dependencies));
+        // `C0`, the story's and the wrapper's target, is left to `watch_equals_fresh`: the model counts only the page's
+        // and the consumer's sites.
+        for (at, component) in model.components.iter().enumerate().skip(1) {
+            let entry = &output.components[&component.name];
+            // The ambient source collapses here (an ambient source of more than a handful of members does): a member
+            // put forward has no typed row, so it is named in `used`. What is visible (rows and `used`) is exactly the
+            // members passed at the floor and those the body reads; no row of the source is listed without evidence.
+            let expected = at_floor(&model, at).into_iter().filter(|name| name.starts_with('d')).collect::<Vec<_>>();
+            let layer = entry.inheritance.iter().find(|layer| layer.type_name == "DomBits").unwrap();
+            let mut visible: Vec<String> = entry.props.keys().filter(|name| name.starts_with('d')).cloned().collect();
+            visible.extend(layer.used.iter().cloned());
+            visible.sort();
+            let mut wanted: Vec<String> = expected.iter().chain(&component.reads).cloned().collect();
+            wanted.sort();
+            wanted.dedup();
+            assert_eq!(
+                visible, wanted,
+                "seed {seed}, {}: sites {:?} story {:?} consumer {:?}",
+                component.name, model.sites, model.story, model.consumer
+            );
+            nonempty += usize::from(!expected.is_empty());
+            for own in 0..component.own {
+                assert!(entry.props.contains_key(&format!("own{own}")), "seed {seed}, {}", component.name);
+            }
+            let named: std::collections::BTreeSet<&String> = layer.members.iter().chain(entry.props.keys()).collect();
+            assert!((0..24).all(|i| named.contains(&format!("d{i}"))), "seed {seed}: a DOM member is lost");
+        }
+    }
+    assert!(nonempty >= 4, "only {nonempty} components had a member at the floor: the model does not exercise it");
 }
 
 /// Every component's non-empty `used` lists, by component and layer.

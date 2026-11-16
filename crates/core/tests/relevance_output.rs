@@ -55,8 +55,9 @@ fn a_collapsed_layer_names_the_ambient_members_consumers_pass() {
     };
     // Ambient and passed at every call site, or read in the body: a `used` name in its layer, in the layer's order.
     assert_eq!(used("DomBits"), ["d1", "d2"]);
-    // A project member put forward is a typed row, never a `used` name; with nothing put forward, none is named.
-    assert_eq!(used("Big"), [] as [&str; 0]);
+    // A project member put forward (passed or read) whose source is collapsed has no typed row to list: it is named in
+    // `used` instead, so evidence never goes unnamed.
+    assert_eq!(used("Big"), ["b1", "b2"]);
 }
 
 #[test]
@@ -70,11 +71,11 @@ fn the_canonical_json_writes_used_at_schema_version_8() {
     assert_eq!(dom["used"], serde_json::json!(["d1", "d2"]));
     assert!(json["components"]["Button"].get("relevance").is_none());
     let big = layers.iter().find(|layer| layer["typeName"] == "Big").unwrap();
-    assert!(big.get("used").is_none(), "an empty `used` is not written");
+    assert_eq!(big["used"], serde_json::json!(["b1", "b2"]));
 }
 
 /// A collapsed ambient prop the signature gives a destructuring default is read by the body, so its layer names it in
-/// `used`; a default on a project member adds nothing (it is a typed row).
+/// `used`; so does a defaulted project member, a row with no type to list while its source is collapsed.
 #[test]
 fn a_collapsed_ambient_prop_with_a_destructuring_default_is_used() {
     let dir = tempfile::Builder::new().prefix("RelevanceDefault").tempdir().unwrap();
@@ -103,7 +104,7 @@ fn a_collapsed_ambient_prop_with_a_destructuring_default_is_used() {
     let layers = &output.components["Button"].inheritance;
     let used = |type_name: &str| layers.iter().find(|layer| layer.type_name == type_name).unwrap().used.clone();
     assert_eq!(used("DomBits"), ["d2"], "{layers:?}");
-    assert!(used("Big").is_empty(), "a project member is a typed row, never `used`: {layers:?}");
+    assert_eq!(used("Big"), ["b2"], "{layers:?}");
 }
 
 /// A file-level element whose tag is a local binding of the same name as an imported component is not a call site of

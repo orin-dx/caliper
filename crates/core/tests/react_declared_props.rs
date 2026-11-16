@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
+use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, extract};
 use camino::Utf8PathBuf;
 use tempfile::TempDir;
 
@@ -33,6 +33,8 @@ fn listed(mode: HtmlAttributeMode, component: &str) -> BTreeSet<String> {
         src_dirs: vec![root.clone()],
         cache_dir: Some(root.join(".cache")),
         html_attributes: mode,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     };
     let output = extract(&options);
@@ -127,6 +129,8 @@ fn a_prop_declared_beside_an_element_has_one_type_when_the_declarations_agree() 
         src_dirs: vec![root.clone()],
         cache_dir: Some(root.join(".cache")),
         html_attributes: HtmlAttributeMode::Full,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     };
     let output = extract(&options);

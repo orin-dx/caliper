@@ -287,9 +287,11 @@ fn names(session: &WatchSession, key: &str) -> Vec<String> {
 }
 
 #[test]
-fn curated_and_none_take_the_checkers_react_props_only_where_the_structural_pass_lists_them() {
+fn every_mode_takes_the_checkers_react_props_only_where_the_structural_pass_lists_them() {
+    // Which `@types/react` props are rows is relevance's decision on the structural answer (ADR 0028), in every mode:
+    // `full` makes every attribute known, not every attribute a row, so the checker adds no name of its own.
     let project = project(&REACT_PROP_COMPONENTS);
-    for mode in [HtmlAttributeMode::Curated, HtmlAttributeMode::None] {
+    for mode in [HtmlAttributeMode::Full, HtmlAttributeMode::Curated, HtmlAttributeMode::None] {
         let structural = structural_session(&project, mode);
         let checked = session_in(&project, mode, reports_react_props);
         for key in ["WithChildren", "OwnChildren", "Div"] {
@@ -306,20 +308,7 @@ fn curated_and_none_take_the_checkers_react_props_only_where_the_structural_pass
 }
 
 #[test]
-fn full_takes_everything_the_checker_reports_except_key() {
-    let project = project(&REACT_PROP_COMPONENTS);
-    let checked = session_in(&project, HtmlAttributeMode::Full, reports_react_props);
-    for key in ["WithChildren", "OwnChildren", "Div"] {
-        let got = names(&checked, key);
-        for wanted in ["label", "children", "className", "id", "ref"] {
-            assert!(got.iter().any(|name| name == wanted), "{key} lacks {wanted}: {got:?}");
-        }
-        assert!(!got.iter().any(|name| name == "key"), "{key} lists key: {got:?}");
-    }
-}
-
-#[test]
-fn the_request_asks_only_for_the_react_props_the_mode_can_use() {
+fn the_request_asks_only_for_the_react_props_the_structural_answer_lists() {
     let wanted = |mode| {
         let seen = Arc::new(std::sync::Mutex::new(None));
         struct Spy(Arc<std::sync::Mutex<Option<SemanticTarget>>>);
@@ -339,10 +328,12 @@ fn the_request_asks_only_for_the_react_props_the_mode_can_use() {
         target.react_wanted
     };
 
-    assert_eq!(wanted(HtmlAttributeMode::Full), None);
-    let curated = wanted(HtmlAttributeMode::Curated).unwrap();
-    assert!(curated.contains("children") && curated.contains("label"), "{curated:?}");
-    assert!(!curated.contains("className"));
+    // The attributes relevance leaves to a layer are never converted, whatever the mode.
+    for mode in [HtmlAttributeMode::Full, HtmlAttributeMode::Curated] {
+        let asked = wanted(mode).unwrap();
+        assert!(asked.contains("children") && asked.contains("label"), "{mode:?}: {asked:?}");
+        assert!(!asked.contains("className"), "{mode:?}: {asked:?}");
+    }
 }
 
 const BUTTON_FROM_TYPES: &str =
@@ -553,11 +544,11 @@ fn the_whole_project_merge_and_the_session_merge_agree_on_every_prop_the_checker
     assert_eq!(batch.props["label"].prop_type, PropType::StringLiteral("ok".into()));
     assert!(batch.props["label"].default_value.is_some(), "the structural default stays");
 
-    // Where they differ, on purpose: the whole-project merge lets the checker decide which props exist and leaves
-    // `@types/react`'s to the inheritance layers; the session keeps a structural prop the checker did not return and
-    // takes the `@types/react` prop its `htmlAttributes` mode lists.
+    // Both take a `@types/react` prop only where the structural answer lists it (relevance's decision, ADR 0028),
+    // whatever the mode. Where they differ, on purpose: the whole-project merge lets the checker decide which props
+    // exist; the session keeps a structural prop the checker did not return.
     assert_eq!(batch.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
-    assert_eq!(on_demand.props.keys().cloned().collect::<Vec<_>>(), ["className", "label", "legacy", "size"]);
+    assert_eq!(on_demand.props.keys().cloned().collect::<Vec<_>>(), ["label", "legacy", "size"]);
 }
 
 /// A provider that drops its sender without answering, as a checker whose worker died does.
