@@ -382,7 +382,7 @@ fn apply_props(
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
     move_notable(entry, &notable);
-    listed_props_leave_layers(entry);
+    listed_props_leave_layers(entry, true);
     merged
 }
 
@@ -390,14 +390,22 @@ fn apply_props(
 /// the first collapsed layer holding it keeps. The collapse decision stands, only the names go: a layer left with none
 /// is dropped. A notable member copied to `notableInherited` stays its layer's (the layer contract). Run wherever a
 /// component's layers are final: the structural answer and each merge of the checker's.
-pub(crate) fn listed_props_leave_layers(entry: &mut ComponentEntry) {
+///
+/// In the structural answer (`merged` false) a listed prop whose `parent` is `@types/react`'s takes no name from a
+/// layer: the merge drops a prop React alone declares, and the name must then still be the layer's.
+pub(crate) fn listed_props_leave_layers(entry: &mut ComponentEntry, merged: bool) {
     let mut held: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let listed = |name: &String| {
+        entry.props.get(name).is_some_and(|prop| {
+            merged || !prop.parent.as_ref().is_some_and(|parent| parent.file_name.contains("/@types/react/"))
+        })
+    };
     entry.inheritance.retain_mut(|layer| {
         if layer.members.is_empty() {
             return true;
         }
         let before = layer.members.len();
-        layer.members.retain(|name| !entry.props.contains_key(name) && held.insert(name.clone()));
+        layer.members.retain(|name| !listed(name) && held.insert(name.clone()));
         let removed = u32::try_from(before - layer.members.len()).unwrap_or(u32::MAX);
         layer.total_props = layer.total_props.saturating_sub(removed);
         !layer.members.is_empty()

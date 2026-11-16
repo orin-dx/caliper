@@ -1117,7 +1117,7 @@ pub(crate) fn resolve_component_shared(
         exported: mapping.exported(),
         exports: mapping.exports.clone(),
     };
-    crate::types::semantic::listed_props_leave_layers(&mut entry);
+    crate::types::semantic::listed_props_leave_layers(&mut entry, false);
     (entry, ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics })
 }
 

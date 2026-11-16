@@ -30,13 +30,14 @@ pub(crate) struct Props {
     pub(crate) whole: Vec<PropParent>,
 }
 
-/// What `@types/react` alone declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with
-/// the flag set when the request asks for the name; what to do with them is the session's policy, not ours. A property
-/// the project or a dependency also declares (`ComponentProps<'div'> & { className: 'mine' }`) is theirs too: one
-/// declaration in `@types/react` is no proof the prop is React's, every one must be.
+/// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes) and the project does
+/// not. Reported with the flag set when the request asks for the name; what to do with them is the session's policy, not
+/// ours. A property a project file also declares (`ComponentProps<'div'> & { className: 'mine' }`) is the component's
+/// own and never React's. One a dependency declares again over React's (a library's `className`, its DOM handlers)
+/// stays React's: the element layer stands for it.
 fn is_react_declared(property: &SymbolInfo) -> bool {
-    !property.declarations.is_empty()
-        && property.declarations.iter().all(|declaration| declared_in(declaration).contains("/@types/react/"))
+    let files = || property.declarations.iter().map(|declaration| declared_in(declaration));
+    files().any(|file| file.contains("/@types/react/")) && files().all(|file| file.contains("/node_modules/"))
 }
 
 fn fallback(reason: &str) -> Result<Answer, CallError> {

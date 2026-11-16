@@ -579,8 +579,9 @@ fn a_checker_only_source_collapses_only_where_it_is_proven_to_reach_whole() {
 }
 
 /// The red team's repros of change 267 (`redteam-collapse.md`), in both lanes:
-/// - D1: a prop is React's only when every declaration of it is in `@types/react`, so an own or a dependency's prop of a
-///   React name beside an element layer is kept (`OwnOverReact`, `KeyRef`, `CpwrAndDep`);
+/// - D1: a prop a project file declares is the component's own, never React's, so an own prop of a React name beside an
+///   element layer is kept (`OwnOverReact`, `KeyRef`); a dependency's redeclaration of a React name stays React's, left
+///   to the element layer (`CpwrAndDep`, `LegendLike`);
 /// - D2, D3, D4, D7: a prop is shown once, the listed one wins over a layer member and a name sits in one layer
 ///   (`assert_shown_once`);
 /// - D5: an `Omit` whose keys are not a finite union of string literals collapses nothing, so no layer holds a member
@@ -592,13 +593,17 @@ fn redteam_each_prop_is_shown_once_and_never_lost() {
         "export interface DepBig {{ {}className?: string; style?: object; id?: string; onClick?: () => void; \
          children?: string }}\n\
          export interface DepOther {{ {}a5?: string; className?: string }}\n\
-         export type DepAlias = {{ {}}};\n",
+         export type DepAlias = {{ {}}};\n\
+         export interface DepLegend {{ payload?: string[]; className?: string; onClick?: () => void; \
+         onAbort?: () => void }}\n",
         members("a", 196),
         members("b", 199),
         members("t", 201),
     );
     let components = "import type * as React from 'react';\n\
-        import type { DepBig, DepOther, DepAlias } from 'pkg';\n\
+        import type { DepBig, DepOther, DepAlias, DepLegend } from 'pkg';\n\
+        export function LegendLike(props: React.ComponentProps<'div'> & { hideIcon?: boolean } & DepLegend) { \
+          return null; }\n\
         export function OwnOverReact(props: React.ComponentProps<'div'> & { className: 'mine'; \
           onClick: (x: number) => void; title: 'own'; own: string }) { return null; }\n\
         export function KeyRef(props: DepBig & React.RefAttributes<HTMLDivElement> & { key?: string }) { return null; }\n\
@@ -620,13 +625,29 @@ fn redteam_each_prop_is_shown_once_and_never_lost() {
         for (key, own) in [
             ("OwnOverReact", &["className", "onClick", "title", "own"][..]),
             ("KeyRef", &["key"]),
-            ("CpwrAndDep", &["className", "style", "id", "children"]),
             ("Redeclared", &["a1", "className"]),
+            ("LegendLike", &["hideIcon", "payload"]),
         ] {
             let listed = props(output, key);
             wrong.extend(
                 own.iter().filter(|name| !listed.contains(**name)).map(|name| format!("{lane} {key}: {name} dropped")),
             );
+        }
+        // A dependency's redeclaration of a React name stays React's, left to the element layer (the structural lane
+        // lists React's attributes for these forms, out of scope here).
+        if lane == "checker" {
+            for (key, react) in [
+                ("CpwrAndDep", &["className", "style", "id", "children"][..]),
+                ("LegendLike", &["className", "onClick", "onAbort"]),
+            ] {
+                let listed = props(output, key);
+                wrong.extend(
+                    react
+                        .iter()
+                        .filter(|name| listed.contains(**name))
+                        .map(|name| format!("{lane} {key}: {name} listed")),
+                );
+            }
         }
         for key in ["OmitString", "OmitBranded", "OmitTemplate"] {
             let entry = &output.components[key];
