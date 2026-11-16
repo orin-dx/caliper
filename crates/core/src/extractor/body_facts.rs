@@ -24,6 +24,18 @@
 //! computed key, an assignment, `typeof`, a type query) hands the object on, so `reads` is complete only when
 //! `handed_on` is false.
 //!
+//! # Invariants
+//!
+//! - Unknown unless proven: a component with no function body to read (`declare function`, an overload signature,
+//!   `declare const`) has no facts at all; `reads` is complete only while `handed_on` is false. The props object
+//!   named by no parameter (`arguments`, a rest parameter) hands it on.
+//! - The contexts that only read a member are an allow-list ([`Reader::is_read`]); a parent node kind not named there
+//!   hands the object on, so a form the parser adds later is unknown, not a silent read.
+//! - By binding, never by spelling: references resolve through `oxc_semantic` symbols.
+//! - Every read is recorded: an attribute's prop is named for each form of the member (`props.x`, `props['x']`,
+//!   `props?.x`, `props?.['x']`, `props!.x`) by the same rule that records the read.
+//! - One owner: an element belongs to the function node it is written in.
+//!
 //! A function or class the body binds and renders as a JSX tag, by symbol (`const Item = () => <li/>; return
 //! <Item/>`), is a component of its own: its references to the props object still count, but its elements are the
 //! file's ([`JsxUsage`]), not the parent's.
@@ -166,7 +178,15 @@ impl Finder {
     /// Notes the function a wanted node holds.
     fn record(&mut self, span: oxc_span::Span, function: Option<ComponentFn<'_, '_>>) {
         let key = (span.start, span.end);
-        let Some(function) = function.filter(|_| self.wanted.contains(&key)) else { return };
+        // A declaration without a body (`declare function`, an overload signature) has no behaviour to record: its
+        // component has no facts, which means unknown.
+        let has_body = |function: &ComponentFn<'_, '_>| match function {
+            ComponentFn::Function(function) => function.body.is_some(),
+            ComponentFn::Arrow(_) => true,
+        };
+        let Some(function) = function.filter(|function| self.wanted.contains(&key) && has_body(function)) else {
+            return;
+        };
         let function = function.span();
         let holders = self.functions.entry((function.start, function.end)).or_default();
         if !holders.contains(&key) {
@@ -268,6 +288,15 @@ impl<'s, 'a> Reader<'s, 'a> {
         };
         if let Some(first) = params.items.first() {
             self.props_param(&first.pattern);
+        } else if params.rest.is_some() {
+            // `function C(...args)`: the props object is `args[0]`, which no key names.
+            self.facts.handed_on = true;
+        }
+        // `arguments[0]` is the props object, named by no parameter.
+        if matches!(function, ComponentFn::Function(_))
+            && self.scoping.root_unresolved_references().contains_key("arguments")
+        {
+            self.facts.handed_on = true;
         }
         while let Some(symbol) = self.queue.pop_front() {
             for reference in self.scoping.get_resolved_references(symbol) {
@@ -481,7 +510,43 @@ impl<'s, 'a> Reader<'s, 'a> {
             | AstKind::AssignmentTargetRest(_)
             | AstKind::AssignmentTargetWithDefault(_)
             | AstKind::AssignmentTargetPropertyProperty(_) => false,
-            _ => true,
+            // An allow-list of the contexts that only read a value; any other parent (a form not named here, or one a
+            // later parser version adds) is not known to be a read and hands the object on.
+            AstKind::StaticMemberExpression(_)
+            | AstKind::ComputedMemberExpression(_)
+            | AstKind::PrivateFieldExpression(_)
+            | AstKind::VariableDeclarator(_)
+            | AstKind::ReturnStatement(_)
+            | AstKind::ThrowStatement(_)
+            | AstKind::ExpressionStatement(_)
+            | AstKind::JSXExpressionContainer(_)
+            | AstKind::JSXSpreadChild(_)
+            | AstKind::BinaryExpression(_)
+            | AstKind::LogicalExpression(_)
+            | AstKind::ConditionalExpression(_)
+            | AstKind::TemplateLiteral(_)
+            | AstKind::ArrayExpression(_)
+            | AstKind::ObjectProperty(_)
+            | AstKind::SpreadElement(_)
+            | AstKind::SequenceExpression(_)
+            | AstKind::AwaitExpression(_)
+            | AstKind::YieldExpression(_)
+            | AstKind::IfStatement(_)
+            | AstKind::WhileStatement(_)
+            | AstKind::DoWhileStatement(_)
+            | AstKind::ForStatement(_)
+            | AstKind::SwitchStatement(_)
+            | AstKind::SwitchCase(_)
+            | AstKind::ArrowFunctionExpression(_)
+            | AstKind::AssignmentPattern(_)
+            | AstKind::PropertyDefinition(_)
+            | AstKind::MethodDefinition(_)
+            | AstKind::BindingProperty(_)
+            | AstKind::JSXSpreadAttribute(_)
+            | AstKind::NewExpression(_)
+            | AstKind::ImportExpression(_)
+            | AstKind::ExportDefaultDeclaration(_) => true,
+            _ => false,
         }
     }
 
@@ -510,6 +575,10 @@ impl<'s, 'a> Reader<'s, 'a> {
             },
             Expression::ChainExpression(chain) => match &chain.expression {
                 ChainElement::StaticMemberExpression(member) => (&member.object, member.property.name.to_string()),
+                ChainElement::ComputedMemberExpression(member) => match &member.expression {
+                    Expression::StringLiteral(key) => (&member.object, js_text::lossy(key.value).into_owned()),
+                    _ => return None,
+                },
                 _ => return None,
             },
             _ => return None,
