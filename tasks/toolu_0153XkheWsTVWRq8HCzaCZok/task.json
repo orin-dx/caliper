@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_0153XkheWsTVWRq8HCzaCZok",
+  "agent_id": "ae96c08e3c3bf7d68",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix #483: relevance dependencies, ADR shape, findings",
+  "started_at": "2026-11-15T15:59:43.236698-08:00"
+}
