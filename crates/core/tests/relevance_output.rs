@@ -73,6 +73,39 @@ fn the_canonical_json_writes_used_at_schema_version_8() {
     assert!(big.get("used").is_none(), "an empty `used` is not written");
 }
 
+/// A collapsed ambient prop the signature gives a destructuring default is read by the body, so its layer names it in
+/// `used`; a default on a project member adds nothing (it is a typed row).
+#[test]
+fn a_collapsed_ambient_prop_with_a_destructuring_default_is_used() {
+    let dir = tempfile::Builder::new().prefix("RelevanceDefault").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    let fields = |prefix: &str| -> String { (0..33).map(|i| format!("{prefix}{i}?: string; ")).collect() };
+    std::fs::create_dir_all(root.join("vendor/@types/react")).unwrap();
+    std::fs::write(root.join("vendor/@types/react/dom.ts"), format!("export interface DomBits {{ {}}}\n", fields("d")))
+        .unwrap();
+    std::fs::write(root.join("big.ts"), format!("export interface Big {{ {}}}\n", fields("b"))).unwrap();
+    std::fs::write(
+        root.join("Button.tsx"),
+        "import type { DomBits } from './vendor/@types/react/dom';\n\
+         import type { Big } from './big';\n\
+         export interface ButtonProps extends DomBits, Big { tone?: string }\n\
+         export function Button({ d2 = '', b2 = '' }: ButtonProps) { return <button>{d2}{b2}</button>; }\n",
+    )
+    .unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        use_cache: false,
+        html_attributes: HtmlAttributeMode::None,
+        collapse_inherited_props: CollapseInheritedProps::All,
+        ..PipelineOptions::default()
+    };
+    let output = extract(&options);
+    let layers = &output.components["Button"].inheritance;
+    let used = |type_name: &str| layers.iter().find(|layer| layer.type_name == type_name).unwrap().used.clone();
+    assert_eq!(used("DomBits"), ["d2"], "{layers:?}");
+    assert!(used("Big").is_empty(), "a project member is a typed row, never `used`: {layers:?}");
+}
+
 /// A file-level element whose tag is a local binding of the same name as an imported component is not a call site of
 /// that component: usages are keyed by binding, and an inner binding resolves to nothing.
 #[test]

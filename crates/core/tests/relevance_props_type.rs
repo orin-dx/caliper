@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The lane facts the props-type evidence of ADR 0028 (slice T2, `relevance::props_type::members`) reads, pinned at
 //! the public output: the evidence itself is crate-private and tested beside it. A member the props type redeclares is
-//! both a listed prop and a member of its base's collapsed layer (the structural own-vs-inherited split, which marks
-//! it overriding); a `Pick`'s keys are listed with their base as `parent`; an `Omit`'s key is in neither; and a
+//! a listed prop and no member of its base's collapsed layer (a collapsed layer never holds a listed name, though the
+//! structural own-vs-inherited split still marks it overriding); a `Pick`'s keys are listed with their base as `parent`; an `Omit`'s key is in neither; and a
 //! collapsed layer names its members only, so a required member in it is known by name alone in either lane.
 
 use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, extract};
@@ -50,14 +50,14 @@ fn parent(entry: &ComponentEntry, name: &str) -> Option<String> {
 }
 
 #[test]
-fn a_redeclared_member_is_listed_and_held_by_its_collapsed_base() {
+fn a_redeclared_member_is_listed_and_not_held_by_its_collapsed_base() {
     let output = run();
     let extends = &output.components["ByExtends"];
     assert_eq!(parent(extends, "size").as_deref(), Some("Narrows"));
-    assert!(layered(extends, "size"));
+    assert!(!layered(extends, "size"));
     let intersection = &output.components["ByIntersection"];
     assert_eq!(parent(intersection, "size"), None);
-    assert!(layered(intersection, "size"));
+    assert!(!layered(intersection, "size"));
 }
 
 #[test]

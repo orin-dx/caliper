@@ -36,7 +36,11 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
     let members = props_type::members(&inputs.props_type, rows, &entry.inheritance);
     let shown = decide(&Evidence { members: &members, body: inputs.body.as_ref(), call_sites });
-    let used: BTreeSet<&str> = shown.used.iter().map(String::as_str).collect();
+    // A collapsed ambient member the signature defaults (`{ className = 'x' }`) is read by the body, which a row does
+    // not record for a name left in its layer: it is `used` too. Nothing else in `rows` is added.
+    let defaulted =
+        members.iter().filter(|member| member.ambient && member.default_tag).map(|member| member.name.as_str());
+    let used: BTreeSet<&str> = shown.used.iter().map(String::as_str).chain(defaulted).collect();
     for layer in &mut entry.inheritance {
         layer.used = layer.members.iter().filter(|name| used.contains(name.as_str())).cloned().collect();
     }
