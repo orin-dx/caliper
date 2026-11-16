@@ -102,6 +102,44 @@ export const Trigger = createLeaf(SeparatorNode, (props: TriggerProps, ref) => <
 }
 
 #[test]
+fn a_render_callbacks_discriminated_union_keeps_its_discriminant() {
+    let output = extract_file(&format!(
+        "{LEAF_FACTORY}
+interface A {{ mode: 'a'; left: string }}
+interface B {{ mode: 'b'; right: number }}
+type Props = A | B;
+export const Pair = createLeaf(SeparatorNode, (props: Props, ref) => <div />);
+"
+    ));
+    assert_eq!(output.components["Pair"].discriminant_prop.as_deref(), Some("mode"));
+}
+
+#[test]
+fn a_render_callback_type_parameter_does_not_shadow_a_declaration_in_the_result() {
+    let output = extract_file(
+        r#"
+interface Base { label: string }
+declare function make<P>(tag: P, render: unknown): React.FC<Base>;
+export const Widget = make('div', <Base,>(props: { value: Base }) => <div />);
+"#,
+    );
+    assert!(output.components.contains_key("Widget"), "{:?}", output.components.keys().collect::<Vec<_>>());
+    assert!(prop_names(&output, "Widget").contains(&"label".to_owned()));
+}
+
+#[test]
+fn a_render_callback_type_parameter_stays_a_placeholder_in_its_own_props() {
+    let output = extract_file(
+        r#"
+declare function make<P>(tag: P, render: unknown): React.FC<{ id?: string }>;
+export const Widget = make('div', <T,>(props: { v: T }) => <div />);
+"#,
+    );
+    assert_eq!(prop_names(&output, "Widget"), ["id", "v"]);
+    assert!(format!("{:?}", output.components["Widget"].props["v"].prop_type).contains('T'));
+}
+
+#[test]
 fn a_hook_call_given_a_function_is_no_component() {
     let output = extract_file(
         r#"
@@ -133,4 +171,112 @@ export const Button = forwardRef(function Button(props: ButtonProps, ref) { retu
 "#,
     );
     assert_eq!(prop_names(&output, "Button"), ["label", "ref"]);
+}
+
+/// A local factory whose result has the props `{ id?: string }`, taking a callback as its last argument.
+const LOCAL_FACTORY: &str = r#"
+import type { ForwardRefExoticComponent } from "react";
+declare function make<P>(tag: string, callback: (props: P, ref?: unknown) => unknown): ForwardRefExoticComponent<{ id?: string }>;
+type Theme = { color: string; gap: number };
+"#;
+
+#[test]
+fn an_annotated_callback_that_does_not_render_gives_no_props() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+export const AsString = make('div', (theme: Theme) => `${{theme.color}}`);
+export const AsNumber = make('div', (theme: Theme) => theme.gap);
+export const AsObject = make('div', (theme: Theme) => ({{ color: theme.color }}));
+export const AsFunction = make('div', (theme: Theme) => () => theme.gap);
+export const AsVoid = make('div', function (theme: Theme) {{ console.log(theme); }});
+"
+    ));
+    for name in ["AsString", "AsNumber", "AsObject", "AsFunction", "AsVoid"] {
+        assert!(output.components.contains_key(name), "{name} is a component");
+        assert!(!output.components[name].props.contains_key("color"), "{name} took the callback's parameter as props");
+    }
+}
+
+#[test]
+fn an_async_generator_or_rest_callback_gives_no_props() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+export const Async = make('div', async (theme: Theme) => <div>{{theme.color}}</div>);
+export const Generator = make('div', function* (theme: Theme) {{ yield <div />; }});
+export const Rest = make('div', (...theme: Theme[]) => <div />);
+"
+    ));
+    for name in ["Async", "Generator", "Rest"] {
+        assert!(output.components.contains_key(name), "{name} is a component");
+        assert!(!output.components[name].props.contains_key("color"), "{name} took the callback's parameter as props");
+    }
+}
+
+#[test]
+fn an_unannotated_render_callback_with_two_parameters_still_works() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+interface BoxProps {{ tone?: string }}
+export const Box = make('div', (props: BoxProps, ref: unknown) => <div />);
+"
+    ));
+    assert_eq!(prop_names(&output, "Box"), ["id", "tone"]);
+}
+
+#[test]
+fn a_render_callback_annotated_with_a_large_named_interface_keeps_its_props() {
+    let members: String = (0..210).map(|i| format!("  p{i}?: string;\n")).collect();
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+interface WideProps {{
+{members}}}
+export const Wide = make('div', (props: WideProps) => <div />);
+"
+    ));
+    let names = prop_names(&output, "Wide");
+    assert!(names.contains(&"p0".to_owned()) && names.contains(&"p209".to_owned()), "{}", names.len());
+}
+
+fn default_of(output: &ExtractionOutput, component: &str, prop: &str) -> Option<String> {
+    output.components[component].props[prop].default_value.as_ref().map(|d| d.value.clone())
+}
+
+#[test]
+fn a_render_callbacks_destructuring_default_is_the_props_default() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+export const Sized = make('div', ({{ size = 'M' }}: {{ size?: 'S' | 'M' }}) => <div />);
+export const Plain = make('div', ({{ size }}: {{ size?: 'S' | 'M' }}) => <div />);
+"
+    ));
+    assert_eq!(prop_names(&output, "Sized"), ["id", "size"]);
+    assert_eq!(default_of(&output, "Sized", "size").as_deref(), Some("'M'"));
+    assert_eq!(default_of(&output, "Plain", "size"), None);
+}
+
+#[test]
+fn an_unannotated_callbacks_defaults_are_not_read() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+export const Loose = make('div', ({{ size = 'M' }}) => <div />);
+export const NoRender = make('div', ({{ size = 'M' }}: {{ size?: string }}) => 'x');
+"
+    ));
+    for name in ["Loose", "NoRender"] {
+        assert!(!output.components[name].props.contains_key("size"), "{name} took the callback's props");
+    }
+}
+
+#[test]
+fn unreadable_destructuring_defaults_are_skipped() {
+    let output = extract_file(&format!(
+        "{LOCAL_FACTORY}
+const key = 'size';
+export const Odd = make('div', ({{ [key]: a = 1, tone: {{ x = 2 }} = {{}}, size: s = 'M', ...rest }}: {{ size?: string; tone?: {{ x?: number }} }}) => <div />);
+"
+    ));
+    assert_eq!(default_of(&output, "Odd", "size").as_deref(), Some("'M'"));
+    // The nested pattern's own default (`x = 2`) is no prop's default; the prop's is the `{}` written after it.
+    assert_eq!(default_of(&output, "Odd", "tone").as_deref(), Some("{}"));
+    assert!(!output.components["Odd"].props.contains_key("x"));
 }

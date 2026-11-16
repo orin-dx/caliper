@@ -1012,7 +1012,12 @@ pub(crate) fn resolve_component_shared(
     // A component a generic call builds has the props its callee's result type declares; the props type the extractor
     // selected is for a callee whose result isn't known.
     // The factory's own props resolve beside the main chain, not inside it: a type both reach is shared, not a cycle.
-    let mut factory_state = mapping.factory_props.as_ref().map(|_| state.branch());
+    // The render function's own type parameters are in scope for these props only, not for the callee's result.
+    let mut factory_state = mapping.factory_props.as_ref().map(|_| {
+        let mut branch = state.branch();
+        branch.scope = TypeScope::new(mapping.type_params.iter().chain(&mapping.factory_type_params));
+        branch
+    });
     let result = callee::result_chain(mapping, ctx, &mut state);
     // A call to a function whose result is no component is no component: nothing to document, nothing to report.
     if result.is_none() && mapping.rule == DetectionRule::FactoryResult {
@@ -1032,7 +1037,14 @@ pub(crate) fn resolve_component_shared(
     // The props a factory call's own arguments give the component, which the props type read above can lack: the
     // variant keys of its style recipe, or the annotated props of its render function (`extractor::factory_props`).
     if let (Some(own), Some(mut branch)) = (&mapping.factory_props, factory_state.take()) {
-        let own = alias::resolve_base_as_chain(own, &mapping.file_path, mapping, ctx, &mut branch, 0);
+        // A named props type is the root of the callback's props, as a function component's is: depth 0, so a large
+        // interface of its own is not collapsed (its inherited sources still can).
+        let own = match own {
+            CollectedType::Named { name, args } => {
+                chain::resolve_props_chain(name.as_str(), args, &mapping.file_path, mapping, ctx, &mut branch, 0)
+            }
+            _ => alias::resolve_base_as_chain(own, &mapping.file_path, mapping, ctx, &mut branch, 0),
+        };
         state.absorb(branch);
         chain.add_absent(own);
     }
@@ -1271,6 +1283,10 @@ impl ResolvedChain {
         self.notable.extend(other.notable.into_iter().filter(|p| !notable.contains(&p.name)));
         for (name, prop) in other.inherited_by_name {
             self.inherited_by_name.entry(name).or_insert(prop);
+        }
+        // The props `other` adds come with the discriminant that tells them apart (`Props = A | B`), unless self has one.
+        if self.discriminant_prop.is_none() {
+            self.discriminant_prop = other.discriminant_prop;
         }
     }
 

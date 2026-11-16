@@ -58,7 +58,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 41: `ComponentMapping::factory_props`: the props a factory call's own arguments give the component it builds.
 /// 42: a file-level tag bound in an inner scope is `JsxTag::Scoped` too, and a JSX spread of the whole props object no
 ///     longer sets `BodyFacts::handed_on`.
-const CACHE_SCHEMA_VERSION: u32 = 42;
+/// 43: `ComponentMapping::factory_type_params`: the type parameters of a factory call's render function.
+const CACHE_SCHEMA_VERSION: u32 = 43;
 
 const DATA_FILE: &str = "dts.msgpack";
 

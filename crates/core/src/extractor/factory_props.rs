@@ -10,10 +10,11 @@
 
 use oxc_ast::ast::*;
 
-use crate::types::{CollectedObjectField, CollectedType, TypeName};
+use crate::types::{CollectedObjectField, CollectedType, RawDefault, TypeName};
 
 use super::SourceDataCollector;
 use super::component::peel_expr;
+use super::evidence::{FunctionShape, renders};
 
 /// The own props a factory call's arguments give, waiting for detection to decide whether the call is a component.
 pub(crate) struct PendingFactoryProps {
@@ -22,32 +23,48 @@ pub(crate) struct PendingFactoryProps {
     props: CollectedType,
     /// Type parameters of the render function, which its props type names as placeholders.
     type_params: Vec<TypeName>,
+    /// The defaults the render function's destructured props parameter gives, read as for a function component.
+    defaults: rustc_hash::FxHashMap<String, RawDefault>,
 }
 
 impl<'src> SourceDataCollector<'src> {
     /// Record the own props `init`, the initializer of the PascalCase binding declared at `span_start`, gives the
-    /// component it builds, when it is a call: (a) the type annotation of the first parameter of a function given as
-    /// its last argument, read as for a function component; (b) otherwise, the keys of an object literal `variants`
+    /// component it builds, when it is a call: (a) the type annotation of the first parameter of a render function given as
+    /// its last argument (one that renders, read as for a function component; any other callback is ignored); (b) otherwise, the keys of an object literal `variants`
     /// inside an object literal argument, when that is a style recipe.
     pub(super) fn record_factory_props<'a>(&mut self, span_start: u32, init: &Expression<'a>) {
         let Expression::CallExpression(call) = peel_expr(init) else { return };
         let annotated = call.arguments.last().and_then(Argument::as_expression).map(peel_expr).and_then(|last| {
-            let (params, type_parameters) = match last {
-                Expression::ArrowFunctionExpression(f) => (&f.params, f.type_parameters.as_deref()),
-                Expression::FunctionExpression(f) => (&f.params, f.type_parameters.as_deref()),
+            let (params, type_parameters, shape, asynchronous) = match last {
+                Expression::ArrowFunctionExpression(f) => {
+                    (&f.params, f.type_parameters.as_deref(), FunctionShape::of_arrow(f), f.r#async)
+                }
+                Expression::FunctionExpression(f) => {
+                    (&f.params, f.type_parameters.as_deref(), FunctionShape::of_function(f), f.r#async)
+                }
                 _ => return None,
             };
-            let annotation = params.items.first()?.type_annotation.as_ref()?;
-            Some((&annotation.type_annotation, type_parameters))
+            // An allow-list: the callback is the render function only when it is proven to be one. Its first
+            // parameter is a plain or destructured props parameter, and it renders (`evidence::renders`: it returns
+            // JSX or an element, not a string, a function or nothing). An async or generator function does not render.
+            let first = params.items.first()?;
+            if asynchronous
+                || !matches!(first.pattern, BindingPattern::BindingIdentifier(_) | BindingPattern::ObjectPattern(_))
+                || renders(&shape, &*self).is_err()
+            {
+                return None;
+            }
+            let annotation = first.type_annotation.as_ref()?;
+            Some((&annotation.type_annotation, type_parameters, self.extract_param_defaults(params)))
         });
-        let (props, type_params) = if let Some((annotation, type_parameters)) = annotated {
-            (self.ts_type_to_collected(annotation), super::type_param_names(type_parameters))
+        let (props, type_params, defaults) = if let Some((annotation, type_parameters, defaults)) = annotated {
+            (self.ts_type_to_collected(annotation), super::type_param_names(type_parameters), defaults)
         } else if let Some(variants) = call.arguments.iter().find_map(recipe_variants) {
-            (CollectedType::Object(variants), Vec::new())
+            (CollectedType::Object(variants), Vec::new(), Default::default())
         } else {
             return;
         };
-        self.pending_factory_props.push(PendingFactoryProps { span_start, props, type_params });
+        self.pending_factory_props.push(PendingFactoryProps { span_start, props, type_params, defaults });
     }
 
     /// Give each mapping a detection rule built from a factory call the own props recorded for that call. A mapping
@@ -56,12 +73,11 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn attach_factory_props(&mut self) {
         for pending in std::mem::take(&mut self.pending_factory_props) {
             for mapping in self.data.component_mappings.iter_mut().filter(|m| m.span_start == pending.span_start) {
-                for param in &pending.type_params {
-                    if !mapping.type_params.contains(param) {
-                        mapping.type_params.push(param.clone());
-                    }
-                }
+                mapping.factory_type_params.clone_from(&pending.type_params);
                 mapping.factory_props = Some(pending.props.clone());
+                for (name, default) in &pending.defaults {
+                    mapping.param_defaults.entry(name.clone()).or_insert_with(|| default.clone());
+                }
             }
         }
     }

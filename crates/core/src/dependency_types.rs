@@ -129,6 +129,10 @@ fn alias_refs(alias: &CollectedTypeAlias, out: &mut FxHashSet<CompactString>) {
 fn mapping_refs(mapping: &ComponentMapping, out: &mut FxHashSet<CompactString>) {
     out.insert(CompactString::from(mapping.props_type_name.as_str()));
     mapping.props_type_args.iter().for_each(|arg| type_refs(arg, out));
+    // A factory call's callback annotation (`make('div', (props: ExternalProps) => ...)`) names types only here.
+    if let Some(factory_props) = &mapping.factory_props {
+        type_refs(factory_props, out);
+    }
 }
 
 fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
