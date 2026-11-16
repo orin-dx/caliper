@@ -482,7 +482,9 @@ export function Button(props: ButtonProps) { return null; }
         json: false,
         load_dependencies: false,
         no_load_dependencies: false,
-        collapse_inherited_props: None,
+        // The expanded view (ADR 0028 relevance 'all'): `htmlAttributes` decides which attributes are known, and
+        // every one known is a row. Under the default, relevance lists only those evidence shows.
+        collapse_inherited_props: Some(crate::CollapseInheritedPropsArg::None),
         no_checker: true,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
         no_resolver_facts: false,

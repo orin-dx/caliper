@@ -41,6 +41,9 @@ pub(crate) struct PropsType {
     defaulted: BTreeSet<String>,
     /// The members the interfaces it extends or intersects declare outside the ambient declarations.
     inherited: BTreeSet<String>,
+    /// A `Pick` or `Omit` in it names keys that are not a finite union of string literals (`string`, a branded or
+    /// template key): which members reach is not proven, so relevance narrows none of its listing.
+    pub(crate) declined: bool,
 }
 
 /// Finds a name written in a file: the declaration it names and the file declaring it, through imports.
@@ -132,10 +135,51 @@ impl PropsType {
         }
     }
 
-    /// The keys of `name<args>` written in `from` when it is `Pick<Base, Keys>`.
+    /// The keys of `name<args>` written in `from` when it is `Pick<Base, Keys>`, or a `Pick` under a utility that keeps
+    /// the keys it names (`Omit`, `Partial`, `Required`, `Readonly`: an omitted key no longer reaches the component, so
+    /// naming it changes nothing), or a type alias whose body is one of these. Any other form names no key.
     fn pick<'a>(&mut self, name: &str, args: &[CollectedType], from: &Utf8Path, lookup: &impl Lookup<'a>) {
-        if let ("Pick", [_, keys]) = (name, args) {
-            self.keys(keys, from, lookup, 0);
+        self.picks(name, args, from, lookup, 0);
+    }
+
+    fn picks<'a>(&mut self, name: &str, args: &[CollectedType], from: &Utf8Path, lookup: &impl Lookup<'a>, depth: u8) {
+        if depth >= MAX_ALIAS_DEPTH {
+            return;
+        }
+        match (name, args) {
+            ("Pick", [_, keys]) => self.keys(keys, from, lookup, 0),
+            ("Omit", [base, keys]) => {
+                // The omitted keys are not picked; only whether they are a closed set of literals is kept.
+                let mut omitted = Self::default();
+                omitted.keys(keys, from, lookup, 0);
+                self.declined |= omitted.declined;
+                if let CollectedType::Named { name, args } = base {
+                    self.picks(name, args, from, lookup, depth + 1);
+                }
+            }
+            ("Partial" | "Required" | "Readonly", [CollectedType::Named { name, args }, ..]) => {
+                self.picks(name, args, from, lookup, depth + 1);
+            }
+            (_, []) => {
+                let Some((Declaration::Alias(alias), declared)) = lookup(name, from) else { return };
+                let base = match alias {
+                    CollectedTypeAlias::Pick { keys, .. } => {
+                        self.keys(keys, &declared, lookup, depth + 1);
+                        return;
+                    }
+                    CollectedTypeAlias::Omit { base, .. }
+                    | CollectedTypeAlias::Partial { base, .. }
+                    | CollectedTypeAlias::Required { base, .. }
+                    | CollectedTypeAlias::Passthrough { target: base, .. } => base,
+                    CollectedTypeAlias::LiteralUnion { .. }
+                    | CollectedTypeAlias::Union { .. }
+                    | CollectedTypeAlias::Intersection { .. } => return,
+                };
+                if let CollectedType::Named { name, args } = base {
+                    self.picks(name, args, &declared, lookup, depth + 1);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -148,7 +192,10 @@ impl PropsType {
             }
             CollectedType::Union(keys) => keys.iter().for_each(|key| self.keys(key, from, lookup, depth)),
             CollectedType::Named { name, args } if args.is_empty() && depth < MAX_ALIAS_DEPTH => {
-                let Some((Declaration::Alias(alias), declared)) = lookup(name, from) else { return };
+                let Some((Declaration::Alias(alias), declared)) = lookup(name, from) else {
+                    self.declined = true;
+                    return;
+                };
                 match alias {
                     CollectedTypeAlias::LiteralUnion { members, .. } => self.picked.extend(members.iter().cloned()),
                     CollectedTypeAlias::Passthrough { target, .. } => self.keys(target, &declared, lookup, depth + 1),
@@ -159,10 +206,12 @@ impl PropsType {
                     | CollectedTypeAlias::Omit { .. }
                     | CollectedTypeAlias::Intersection { .. }
                     | CollectedTypeAlias::Partial { .. }
-                    | CollectedTypeAlias::Required { .. } => {}
+                    | CollectedTypeAlias::Required { .. } => self.declined = true,
                 }
             }
-            _ => {}
+            // Any other key form (`string`, `string & {}`, a template literal, `keyof X`, an alias past the depth)
+            // is not a closed set of literals.
+            _ => self.declined = true,
         }
     }
 

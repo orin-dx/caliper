@@ -1,6 +1,5 @@
 ---
 source: crates/semantic/tests/cases.rs
-assertion_line: 101
 expression: rendered(&outcome)
 ---
 {
@@ -2738,6 +2737,54 @@ expression: rendered(&outcome)
             {
               "kind": "stringLiteral",
               "value": "solid"
+            }
+          ]
+        }
+      },
+      {
+        "name": "ref",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "null"
+            },
+            {
+              "kind": "function",
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "instance",
+                  "type": {
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "named",
+                        "name": "HTMLButtonElement",
+                        "args": []
+                      }
+                    ]
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "void"
+              }
+            },
+            {
+              "kind": "named",
+              "name": "RefObject",
+              "args": [
+                {
+                  "kind": "named",
+                  "name": "HTMLButtonElement",
+                  "args": []
+                }
+              ]
             }
           ]
         }

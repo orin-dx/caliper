@@ -278,9 +278,14 @@ fn a_source_collapses_by_the_members_that_reach_the_component() {
             let entry = &output.components[&key];
             let huge: Vec<_> = entry.inheritance.iter().filter(|layer| layer.type_name == "Huge").collect();
             let listed = entry.props.keys().filter(|prop| prop.starts_with('h')).count();
-            if collapses {
+            // Relevance lists a dependency's member only where evidence shows it (ADR 0028, A2): these bodies read
+            // nothing and no call site passes anything, so a source under the size rule is a layer of names too,
+            // except the keys a `Pick` names. A source only the checker reads gave relevance no placement: listed whole.
+            let narrowed = lane != "checker only" && !name.starts_with("Pick");
+            if collapses || narrowed {
                 assert_eq!(huge.len(), 1, "{lane} {key}: one Huge layer");
                 assert_eq!(huge[0].total_props as usize, *reaching, "{lane} {key}: what the layer holds");
+                assert_eq!(listed, 0, "{lane} {key}: listed");
             } else {
                 assert!(huge.is_empty(), "{lane} {key}: no Huge layer");
                 assert_eq!(listed, *reaching, "{lane} {key}: listed");
@@ -626,12 +631,22 @@ fn redteam_each_prop_is_shown_once_and_never_lost() {
             ("OwnOverReact", &["className", "onClick", "title", "own"][..]),
             ("KeyRef", &["key"]),
             ("Redeclared", &["a1", "className"]),
-            ("LegendLike", &["hideIcon", "payload"]),
+            ("LegendLike", &["hideIcon"]),
         ] {
             let listed = props(output, key);
             wrong.extend(
                 own.iter().filter(|name| !listed.contains(**name)).map(|name| format!("{lane} {key}: {name} dropped")),
             );
+        }
+        // A dependency's member no evidence shows is not lost: relevance leaves it a name in its source's layer
+        // (ADR 0028, A2), where the old contract listed a source this small.
+        let legend = &output.components["LegendLike"];
+        if !legend
+            .inheritance
+            .iter()
+            .any(|layer| layer.type_name == "DepLegend" && layer.members.iter().any(|m| m == "payload"))
+        {
+            wrong.push(format!("{lane} LegendLike: payload neither listed nor in the DepLegend layer"));
         }
         // A dependency's redeclaration of a React name stays React's, left to the element layer (the structural lane
         // lists React's attributes for these forms, out of scope here).

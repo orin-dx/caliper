@@ -51,28 +51,52 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
         .filter(|name| !entry.props.contains_key(*name) && !entry.notable_inherited.contains_key(*name))
         .cloned();
     let used: BTreeSet<String> = shown.used.iter().cloned().chain(defaulted).chain(untyped).collect();
-    let left =
-        if inputs.narrows { shown.collapsed.iter().chain(&shown.used).cloned().collect() } else { BTreeSet::new() };
+    let left = if inputs.narrows && !inputs.props_type.declined {
+        sources(entry, shown.collapsed.iter().chain(&shown.used))
+    } else {
+        BTreeSet::new()
+    };
     entry.relevance = Some(std::sync::Arc::new(Placement { left, used }));
     narrow(entry);
+}
+
+/// A member by provenance: its name and the source that declares it, by type name and file.
+type Sourced = (String, String, String);
+
+/// Each of `names` with the source the structural answer gives it: the `parent` of the listed prop, and the layer of
+/// each collapsed layer holding the name. A name the answer gives no source (a listed prop with no `parent`) has no
+/// entry: its source is unknown, so no lane narrows it.
+fn sources<'n>(entry: &ComponentEntry, names: impl Iterator<Item = &'n String>) -> BTreeSet<Sourced> {
+    let mut sourced = BTreeSet::new();
+    for name in names {
+        let listed = entry.props.get(name).or_else(|| entry.notable_inherited.get(name));
+        if let Some(parent) = listed.and_then(|prop| prop.parent.as_ref()) {
+            sourced.insert((name.clone(), parent.name.clone(), parent.file_name.clone()));
+        }
+        for layer in entry.inheritance.iter().filter(|layer| layer.members.contains(name)) {
+            sourced.insert((name.clone(), layer.type_name.clone(), layer.file_name.clone()));
+        }
+    }
+    sourced
 }
 
 /// What [`decide`] said of one component, kept on its entry so that every merge of the checker's props into it lists by
 /// the same decision ([`narrow`]): the decision is made once, from the structural answer's evidence.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Placement {
-    /// The members evidence leaves out of the listing ([`Shown::collapsed`] and [`Shown::used`]): each is a name in
-    /// the layer of its source, never a row.
-    left: BTreeSet<String>,
+    /// The members evidence leaves out of the listing ([`Shown::collapsed`] and [`Shown::used`]), each by name and
+    /// the source the structural answer gives it: a listed prop is left out only when both match, so a prop of
+    /// another source with the same name, or one the structural answer gave no source, is never hidden by it.
+    left: BTreeSet<Sourced>,
     /// The members of `left` named in their layer's `used` list.
     used: BTreeSet<String>,
 }
 
 /// Lists `entry` by its kept [`Placement`]: a listed prop (in `props` or `notableInherited`) the decision leaves out
 /// and that a source outside the project declares (a dependency's, or React's and the DOM's) moves to the layer of
-/// its source, as a name. Its home is the layer of its `parent` (by type name and file), else,
-/// for an ambient source, the entry's HTML element layer, else a new layer of its `parent`. A prop with no `parent`
-/// has no known source and stays listed: no name is ever lost. Then each layer's `used` list is written. Without a
+/// its source, as a name, when the placement left out that name from that same source. Its home is the layer of its
+/// `parent` (by type name and file), else, for an ambient source, the entry's HTML element layer, else a new layer of
+/// its `parent`. A prop with no `parent` has no known source and stays listed: no name is ever lost. Then each layer's `used` list is written. Without a
 /// placement (no evidence was gathered) nothing changes. Run by [`apply`] and at the end of each merge of the
 /// checker's props, which may list again what the structural answer left out.
 pub(crate) fn narrow(entry: &mut ComponentEntry) {
@@ -80,15 +104,16 @@ pub(crate) fn narrow(entry: &mut ComponentEntry) {
     let ComponentEntry { props, notable_inherited, inheritance, .. } = entry;
     for listing in [props, notable_inherited] {
         listing.retain(|name, prop| {
-            if !placement.left.contains(name) {
+            let Some(parent) = prop.parent.as_ref() else { return true };
+            if !placement.left.contains(&(name.clone(), parent.name.clone(), parent.file_name.clone())) {
                 return true;
             }
             // Only a source outside the project is narrowed: a dependency's or an ambient one, decided by the
             // declaring path. The project's own sources stay as the collapse rule lists them.
-            let Some(parent) = prop.parent.as_ref() else { return true };
             if crate::origin::declaration_origin(&parent.file_name) == crate::origin::Origin::Project {
                 return true;
             }
+            // Each name is held once: a layer already holding it keeps it (`listed_props_leave_layers`' rule).
             if !inheritance.iter().any(|layer| layer.members.contains(name)) {
                 home(inheritance, parent).members.push(name.clone());
             }

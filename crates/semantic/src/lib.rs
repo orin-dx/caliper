@@ -100,14 +100,10 @@ fn targets_with(output: &ExtractionOutput, cx: Option<CollapseContext>) -> Vec<T
                 .filter(|prop| !prop.description.is_empty())
                 .map(|prop| prop.name.clone())
                 .collect(),
-            // The whole-project merge leaves `@types/react`'s props to the inheritance layers. A component with no
-            // layer (a context's `Provider`, a `th`/`td` attribute intersection) has none to leave them to, so the
-            // checker reports the ones the structural pass lists, which `apply_props` keeps.
-            react_wanted: Some(if entry.inheritance.is_empty() {
-                entry.props.keys().cloned().collect()
-            } else {
-                Default::default()
-            }),
+            // Of `@types/react`'s props the whole-project merge keeps those the structural answer lists, as the
+            // session does (`react_prop_listed`): relevance decided them there (ADR 0028, A2), so the checker reports
+            // those names and converts no other DOM attribute.
+            react_wanted: Some(entry.props.keys().cloned().collect()),
         })
         .collect()
 }
