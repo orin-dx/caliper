@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7H8W9NSKMF3MKN5EMAMYPSK",
+  "strategy": "manual-commit",
+  "branch": "fix/cancel-running-request",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "crates/core/src/pipeline/semantic_hook.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/on_demand.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 166,
+    "cache_creation_tokens": 615676,
+    "cache_read_tokens": 44134160,
+    "output_tokens": 22689,
+    "api_call_count": 82,
+    "subagent_tokens": {
+      "input_tokens": 140,
+      "cache_creation_tokens": 178994,
+      "cache_read_tokens": 7027515,
+      "output_tokens": 37538,
+      "api_call_count": 70
+    }
+  },
+  "redaction": {
+    "replacements": 46,
+    "layers": {
+      "betterleaks": 30,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 16,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

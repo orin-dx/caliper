@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01HVk556MD9j44L8rfPYgNXd",
+  "agent_id": "ab007d2dc7b6de4f7",
+  "subagent_type": "general-purpose",
+  "task_description": "481: keep pending entry for a running request",
+  "started_at": "2026-11-15T20:07:05.626897-08:00"
+}

@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01DwCpNDpChx77LTM4V7dmiL",
+  "agent_id": "af7be012eadb22aa5",
+  "subagent_type": "general-purpose",
+  "task_description": "480: keep callback generics local to factory props",
+  "started_at": "2026-11-15T20:07:05.653841-08:00"
+}
