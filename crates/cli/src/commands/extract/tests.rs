@@ -325,6 +325,7 @@ fn rdt_type_json_union_with_one_non_literal_member_never_produces_enum_shape() {
 fn serialize_rdt_emits_composes_exactly() {
     use caliper_docgen_core::types::ComponentEntry;
     let entry = ComponentEntry {
+        relevance: None,
         display_name: "Widget".to_string(),
         file_path: "Widget.tsx".into(),
         description: String::new(),
@@ -359,6 +360,7 @@ fn serialize_rdt_emits_composes_exactly() {
 fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_core::types::ComponentEntry {
     use caliper_docgen_core::types::{ComponentEntry, ParsedProp};
     ComponentEntry {
+        relevance: None,
         display_name: name.to_string(),
         file_path: format!("{name}.tsx").into(),
         description: String::new(),

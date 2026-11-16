@@ -321,6 +321,7 @@ mod tests {
         components.insert(
             "Button".to_string(),
             ComponentEntry {
+                relevance: None,
                 display_name: "Button".into(),
                 file_path: "src/Button.tsx".into(),
                 description: "A button".into(),
