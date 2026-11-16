@@ -641,8 +641,9 @@ impl Revision {
         // same-named component elsewhere appeared or disappeared, so the bare and disambiguated keys swapped), and every
         // kept component whose layers' `used` lists the revision's call sites changed.
         let fresh: FxHashSet<&ComponentId> = fresh_ids.iter().collect();
-        let layers =
-            |output: &ExtractionOutput, key: &String| output.components.get(key).map(|entry| entry.inheritance.clone());
+        fn layers<'o>(output: &'o ExtractionOutput, key: &str) -> Option<&'o [InheritedLayer]> {
+            output.components.get(key).map(|entry| entry.inheritance.as_slice())
+        }
         let mut updated_keys: Vec<&String> = next
             .keys
             .iter()

@@ -293,6 +293,7 @@ impl<'s, 'a> Reader<'s, 'a> {
             nested: 0,
             elements: Vec::new(),
             nested_usages: Vec::new(),
+            spreads_nested: false,
         };
         // The parameters too: a default or a computed key can hold JSX (`{ icon = <Icon /> }`).
         match function {
@@ -317,8 +318,10 @@ impl<'s, 'a> Reader<'s, 'a> {
                 elements.visit_arrow_function_body(&arrow.body);
             }
         }
-        let (found, nested_usages) = (elements.elements, elements.nested_usages);
+        let (found, nested_usages, spreads_nested) =
+            (elements.elements, elements.nested_usages, elements.spreads_nested);
         self.facts.elements = found;
+        self.facts.handed_on |= spreads_nested;
         (self.facts, nested_usages)
     }
 
@@ -546,6 +549,8 @@ struct Elements<'r, 's, 'a> {
     nested: u32,
     elements: Vec<JsxElementFact>,
     nested_usages: Vec<JsxUsage>,
+    /// A nested component spreads the props object or a rest binding: an escape this body's elements do not record.
+    spreads_nested: bool,
 }
 
 impl Elements<'_, '_, '_> {
@@ -591,6 +596,12 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
 
     fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
         if self.nested > 0 {
+            // A nested component's elements are not this body's: a spread of the props or a rest binding there is
+            // recorded nowhere, so it hands them on.
+            self.spreads_nested |= it.attributes.iter().any(|attribute| {
+                matches!(attribute, JSXAttributeItem::SpreadAttribute(spread)
+                    if self.reader.whole_expr(&spread.argument).is_some())
+            });
             self.nested_usages.push(usage_of(it, self.reader.scoping));
         } else {
             let attributes = it

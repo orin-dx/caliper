@@ -89,7 +89,12 @@ fn schema_value() -> serde_json::Value {
                                     "omitted": { "$ref": "#/definitions/nameListId" },
                                     "htmlElement": { "type": ["string", "null"] },
                                     "totalProps": { "type": "integer" },
-                                    "members": { "$ref": "#/definitions/nameListId" }
+                                    "members": { "$ref": "#/definitions/nameListId" },
+                                    "used": {
+                                        "description": "The members of this collapsed layer relevance evidence puts forward (ADR 0028): ambient members consumers pass at the call-site floor or the body reads, in the order of `members`. Absent when none is",
+                                        "type": "array",
+                                        "items": { "type": "string" }
+                                    }
                                 }
                             }
                         },
@@ -117,11 +122,6 @@ fn schema_value() -> serde_json::Value {
                             "description": "How its module exports it, in source order (ADR 0027). `exported` is whether there are any",
                             "type": "array",
                             "items": { "$ref": "#/definitions/componentExport" }
-                        },
-                        "relevance": {
-                            "description": "Where relevance evidence puts each listed prop, and each member of a collapsed layer it puts forward (ADR 0028): `row` a typed row, `used` an ambient member named in its layer, `collapsed` left in its layer, `asToday` no signal with incomplete evidence. A member left out stays in its layer",
-                            "type": "object",
-                            "additionalProperties": { "type": "string", "enum": ["row", "used", "collapsed", "asToday"] }
                         }
                     }
                 }
