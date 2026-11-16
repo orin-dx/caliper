@@ -240,6 +240,23 @@ async fn program_files(rpc: &Rpc) -> Result<FxHashMap<String, String>, CallError
     Ok(files)
 }
 
+/// Each source, by its name and the file as the checker keys it, as a prop's `parent` names it ([`declared`]): the file
+/// on disk, or the checker's spelling where the program does not name it.
+pub(crate) async fn as_parents(
+    rpc: &Rpc,
+    memo: &Memo,
+    sources: Vec<(String, String)>,
+) -> Result<Vec<PropParent>, CallError> {
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+    let files = memo.files.get_or_try_init(|| program_files(rpc)).await?;
+    Ok(sources
+        .into_iter()
+        .map(|(name, file)| PropParent { name, file_name: files.get(&file).cloned().unwrap_or(file) })
+        .collect())
+}
+
 /// A prop's tags as the structural pass keys them: by name, the last of a repeated tag winning, its text trimmed, and a
 /// `@param` by `param:<parameter>` with the text after the parameter's name, which the checker renders as the text's
 /// first word.
