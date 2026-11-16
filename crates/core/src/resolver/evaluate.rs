@@ -1054,6 +1054,10 @@ pub(super) fn structural_expansion(
                     .map(|key| key.name)
                     .collect(),
             };
+            // A key union holds each name once (`Keys | "a"` over a `Keys` that has `"a"`).
+            let mut keys = keys;
+            let mut seen = std::collections::HashSet::new();
+            keys.retain(|key| seen.insert(key.clone()));
             let mut fields = object_fields(base, file, scope, ctx, depth + 1)?;
             if name == "Pick" {
                 // `[P in K]` lists the members in the keys' order. A key the object lacks is an error TypeScript
