@@ -197,9 +197,10 @@ pub trait SemanticProvider: Send + Sync {
     fn request(&self, targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome>;
 
     /// Queues `targets` at `priority` and returns at once; `delivery` receives the outcome. A checker that answers one
-    /// request at a time answers an interactive request before a background one, and reads `priority` again when it
-    /// picks the next, since a caller that joins a background request may raise it. The default ignores the priority
-    /// and waits for [`Self::request`]'s receiver on a thread of its own.
+    /// request at a time answers by [`Priority`] class, and reads `priority` again when it picks the next, since a
+    /// caller that joins a request may raise it, and drops one that was cancelled before it started
+    /// ([`SharedPriority::cancel`]). The default ignores the priority, so it never drops a request, and waits for
+    /// [`Self::request`]'s receiver on a thread of its own.
     fn request_at(&self, targets: Vec<SemanticTarget>, priority: SharedPriority, delivery: Delivery) {
         drop(priority);
         let receiver = self.request(targets);
@@ -228,37 +229,93 @@ pub trait SemanticProvider: Send + Sync {
     fn changed(&self, _change: SourceChange) {}
 }
 
-/// Who waits for a request to the checker, which decides what a busy checker answers first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Who waits for a request to the checker, which decides what a busy checker answers first. The classes are ordered
+/// as a checker answers them: [`Priority::Interactive`] first, then [`Priority::Neighbour`], then
+/// [`Priority::Background`], so the lesser of two priorities is the one answered first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Priority {
-    /// A component someone is looking at now: a story that was opened.
+    /// A component someone is looking at now: a story that was opened. A caller that names no priority asks at this
+    /// one ([`SemanticProvider::request`]).
     Interactive,
-    /// Work nobody waits for yet: a warm-up, a fill, a prefetch.
+    /// A component of a story next to the one shown, which the client may open next: a prefetch.
+    Neighbour,
+    /// Work nobody waits for yet: a warm-up, a fill.
     Background,
 }
 
+/// The bit of a [`SharedPriority`] set once its request is cancelled; the bits below it hold the [`Priority`].
+const CANCELLED: u8 = 0b100;
+
+/// The bit set once the checker took the request to convert it; it is never cancelled after that.
+const STARTED: u8 = 0b1000;
+
 /// The priority of one queued request, shared between the caller and the checker so that a later caller can raise it
-/// ([`SharedPriority::raise`]) while the request waits. Clones share one priority.
+/// ([`SharedPriority::raise`]) while the request waits, or cancel it ([`SharedPriority::cancel`]) when nobody will
+/// read its answer. Clones share one priority.
 #[derive(Debug, Clone)]
-pub struct SharedPriority(Arc<std::sync::atomic::AtomicBool>);
+pub struct SharedPriority(Arc<std::sync::atomic::AtomicU8>);
 
 impl SharedPriority {
-    /// A priority that starts at `priority`.
+    /// A priority that starts at `priority`, not cancelled.
     pub fn new(priority: Priority) -> Self {
-        Self(Arc::new(std::sync::atomic::AtomicBool::new(priority == Priority::Interactive)))
+        Self(Arc::new(std::sync::atomic::AtomicU8::new(Self::bits(priority))))
     }
 
     /// The priority now.
     pub fn get(&self) -> Priority {
-        match self.0.load(std::sync::atomic::Ordering::Acquire) {
-            true => Priority::Interactive,
-            false => Priority::Background,
+        Self::class(self.0.load(std::sync::atomic::Ordering::Acquire))
+    }
+
+    fn bits(priority: Priority) -> u8 {
+        match priority {
+            Priority::Interactive => 0,
+            Priority::Neighbour => 1,
+            Priority::Background => 2,
+        }
+    }
+
+    fn class(bits: u8) -> Priority {
+        match bits & !(CANCELLED | STARTED) {
+            0 => Priority::Interactive,
+            1 => Priority::Neighbour,
+            _ => Priority::Background,
         }
     }
 
     /// Makes the request interactive: someone is now waiting for it.
     pub fn raise(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::Release);
+        self.raise_to(Priority::Interactive);
+    }
+
+    /// Raises the request to `priority`, or leaves it where it is when it already goes before `priority`. A caller
+    /// asked for it again, so it is no longer cancelled.
+    pub fn raise_to(&self, priority: Priority) {
+        let raise = |bits: u8| Some(bits & STARTED | Self::bits(Self::class(bits).min(priority)));
+        self.0.try_update(std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire, raise).ok();
+    }
+
+    /// Cancels the request: nobody will read its answer (the client no longer shows its component, or an edit
+    /// superseded the revision it was asked at), so a checker that has not started it drops it, and its delivery
+    /// receives `None`. A checker already converting it ([`SharedPriority::start`]) finishes, and the request is not
+    /// cancelled. An interactive request is waited for and is never cancelled; returns whether this one was.
+    pub fn cancel(&self) -> bool {
+        let cancel = |bits: u8| match (bits & STARTED != 0, Self::class(bits)) {
+            (true, _) | (false, Priority::Interactive) => None,
+            (false, Priority::Neighbour | Priority::Background) => Some(bits | CANCELLED),
+        };
+        self.0.try_update(std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire, cancel).is_ok()
+    }
+
+    /// Marks the request as being converted, so it can no longer be cancelled; returns false, marking nothing, when it
+    /// was cancelled first and is to be dropped instead.
+    pub fn start(&self) -> bool {
+        let start = |bits: u8| (bits & CANCELLED == 0).then_some(bits | STARTED);
+        self.0.try_update(std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire, start).is_ok()
+    }
+
+    /// Whether the request was cancelled and not raised since.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire) & CANCELLED != 0
     }
 }
 

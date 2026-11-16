@@ -164,9 +164,18 @@ export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>
 
 /**
  * Resolves the components under `keys` in the background, without returning them: a request for one later is
- * answered from what this resolved. With the checker on (the default) it asks the checker for each at background
- * priority, after any component someone waits for, and does not wait for it; the answers are kept for the requests
- * that follow. Runs off the calling thread and returns how many of the keys it resolved. An eager session and an
- * unknown session resolve nothing.
+ * answered from what this resolved. These are the components of the stories next to the one shown: with the checker
+ * on (the default) it asks the checker for each at neighbour priority, after any component someone waits for and
+ * before warm-up and fill work, and does not wait for it; the answers are kept for the requests that follow. Runs off
+ * the calling thread and returns how many of the keys it resolved. An eager session and an unknown session resolve
+ * nothing. `sessionCancel` drops these requests once the client no longer shows the stories.
  */
 export declare function sessionPrefetch(sessionId: number, keys: Array<string>): Promise<number>
+
+/**
+ * Tells the checker that the client no longer shows the components under `keys` (it navigated away, which replaced
+ * what `sessionPrefetch` asked for): a request for one of them that nobody waits for and that the checker has not
+ * started is dropped before it is converted. A request someone waits for, and one already being converted, is
+ * answered and kept. Does nothing without the checker, and for an unknown or closed session.
+ */
+export declare function sessionCancel(sessionId: number, keys: Array<string>): void

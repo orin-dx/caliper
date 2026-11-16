@@ -461,12 +461,30 @@ impl WatchSession {
         self.components_at(keys, Priority::Interactive)
     }
 
-    /// [`Self::components`] for work nobody waits for yet: a warm-up, a fill, a prefetch of the components stories
-    /// name. With a checker attached, each is asked for at [`Priority::Background`] and not waited for, so the call
-    /// returns the structural answers; the checker answers them after every request someone waits for, and keeps its
-    /// answers for the requests that follow. A request for a component already being asked joins that request.
+    /// [`Self::components`] for work nobody waits for yet: a warm-up, a fill of the components stories name (a prefetch
+    /// of the stories next to the one shown is [`Self::components_as_neighbours`]). With a checker attached, each is
+    /// asked for at [`Priority::Background`] and not waited for, so the call returns the structural answers; the
+    /// checker answers them after every request someone waits for, and keeps its answers for the requests that follow.
+    /// A request for a component already being asked joins that request.
     pub fn components_in_background(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
         self.components_at(keys, Priority::Background)
+    }
+
+    /// [`Self::components_in_background`] for the components of the stories next to the one shown, which the client
+    /// may open next: with a checker attached, each is asked for at [`Priority::Neighbour`], after every request
+    /// someone waits for and before warm-up and fill work, and not waited for.
+    pub fn components_as_neighbours(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
+        self.components_at(keys, Priority::Neighbour)
+    }
+
+    /// Tells the checker that the client no longer shows the components under `keys` (it navigated away, and replaced
+    /// what it prefetched): a request for one of them that nobody waits for and that the checker has not started is
+    /// dropped before it is converted. A request someone waits for, and one already being converted, is answered and
+    /// kept. Does nothing without a checker.
+    pub fn cancel_components(&self, keys: &[String]) {
+        if let Some(hook) = &self.semantic {
+            hook.cancel(keys);
+        }
     }
 
     fn components_at(&self, keys: &[String], priority: Priority) -> Vec<Option<ComponentAnswer>> {

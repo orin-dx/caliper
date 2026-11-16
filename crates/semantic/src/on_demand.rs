@@ -26,12 +26,15 @@
 //! (measured in `docs/gate-measurements.md`). Past the bound it stays down instead, and its components keep their
 //! structural answer with a warning that says why.
 //!
-//! Requests wait in two queues: an interactive one (a story someone opened) is answered before any background one (a
-//! warm-up, a fill, a prefetch), first come first served within each, and a background request a caller raised while
-//! it waited moves to the interactive queue. So that background work is never starved, after [`INTERACTIVE_STREAK`]
-//! interactive answers in a row while background requests wait, the oldest of them goes next.
+//! Requests wait in three classes ([`Priority`]): an interactive one (a story someone opened) is answered before a
+//! neighbour (a prefetch of the stories next to it), and a neighbour before a background one (a warm-up, a fill), first
+//! come first served within each, and a request a caller raised while it waited goes with its new class, at the place it
+//! was first filed. So that lesser work is never starved, after [`INTERACTIVE_STREAK`] picks that bypassed a waiting
+//! lesser class, whichever class they served, the oldest request of a lesser class goes next. A request cancelled while it waits (its component no longer shown, its
+//! revision superseded by an edit) is dropped before it is converted; one being converted is not interrupted, since a
+//! checker call cannot be.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
@@ -58,8 +61,8 @@ const WARM_FILE: &str = "__caliper_warm_up__.ts";
 /// How many files an unannounced-edit warning names before it counts the rest.
 const UNTOLD_NAMED: usize = 5;
 
-/// Interactive answers in a row the checker gives while background requests wait, before the oldest background request
-/// goes next: once first in its queue, a background request waits behind at most this many interactive ones.
+/// Picks the checker makes in a row while a lesser class ([`Priority`]) waits, before the oldest request of a lesser
+/// class goes next: a waiting request goes behind at most this many picks of the classes before it.
 const INTERACTIVE_STREAK: u32 = 4;
 
 /// Crashes the checker may have before it stays down for the session.
@@ -147,54 +150,62 @@ struct Asked {
     delivery: Delivery,
 }
 
-/// The requests waiting for the checker, in two queues by priority, first in first out within each. A request is
-/// filed by its priority when it arrives and moved to the interactive queue when a caller raised it while it waited.
-/// After [`INTERACTIVE_STREAK`] interactive requests in a row while the background queue is not empty, the next is
-/// the oldest background request.
+/// The requests waiting for the checker. The next is the first of the first class waiting ([`Priority`]: interactive,
+/// then neighbour, then background), by arrival: a request a caller raised while it waited goes with its new class, at
+/// the place it was first filed. A request cancelled while it waited ([`SharedPriority::cancel`]) is dropped when the
+/// next is picked, before it is converted, which hands its delivery `None`; one the checker already took is not
+/// interrupted. A lesser class never waits past [`INTERACTIVE_STREAK`] picks that bypassed it, whichever class they
+/// served: then the oldest request of a lesser class is the next.
 struct Queue<T> {
-    interactive: VecDeque<(T, SharedPriority)>,
-    background: VecDeque<(T, SharedPriority)>,
-    /// Interactive requests taken in a row while a background one waited.
-    streak: u32,
+    /// Every waiting request with the number it arrived as.
+    waiting: Vec<(u64, T, SharedPriority)>,
+    /// Requests that arrived so far.
+    arrived: u64,
+    /// Picks in a row that went to a class while a lesser one waited.
+    bypassed: u32,
 }
 
 impl<T> Default for Queue<T> {
     fn default() -> Self {
-        Self { interactive: VecDeque::new(), background: VecDeque::new(), streak: 0 }
+        Self { waiting: Vec::new(), arrived: 0, bypassed: 0 }
     }
 }
 
 impl<T> Queue<T> {
     fn push(&mut self, item: T, priority: SharedPriority) {
-        match priority.get() {
-            Priority::Interactive => self.interactive.push_back((item, priority)),
-            Priority::Background => self.background.push_back((item, priority)),
-        }
+        self.waiting.push((self.arrived, item, priority));
+        self.arrived += 1;
     }
 
     fn is_empty(&self) -> bool {
-        self.interactive.is_empty() && self.background.is_empty()
+        self.waiting.is_empty()
     }
 
-    /// The request the checker answers next.
+    /// The request the checker answers next, marked as started so a cancel after this no longer drops it.
     fn next(&mut self) -> Option<T> {
-        let (raised, waiting): (VecDeque<_>, VecDeque<_>) = std::mem::take(&mut self.background)
-            .into_iter()
-            .partition(|(_, priority)| priority.get() == Priority::Interactive);
-        self.interactive.extend(raised);
-        self.background = waiting;
-        let starving = self.streak >= INTERACTIVE_STREAK;
-        let (next, streak) = match (self.interactive.pop_front(), self.background.is_empty()) {
-            (Some(interactive), true) => (Some(interactive), 0),
-            (Some(interactive), false) if !starving => (Some(interactive), self.streak + 1),
-            (Some(interactive), false) => {
-                self.interactive.push_front(interactive);
-                (self.background.pop_front(), 0)
+        loop {
+            let (_, item, priority) = self.pick()?;
+            if priority.start() {
+                return Some(item);
             }
-            (None, _) => (self.background.pop_front(), 0),
-        };
-        self.streak = streak;
-        next.map(|(item, _)| item)
+        }
+    }
+
+    fn pick(&mut self) -> Option<(u64, T, SharedPriority)> {
+        self.waiting.retain(|(_, _, priority)| !priority.is_cancelled());
+        // Each priority is read once, so a request raised during the pick does not change the class it is picked by.
+        let classes: Vec<Priority> = self.waiting.iter().map(|(_, _, priority)| priority.get()).collect();
+        let first = *classes.iter().min()?;
+        let lesser = |index: &usize| classes[*index] > first;
+        let oldest = |indices: &mut dyn Iterator<Item = usize>| indices.min_by_key(|index| self.waiting[*index].0);
+        let lesser_waits = (0..classes.len()).any(|index| lesser(&index));
+        let starving = lesser_waits && self.bypassed >= INTERACTIVE_STREAK;
+        let index = match starving {
+            true => oldest(&mut (0..classes.len()).filter(lesser)),
+            false => oldest(&mut (0..classes.len()).filter(|index| classes[*index] == first)),
+        }?;
+        self.bypassed = if lesser_waits && !starving { self.bypassed + 1 } else { 0 };
+        Some(self.waiting.remove(index))
     }
 }
 
@@ -924,7 +935,7 @@ mod tests {
         assert!(Upkeep::checks_memory(64));
     }
 
-    fn drain(queue: &mut Queue<&'static str>) -> Vec<&'static str> {
+    fn drain<T>(queue: &mut Queue<T>) -> Vec<T> {
         std::iter::from_fn(|| queue.next()).collect()
     }
 
@@ -955,7 +966,7 @@ mod tests {
 
         prefetch.raise();
 
-        assert_eq!(drain(&mut queue), ["story", "prefetch of the story", "fill 1"]);
+        assert_eq!(drain(&mut queue), ["prefetch of the story", "story", "fill 1"]);
     }
 
     #[test]
@@ -989,5 +1000,175 @@ mod tests {
         push(&mut queue, "story 6", Priority::Interactive);
 
         assert_eq!(drain(&mut queue), ["story 6", "fill"]);
+    }
+
+    /// The first test of ADR 0028 S1: a prefetch of a neighbouring story goes after the story shown and before a
+    /// fill, in arrival order within each class. On the base there was no neighbour class.
+    #[test]
+    fn a_neighbour_request_goes_after_an_on_screen_one_and_before_a_fill() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        push(&mut queue, "next story 1", Priority::Neighbour);
+        push(&mut queue, "story 1", Priority::Interactive);
+        push(&mut queue, "fill 2", Priority::Background);
+        push(&mut queue, "next story 2", Priority::Neighbour);
+        push(&mut queue, "story 2", Priority::Interactive);
+
+        assert_eq!(drain(&mut queue), ["story 1", "story 2", "next story 1", "next story 2", "fill 1", "fill 2"]);
+    }
+
+    /// The finding on change 279: with a fill waiting, interactive and neighbour requests arriving by turns used to reset
+    /// the run each switch, so the fill never went.
+    #[test]
+    fn a_waiting_fill_goes_within_the_bound_whichever_classes_are_served_before_it() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill", Priority::Background);
+        let mut picks = 0;
+        loop {
+            let class = if picks % 2 == 0 { Priority::Interactive } else { Priority::Neighbour };
+            push(&mut queue, "other", class);
+            picks += 1;
+            match queue.next() {
+                Some("fill") => break,
+                _ => assert!(picks <= INTERACTIVE_STREAK, "the fill was bypassed {picks} times"),
+            }
+        }
+    }
+
+    /// A request raised keeps the place it was first filed in: it goes before later arrivals of its new class.
+    #[test]
+    fn a_raised_request_keeps_the_age_it_was_first_filed_at() {
+        let mut queue = Queue::default();
+        let old = push(&mut queue, "old fill", Priority::Background);
+        push(&mut queue, "next story", Priority::Neighbour);
+        old.raise_to(Priority::Neighbour);
+
+        assert_eq!(drain(&mut queue), ["old fill", "next story"]);
+    }
+
+    /// The queue against a model: by class, then by arrival, except that after [`INTERACTIVE_STREAK`] picks that bypass a
+    /// waiting lesser class the oldest lesser request goes.
+    #[test]
+    fn the_queue_picks_as_a_class_then_arrival_model_with_the_bound_does() {
+        let classes = [Priority::Interactive, Priority::Neighbour, Priority::Background];
+        for seed in 0..200u64 {
+            let (mut queue, mut model, mut bypassed) = (Queue::default(), Vec::<(Priority, u64)>::new(), 0);
+            let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            for arrival in 0..40u64 {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let class = classes[(state >> 33) as usize % 3];
+                queue.push(arrival, SharedPriority::new(class));
+                model.push((class, arrival));
+                if (state >> 40) % 2 == 0 {
+                    let first = model.iter().map(|(class, _)| *class).min().unwrap();
+                    let lesser = model.iter().filter(|(class, _)| *class > first).map(|(_, at)| *at).min();
+                    let want = match lesser {
+                        Some(at) if bypassed >= INTERACTIVE_STREAK => at,
+                        _ => model.iter().filter(|(class, _)| *class == first).map(|(_, at)| *at).min().unwrap(),
+                    };
+                    bypassed = if lesser.is_none() || lesser == Some(want) { 0 } else { bypassed + 1 };
+                    model.retain(|(_, at)| *at != want);
+                    assert_eq!(queue.next(), Some(want), "seed {seed}, arrival {arrival}");
+                }
+            }
+        }
+    }
+
+    /// A neighbour joined by a story moves ahead with it; a fill joined by a neighbour moves ahead of the other fills.
+    #[test]
+    fn a_request_raised_while_it_waits_goes_with_its_new_class() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        let fill = push(&mut queue, "fill 2", Priority::Background);
+        push(&mut queue, "next story", Priority::Neighbour);
+        let next = push(&mut queue, "next story opened", Priority::Neighbour);
+
+        next.raise();
+        fill.raise_to(Priority::Neighbour);
+        next.raise_to(Priority::Background);
+
+        assert_eq!(next.get(), Priority::Interactive, "raising never lowers");
+        assert_eq!(drain(&mut queue), ["next story opened", "fill 2", "next story", "fill 1"]);
+    }
+
+    /// A request cancelled while it waits is dropped when the next is picked: its delivery is handed `None`, never an
+    /// outcome, and the checker answers the rest. An interactive request is waited for and cannot be cancelled; a
+    /// cancelled one raised again is no longer cancelled. On the base nothing could cancel a queued request.
+    #[test]
+    fn a_cancelled_request_is_never_answered() {
+        let delivered = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut queue = Queue::default();
+        let mut queued = |name: &'static str, priority: Priority| {
+            let delivered = delivered.clone();
+            let delivery = Delivery::new(move |outcome| delivered.lock().unwrap().push((name, outcome.is_some())));
+            let priority = SharedPriority::new(priority);
+            queue.push((name, delivery), priority.clone());
+            priority
+        };
+        let prefetch = queued("prefetch", Priority::Neighbour);
+        let fill = queued("fill", Priority::Background);
+        let story = queued("story", Priority::Interactive);
+        let raised = queued("prefetch opened", Priority::Neighbour);
+
+        assert!(prefetch.cancel());
+        assert!(fill.cancel());
+        assert!(raised.cancel());
+        assert!(!story.cancel(), "a story someone waits for is not cancelled");
+        raised.raise();
+        let mut answered = Vec::new();
+        while let Some((name, delivery)) = queue.next() {
+            answered.push(name);
+            delivery.deliver(Some(SemanticOutcome::default()));
+        }
+
+        assert_eq!(answered, ["story", "prefetch opened"]);
+        assert_eq!(
+            *delivered.lock().unwrap(),
+            [("prefetch", false), ("fill", false), ("story", true), ("prefetch opened", true)]
+        );
+        assert!(!story.is_cancelled() && !raised.is_cancelled());
+    }
+
+    /// A request the checker took is being converted: a cancel after that leaves it, and it stays answered.
+    #[test]
+    fn a_request_the_checker_took_is_not_cancelled() {
+        let mut queue = Queue::default();
+        let taken = push(&mut queue, "prefetch", Priority::Neighbour);
+        assert_eq!(queue.next(), Some("prefetch"));
+
+        assert!(!taken.cancel());
+        assert!(!taken.is_cancelled());
+    }
+
+    /// The streak bound holds across three classes: after a run of the first class while lesser ones wait, the oldest
+    /// lesser request goes, whatever its class.
+    #[test]
+    fn a_waiting_lesser_request_goes_after_a_bounded_run_of_the_first_class() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill", Priority::Background);
+        push(&mut queue, "next story", Priority::Neighbour);
+        for story in ["story 1", "story 2", "story 3", "story 4", "story 5"] {
+            push(&mut queue, story, Priority::Interactive);
+        }
+
+        assert_eq!(drain(&mut queue), ["story 1", "story 2", "story 3", "story 4", "fill", "story 5", "next story"]);
+    }
+
+    /// The bound counts picks of any class: the stories and neighbours answered before the fill all count toward it.
+    #[test]
+    fn picks_of_every_class_count_toward_the_bound() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill", Priority::Background);
+        for next in ["next 1", "next 2", "next 3", "next 4", "next 5"] {
+            push(&mut queue, next, Priority::Neighbour);
+        }
+        for story in ["story 1", "story 2", "story 3"] {
+            push(&mut queue, story, Priority::Interactive);
+        }
+
+        assert_eq!(
+            drain(&mut queue),
+            ["story 1", "story 2", "story 3", "next 1", "fill", "next 2", "next 3", "next 4", "next 5"]
+        );
     }
 }
