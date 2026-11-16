@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_01Wbc9ZRw4uDZCx9f7HD3Vy8",
+  "agent_id": "aeec446031235db51",
+  "task_description": "/code-review",
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 43695,
+    "cache_read_tokens": 81341,
+    "output_tokens": 273,
+    "api_call_count": 3
+  },
+  "started_at": "2026-11-15T21:52:10.58449-08:00",
+  "completed_at": "2026-11-15T21:52:15.110993-08:00"
+}

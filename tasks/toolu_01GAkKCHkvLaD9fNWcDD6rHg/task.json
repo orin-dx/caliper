@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01GAkKCHkvLaD9fNWcDD6rHg",
+  "agent_id": "a5b97cb0da577f4a1",
+  "subagent_type": "general-purpose",
+  "task_description": "278: factory callback parameter defaults",
+  "token_usage": {
+    "input_tokens": 34,
+    "cache_creation_tokens": 71199,
+    "cache_read_tokens": 957338,
+    "output_tokens": 6969,
+    "api_call_count": 17
+  },
+  "started_at": "2026-11-15T21:49:06.459767-08:00",
+  "completed_at": "2026-11-15T21:52:16.338404-08:00"
+}
