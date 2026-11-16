@@ -74,11 +74,11 @@ type Source = (String, String);
 /// and the layer of each collapsed layer holding the name. A name the answer gives no source (a listed prop with no
 /// `parent`) has no entry: its source is unknown, so no lane narrows it. A source of the project has no entry either:
 /// [`narrow`] never moves a prop of the project's own sources, so naming them would only hold memory.
-fn sources<'n>(entry: &ComponentEntry, names: impl Iterator<Item = &'n String>) -> Vec<(Source, Box<[Box<str>]>)> {
-    let mut sourced: BTreeMap<Source, BTreeSet<&str>> = BTreeMap::new();
-    let mut add = |name: &'n str, type_name: &str, file_name: &str| {
+fn sources<'n>(entry: &'n ComponentEntry, names: impl Iterator<Item = &'n String>) -> Vec<(Source, Box<[Box<str>]>)> {
+    let mut sourced: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
+    let mut add = |name: &'n str, type_name: &'n str, file_name: &'n str| {
         if crate::origin::declaration_origin(file_name) != crate::origin::Origin::Project {
-            sourced.entry((type_name.to_owned(), file_name.to_owned())).or_default().insert(name);
+            sourced.entry((type_name, file_name)).or_default().insert(name);
         }
     };
     for name in names {
@@ -90,7 +90,12 @@ fn sources<'n>(entry: &ComponentEntry, names: impl Iterator<Item = &'n String>) 
             add(name, &layer.type_name, &layer.file_name);
         }
     }
-    sourced.into_iter().map(|(source, names)| (source, names.into_iter().map(Box::from).collect())).collect()
+    sourced
+        .into_iter()
+        .map(|((type_name, file_name), names)| {
+            ((type_name.to_owned(), file_name.to_owned()), names.into_iter().map(Box::from).collect())
+        })
+        .collect()
 }
 
 /// What [`decide`] said of one component, kept on its entry so that every merge of the checker's props into it lists by
@@ -110,9 +115,11 @@ pub struct Placement {
 impl Placement {
     /// Whether the decision leaves `name`, declared by `parent`, out of the listing.
     fn leaves(&self, name: &str, parent: &PropParent) -> bool {
+        let source = (parent.name.as_str(), parent.file_name.as_str());
         self.left
-            .iter()
-            .find(|((type_name, file_name), _)| *type_name == parent.name && *file_name == parent.file_name)
+            .binary_search_by(|((type_name, file_name), _)| (type_name.as_str(), file_name.as_str()).cmp(&source))
+            .ok()
+            .and_then(|at| self.left.get(at))
             .is_some_and(|(_, names)| names.binary_search_by(|held| (**held).cmp(name)).is_ok())
     }
 }
