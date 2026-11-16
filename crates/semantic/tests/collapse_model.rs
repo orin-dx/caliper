@@ -642,15 +642,10 @@ fn redteam_each_prop_is_shown_once_and_never_lost() {
                 own.iter().filter(|name| !listed.contains(**name)).map(|name| format!("{lane} {key}: {name} dropped")),
             );
         }
-        // A dependency's member no evidence shows is not lost: relevance leaves it a name in its source's layer
-        // (ADR 0028, A2), where the old contract listed a source this small.
-        let legend = &output.components["LegendLike"];
-        if !legend
-            .inheritance
-            .iter()
-            .any(|layer| layer.type_name == "DepLegend" && layer.members.iter().any(|m| m == "payload"))
-        {
-            wrong.push(format!("{lane} LegendLike: payload neither listed nor in the DepLegend layer"));
+        // A member of a small dependency source is one of the component's main props: listed with no evidence
+        // (ADR 0028, A2).
+        if !props(output, "LegendLike").contains("payload") {
+            wrong.push(format!("{lane} LegendLike: payload not listed"));
         }
         // A dependency's redeclaration of a React name stays React's, left to the element layer (the structural lane
         // lists React's attributes for these forms, out of scope here).

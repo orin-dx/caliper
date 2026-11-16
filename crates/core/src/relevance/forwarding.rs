@@ -39,15 +39,12 @@ pub(crate) trait Lane {
     fn members(&self, component: &ComponentMapping) -> Option<Vec<Member>>;
 }
 
-/// The forwarding input of [`Body`](super::Body): the elements a component body writes with their tags resolved, and
-/// whether the props escape where the syntax cannot follow them.
+/// The forwarding input of [`Body`](super::Body): the elements a component body writes with their tags resolved.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Forwarding {
     /// The body's elements in source order, for [`Body::elements`](super::Body::elements). A component tag that no
     /// spread of the props reaches is left [`Target::Unresolved`]: `decide` reads a target only through such a spread.
     pub(crate) elements: Vec<Element>,
-    /// For [`Body::handed_on`](super::Body::handed_on): the body's silence about a prop is unknown.
-    pub(crate) handed_on: bool,
 }
 
 /// Where the project's components and imports are looked up.
@@ -83,7 +80,7 @@ pub(crate) fn forwarding(component: &ComponentMapping, project: Project<'_>, lan
             Element { target, attributes }
         })
         .collect();
-    Some(Forwarding { elements, handed_on: body.handed_on })
+    Some(Forwarding { elements })
 }
 
 /// The extractor's attribute fact as `decide` reads it.

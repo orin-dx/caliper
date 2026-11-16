@@ -30,7 +30,6 @@ pub(crate) fn evidence(mapping: &ComponentMapping, ctx: &ResolutionContext) -> A
     let body = forwarding::forwarding(mapping, project, &lane).map(|forwarding| Body {
         reads: mapping.body.as_ref().map(|facts| facts.reads.clone()).unwrap_or_default(),
         elements: forwarding.elements,
-        handed_on: forwarding.handed_on,
     });
     let narrows = ctx.collapse_inherited_props != crate::types::options::CollapseInheritedProps::None;
     Arc::new(Inputs { site: site_key(mapping), props_type, body, narrows })

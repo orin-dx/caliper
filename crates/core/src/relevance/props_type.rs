@@ -8,12 +8,13 @@
 //! structural lane's the resolver's; where neither names a base, a collapsed layer that holds the member does. A member
 //! only a layer names is known by its name alone in both lanes, so it is never required or documented here.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
 use super::Member;
 use crate::types::collected::{CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, ExtendsRef};
+use crate::types::options::COLLAPSE_THRESHOLD;
 use crate::types::output::{InheritedLayer, ParsedProp, PropParent, PropType};
 
 /// How deep [`PropsType::read`] follows aliases of `Pick` keys, so a cyclic alias ends.
@@ -230,6 +231,9 @@ impl PropsType {
 /// The props-type evidence of every member a lane's answer reaches: each prop it lists (`rows`, with its
 /// `notableInherited` ones) in order, then each member of its collapsed `layers` it does not list. `ambient` says
 /// whether a declaring file is ambient (ADR 0028: by path, never by name); a member with no declaring file is not.
+/// `large` says whether the member's source (its `parent`, or the layer holding it) reaches with more than
+/// [`COLLAPSE_THRESHOLD`] members, counted over the listed props of that source and the unlisted members of its layers;
+/// a listed prop with no `parent` has no known source and is not large.
 ///
 /// A member is own when the props type writes it, and overrides when, besides, a base declares it: its `parent` or a
 /// declaration is not the props type, or a collapsed layer holds it.
@@ -241,11 +245,21 @@ pub(crate) fn members<'a>(
     let ambient = |file: &str| crate::origin::declaration_origin(file).is_ambient();
     let layered: BTreeSet<&str> = layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
     let mut listed = BTreeSet::new();
+    let rows: Vec<&ParsedProp> = rows.into_iter().filter(|prop| listed.insert(prop.name.as_str())).collect();
+    // Each source's reach: its listed props, then its layers' members not listed.
+    let mut reach: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    for parent in rows.iter().filter_map(|prop| prop.parent.as_ref()) {
+        *reach.entry((&parent.name, &parent.file_name)).or_default() += 1;
+    }
+    for layer in layers {
+        let unlisted = layer.members.iter().filter(|name| !listed.contains(name.as_str())).count();
+        *reach.entry((&layer.type_name, &layer.file_name)).or_default() += unlisted;
+    }
+    let large = |type_name: &str, file_name: &str| {
+        reach.get(&(type_name, file_name)).is_some_and(|reaching| *reaching > COLLAPSE_THRESHOLD)
+    };
     let mut members = Vec::new();
     for prop in rows {
-        if !listed.insert(prop.name.as_str()) {
-            continue;
-        }
         let own = props_type.own.contains(&prop.name) || prop.parent.as_ref().is_some_and(|p| props_type.declares(p));
         let based = layered.contains(prop.name.as_str())
             || prop.parent.iter().chain(&prop.declarations).any(|parent| !props_type.declares(parent));
@@ -259,6 +273,7 @@ pub(crate) fn members<'a>(
             literal_union: is_literal_union(&prop.prop_type),
             // The checker states `parent` only for an interface; a declaration in a type literal is still in a file.
             ambient: prop.parent.iter().chain(&prop.declarations).any(|parent| ambient(&parent.file_name)),
+            large: prop.parent.as_ref().is_some_and(|parent| large(&parent.name, &parent.file_name)),
             ..given
         });
     }
@@ -269,6 +284,7 @@ pub(crate) fn members<'a>(
                 own,
                 overrides: own,
                 ambient: ambient(&layer.file_name),
+                large: large(&layer.type_name, &layer.file_name),
                 ..member(props_type, name)
             });
         }
@@ -383,8 +399,8 @@ mod tests {
             file_name: "/fixtures/Components.tsx".to_owned(),
             omitted: Vec::new(),
             html_element: None,
-            total_props: 3,
-            members: vec!["size".to_owned(), "tone".to_owned(), "p0".to_owned()],
+            total_props: 33,
+            members: ["size", "tone"].into_iter().map(str::to_owned).chain((0..31).map(|i| format!("p{i}"))).collect(),
             used: Vec::new(),
         };
         let members = members(&props_type("ByIntersection"), [], &[layer]);
@@ -392,7 +408,7 @@ mod tests {
         assert!(size.own && size.overrides, "{size:?}");
         let shown = decided(members);
         assert_eq!(shown.rows, ["size"]);
-        assert_eq!(shown.collapsed, ["tone", "p0"]);
+        assert_eq!(shown.collapsed.len(), 32);
     }
 
     #[test]
@@ -480,12 +496,11 @@ mod tests {
                     assert!(row("own") && row("p5") && !row("p1") && !row("p0"), "{name}: {shown:?}");
                     assert!(!shown.collapsed.iter().any(|member| member == "p1"), "{name}: {shown:?}");
                 }
-                "ByRequired" => {
-                    assert_eq!(
-                        (shown.rows, shown.collapsed),
-                        (vec!["need".to_owned(), "own".to_owned()], vec!["maybe".to_owned()])
-                    );
-                }
+                // `Small` is an API source: all of it is listed.
+                "ByRequired" => assert_eq!(
+                    (shown.rows, shown.collapsed),
+                    (vec!["maybe".to_owned(), "need".to_owned(), "own".to_owned()], vec![])
+                ),
                 _ => {}
             }
         }
@@ -506,7 +521,10 @@ mod tests {
         );
         let members = members(&PropsType::default(), [&documented], &[]);
         assert!(members[0].documented && members[0].literal_union && !members[0].own, "{members:?}");
-        assert_eq!(decided(members).collapsed, ["tone"]);
+        // `Base` declares one member: an API source, listed whatever the evidence.
+        assert!(!members[0].large, "{members:?}");
+        assert_eq!(decided(members.clone()).rows, ["tone"]);
+        assert_eq!(decided(vec![Member { large: true, ..members[0].clone() }]).collapsed, ["tone"]);
         assert!(!is_literal_union(&PropType::Union(vec![PropType::String, PropType::StringLiteral("a".into())])));
         // A declaration in a type literal has no `parent` in the checker lane; its file still says ambient.
         let react = PropParent { name: "__type".into(), file_name: "/node_modules/@types/react/index.d.ts".into() };

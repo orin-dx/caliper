@@ -1378,12 +1378,11 @@ fn a_large_dependency_source_collapses_to_a_layer_and_its_notable_props() {
     assert_eq!(keys(&aliased.notable_inherited), Vec::<&str>::new());
     assert!(aliased.inheritance[0].members.iter().any(|m| m == "id"));
 
-    // A small dependency source no relevance shows is narrowed too: its props are the layer's members.
+    // A small dependency source is part of the component's main props: listed with no evidence, whatever its name.
     let tiny = &output.components["Tiny"];
-    assert_eq!(keys(&tiny.props), ["own"]);
-    assert_eq!(layers(tiny), [("BorderProps", 2, None)]);
-    assert_eq!(tiny.inheritance[0].members, ["radius", "width"]);
-    // A large source that is a dependency's own API is narrowed the same way, whatever its size.
+    assert_eq!(keys(&tiny.props), ["own", "radius", "width"]);
+    assert_eq!(layers(tiny), []);
+    // A source past `COLLAPSE_THRESHOLD` members is a generated set: narrowed to a layer whatever its name.
     let api = &output.components["Api"];
     assert_eq!(keys(&api.props), ["own"]);
     assert_eq!(layers(api), [("ApiProps", 31, None)]);

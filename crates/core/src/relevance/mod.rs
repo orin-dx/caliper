@@ -39,27 +39,23 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
     let members = props_type::members(&inputs.props_type, rows, &entry.inheritance);
     let shown = decide(&Evidence { members: &members, body: inputs.body.as_ref(), call_sites });
-    // A collapsed ambient member the signature defaults (`{ className = 'x' }`) is read by the body, which a row does
-    // not record for a name left in its layer: it is `used` too. Nothing else in `rows` is added.
-    let defaulted =
-        members.iter().filter(|member| member.ambient && member.default_tag).map(|member| member.name.clone());
-    // A row of a member the answer holds only as a name in a collapsed layer has no type to list: it is named in the
-    // layer's `used` list instead, so a member evidence puts forward is never left unnamed.
-    let untyped = shown
+    // A row of a member the answer holds only as a name in a collapsed layer (a source the resolver collapsed, such as
+    // a style system past `LARGE_API_SOURCE` members) has no type to list: it is named in the layer's `used` list
+    // instead, so a member evidence puts forward is never left unnamed.
+    let used: BTreeSet<String> = shown
         .rows
         .iter()
         .filter(|name| !entry.props.contains_key(*name) && !entry.notable_inherited.contains_key(*name))
-        .cloned();
-    let used: BTreeSet<String> = shown.used.iter().cloned().chain(defaulted).chain(untyped).collect();
+        .cloned()
+        .collect();
     // A `Pick` or `Omit` over keys that are not a closed set of literals leaves which members of a source reach
     // unproven, so no source is narrowed into a layer that may claim a member that does not reach; React's and the
-    // DOM's attributes still are, as they are never listed for want of evidence.
+    // DOM's attributes still are, as they are never listed without evidence.
     let ambient: BTreeSet<&str> =
         members.iter().filter(|member| member.ambient).map(|member| member.name.as_str()).collect();
     let declined = inputs.props_type.declined;
     let left = if inputs.narrows {
-        let out = shown.collapsed.iter().chain(&shown.used);
-        sources(entry, out.filter(|name| !declined || ambient.contains(name.as_str())))
+        sources(entry, shown.collapsed.iter().filter(|name| !declined || ambient.contains(name.as_str())))
     } else {
         Vec::new()
     };
@@ -102,13 +98,14 @@ fn sources<'n>(entry: &'n ComponentEntry, names: impl Iterator<Item = &'n String
 /// the same decision ([`narrow`]): the decision is made once, from the structural answer's evidence.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Placement {
-    /// The members evidence leaves out of the listing ([`Shown::collapsed`] and [`Shown::used`]), by name under the
+    /// The members evidence leaves out of the listing ([`Shown::collapsed`]), by name under the
     /// source the structural answer gives each, sources in order and each source's names sorted: a listed prop is left
     /// out only when both match, so a prop of another source with the same name, or one the structural answer gave no
     /// source, is never hidden by it. Only sources outside the project are held, the only ones [`narrow`] moves from,
     /// and each source's type name and path once per component, not once per name.
     left: Vec<(Source, Box<[Box<str>]>)>,
-    /// The members of `left` named in their layer's `used` list.
+    /// The rows [`decide`] puts forward that the structural answer holds only as names in a collapsed layer: named in
+    /// that layer's `used` list.
     used: BTreeSet<String>,
 }
 
@@ -222,18 +219,21 @@ pub(crate) struct Member {
     /// Declared by React's or the shared DOM declarations ([`crate::origin::Origin::is_ambient`]): decided by
     /// the declaring path, never by the name.
     pub(crate) ambient: bool,
+    /// Its source (the interface or layer declaring it) reaches the component with more than
+    /// [`COLLAPSE_THRESHOLD`](crate::types::options::COLLAPSE_THRESHOLD) members: a generated set (a style system's
+    /// properties, the keys a mapped type copies from a large interface), not an API a reader takes in at once.
+    /// Decided by the source's size, never by a name.
+    pub(crate) large: bool,
 }
 
 /// What a component's function body does with its props, read from the syntax alone.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Body {
-    /// The props the body reads. Complete only when [`Body::is_complete`].
+    /// The props the body reads, destructures (with or without a default) or passes by name. What the body says is
+    /// certain; its silence is not read: a member it never names keeps the place the props type gives it.
     pub(crate) reads: Vec<String>,
     /// The JSX elements the body writes, in source order.
     pub(crate) elements: Vec<Element>,
-    /// The props object or a rest binding escapes in a way the syntax cannot follow: what the body says still holds,
-    /// but its silence about a prop is unknown, never guessed.
-    pub(crate) handed_on: bool,
 }
 
 /// One JSX element a component body writes.
@@ -252,7 +252,7 @@ pub(crate) enum Target {
     Dom,
     /// A component resolved by symbol and import, with the names of its own non-ambient props.
     Component(Vec<String>),
-    /// A component tag that did not resolve: a spread onto it leaves the body's evidence unknown.
+    /// A component tag that did not resolve: a spread onto it forwards nothing known.
     Unresolved,
 }
 
@@ -295,25 +295,28 @@ impl CallSites {
     }
 }
 
-/// Where [`decide`] puts each member, every list in the order of [`Evidence::members`], except that `rows` puts the
+/// Where [`decide`] puts each member, both lists in the order of [`Evidence::members`], except that `rows` puts the
 /// documented and literal-union members first.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Shown {
     /// Typed rows.
     pub(crate) rows: Vec<String>,
-    /// Ambient members named in their collapsed layer's `used` list: passed at the floor or read.
-    pub(crate) used: Vec<String>,
-    /// Members left in their collapsed layer.
+    /// Members left as names in their source's layer.
     pub(crate) collapsed: Vec<String>,
-    /// Members with no signal whose body evidence is incomplete or absent: listed or collapsed by the collapse rule
-    /// alone, so missing evidence never hides more than that rule does.
-    pub(crate) unknown: Vec<String>,
 }
 
-/// Decides, from the evidence alone, where each member of a component's props goes.
+/// Decides, from the evidence alone, where each member of a component's props goes (ADR 0028, A2):
+///
+/// 1. The main props are listed in full: every member the props type declares itself (own, picked, overriding,
+///    required or defaulted), and every member of a source that is neither ambient nor large ([`Member::large`]), with
+///    no story or call site needed.
+/// 2. What the component uses directly is listed from any source: a member its body reads, destructures or passes by
+///    name, or that a spread forwards to a resolved component's own props. A spread onto a DOM tag is no evidence, and
+///    a body that hands its props on where the syntax cannot follow promotes nothing and hides nothing.
+/// 3. Every other member of an ambient or large source stays a name in its layer, unless
+/// 4. it is passed at the call-site floor (`max(2, 20%)` of the component's call sites).
 pub(crate) fn decide(evidence: &Evidence<'_>) -> Shown {
     let body = evidence.body;
-    let complete = body.is_some_and(Body::is_complete);
     let reads: BTreeSet<&str> = body.map(|body| body.reads.iter().map(String::as_str).collect()).unwrap_or_default();
     let forwarded = body.map(Body::forwarded).unwrap_or_default();
     let at_floor: BTreeSet<&str> = evidence
@@ -332,25 +335,13 @@ pub(crate) fn decide(evidence: &Evidence<'_>) -> Shown {
             continue;
         }
         let declared = member.own || member.picked || member.overrides || member.required || member.default_tag;
-        // Passed at the floor puts a member forward as a typed row, ambient or not: consumers set it, so a story needs
-        // its control. Read or forwarded puts a non-ambient member forward as a row; an ambient member the body only
-        // reads is a name in its layer's `used` list (ADR 0028, Combination).
-        let passed = at_floor.contains(name);
-        let read = reads.contains(name);
-        let list = if declared || passed || (!member.ambient && (read || forwarded.contains(name))) {
+        let api = !(member.ambient || member.large);
+        let used = reads.contains(name) || forwarded.contains(name);
+        if declared || api || used || at_floor.contains(name) {
             ordered_rows.push((!(member.documented || member.literal_union), member.name.clone()));
-            continue;
-        } else if member.ambient && read {
-            &mut shown.used
-        } else if !complete && !member.ambient {
-            // The body's silence is unknown: listed or collapsed as the collapse rule alone says. An ambient member
-            // (React's and the DOM's attributes, which every element has) is never listed for want of evidence: it
-            // stays a name in its layer, so a component without call sites lists no hundreds of DOM attributes.
-            &mut shown.unknown
         } else {
-            &mut shown.collapsed
-        };
-        list.push(member.name.clone());
+            shown.collapsed.push(member.name.clone());
+        }
     }
     ordered_rows.sort_by_key(|(plain, _)| *plain);
     shown.rows = ordered_rows.into_iter().map(|(_, name)| name).collect();
@@ -358,17 +349,6 @@ pub(crate) fn decide(evidence: &Evidence<'_>) -> Shown {
 }
 
 impl Body {
-    /// Whether the body's evidence is complete, so that a prop it never mentions is known to be unused: nothing handed
-    /// on, and no spread of the props onto a tag that did not resolve. What an incomplete body does say (a read, a
-    /// default, a forward) is still certain; only its silence is unknown.
-    fn is_complete(&self) -> bool {
-        !self.handed_on
-            && !self.elements.iter().any(|element| {
-                element.target == Target::Unresolved
-                    && element.attributes.iter().any(|attribute| attribute.spreads_props())
-            })
-    }
-
     /// The props a spread of the props object or a rest binding passes one hop on to a component: the component's own
     /// props, minus those an attribute after the spread fixes. Spreads onto DOM tags pass nothing.
     fn forwarded(&self) -> BTreeSet<&str> {
@@ -408,12 +388,16 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Placed {
         Row,
-        Used,
         Collapsed,
-        Unknown,
     }
 
+    /// A member of a large source (a style system's, say): listed only on evidence.
     fn inherited(name: &str) -> Member {
+        Member { name: name.to_owned(), large: true, ..Member::default() }
+    }
+
+    /// A member of an API source: neither ambient nor large.
+    fn api(name: &str) -> Member {
         Member { name: name.to_owned(), ..Member::default() }
     }
 
@@ -456,12 +440,7 @@ mod tests {
     }
 
     fn placed(shown: &Shown, name: &str) -> Option<Placed> {
-        let lists = [
-            (&shown.rows, Placed::Row),
-            (&shown.used, Placed::Used),
-            (&shown.collapsed, Placed::Collapsed),
-            (&shown.unknown, Placed::Unknown),
-        ];
+        let lists = [(&shown.rows, Placed::Row), (&shown.collapsed, Placed::Collapsed)];
         lists.into_iter().find(|(list, _)| list.iter().any(|n| n == name)).map(|(_, placed)| placed)
     }
 
@@ -595,12 +574,30 @@ mod tests {
     }
 
     #[test]
-    fn a_read_member_is_a_row_unless_ambient_then_a_used_name() {
+    fn a_member_the_body_uses_is_a_row_from_any_source() {
         table(vec![(
-            "reads",
-            with(vec![inherited("a"), ambient("className"), ambient("id")], Some(reading(&["a", "className"]))),
-            &[("a", Placed::Row), ("className", Placed::Used), ("id", Placed::Collapsed)],
+            "reads, destructures or passes by name",
+            with(
+                vec![inherited("a"), ambient("className"), ambient("onFocus"), ambient("id")],
+                Some(reading(&["a", "className", "onFocus"])),
+            ),
+            &[("a", Placed::Row), ("className", Placed::Row), ("onFocus", Placed::Row), ("id", Placed::Collapsed)],
         )]);
+    }
+
+    #[test]
+    fn every_member_of_an_api_source_is_a_row_without_evidence() {
+        let members = || vec![api("loadingText"), api("asChild"), inherited("_hover"), ambient("onClick")];
+        let listed: &[(&str, Placed)] = &[
+            ("loadingText", Placed::Row),
+            ("asChild", Placed::Row),
+            ("_hover", Placed::Collapsed),
+            ("onClick", Placed::Collapsed),
+        ];
+        table(vec![
+            ("a body that names nothing", with(members(), Some(Body::default())), listed),
+            ("no function of its own", with(members(), None), listed),
+        ]);
     }
 
     #[test]
@@ -620,9 +617,10 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_body_is_never_guessed() {
+    fn an_unknown_body_promotes_nothing_and_hides_nothing() {
+        // A spread onto a tag that did not resolve, or no body at all: what is said still holds, and the main props
+        // stay listed; nothing of an ambient or large source is listed for want of evidence.
         let said = || reading(&["a"]);
-        let handed_on = Body { handed_on: true, ..said() };
         let unresolved =
             Body { elements: vec![element(Target::Unresolved, vec![Attribute::Spread(SpreadOf::Rest)])], ..said() };
         let members = || {
@@ -630,30 +628,24 @@ mod tests {
                 inherited("a"),
                 inherited("b"),
                 ambient("c"),
+                api("f"),
                 Member { required: true, ..inherited("d") },
-                Member { default_tag: true, ..inherited("e") },
+                Member { default_tag: true, ..ambient("e") },
             ]
         };
-        // What an incomplete body says still holds; only its silence is unknown. An ambient member is never listed
-        // for want of evidence: it stays in its layer.
-        let incomplete: &[(&str, Placed)] = &[
-            ("a", Placed::Row),
-            ("b", Placed::Unknown),
-            ("c", Placed::Collapsed),
-            ("d", Placed::Row),
-            ("e", Placed::Row),
-        ];
-        let none: &[(&str, Placed)] = &[
-            ("a", Placed::Unknown),
-            ("b", Placed::Unknown),
-            ("c", Placed::Collapsed),
-            ("d", Placed::Row),
-            ("e", Placed::Row),
-        ];
+        let expected = |a: Placed| -> Vec<(&'static str, Placed)> {
+            vec![
+                ("a", a),
+                ("b", Placed::Collapsed),
+                ("c", Placed::Collapsed),
+                ("f", Placed::Row),
+                ("d", Placed::Row),
+                ("e", Placed::Row),
+            ]
+        };
         table(vec![
-            ("handed on", with(members(), Some(handed_on)), incomplete),
-            ("spread onto an unresolved tag", with(members(), Some(unresolved)), incomplete),
-            ("no function of its own", with(members(), None), none),
+            ("spread onto an unresolved tag", with(members(), Some(unresolved)), &expected(Placed::Row)),
+            ("no function of its own", with(members(), None), &expected(Placed::Collapsed)),
         ]);
     }
 
@@ -667,13 +659,14 @@ mod tests {
         };
         let plain = evidence(["a", "b", "c", "d"]).decide();
         let familiar = evidence(["className", "style", "onClick", "children"]).decide();
-        assert_eq!((plain.rows, plain.used, plain.collapsed), (strings(&["c"]), strings(&["d"]), strings(&["a", "b"])));
-        assert_eq!(familiar.rows, ["onClick"]);
-        assert_eq!(familiar.used, ["children"]);
-        assert_eq!(familiar.collapsed, ["className", "style"]);
+        assert_eq!((plain.rows, plain.collapsed), (strings(&["c", "d"]), strings(&["a", "b"])));
+        assert_eq!(
+            (familiar.rows, familiar.collapsed),
+            (strings(&["onClick", "children"]), strings(&["className", "style"]))
+        );
         assert_eq!(Owned::default().decide(), Shown::default());
         let twice = with(vec![inherited("a"), ambient("a")], Some(reading(&["a"]))).decide();
-        assert_eq!((twice.rows, twice.used), (strings(&["a"]), Vec::new()));
+        assert_eq!((twice.rows, twice.collapsed), (strings(&["a"]), Vec::new()));
     }
 
     const REACT: &str = "/p/node_modules/@types/react/index.d.ts";

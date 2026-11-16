@@ -9,6 +9,26 @@ expression: value
       "filePath": "[ROOT]/fixtures/shadcn/badge.tsx",
       "description": "",
       "props": {
+        "className": {
+          "name": "className",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": {
+            "name": "HTMLAttributes",
+            "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "HTMLAttributes",
+              "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
+            }
+          ]
+        },
         "variant": {
           "name": "variant",
           "type": {
@@ -105,7 +125,6 @@ expression: value
             "autoFocus",
             "autoSave",
             "children",
-            "className",
             "color",
             "content",
             "contentEditable",
@@ -323,9 +342,6 @@ expression: value
             "typeof",
             "unselectable",
             "vocab"
-          ],
-          "used": [
-            "className"
           ]
         }
       ],
@@ -368,6 +384,26 @@ expression: value
             {
               "name": "ButtonProps",
               "fileName": "[ROOT]/fixtures/shadcn/button.tsx"
+            }
+          ]
+        },
+        "className": {
+          "name": "className",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": {
+            "name": "HTMLAttributes",
+            "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "HTMLAttributes",
+              "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
             }
           ]
         },
@@ -516,7 +552,6 @@ expression: value
             "autoFocus",
             "autoSave",
             "children",
-            "className",
             "color",
             "content",
             "contentEditable",
@@ -744,9 +779,6 @@ expression: value
             "unselectable",
             "value",
             "vocab"
-          ],
-          "used": [
-            "className"
           ]
         }
       ],
@@ -769,6 +801,26 @@ expression: value
       "filePath": "[ROOT]/fixtures/shadcn/input.tsx",
       "description": "",
       "props": {
+        "className": {
+          "name": "className",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": {
+            "name": "HTMLAttributes",
+            "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "HTMLAttributes",
+              "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
+            }
+          ]
+        },
         "ref": {
           "name": "ref",
           "type": {
@@ -788,6 +840,119 @@ expression: value
           "tags": {},
           "parent": null,
           "declarations": []
+        },
+        "type": {
+          "name": "type",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "stringLiteral",
+                "value": "button"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "checkbox"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "color"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "date"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "datetime-local"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "email"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "file"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "hidden"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "image"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "month"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "number"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "password"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "radio"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "range"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "reset"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "search"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "submit"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "tel"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "text"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "time"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "url"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "week"
+              },
+              {
+                "kind": "string"
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": {
+            "name": "InputHTMLAttributes",
+            "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "InputHTMLAttributes",
+              "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
+            }
+          ]
         }
       },
       "inheritance": [
@@ -863,7 +1028,6 @@ expression: value
             "capture",
             "checked",
             "children",
-            "className",
             "color",
             "content",
             "contentEditable",
@@ -1100,16 +1264,11 @@ expression: value
             "tabIndex",
             "title",
             "translate",
-            "type",
             "typeof",
             "unselectable",
             "value",
             "vocab",
             "width"
-          ],
-          "used": [
-            "className",
-            "type"
           ]
         }
       ],

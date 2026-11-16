@@ -3,8 +3,12 @@
 //! source of either side of the collapse threshold reached whole or through `Pick` or `Omit`, an ambient DOM source
 //! declared under `@types/react` or `@react-types/shared`, a body reading some members, call sites passing some at
 //! several counts), the structural lane alone and the checker lane (the structural answer with the checker's merged over
-//! it) must give each layer the same `used` names: one decision function, `relevance::decide`, asked with the same
-//! evidence in both, and its ambient bit decided by the declaring path.
+//! it) must list the same rows and give each layer the same `used` names: one decision function, `relevance::decide`,
+//! asked with the same evidence in both, and its ambient bit decided by the declaring path.
+//!
+//! A second model checks the rule itself (ADR 0028, A2): over generated bodies that read, destructure (with or without
+//! a default) or pass by name some members of an ambient DOM source, and spread the rest onto a DOM tag, both lanes list
+//! exactly the props type's own members, its API source's members and the DOM members the body names.
 
 use std::fmt::Write as _;
 use std::time::Duration;
@@ -125,8 +129,8 @@ fn both_lanes_report_the_same_relevance_for_the_same_member() {
             for name in &names {
                 let case = format!("{name} seed={seed} {collapse:?}");
                 let (from_structural, from_checker) = (&structural.components[name], &checker.components[name]);
-                // A component whose members all stay in a collapsed layer names none: an empty list is an answer.
-                named += usize::from(!used(from_structural).is_empty());
+                named += usize::from(rows(from_structural).iter().any(|row| row.starts_with('d')));
+                assert_eq!(rows(from_checker), rows(from_structural), "{case}");
                 assert_eq!(used(from_checker), used(from_structural), "{case}");
                 compared += 1;
             }
@@ -134,6 +138,108 @@ fn both_lanes_report_the_same_relevance_for_the_same_member() {
     }
     assert_eq!(compared, 3 * 2 * 12);
     assert!(named > 0, "ambient members were put forward: {named} of {compared}");
+}
+
+/// The rows a component lists: `props` and `notableInherited`, sorted.
+fn rows(entry: &ComponentEntry) -> Vec<String> {
+    let mut rows: Vec<String> = entry.props.keys().chain(entry.notable_inherited.keys()).cloned().collect();
+    rows.sort();
+    rows
+}
+
+/// How a generated body names one member of the ambient source.
+#[derive(Debug, Clone, Copy)]
+enum Names {
+    /// `rest.dN` in an expression.
+    Reads,
+    /// `{ dN }` in the parameter.
+    Destructures,
+    /// `{ dN = 'v' }` in the parameter.
+    Defaults,
+    /// `<Child v={rest.dN} />`.
+    Passes,
+}
+
+#[test]
+fn the_main_props_and_the_members_the_body_names_are_listed_and_nothing_a_dom_spread_passes() {
+    let mut checked = 0;
+    for seed in [3, 11, 29] {
+        let dir = tempfile::Builder::new().prefix("RelevanceRule").tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let fields = |prefix: &str, n: usize| -> String { (0..n).map(|i| format!("{prefix}{i}?: string; ")).collect() };
+        std::fs::write(root.join("sources.ts"), format!("export interface Api {{ {}}}\n", fields("a", 6))).unwrap();
+        std::fs::create_dir_all(root.join("vendor/@types/react")).unwrap();
+        std::fs::write(
+            root.join("vendor/@types/react/dom.ts"),
+            format!("export interface ReactDom {{ {}}}\n", fields("d", 40)),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            r#"{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "preserve", "strict": true, "skipLibCheck": true, "noEmit": true, "types": [] } }"#,
+        )
+        .unwrap();
+        let mut rng = Lcg(seed);
+        let mut text = String::from(
+            "import type { Api } from './sources';\n\
+             import type { ReactDom } from './vendor/@types/react/dom';\n\
+             export function Child(props: { v?: string }) { return null; }\n",
+        );
+        let mut expected = Vec::new();
+        for c in 0..10 {
+            let name = format!("C{c}");
+            let mut named: Vec<(usize, Names)> = Vec::new();
+            for _ in 0..rng.below(4) {
+                let member = rng.below(40);
+                if named.iter().all(|(seen, _)| *seen != member) {
+                    let how = [Names::Reads, Names::Destructures, Names::Defaults, Names::Passes][rng.below(4)];
+                    named.push((member, how));
+                }
+            }
+            let mut params = String::new();
+            let mut body = String::new();
+            for (member, how) in &named {
+                match how {
+                    Names::Reads => write!(body, "{{String(rest.d{member})}}").unwrap(),
+                    Names::Destructures => write!(params, "d{member}, ").unwrap(),
+                    Names::Defaults => write!(params, "d{member} = 'v', ").unwrap(),
+                    Names::Passes => write!(body, "<Child v={{rest.d{member}}} />").unwrap(),
+                }
+            }
+            writeln!(
+                text,
+                "export function {name}({{ {params}...rest }}: Api & ReactDom & {{ own?: string }}) \
+                 {{ return <div {{...rest}}>{body}</div>; }}"
+            )
+            .unwrap();
+            let mut rows: Vec<String> = (0..6).map(|i| format!("a{i}")).collect();
+            rows.push("own".to_owned());
+            rows.extend(named.iter().map(|(member, _)| format!("d{member}")));
+            rows.sort();
+            expected.push((name, rows));
+        }
+        std::fs::write(root.join("Components.tsx"), text).unwrap();
+        let options = PipelineOptions {
+            src_dirs: vec![root.clone()],
+            use_cache: false,
+            html_attributes: HtmlAttributeMode::None,
+            ..PipelineOptions::default()
+        };
+        let structural = extract(&options);
+        let mut request = SemanticRequest::new(root.clone(), targets_of(&structural));
+        request.request_timeout = Duration::from_secs(60);
+        let outcome = resolve(request);
+        assert_eq!(outcome.fallbacks, [], "the checker answers every component");
+        let mut checker = structural.clone();
+        merge_semantic_in(&mut checker, outcome, Default::default(), CollapseContext::of(&options));
+        for (name, want) in &expected {
+            for (lane, output) in [("structural", &structural), ("checker", &checker)] {
+                assert_eq!(&rows(&output.components[name]), want, "{name} seed={seed} {lane}");
+            }
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 30);
 }
 
 /// Each layer's non-empty `used` list, by the layer's type name.
