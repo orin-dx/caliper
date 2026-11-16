@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01PnYtk7cAED7xier5mZ2myX",
+  "agent_id": "acd180c89ad369b74",
+  "subagent_type": "general-purpose",
+  "task_description": "279: scheduler queue fairness fix",
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 56345,
+    "cache_read_tokens": 920880,
+    "output_tokens": 10105,
+    "api_call_count": 15
+  },
+  "started_at": "2026-11-15T18:06:19.633184-08:00",
+  "completed_at": "2026-11-15T18:12:21.711577-08:00"
+}
