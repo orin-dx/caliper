@@ -30,11 +30,15 @@ pub(crate) struct Props {
     pub(crate) whole: Vec<PropParent>,
 }
 
-/// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
-/// flag set when the request asks for the name; what to do with them is the session's policy, not ours.
+/// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes) and the project does
+/// not. Reported with the flag set when the request asks for the name; what to do with them is the session's policy, not
+/// ours. A property a project file also declares (`ComponentProps<'div'> & { className: 'mine' }`) is the component's
+/// own and never React's. One a dependency declares again over React's (a library's `className`, its DOM handlers)
+/// stays React's: the element layer stands for it.
 fn is_react_declared(property: &SymbolInfo) -> bool {
     use caliper_docgen_core::origin::{Origin, declaration_origin};
-    property.declarations.iter().any(|declaration| declaration_origin(declared_in(declaration)) == Origin::React)
+    let files = || property.declarations.iter().map(|declaration| declared_in(declaration));
+    files().any(|file| declaration_origin(file) == Origin::React) && files().all(|file| file.contains("/node_modules/"))
 }
 
 fn fallback(reason: &str) -> Result<Answer, CallError> {

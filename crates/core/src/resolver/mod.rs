@@ -1124,24 +1124,23 @@ pub(crate) fn resolve_component_shared(
     // Detect discriminated union if applicable.
     let discriminant_prop = chain.discriminant_prop;
 
-    (
-        ComponentEntry {
-            display_name: mapping.component_name.clone(),
-            file_path: mapping.file_path.clone(),
-            description: mapping.description.clone(),
-            props,
-            inheritance: one_layer_per_collapsed_source(chain.inheritance),
-            notable_inherited,
-            discriminant_prop,
-            composes: chain.composes,
-            tags: mapping.tags.clone(),
-            methods: vec![],
-            detected_by: mapping.rule,
-            exported: mapping.exported(),
-            exports: mapping.exports.clone(),
-        },
-        ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics },
-    )
+    let mut entry = ComponentEntry {
+        display_name: mapping.component_name.clone(),
+        file_path: mapping.file_path.clone(),
+        description: mapping.description.clone(),
+        props,
+        inheritance: one_layer_per_collapsed_source(chain.inheritance),
+        notable_inherited,
+        discriminant_prop,
+        composes: chain.composes,
+        tags: mapping.tags.clone(),
+        methods: vec![],
+        detected_by: mapping.rule,
+        exported: mapping.exported(),
+        exports: mapping.exports.clone(),
+    };
+    crate::types::semantic::listed_props_leave_layers(&mut entry, false);
+    (entry, ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics })
 }
 
 /// A destructuring default is the component's default for that prop wherever the prop's type was declared, as
