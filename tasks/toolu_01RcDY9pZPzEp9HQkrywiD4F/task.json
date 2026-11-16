@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01RcDY9pZPzEp9HQkrywiD4F",
+  "agent_id": "a0cb971e642edd847",
+  "subagent_type": "general-purpose",
+  "task_description": "Diagnose 437 Controls rows and the React-props recall drop",
+  "token_usage": {
+    "input_tokens": 90,
+    "cache_creation_tokens": 96675,
+    "cache_read_tokens": 3787787,
+    "output_tokens": 22228,
+    "api_call_count": 45
+  },
+  "started_at": "2026-11-15T23:38:43.364413-08:00",
+  "completed_at": "2026-11-15T23:43:27.740003-08:00"
+}

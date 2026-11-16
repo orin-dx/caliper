@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_019vwsrvCRxfRm76hphc941Q",
+  "agent_id": "a5fd7afe2ce9a583f",
+  "subagent_type": "general-purpose",
+  "task_description": "Oracle run from latest main: CLI first/second run and Storybook dev",
+  "token_usage": {
+    "input_tokens": 264,
+    "cache_creation_tokens": 423473,
+    "cache_read_tokens": 17439794,
+    "output_tokens": 72840,
+    "api_call_count": 130
+  },
+  "started_at": "2026-11-15T22:34:59.451557-08:00",
+  "completed_at": "2026-11-15T23:37:48.250897-08:00"
+}

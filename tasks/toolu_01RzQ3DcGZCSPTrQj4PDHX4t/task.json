@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01RzQ3DcGZCSPTrQj4PDHX4t",
+  "agent_id": "a86274cd089b18387",
+  "subagent_type": "general-purpose",
+  "task_description": "Alpha docs: addon upgrade note and known limits",
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 80293,
+    "cache_read_tokens": 594896,
+    "output_tokens": 4814,
+    "api_call_count": 11
+  },
+  "started_at": "2026-11-15T23:10:25.33276-08:00",
+  "completed_at": "2026-11-15T23:14:30.052003-08:00"
+}
