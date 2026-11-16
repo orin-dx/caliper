@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_015Fsr3fseoXGGGjEB5bzYYg",
+  "agent_id": "ace6850035594237c",
+  "subagent_type": "general-purpose",
+  "task_description": "PR 490: fix the listing rule's pattern gaps (7 rule-level changes)",
+  "started_at": "2026-11-16T13:22:49.986442-08:00"
+}
