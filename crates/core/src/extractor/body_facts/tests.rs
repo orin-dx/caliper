@@ -824,3 +824,9 @@ fn a_member_in_each_syntax_context_is_a_read_only_where_known_and_never_silently
         assert!(body.handed_on, "{context}: {body:?}");
     }
 }
+
+#[test]
+fn an_arguments_use_in_another_function_is_not_this_ones() {
+    let other = "function other() { return arguments[0] }\nexport function C(props: P) { return <i /> }";
+    assert!(!facts(other, "C").handed_on);
+}

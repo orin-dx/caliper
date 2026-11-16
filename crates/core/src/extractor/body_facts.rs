@@ -293,10 +293,17 @@ impl<'s, 'a> Reader<'s, 'a> {
             self.facts.handed_on = true;
         }
         // `arguments[0]` is the props object, named by no parameter.
-        if matches!(function, ComponentFn::Function(_))
-            && self.scoping.root_unresolved_references().contains_key("arguments")
-        {
-            self.facts.handed_on = true;
+        if matches!(function, ComponentFn::Function(_)) {
+            let own = function.span();
+            let uses_arguments = self.scoping.root_unresolved_references().get("arguments").is_some_and(|references| {
+                references.iter().any(|&reference| {
+                    let at = self.nodes.kind(self.scoping.get_reference(reference).node_id()).span();
+                    own.start <= at.start && at.end <= own.end
+                })
+            });
+            if uses_arguments {
+                self.facts.handed_on = true;
+            }
         }
         while let Some(symbol) = self.queue.pop_front() {
             for reference in self.scoping.get_resolved_references(symbol) {
@@ -499,6 +506,7 @@ impl<'s, 'a> Reader<'s, 'a> {
         };
         match self.nodes.kind(parent) {
             AstKind::CallExpression(call) => call.callee.span() != child,
+            AstKind::NewExpression(new) => new.callee.span() != child,
             AstKind::TaggedTemplateExpression(tagged) => tagged.tag.span() != child,
             AstKind::AssignmentExpression(assignment) => assignment.left.span() != child,
             AstKind::UnaryExpression(unary) => unary.operator != UnaryOperator::Delete,
@@ -543,7 +551,6 @@ impl<'s, 'a> Reader<'s, 'a> {
             | AstKind::MethodDefinition(_)
             | AstKind::BindingProperty(_)
             | AstKind::JSXSpreadAttribute(_)
-            | AstKind::NewExpression(_)
             | AstKind::ImportExpression(_)
             | AstKind::ExportDefaultDeclaration(_) => true,
             _ => false,
