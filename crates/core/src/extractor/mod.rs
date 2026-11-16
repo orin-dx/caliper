@@ -292,6 +292,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) alias_candidate: Option<(String, Option<component::AliasCall>)>,
     /// Calls to a plain function bound to a PascalCase name, resolved by what the callee returns.
     pub(super) pending_factory_calls: Vec<wrapper::PendingFactoryCall>,
+    /// The own props factory calls bound to PascalCase names give, attached to the mappings detection builds from them.
+    pub(super) pending_factory_props: Vec<factory_props::PendingFactoryProps>,
     /// Simple local aliases of generic functions, resolved after all declarations have been visited.
     pub(super) pending_function_aliases: Vec<(String, String)>,
     /// Local cast names and the base component and asserted props type they export.
@@ -362,6 +364,7 @@ impl<'src> SourceDataCollector<'src> {
             pending_wrappers: Vec::new(),
             pending_aliases: Vec::new(),
             pending_factory_calls: Vec::new(),
+            pending_factory_props: Vec::new(),
             alias_candidate: None,
             pending_function_aliases: Vec::new(),
             cast_component_aliases: Default::default(),
@@ -605,6 +608,7 @@ impl<'src> SourceDataCollector<'src> {
         self.promote_wrapper_calls();
         self.promote_identifier_aliases();
         self.promote_factory_calls();
+        self.attach_factory_props();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
         // below can change what identifier a mapping currently answers to.
@@ -641,7 +645,8 @@ impl<'src> SourceDataCollector<'src> {
             for (start, end, params) in &self.function_type_params {
                 if *start >= mapping.span_start && *end <= mapping.span_end {
                     for param in params {
-                        if !mapping.type_params.contains(param) {
+                        // The render callback's own parameters are in scope for its props only (`factory_type_params`).
+                        if !mapping.type_params.contains(param) && !mapping.factory_type_params.contains(param) {
                             mapping.type_params.push(param.clone());
                         }
                     }
