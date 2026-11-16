@@ -25,6 +25,7 @@ fn output() -> ExtractionOutput {
         ("gone".to_string(), structural("gone", "Not in the checker's answer.", None)),
     ]);
     let entry = |name: &str, props| ComponentEntry {
+        relevance: None,
         display_name: name.to_string(),
         file_path: format!("/src/{name}.tsx").into(),
         description: String::new(),

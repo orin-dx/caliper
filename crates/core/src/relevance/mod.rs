@@ -16,7 +16,7 @@ pub(crate) mod props_type;
 
 use std::collections::BTreeSet;
 
-use crate::types::output::ComponentEntry;
+use crate::types::output::{ComponentEntry, InheritedLayer, PropParent};
 
 /// The evidence about one component gathered with its resolution: what its props type writes and what its body does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,11 +27,14 @@ pub(crate) struct Inputs {
     pub(crate) props_type: props_type::PropsType,
     /// What the component's body does with its props; `None` when it has no function of its own.
     pub(crate) body: Option<Body>,
+    /// Whether the listing follows the decision ([`narrow`]): off when every inherited prop is asked for expanded
+    /// (`collapseInheritedProps: none`, ADR 0028's `relevance: 'all'`); the `used` lists are written either way.
+    pub(crate) narrows: bool,
 }
 
 /// Decides where each member of `entry`'s props goes, from `inputs`, the revision's `call_sites` of the component and
-/// the members its listed props and layers reach, and writes each collapsed layer's `used` list: the members of that
-/// layer evidence names. Which props are listed or collapsed does not change.
+/// the members its listed props and layers reach; keeps the decision on the entry ([`ComponentEntry::relevance`]) and
+/// lists by it ([`narrow`]).
 pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &CallSites) {
     let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
     let members = props_type::members(&inputs.props_type, rows, &entry.inheritance);
@@ -39,11 +42,86 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     // A collapsed ambient member the signature defaults (`{ className = 'x' }`) is read by the body, which a row does
     // not record for a name left in its layer: it is `used` too. Nothing else in `rows` is added.
     let defaulted =
-        members.iter().filter(|member| member.ambient && member.default_tag).map(|member| member.name.as_str());
-    let used: BTreeSet<&str> = shown.used.iter().map(String::as_str).chain(defaulted).collect();
-    for layer in &mut entry.inheritance {
-        layer.used = layer.members.iter().filter(|name| used.contains(name.as_str())).cloned().collect();
+        members.iter().filter(|member| member.ambient && member.default_tag).map(|member| member.name.clone());
+    let used: BTreeSet<String> = shown.used.iter().cloned().chain(defaulted).collect();
+    let left =
+        if inputs.narrows { shown.collapsed.iter().chain(&shown.used).cloned().collect() } else { BTreeSet::new() };
+    entry.relevance = Some(std::sync::Arc::new(Placement { left, used }));
+    narrow(entry);
+}
+
+/// What [`decide`] said of one component, kept on its entry so that every merge of the checker's props into it lists by
+/// the same decision ([`narrow`]): the decision is made once, from the structural answer's evidence.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Placement {
+    /// The members evidence leaves out of the listing ([`Shown::collapsed`] and [`Shown::used`]): each is a name in
+    /// the layer of its source, never a row.
+    left: BTreeSet<String>,
+    /// The members of `left` named in their layer's `used` list.
+    used: BTreeSet<String>,
+}
+
+/// Lists `entry` by its kept [`Placement`]: a listed prop (in `props` or `notableInherited`) the decision leaves out
+/// and that a source outside the project declares (a dependency's, or React's and the DOM's) moves to the layer of
+/// its source, as a name. Its home is the layer of its `parent` (by type name and file), else,
+/// for an ambient source, the entry's HTML element layer, else a new layer of its `parent`. A prop with no `parent`
+/// has no known source and stays listed: no name is ever lost. Then each layer's `used` list is written. Without a
+/// placement (no evidence was gathered) nothing changes. Run by [`apply`] and at the end of each merge of the
+/// checker's props, which may list again what the structural answer left out.
+pub(crate) fn narrow(entry: &mut ComponentEntry) {
+    let Some(placement) = entry.relevance.clone() else { return };
+    let ComponentEntry { props, notable_inherited, inheritance, .. } = entry;
+    for listing in [props, notable_inherited] {
+        listing.retain(|name, prop| {
+            if !placement.left.contains(name) {
+                return true;
+            }
+            // Only a source outside the project is narrowed: a dependency's or an ambient one, decided by the
+            // declaring path. The project's own sources stay as the collapse rule lists them.
+            let Some(parent) = prop.parent.as_ref() else { return true };
+            if crate::origin::declaration_origin(&parent.file_name) == crate::origin::Origin::Project {
+                return true;
+            }
+            if !inheritance.iter().any(|layer| layer.members.contains(name)) {
+                home(inheritance, parent).members.push(name.clone());
+            }
+            false
+        });
     }
+    for layer in inheritance.iter_mut() {
+        layer.total_props = layer.total_props.max(u32::try_from(layer.members.len()).unwrap_or(u32::MAX));
+        layer.used = layer.members.iter().filter(|name| placement.used.contains(*name)).cloned().collect();
+    }
+}
+
+/// The layer a prop declared in `parent` is left in ([`narrow`]): made when the entry has none.
+fn home<'l>(layers: &'l mut Vec<InheritedLayer>, parent: &PropParent) -> &'l mut InheritedLayer {
+    let ambient = crate::origin::declaration_origin(&parent.file_name).is_ambient();
+    let at = layers
+        .iter()
+        .position(|layer| layer.type_name == parent.name && layer.file_name == parent.file_name)
+        .or_else(|| {
+            ambient
+                .then(|| {
+                    layers.iter().position(|layer| {
+                        layer.html_element.is_some() && crate::origin::declaration_origin(&layer.file_name).is_ambient()
+                    })
+                })
+                .flatten()
+        });
+    let at = at.unwrap_or_else(|| {
+        layers.push(InheritedLayer {
+            type_name: parent.name.clone(),
+            file_name: parent.file_name.clone(),
+            omitted: Vec::new(),
+            html_element: None,
+            total_props: 0,
+            members: Vec::new(),
+            used: Vec::new(),
+        });
+        layers.len() - 1
+    });
+    &mut layers[at]
 }
 
 /// Everything known about the members one component's props type reaches.
@@ -174,7 +252,7 @@ pub(crate) fn decide(evidence: &Evidence<'_>) -> Shown {
     let complete = body.is_some_and(Body::is_complete);
     let reads: BTreeSet<&str> = body.map(|body| body.reads.iter().map(String::as_str).collect()).unwrap_or_default();
     let forwarded = body.map(Body::forwarded).unwrap_or_default();
-    let passed: BTreeSet<&str> = evidence
+    let at_floor: BTreeSet<&str> = evidence
         .call_sites
         .passed
         .iter()
@@ -190,15 +268,20 @@ pub(crate) fn decide(evidence: &Evidence<'_>) -> Shown {
             continue;
         }
         let declared = member.own || member.picked || member.overrides || member.required || member.default_tag;
-        // Passed at the floor or read puts a member forward: a typed row unless ambient, then a name in its layer's
-        // `used` list (ADR 0028, Combination).
-        let wanted = passed.contains(name) || reads.contains(name);
-        let list = if declared || (!member.ambient && (wanted || forwarded.contains(name))) {
+        // Passed at the floor puts a member forward as a typed row, ambient or not: consumers set it, so a story needs
+        // its control. Read or forwarded puts a non-ambient member forward as a row; an ambient member the body only
+        // reads is a name in its layer's `used` list (ADR 0028, Combination).
+        let passed = at_floor.contains(name);
+        let read = reads.contains(name);
+        let list = if declared || passed || (!member.ambient && (read || forwarded.contains(name))) {
             ordered_rows.push((!(member.documented || member.literal_union), member.name.clone()));
             continue;
-        } else if member.ambient && wanted {
+        } else if member.ambient && read {
             &mut shown.used
-        } else if !complete {
+        } else if !complete && !member.ambient {
+            // The body's silence is unknown: listed or collapsed as the collapse rule alone says. An ambient member
+            // (React's and the DOM's attributes, which every element has) is never listed for want of evidence: it
+            // stays a name in its layer, so a component without call sites lists no hundreds of DOM attributes.
             &mut shown.unknown
         } else {
             &mut shown.collapsed

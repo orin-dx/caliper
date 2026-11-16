@@ -54,6 +54,7 @@ fn component(name: &str, props: &[ParsedProp], notable: &[ParsedProp]) -> Compon
     let by_name =
         |props: &[ParsedProp]| props.iter().map(|p| (p.name.clone(), std::sync::Arc::new(p.clone()))).collect();
     ComponentEntry {
+        relevance: None,
         display_name: name.to_string(),
         file_path: format!("/src/{name}.tsx").into(),
         description: format!("The {name}."),

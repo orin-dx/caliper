@@ -425,21 +425,20 @@ fn apply_props(
     resolver: ResolverFacts,
     cx: CollapseContext,
 ) -> MergedProps {
-    // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers. A component
-    // with no layer has nowhere to leave them: a context's `Provider` (`value`, `children`) or a `th`/`td` attribute
-    // intersection names no element. Its `@types/react` props the structural pass lists stay, as the curated mode
-    // keeps them (`targets_of` asks the checker for those names only, `key` among them only if the component lists it).
-    let layered = !entry.inheritance.is_empty();
+    // The whole-project merge replaces the props. Of `@types/react`'s it takes those the structural answer lists, as
+    // the session's merge does (`checker_prop_used`): relevance decided them there (ADR 0028), and the rest are names
+    // in the inheritance layers.
     let own: Vec<&Arc<SemanticProp>> = semantic
         .props
         .iter()
-        .filter(|prop| !prop.react_declared || (!layered && entry.props.contains_key(&prop.name)))
+        .filter(|prop| crate::react_types::react_prop_listed(&prop.name, prop.react_declared, &entry.props))
         .collect();
     let (own, notable) = layer_checker_props(entry, own, &semantic.whole, cx);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
     move_notable(entry, &notable);
     listed_props_leave_layers(entry, true);
+    crate::relevance::narrow(entry);
     merged
 }
 

@@ -400,6 +400,7 @@ impl Serialize for InternedComponent<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Destructured so a new field fails to compile here instead of going missing from the JSON.
         let ComponentEntry {
+            relevance: _,
             display_name,
             file_path,
             description,

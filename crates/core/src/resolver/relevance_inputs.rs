@@ -32,7 +32,8 @@ pub(crate) fn evidence(mapping: &ComponentMapping, ctx: &ResolutionContext) -> A
         elements: forwarding.elements,
         handed_on: forwarding.handed_on,
     });
-    Arc::new(Inputs { site: site_key(mapping), props_type, body })
+    let narrows = ctx.collapse_inherited_props != crate::types::options::CollapseInheritedProps::None;
+    Arc::new(Inputs { site: site_key(mapping), props_type, body, narrows })
 }
 
 /// Every component's call sites in `ctx`'s project (the files' JSX and the components' bodies), counted once per

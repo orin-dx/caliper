@@ -957,6 +957,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
 /// The entry of a candidate with nothing to document: no props and no layers, which the output leaves out.
 fn unpublished_entry(mapping: &ComponentMapping) -> ComponentEntry {
     ComponentEntry {
+        relevance: None,
         display_name: mapping.component_name.clone(),
         file_path: mapping.file_path.clone(),
         description: mapping.description.clone(),
@@ -1137,6 +1138,7 @@ pub(crate) fn resolve_component_shared(
     let discriminant_prop = chain.discriminant_prop;
 
     let mut entry = ComponentEntry {
+        relevance: None,
         display_name: mapping.component_name.clone(),
         file_path: mapping.file_path.clone(),
         description: mapping.description.clone(),

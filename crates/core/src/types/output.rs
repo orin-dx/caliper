@@ -140,6 +140,10 @@ pub struct ComponentEntry {
     /// TypeScript checker asks for the component by these, and a reader of the canonical JSON finds the component by
     /// file and export instead of by display name.
     pub exports: Vec<crate::types::ComponentExport>,
+    /// What relevance decided of the component's members (ADR 0028), kept so that every merge of the checker's props
+    /// lists by the decision the structural answer's evidence made. Not output: the listing and layers say it.
+    #[serde(skip)]
+    pub relevance: Option<Arc<crate::relevance::Placement>>,
 }
 
 impl ComponentEntry {

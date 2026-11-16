@@ -277,6 +277,7 @@ pub(super) fn resolve_guarded(
             })
             .unwrap_or_else(|diag| {
                 let stub = ComponentEntry {
+                    relevance: None,
                     display_name: mapping.component_name.clone(),
                     file_path: mapping.file_path.clone(),
                     description: String::new(),
