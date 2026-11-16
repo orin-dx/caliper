@@ -102,6 +102,19 @@ export const Trigger = createLeaf(SeparatorNode, (props: TriggerProps, ref) => <
 }
 
 #[test]
+fn a_render_callbacks_discriminated_union_keeps_its_discriminant() {
+    let output = extract_file(&format!(
+        "{LEAF_FACTORY}
+interface A {{ mode: 'a'; left: string }}
+interface B {{ mode: 'b'; right: number }}
+type Props = A | B;
+export const Pair = createLeaf(SeparatorNode, (props: Props, ref) => <div />);
+"
+    ));
+    assert_eq!(output.components["Pair"].discriminant_prop.as_deref(), Some("mode"));
+}
+
+#[test]
 fn a_render_callback_type_parameter_does_not_shadow_a_declaration_in_the_result() {
     let output = extract_file(
         r#"

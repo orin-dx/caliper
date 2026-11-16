@@ -1271,6 +1271,10 @@ impl ResolvedChain {
         for (name, prop) in other.inherited_by_name {
             self.inherited_by_name.entry(name).or_insert(prop);
         }
+        // The props `other` adds come with the discriminant that tells them apart (`Props = A | B`), unless self has one.
+        if self.discriminant_prop.is_none() {
+            self.discriminant_prop = other.discriminant_prop;
+        }
     }
 
     /// Merge the next member of an intersection into self. Unlike an extended interface's, a prop both declare keeps
