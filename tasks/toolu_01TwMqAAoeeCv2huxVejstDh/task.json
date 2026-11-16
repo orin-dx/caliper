@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01TwMqAAoeeCv2huxVejstDh",
+  "agent_id": "ab8cf816dbd63a03e",
+  "subagent_type": "general-purpose",
+  "task_description": "267: never collapse what the selection hides (Pick finding A)",
+  "token_usage": {
+    "input_tokens": 196,
+    "cache_creation_tokens": 411431,
+    "cache_read_tokens": 14107718,
+    "output_tokens": 70076,
+    "api_call_count": 96
+  },
+  "started_at": "2026-11-15T17:05:07.809322-08:00",
+  "completed_at": "2026-11-15T17:43:46.348793-08:00"
+}

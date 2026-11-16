@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01SMEZG5nPVH1rNytx8h34JN",
+  "agent_id": "a02829fa385697a7f",
+  "subagent_type": "general-purpose",
+  "task_description": "Red-team collapse decision and layering (no fixes)",
+  "started_at": "2026-11-15T17:46:54.761038-08:00"
+}
