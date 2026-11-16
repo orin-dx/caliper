@@ -17,6 +17,7 @@ mod checker;
 mod component;
 mod convert;
 mod declared;
+mod heap;
 mod instantiate;
 mod kept;
 mod on_demand;
@@ -24,6 +25,7 @@ mod printed;
 mod rpc;
 mod stamps;
 
+pub use heap::{HeapBudget, MAX_HEAP_BUDGET};
 pub use on_demand::{OnDemand, OnDemandConfig, Snapshots};
 
 use std::collections::VecDeque;
@@ -43,6 +45,7 @@ use tokio::task::JoinSet;
 use crate::checker::Backend;
 use crate::component::Answer;
 use crate::convert::Converter;
+use crate::heap::{HEAP, Watch};
 use crate::instantiate::Instantiation;
 use crate::rpc::{CallError, REQUESTS, Rpc};
 
@@ -143,6 +146,10 @@ pub struct SemanticRequest {
     /// Ask the checker about a component's props, and about the members of each type, last to first. The answer must
     /// not change: no id the checker hands out, and so no order of queries, may show in it. The tests set this.
     pub reverse_queries: bool,
+    /// How large the run's heap may grow before the checker is asked nothing more ([`HeapBudget`]); with none, the
+    /// run is not bounded. [`SemanticRequest::new`] leaves it unset, and [`resolve`] and the calls beside it run
+    /// under [`HeapBudget::machine`] when it is: an [`OnDemand`] session keeps its own bound instead.
+    pub heap_budget: Option<HeapBudget>,
     teardown: Teardown,
 }
 
@@ -156,6 +163,7 @@ impl SemanticRequest {
             request_timeout: Duration::from_secs(60),
             record_to: None,
             reverse_queries: false,
+            heap_budget: None,
             teardown: Teardown::Session,
         }
     }
@@ -171,6 +179,9 @@ impl SemanticRequest {
 /// Resolves the request's components with the checker. Blocks; builds its own runtime, so it must not be called from
 /// inside one. The runtime has up to four threads: the built-in checker answers two programs at once, each on a thread
 /// of its own, and while it does, the answers it gave the other files in flight are read and converted on these.
+///
+/// The run's heap is bounded by the request's [`HeapBudget`], or [`HeapBudget::machine`] when it sets none: past it,
+/// the components not yet answered keep their structural result, with one warning that says how many.
 pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
     resolve_noting(request, None)
 }
@@ -330,10 +341,11 @@ fn resolve_noting(request: SemanticRequest, reads: Option<Arc<kept::Reads>>) -> 
 
 /// [`resolve_noting`], over the program an early start opened when there is one (it [`fits`](EarlyStart::fits)).
 fn resolve_with(
-    request: SemanticRequest,
+    mut request: SemanticRequest,
     reads: Option<Arc<kept::Reads>>,
     early: Option<EarlyStart>,
 ) -> SemanticOutcome {
+    request.heap_budget.get_or_insert_with(HeapBudget::machine);
     let teardown = request.teardown;
     if let Some(opened) = early.and_then(|early| early.handle).and_then(|handle| handle.join().ok().flatten()) {
         let Opened { runtime, checker, programs } = opened;
@@ -476,6 +488,7 @@ async fn answer_on(
 ) -> Result<SemanticOutcome, CallError> {
     let (mut outcome, by_file, order) = group_by_file(request);
     let mut answered = session(programs, request, files, &by_file, &order).await?;
+    outcome.diagnostics.append(&mut answered.diagnostics);
     outcome.components.append(&mut answered.components);
     outcome.fallbacks.append(&mut answered.fallbacks);
     Ok(outcome)
@@ -500,34 +513,38 @@ async fn session(
         .map(|file| by_file.get(file).into_iter().flatten().map(|target| (*target).clone()).collect())
         .collect();
     let queue = Arc::new(Mutex::new(queue));
+    let watch = Arc::new(Watch::new(request.heap_budget));
 
     let mut tasks = JoinSet::new();
     for worker in 0..FILES_IN_FLIGHT {
         let lane = worker % programs.len();
         let (Some(rpc), Some(converter)) = (programs.get(lane), converters.get(lane)) else { continue };
         let (rpc, converter, queue, interner) = (rpc.clone(), converter.clone(), queue.clone(), interner.clone());
-        tasks.spawn(async move {
-            let mut answered = (SemanticOutcome::default(), Vec::new());
+        let watch = watch.clone();
+        tasks.spawn(HEAP.scope(watch.clone(), async move {
+            let mut answered = Answered::default();
             loop {
+                if watch.passed() {
+                    return Ok(answered);
+                }
                 let next = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).pop_front();
                 let Some(targets) = next else { return Ok(answered) };
-                let (mut outcome, mut generic) = answer_file(&rpc, &converter, &interner, targets).await?;
-                answered.0.components.append(&mut outcome.components);
-                answered.0.fallbacks.append(&mut outcome.fallbacks);
-                answered.1.append(&mut generic);
+                answered.append(answer_file(&rpc, &converter, &interner, &watch, targets).await?);
             }
-        });
+        }));
     }
 
     let mut outcome = SemanticOutcome::default();
     let mut generic = Vec::new();
+    let mut left = Vec::new();
     let mut failure = None;
     while let Some(joined) = tasks.join_next().await {
         match joined {
-            Ok(Ok((mut answered, mut instantiations))) => {
-                outcome.components.append(&mut answered.components);
-                outcome.fallbacks.append(&mut answered.fallbacks);
-                generic.append(&mut instantiations);
+            Ok(Ok(mut answered)) => {
+                outcome.components.append(&mut answered.outcome.components);
+                outcome.fallbacks.append(&mut answered.outcome.fallbacks);
+                generic.append(&mut answered.generic);
+                left.append(&mut answered.left);
             }
             Ok(Err(error)) => {
                 failure = Some(error);
@@ -545,12 +562,34 @@ async fn session(
     if let Some(error) = failure {
         return Err(error);
     }
+    // The files no lane took before the heap passed its budget.
+    let unasked = std::mem::take(&mut *queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    left.extend(unasked.into_iter().flatten().map(|target| target.key));
     if !generic.is_empty() {
-        let mut instantiated =
-            instantiate::answer(rpc, files, &request.project_root, &interner, request.reverse_queries, generic).await?;
-        outcome.components.append(&mut instantiated.components);
-        outcome.fallbacks.append(&mut instantiated.fallbacks);
+        let keys = generic.iter().map(|(target, _)| target.key.clone()).collect::<Vec<_>>();
+        let instantiated = match watch.passed() {
+            true => Err(CallError::OverBudget),
+            false => {
+                let (reverse, root) = (request.reverse_queries, &request.project_root);
+                HEAP.scope(watch.clone(), instantiate::answer(rpc, files, root, &interner, reverse, generic)).await
+            }
+        };
+        match instantiated {
+            // A component answered after the heap passed may have met a refused request it read as an answer.
+            // Its fallbacks stand: they name what the checker said, not the heap.
+            Ok(mut instantiated) if watch.passed() => {
+                outcome.fallbacks.append(&mut instantiated.fallbacks);
+                left.extend(instantiated.components.into_iter().map(|component| component.key));
+            }
+            Err(CallError::OverBudget) => left.extend(keys),
+            Ok(mut instantiated) => {
+                outcome.components.append(&mut instantiated.components);
+                outcome.fallbacks.append(&mut instantiated.fallbacks);
+            }
+            Err(error) => return Err(error),
+        }
     }
+    outcome.diagnostics.extend(watch.diagnostic(left));
 
     if let (Some(path), Some(recording)) = (&request.record_to, rpc.recording())
         && let Ok(json) = serde_json::to_string_pretty(&recording)
@@ -563,6 +602,8 @@ async fn session(
         files = files.len(),
         type_memo = ?converters.iter().map(Converter::memo_stats).fold((0, 0), |sum, (hits, misses)| (sum.0 + hits, sum.1 + misses)),
         total_ms = started.elapsed().as_millis() as u64,
+        heap_peak_mib = watch.peak() >> 20,
+        heap_budget_mib = request.heap_budget.map(|budget| budget.bytes() >> 20),
         "semantic backend finished"
     );
     outcome.components.sort_by(|a, b| a.key.cmp(&b.key));
@@ -574,33 +615,62 @@ async fn session(
     Ok(outcome)
 }
 
+/// What a lane answered: the components, the fallbacks, the generic components that come back apart to be answered
+/// from their instantiations, and the keys of the components left structural because the heap passed its budget.
+#[derive(Default)]
+struct Answered {
+    outcome: SemanticOutcome,
+    generic: Vec<(Target, Instantiation)>,
+    left: Vec<String>,
+}
+
+impl Answered {
+    fn append(&mut self, mut other: Answered) {
+        self.outcome.components.append(&mut other.outcome.components);
+        self.outcome.fallbacks.append(&mut other.outcome.fallbacks);
+        self.generic.append(&mut other.generic);
+        self.left.append(&mut other.left);
+    }
+}
+
 fn fallback_of(target: &Target, reason: &str) -> SemanticFallback {
     SemanticFallback { key: target.key.clone(), reason: reason.to_string() }
 }
 
 /// A fatal error aborts the run; a call the checker rejected only sends that component to its structural result. The
-/// generic components come back apart, to be answered from their instantiations once every file is done.
+/// generic components come back apart, to be answered from their instantiations once every file is done. Before each
+/// component the heap is read; once it is past the budget, the component in flight and the rest are left structural.
 async fn answer_file(
     rpc: &Rpc,
     converter: &Converter,
     interner: &PropInterner,
+    watch: &Watch,
     targets: Vec<Target>,
-) -> Result<(SemanticOutcome, Vec<(Target, Instantiation)>), CallError> {
-    let mut outcome = SemanticOutcome::default();
-    let mut generic = Vec::new();
-    let Some(first) = targets.first() else { return Ok((outcome, generic)) };
+) -> Result<Answered, CallError> {
+    let mut answered = Answered::default();
+    let Some(first) = targets.first() else { return Ok(answered) };
     let module = match module_exports(rpc, first.file_path.as_str()).await {
         Ok(Some(module)) => module,
         Ok(None) | Err(CallError::Rejected(_)) => {
-            outcome
+            answered
+                .outcome
                 .fallbacks
                 .extend(targets.iter().map(|target| fallback_of(target, "not part of the checker's program")));
-            return Ok((outcome, generic));
+            return Ok(answered);
+        }
+        Err(CallError::OverBudget) => {
+            answered.left.extend(targets.into_iter().map(|target| target.key));
+            return Ok(answered);
         }
         Err(fatal) => return Err(fatal),
     };
 
+    let Answered { outcome, generic, left } = &mut answered;
     for target in &targets {
+        if watch.past() {
+            left.push(target.key.clone());
+            continue;
+        }
         let requests = Arc::new(AtomicU64::new(0));
         let started = std::time::Instant::now();
         let answered =
@@ -611,19 +681,26 @@ async fn answer_file(
             ms = started.elapsed().as_millis() as u64,
             "semantic component answered"
         );
+        let answered = match answered {
+            // A conversion that met a refused request may have read it as an answer (a declaration it could not
+            // read); only what was answered before the heap passed its budget is kept.
+            Ok(_) if watch.passed() => Err(CallError::OverBudget),
+            other => other,
+        };
         match answered {
-            Ok(Answer::Props(component::Props { props, composes, picked })) => {
-                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes, picked });
+            Ok(Answer::Props(component::Props { props, composes, whole })) => {
+                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes, whole });
             }
             Ok(Answer::Fallback(reason)) => outcome.fallbacks.push(fallback_of(target, &reason)),
             Ok(Answer::Instantiate(instantiation)) => generic.push((target.clone(), instantiation)),
             Err(CallError::Rejected(message)) => {
                 outcome.fallbacks.push(fallback_of(target, &format!("the checker rejected a request: {message}")));
             }
+            Err(CallError::OverBudget) => left.push(target.key.clone()),
             Err(fatal) => return Err(fatal),
         }
     }
-    Ok((outcome, generic))
+    Ok(answered)
 }
 
 /// The module `file` is, as the checker reads it, with its exports; `None` when the file is not in its program.
@@ -882,5 +959,72 @@ mod tests {
             (description("C0"), description("C1"), description("C2")),
             ("The id.".into(), String::new(), "The id.".into())
         );
+    }
+
+    /// `root`'s components answered on two programs under `budget`.
+    fn answered_under(root: &Utf8Path, budget: Option<HeapBudget>) -> SemanticOutcome {
+        let output = extract(&PipelineOptions { src_dirs: vec![root.to_owned()], ..PipelineOptions::default() });
+        let mut request = SemanticRequest::new(root.to_owned(), targets_of(&output));
+        request.heap_budget = budget;
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        runtime.block_on(run(request, Some(2)))
+    }
+
+    /// The reads of [`a_run_past_its_heap_budget_leaves_the_rest_structural_with_one_warning`]'s meter.
+    static READS: AtomicU64 = AtomicU64::new(0);
+
+    /// A heap that grows by a byte at each read.
+    fn growing() -> u64 {
+        READS.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// A run whose heap passes its budget part way finishes: the components answered before keep the checker's answer,
+    /// exactly as an unbounded run gives it, every other one is left to its structural result, and one warning names
+    /// them all. Nothing reads the heap or asks the checker once it is past: the reads stop at the one that passed,
+    /// plus at most one per lane that was reading at the same moment.
+    #[test]
+    fn a_run_past_its_heap_budget_leaves_the_rest_structural_with_one_warning() {
+        let (_dir, root) = shared_types_project(24);
+        // The reads a whole run makes, so the budget can be passed three quarters of the way through: eight lanes
+        // answer the 24 files in three rounds, so the first round is done by then whatever order the lanes run in.
+        let unbounded = answered_under(&root, Some(HeapBudget::metered(u64::MAX, growing)));
+        assert_eq!(unbounded.components.len(), 24, "{unbounded:?}");
+        let budget = READS.swap(0, Ordering::Relaxed) * 3 / 4;
+
+        let outcome = answered_under(&root, Some(HeapBudget::metered(budget, growing)));
+
+        let answered = outcome.components.len();
+        assert!((1..24).contains(&answered), "{answered} of 24 answered");
+        for component in &outcome.components {
+            assert!(unbounded.components.contains(component), "{} differs", component.key);
+        }
+        assert!(outcome.fallbacks.is_empty(), "{:?}", outcome.fallbacks);
+        let [warning] = outcome.diagnostics.as_slice() else { panic!("{:?}", outcome.diagnostics) };
+        assert_eq!(warning.severity, caliper_docgen_core::types::DiagnosticSeverity::Warning);
+        assert!(warning.message.starts_with(&format!("{} component(s) kept their structural result", 24 - answered)));
+        assert!(warning.message.contains("depends on timing"), "{}", warning.message);
+        let mut all: Vec<&str> = outcome.components.iter().map(|component| component.key.as_str()).collect();
+        all.extend(warning.affects.iter().map(String::as_str));
+        all.sort_unstable();
+        let mut expected: Vec<&str> = unbounded.components.iter().map(|component| component.key.as_str()).collect();
+        expected.sort_unstable();
+        assert_eq!(all, expected);
+        let reads = READS.load(Ordering::Relaxed);
+        assert!(reads <= budget + 1 + FILES_IN_FLIGHT as u64, "{reads} reads");
+    }
+
+    /// A budget the heap never reaches changes nothing: the answer is the unbounded one. The machine's budget is read
+    /// against mimalloc's commit, which in this test binary (system allocator) is only mimalloc's own; the Chakra run
+    /// in the PR shows the meter against a real heap.
+    #[test]
+    fn a_budget_never_reached_changes_nothing() {
+        let (_dir, root) = shared_types_project(12);
+
+        let bounded = answered_under(&root, Some(HeapBudget::machine()));
+        let unbounded = answered_under(&root, None);
+
+        assert!(bounded.diagnostics.is_empty() && bounded.fallbacks.is_empty(), "{bounded:?}");
+        assert_eq!(bounded.components.len(), 12);
+        assert_eq!(bounded, unbounded);
     }
 }

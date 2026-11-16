@@ -706,32 +706,46 @@ impl Converter {
         crate::declared::declared(&self.rpc, &self.state.declared, asked).await
     }
 
+    /// The sources [`Self::composes`] found reached whole, named as a prop's `parent` names them.
+    pub(crate) async fn as_parents(
+        &self,
+        sources: Vec<(String, String)>,
+    ) -> Result<Vec<caliper_docgen_core::types::PropParent>, CallError> {
+        crate::declared::as_parents(&self.rpc, &self.state.declared, sources).await
+    }
+
     /// The `@types/react` types a props type is made of, by name, in the order it names them: its bases and the members
     /// of an intersection, seen through the project's and dependencies' own types and through a lib utility (`Omit`,
     /// `Pick`) to what it applies to. A React type is found by where it is declared, as [`Origin::react_terminal`]
     /// finds React's terminals, and is not looked into. `None` when a type on the way has bases the checker cannot be
     /// asked for ([`Self::named_bases`]): the list would not be the answer, and an empty one would say there are none.
     ///
-    /// The same walk finds the props each lib `Pick` on the way selects (the second of the pair), each name once: they
-    /// reach the component by name (`SemanticComponent::picked`). A type whose bases cannot be asked for is not looked
-    /// into, for either. A `Pick` that is the whole body of a project alias (`type P = Pick<Base, "a">`) is not found:
-    /// the checker names the type by the project alias (TypeScript keeps the outermost alias), and the mapped type it
-    /// is cannot tell a `Pick` from an `Omit`, which the lib writes as a `Pick`. Where the structural pass reads the
-    /// base it lists those props itself, and the merge follows it; only a base it cannot read is decided here alone.
+    /// The same walk finds the interfaces and classes the props type reaches whole (the second of the pair), each by
+    /// name and file as the checker keys it: those every member of which can reach the component. It is an allow-list.
+    /// A type is reached whole only through the edges that keep every member: the props type itself, an intersection's
+    /// members, a class's or interface's bases (a generic one's through its target), and the lib's own `Partial`,
+    /// `Required`, `Readonly` and `Omit` (named by the lib's alias: `Omit` only removes keys, and the members left are
+    /// the answer's props). A lib `Pick` selects: what it applies to is reached, but not whole, and stays so however
+    /// else it is reached. Any other type is not looked into: a mapped type, a project alias of one (TypeScript names
+    /// the type by the outermost alias, and the lib writes `Omit` as a `Pick`, so under a project alias the two cannot
+    /// be told apart), a conditional, a union. What it holds is not proven to reach whole, and the merge does not
+    /// collapse it (`SemanticComponent::whole`).
     pub(crate) async fn composes(
         &self,
         props_type: &TypeInfo,
-    ) -> Result<(Option<Vec<String>>, Vec<String>), CallError> {
+    ) -> Result<(Option<Vec<String>>, Vec<(String, String)>), CallError> {
         let mut names: Vec<String> = Vec::new();
-        let mut picked: Vec<String> = Vec::new();
+        let mut reached: Vec<(String, String)> = Vec::new();
+        let mut selected: Vec<(String, String)> = Vec::new();
         let mut known = true;
-        let mut seen: Vec<u64> = Vec::new();
-        let mut pending = vec![props_type.clone()];
-        while let Some(info) = pending.pop() {
-            if seen.contains(&info.id) {
+        let mut seen: Vec<(u64, bool)> = Vec::new();
+        // Each type with whether every edge on the way to it keeps every member.
+        let mut pending = vec![(props_type.clone(), true)];
+        while let Some((info, whole)) = pending.pop() {
+            if seen.contains(&(info.id, whole)) {
                 continue;
             }
-            seen.push(info.id);
+            seen.push((info.id, whole));
             let origin = self.origin(&info).await?;
             if let Some(origin) = &origin {
                 if origin.in_react() {
@@ -741,15 +755,20 @@ impl Converter {
                     continue;
                 }
                 if origin.alias && origin.in_lib() && UTILITIES.contains(&origin.name.as_str()) {
-                    if origin.name == "Pick" {
-                        for property in self.rpc.properties(info.id).await? {
-                            if !picked.contains(&property.name) {
-                                picked.push(property.name);
-                            }
-                        }
-                    }
-                    pending.extend(self.rpc.alias_type_arguments(info.id).await?.into_iter().take(1));
+                    let keeps = whole && origin.name != "Pick";
+                    let applied = self.rpc.alias_type_arguments(info.id).await?.into_iter().take(1);
+                    pending.extend(applied.map(|base| (base, keeps)));
                     continue;
+                }
+            }
+            // A class or interface, or an instantiation of one: a source a prop's `parent` can name.
+            if info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0
+                && let Some(source) = self.symbol_origin(&info).await?
+            {
+                let into = if whole { &mut reached } else { &mut selected };
+                let key = (source.name, source.file);
+                if !into.contains(&key) {
+                    into.push(key);
                 }
             }
             let parts = if info.flags & flag::INTERSECTION != 0 {
@@ -762,9 +781,10 @@ impl Converter {
                 bases
             };
             // Last first onto the stack, so they are taken in the order the type names them.
-            pending.extend(parts.into_iter().rev());
+            pending.extend(parts.into_iter().rev().map(|part| (part, whole)));
         }
-        Ok((known.then_some(names), picked))
+        reached.retain(|source| !selected.contains(source));
+        Ok((known.then_some(names), reached))
     }
 
     /// The base types of `info` for a traversal that wants their names and not their arguments. The checker states the
@@ -790,6 +810,8 @@ impl Converter {
 
     fn convert<'a>(&'a self, info: &'a TypeInfo, cx: &'a Cx) -> Converted<'a> {
         Box::pin(async move {
+            // A memo hit copies the tree it recalls, and a conversion can build gigabytes of them between two requests.
+            crate::heap::step()?;
             if let Some(entry) = self.recall(info.id, cx) {
                 self.state.hits.fetch_add(1, Ordering::Relaxed);
                 if let Some(frame) = &cx.frame {
