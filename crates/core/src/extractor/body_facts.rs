@@ -232,17 +232,29 @@ impl<'a> Visit<'a> for Finder<'_> {
         self.walk_function(it.span, |finder| walk::walk_arrow_function_expression(finder, it));
     }
 
-    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+    fn visit_jsx_element(&mut self, it: &JSXElement<'a>) {
         if self.owned == 0 {
-            self.usages.push(usage_of(it, self.scoping));
+            self.usages.push(usage_of(&it.opening_element, passes_children(it), self.scoping));
         }
-        walk::walk_jsx_opening_element(self, it);
+        walk::walk_jsx_element(self, it);
     }
 }
 
-/// One file-level element: its tag keyed by binding ([`scoped`]), and its attributes.
-fn usage_of(it: &JSXOpeningElement<'_>, scoping: &Scoping) -> JsxUsage {
-    let attributes = it
+/// Whether `element` passes the `children` prop through its JSX children: the JSX transform sets `children` from
+/// them, after every attribute, unless all it has is layout whitespace (text of spaces with a line break) or empty
+/// expressions (`{/* comment */}`), which the transform drops.
+fn passes_children(element: &JSXElement<'_>) -> bool {
+    element.children.iter().any(|child| match child {
+        JSXChild::Text(text) => !(text.value.contains('\n') && text.value.trim().is_empty()),
+        JSXChild::ExpressionContainer(container) => !matches!(container.expression, JSXExpression::EmptyExpression(_)),
+        JSXChild::Element(_) | JSXChild::Fragment(_) | JSXChild::Spread(_) => true,
+    })
+}
+
+/// One file-level element: its tag keyed by binding ([`scoped`]), and its attributes, `children` last when its JSX
+/// children pass it ([`passes_children`]).
+fn usage_of(it: &JSXOpeningElement<'_>, children: bool, scoping: &Scoping) -> JsxUsage {
+    let mut attributes: Vec<JsxUsageAttribute> = it
         .attributes
         .iter()
         .map(|attribute| match attribute {
@@ -250,6 +262,9 @@ fn usage_of(it: &JSXOpeningElement<'_>, scoping: &Scoping) -> JsxUsage {
             JSXAttributeItem::SpreadAttribute(_) => JsxUsageAttribute::Spread,
         })
         .collect();
+    if children {
+        attributes.push(JsxUsageAttribute::Named("children".to_owned()));
+    }
     JsxUsage { tag: scoped(scoping, tag_of(&it.name), &it.name), attributes }
 }
 
@@ -688,7 +703,9 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
         self.in_nested(nested, |elements| walk::walk_class(elements, it));
     }
 
-    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+    fn visit_jsx_element(&mut self, element: &JSXElement<'a>) {
+        let it = &element.opening_element;
+        let children = passes_children(element);
         if self.nested > 0 {
             // A nested component's elements are not this body's: a spread of the props or a rest binding there is
             // recorded nowhere, so it hands them on.
@@ -696,9 +713,9 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
                 matches!(attribute, JSXAttributeItem::SpreadAttribute(spread)
                     if self.reader.whole_expr(&spread.argument).is_some())
             });
-            self.nested_usages.push(usage_of(it, self.reader.scoping));
+            self.nested_usages.push(usage_of(it, children, self.reader.scoping));
         } else {
-            let attributes = it
+            let mut attributes: Vec<JsxAttributeFact> = it
                 .attributes
                 .iter()
                 .map(|attribute| match attribute {
@@ -711,10 +728,14 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
                     }
                 })
                 .collect();
+            // JSX children set `children` after every attribute, so it is fixed after any spread.
+            if children {
+                attributes.push(JsxAttributeFact::Named { name: "children".to_owned(), prop: None });
+            }
             self.elements
                 .push(JsxElementFact { tag: scoped(self.reader.scoping, tag_of(&it.name), &it.name), attributes });
         }
-        walk::walk_jsx_opening_element(self, it);
+        walk::walk_jsx_element(self, element);
     }
 }
 

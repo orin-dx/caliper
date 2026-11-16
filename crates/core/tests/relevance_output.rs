@@ -145,3 +145,43 @@ fn a_local_binding_named_like_an_imported_component_is_not_its_call_site() {
     let layer = &output.components["Button"].inheritance[0];
     assert_eq!(layer.used, ["d2"], "the imported binding's sites only: {layer:?}");
 }
+
+/// JSX children pass `children`, as the JSX transform does: three `<Box>…</Box>` sites put the ambient `children`
+/// forward, while layout whitespace and an empty expression pass nothing.
+#[test]
+fn jsx_children_pass_children_at_a_call_site() {
+    let dir = tempfile::Builder::new().prefix("RelevanceChildren").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    std::fs::create_dir_all(root.join("vendor/@types/react")).unwrap();
+    let fields: String = (0..33).map(|i| format!("d{i}?: string; ")).collect();
+    std::fs::write(
+        root.join("vendor/@types/react/dom.ts"),
+        format!("export interface DomBits {{ children?: string; {fields}}}\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("Box.tsx"),
+        "import type { DomBits } from './vendor/@types/react/dom';\n\
+         export interface BoxProps extends DomBits { tone?: string }\n\
+         export function Box(props: BoxProps) { return null; }\n",
+    )
+    .unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        use_cache: false,
+        html_attributes: HtmlAttributeMode::None,
+        collapse_inherited_props: CollapseInheritedProps::All,
+        ..PipelineOptions::default()
+    };
+    let used = |sites: &str| {
+        std::fs::write(root.join("Page.tsx"), format!("import {{ Box }} from './Box';\n{sites}")).unwrap();
+        extract(&options).components["Box"].inheritance[0].used.clone()
+    };
+    let passed = used(
+        "export const a = <Box>x</Box>;\nexport const b = <Box>{'y'}</Box>;\nexport const c = <Box><b /></Box>;\n",
+    );
+    assert_eq!(passed, ["children"]);
+    let none =
+        used("export const a = <Box>\n</Box>;\nexport const b = <Box>{/* none */}</Box>;\nexport const c = <Box />;\n");
+    assert!(none.is_empty(), "{none:?}");
+}
