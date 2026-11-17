@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import statistics
 import subprocess
 import sys
@@ -58,6 +59,23 @@ UNIVERSE_VERSION = 5
 # No single measured command runs longer than this (seconds): a hung one is killed and its corpus recorded as failed.
 STEP_TIMEOUT = 2400
 
+# The Node heap of the oracle step (MiB). Node's default, about 4 GB, is too little for Chakra: the oracle aborted with
+# exit 134 (heap out of memory) on 2026-11-15, and the rerun with 16384 passed (620 components, 486,834 props, exit 0).
+# The peak was not measured above that; a larger corpus needs a larger figure, and a memory failure is a `failed` entry.
+ORACLE_HEAP_MIB = 16384
+
+
+def exit_text(code):
+    """An exit status as a reader needs it: a negative one or one above 128 is a signal (a kill, `128 + signal` from a
+    shell, 134 from Node's heap abort), None a timeout. Empty for 0 and for a plain error status."""
+    if code is None:
+        return 'timed out'
+    signum = -code if code < 0 else code - 128 if code > 128 else 0
+    try:
+        return f'killed by signal {signal.Signals(signum).name} ({signum})' if signum else ''
+    except ValueError:
+        return ''
+
 
 class StepFailed(Exception):
     """A command of one corpus's measurement that did not finish well: `step` names it, `code` is its exit status
@@ -81,17 +99,19 @@ def step(label, command, stdout=subprocess.DEVNULL, timeout=None):
     try:
         result = run_once(command, stdout=stdout, timeout=STEP_TIMEOUT if timeout is None else timeout)
     except corpora.RunFailed as error:
-        log(f'{label}: exit {error.code if error.code is not None else "none"} after {time.monotonic() - start:.1f} s: {error}')
-        raise StepFailed(label, str(error), error.code, error.tail) from error
+        why = exit_text(error.code)
+        message = f'{error} [{why}]' if why and error.code is not None else str(error)
+        log(f'{label}: exit {error.code if error.code is not None else "none"} after {time.monotonic() - start:.1f} s: {message}')
+        raise StepFailed(label, message, error.code, error.tail) from error
     log(f'{label}: exit 0 after {time.monotonic() - start:.1f} s')
     return result
 
 
-def capture(label, command, timeout=None):
-    """The stdout of a command that must succeed, logged like `step`."""
+def capture(label, command, timeout=None, env=None):
+    """The stdout of a command that must succeed, logged like `step`; `env` replaces the environment when given."""
     start = time.monotonic()
     try:
-        done = subprocess.run(command, capture_output=True, text=True, errors='replace',
+        done = subprocess.run(command, capture_output=True, text=True, errors='replace', env=env,
                               timeout=STEP_TIMEOUT if timeout is None else timeout)
     except subprocess.TimeoutExpired as error:
         log(f'{label}: timed out after {time.monotonic() - start:.1f} s')
@@ -101,7 +121,8 @@ def capture(label, command, timeout=None):
         raise StepFailed(label, f'{label}: cannot run: {error}', 127) from error
     log(f'{label}: exit {done.returncode} after {time.monotonic() - start:.1f} s')
     if done.returncode != 0:
-        raise StepFailed(label, f'{label} exited with {done.returncode}', done.returncode,
+        why = exit_text(done.returncode)
+        raise StepFailed(label, f'{label} exited with {done.returncode}' + (f' [{why}]' if why else ''), done.returncode,
                          '\n'.join(done.stderr.strip().splitlines()[-20:]))
     return done.stdout
 
@@ -537,6 +558,14 @@ def oracle_tools(tools):
     return {tool: {key: value for key, value in score.items() if key != 'examples'} for tool, score in tools.items()}
 
 
+def oracle_env(base=None):
+    """The environment of the oracle's Node process: `base` (os.environ) with the heap of ORACLE_HEAP_MIB added to any
+    `NODE_OPTIONS` already set, so a flag the caller chose stays."""
+    env = dict(os.environ if base is None else base)
+    env['NODE_OPTIONS'] = f"{env.get('NODE_OPTIONS', '')} --max-old-space-size={ORACLE_HEAP_MIB}".strip()
+    return env
+
+
 def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/oracle/src/oracle.ts), and how RDT and
     react-docgen fare against it over the same props. `shared_props`, `agree` and `wrong` are Caliper's, over the props
@@ -552,9 +581,9 @@ def oracle(binary, name, src, root, work, rdt_out, rdg_out):
                        stdout=f, check=True)
     list_file, tsconfig = program_inputs(name, src, work)
     verdicts = os.path.join(work, f'{name}.oracle.json')
-    subprocess.run(['pnpm', '--dir', os.path.join(ROOT, 'apps', 'oracle'), 'exec', 'tsx', 'src/oracle.ts', '--root', root,
-                    '--src', src, '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files',
-                    list_file, '--rdt', rdt_out, '--rdg', rdg_out], check=True, timeout=3600)
+    capture(f'{name} oracle', ['pnpm', '--dir', os.path.join(ROOT, 'apps', 'oracle'), 'exec', 'tsx', 'src/oracle.ts', '--root',
+                               root, '--src', src, '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts,
+                               '--files', list_file, '--rdt', rdt_out, '--rdg', rdg_out], timeout=3600, env=oracle_env())
     with open(verdicts) as f:
         e = json.load(f)
     shared = e['props_shared']
@@ -597,6 +626,10 @@ def measure(args, corpus, work):
             entry['oracle'] = oracle(args.bin, corpus['name'], src, root, work, rdt_out, rdg_out)
             if h := headline.compute(entry['oracle']):
                 entry['headline'] = h
+        except StepFailed as failure:
+            # A memory failure (exit 134, a kill) is a failed step with the log tail, not an absence.
+            entry['oracle'] = {'error': str(failure)[:500], 'step': failure.step, 'exit': failure.code,
+                               'stderr_tail': failure.tail.splitlines()}
         except (subprocess.SubprocessError, OSError, KeyError) as error:
             entry['oracle'] = {'error': str(error)}
     if args.agent_eval:
@@ -786,11 +819,11 @@ def errors(record):
     """What a corpus could not measure (the oracle or the agent evaluation threw), as issue lines."""
     return [f'{name}, {part.replace("_", " ")}: {entry[part]["error"][:200]}'
             for name, entry in record['corpora'].items() for part in ('oracle', 'agent_eval')
-            if isinstance(entry.get(part), dict) and 'error' in entry[part]]
+            if isinstance(entry.get(part), dict) and 'error' in entry[part] and 'step' not in entry[part]]
 
 
 def failures(record):
-    """What a corpus that did not finish left behind (`record['failed']`), as issue lines."""
+    """What a corpus that did not finish left behind (`record['failed']`, a failed oracle step included), as issue lines."""
     return [f"{name}: failed at {f['step']}" + (f", exit {f['exit']}" if f['exit'] is not None else '') + f": {f['error'][:200]}"
             for name, f in record.get('failed', {}).items()]
 
@@ -817,6 +850,10 @@ def measure_all(args, work, version):
         name = corpus['name']
         try:
             record['corpora'][name] = measure(args, corpus, work)
+            if 'step' in record['corpora'][name].get('oracle', {}):
+                o = record['corpora'][name]['oracle']
+                record['failed'][f'{name} oracle'] = {'step': o['step'], 'exit': o['exit'], 'error': o['error'],
+                                                      'stderr_tail': o['stderr_tail']}
         except (StepFailed, OSError, ValueError, KeyError) as error:
             # A tool that exits 0 and writes no or broken output fails its corpus too, not the run.
             failure = error if isinstance(error, StepFailed) else StepFailed('measure', f'{type(error).__name__}: {error}')
