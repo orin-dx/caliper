@@ -36,6 +36,8 @@ pub(super) struct Key {
     /// `parent`, as TypeScript keeps the member's declaration (`{ [K in keyof Conditions]?: V }`). `None` for keys of
     /// any other form.
     pub(super) parent: Option<crate::types::PropParent>,
+    /// The source member's declared type, for `keyof` an interface (`Key::parent`); `None` for keys of any other form.
+    pub(super) value: Option<CollectedType>,
 }
 
 /// `ty` with a decidable conditional replaced by its branch, or an indexed access by the member it reads. `None` when
@@ -120,6 +122,7 @@ pub(super) fn mapped_keys(
                             description: String::new(),
                             tags: Default::default(),
                             parent: None,
+                            value: None,
                         }),
                         _ => None,
                     })
@@ -144,6 +147,7 @@ pub(super) fn mapped_keys(
                             description: String::new(),
                             tags: Default::default(),
                             parent: None,
+                            value: None,
                         })
                     })
                     .collect::<Option<_>>()?,
@@ -158,6 +162,7 @@ pub(super) fn mapped_keys(
                     description: String::new(),
                     tags: Default::default(),
                     parent: None,
+                    value: None,
                 })
                 .collect(),
         ),
@@ -524,6 +529,7 @@ pub(super) fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionC
                     description: f.description.clone(),
                     tags: Default::default(),
                     parent: None,
+                    value: None,
                 })
                 .collect(),
         ),
@@ -564,6 +570,7 @@ fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8
                     name: iface.name.to_string(),
                     file_name: iface.file_path.to_string(),
                 }),
+                value: Some(prop.collected_type.clone()),
             });
         }
     }

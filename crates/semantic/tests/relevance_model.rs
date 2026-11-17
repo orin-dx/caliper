@@ -326,7 +326,8 @@ fn ambient_is_decided_per_declaration_and_the_generated_rule_holds_in_the_projec
              import type { ReactDom } from './vendor/@types/react/dom';\n\
              export interface Conds { ",
         );
-        text.push_str(&fields("c", 40));
+        // A table: every member required and of one type, as Chakra's `Conditions`.
+        text.push_str(&(0..40).map(|i| format!("c{i}: string; ")).collect::<String>());
         // A project's own `@internal` interface is still its API: only typings (`.d.ts`, a dependency's) mark ambient.
         text.push_str("}\n/** @internal */\nexport interface Small { s0?: string; s1?: string; }\n");
         text.push_str("export type CondProps = { [K in keyof Conds]?: string };\n");
@@ -393,4 +394,52 @@ fn the_expanded_view_keeps_the_react_props_only_the_checker_finds_in_the_cli_mer
     assert_eq!(rows(&structural.components["Made"]), Vec::<String>::new());
     let (_dir, [_, narrowed]) = both_lanes(&files, CollapseInheritedProps::Dependencies);
     assert_eq!(rows(&narrowed.components["Made"]), ["label"]);
+}
+
+#[test]
+fn a_read_promotes_a_member_of_a_collapsed_source_and_a_mapped_api_copy_is_listed() {
+    // Pattern evaluation probes (v) and (vi), over generated components:
+    // - the body reads one member of a 210-member source (collapsed, generated): that member is a typed row;
+    // - a mapped copy over the keys of a 40-member API (optional, typed apart) is the component's API: all listed;
+    // - a mapped copy over a 40-key table (every member required, one type: Chakra's `Conditions`) stays generated.
+    let mut checked = 0;
+    for seed in [2, 17] {
+        let mut rng = Lcg(seed);
+        let api: String =
+            (0..40).map(|i| format!("a{i}?: {}; ", if i % 2 == 0 { "string" } else { "boolean" })).collect();
+        let table: String = (0..40).map(|i| format!("_t{i}: string; ")).collect();
+        let mut text = format!(
+            "export interface Huge {{ {} }}\nexport interface Api {{ {api}}}\nexport interface Table {{ {table}}}\n\
+             export type ApiCopy = {{ [K in keyof Api]?: string }};\n\
+             export type TableCopy = {{ [K in keyof Table]?: string }};\n",
+            fields("h", 210)
+        );
+        let mut expected = Vec::new();
+        for c in 0..6 {
+            let name = format!("R{c}");
+            let read = rng.below(210);
+            let mapped = rng.below(2) == 0;
+            let copy = if mapped { "ApiCopy" } else { "TableCopy" };
+            writeln!(
+                text,
+                "export function {name}(props: {{ own?: string }} & Huge & {copy}) \
+                 {{ return <div title={{props.h{read}}} />; }}"
+            )
+            .unwrap();
+            let mut rows = vec!["own".to_owned(), format!("h{read}")];
+            if mapped {
+                rows.extend((0..40).map(|i| format!("a{i}")));
+            }
+            rows.sort();
+            expected.push((name, rows));
+        }
+        let (_dir, lanes) = both_lanes(&[("Components.tsx", text)], CollapseInheritedProps::Dependencies);
+        for (name, want) in &expected {
+            for (lane, output) in ["structural", "checker"].iter().zip(&lanes) {
+                assert_eq!(&rows(&output.components[name]), want, "{name} seed={seed} {lane}");
+            }
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 12);
 }

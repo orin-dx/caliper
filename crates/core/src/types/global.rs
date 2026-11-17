@@ -109,6 +109,8 @@ pub(crate) struct StateReads {
     pub(crate) entered_scopes: u32,
     /// Prop names whose component default was looked up, with the default found.
     pub(crate) defaults: Vec<(CompactString, Option<(std::string::String, bool)>)>,
+    /// Prop names asked whether the component's body reads them, with the answer.
+    pub(crate) body_reads: Vec<(CompactString, bool)>,
     /// Cycle-set keys this state itself added (a branch's own additions are dropped with the branch).
     pub(crate) visited_added: Vec<u32>,
 }
@@ -128,6 +130,7 @@ impl StateReads {
             self.needs_empty_scope |= other.needs_empty_scope;
         }
         self.defaults.extend(other.defaults.iter().cloned());
+        self.body_reads.extend(other.body_reads.iter().cloned());
         if with_effects {
             self.visited_added.extend(other.visited_added.iter().cloned());
         }
@@ -145,6 +148,7 @@ impl StateReads {
             self.needs_empty_scope |= other.needs_empty_scope;
         }
         move_all(&mut self.defaults, &mut other.defaults);
+        move_all(&mut self.body_reads, &mut other.body_reads);
         if with_effects {
             move_all(&mut self.visited_added, &mut other.visited_added);
         }
@@ -329,6 +333,16 @@ impl ResolveState {
         self.declared_in = previous;
     }
 
+    /// Whether the component's body reads, destructures or passes `name` (`ComponentMapping::body`): a collapsed source
+    /// keeps such a member as a typed prop, so the row relevance puts forward for it has a type (ADR 0028, A2).
+    pub(crate) fn body_reads(&mut self, mapping: &ComponentMapping, name: &str) -> bool {
+        let read = body_reads(mapping, name);
+        if let Some(reads) = self.reads.as_mut() {
+            reads.body_reads.push((CompactString::from(name), read));
+        }
+        read
+    }
+
     /// The component's default for prop `name`.
     pub(crate) fn param_default<'m>(&mut self, mapping: &'m ComponentMapping, name: &str) -> Option<&'m RawDefault> {
         let found = mapping.param_defaults.get(name);
@@ -337,6 +351,11 @@ impl ResolveState {
         }
         found
     }
+}
+
+/// Whether `mapping`'s body names `name` ([`ResolveState::body_reads`]).
+pub(crate) fn body_reads(mapping: &ComponentMapping, name: &str) -> bool {
+    mapping.body.as_ref().is_some_and(|body| body.reads.iter().any(|read| read == name))
 }
 
 // ─── GlobalSourceData ─────────────────────────────────────────────────────────
@@ -465,6 +484,7 @@ mod tests {
             needs_empty_scope: tag == "theirs",
             entered_scopes: 0,
             defaults: vec![(CompactString::from(format!("{tag}-prop")), Some(("1".to_owned(), false)))],
+            body_reads: vec![(CompactString::from(format!("{tag}-read")), true)],
             visited_added: vec![key_id(&format!("{tag}-added"))],
         }
     }
@@ -504,7 +524,7 @@ mod tests {
             Some(
                 format!(
                     "StateReads {{ visited: [({id}, false)], named: [], in_scope: [(\"T\", false)], \
-                     needs_empty_scope: false, entered_scopes: 0, defaults: [], visited_added: [] }}"
+                     needs_empty_scope: false, entered_scopes: 0, defaults: [], body_reads: [], visited_added: [] }}"
                 )
                 .as_str()
             )

@@ -53,11 +53,14 @@ fn a_collapsed_layer_names_the_ambient_members_consumers_pass() {
         let layer = button.inheritance.iter().find(|layer| layer.type_name == type_name).unwrap();
         layer.used.iter().map(String::as_str).collect()
     };
-    // Ambient and passed at every call site, or read in the body: a `used` name in its layer, in the layer's order.
-    assert_eq!(used("DomBits"), ["d1", "d2"]);
-    // A project member put forward (passed or read) whose source is collapsed has no typed row to list: it is named in
-    // `used` instead, so evidence never goes unnamed.
-    assert_eq!(used("Big"), ["b1", "b2"]);
+    // Ambient and passed at every call site: a `used` name in its layer. A member the body reads is a typed row: the
+    // collapsed source keeps it typed (ADR 0028, A2: reads promote from layers).
+    assert_eq!(used("DomBits"), ["d1"]);
+    // A project member passed at the floor whose source is collapsed has no typed row to list: it is named in `used`
+    // instead, so evidence never goes unnamed.
+    assert_eq!(used("Big"), ["b1"]);
+    let notable: Vec<&str> = button.notable_inherited.keys().map(String::as_str).collect();
+    assert_eq!(notable, ["b2", "d2"]);
 }
 
 #[test]
@@ -68,14 +71,14 @@ fn the_canonical_json_writes_used_at_schema_version_8() {
     assert_eq!(json["schemaVersion"], 8);
     let layers = json["components"]["Button"]["inheritance"].as_array().unwrap();
     let dom = layers.iter().find(|layer| layer["typeName"] == "DomBits").unwrap();
-    assert_eq!(dom["used"], serde_json::json!(["d1", "d2"]));
+    assert_eq!(dom["used"], serde_json::json!(["d1"]));
     assert!(json["components"]["Button"].get("relevance").is_none());
     let big = layers.iter().find(|layer| layer["typeName"] == "Big").unwrap();
-    assert_eq!(big["used"], serde_json::json!(["b1", "b2"]));
+    assert_eq!(big["used"], serde_json::json!(["b1"]));
 }
 
-/// A collapsed ambient prop the signature gives a destructuring default is read by the body, so its layer names it in
-/// `used`; so does a defaulted project member, a row with no type to list while its source is collapsed.
+/// A collapsed ambient prop the signature gives a destructuring default is read by the body, so its collapsed source
+/// keeps it typed: a row, not a `used` name; so does a defaulted project member.
 #[test]
 fn a_collapsed_ambient_prop_with_a_destructuring_default_is_used() {
     let dir = tempfile::Builder::new().prefix("RelevanceDefault").tempdir().unwrap();
@@ -101,10 +104,11 @@ fn a_collapsed_ambient_prop_with_a_destructuring_default_is_used() {
         ..PipelineOptions::default()
     };
     let output = extract(&options);
-    let layers = &output.components["Button"].inheritance;
-    let used = |type_name: &str| layers.iter().find(|layer| layer.type_name == type_name).unwrap().used.clone();
-    assert_eq!(used("DomBits"), ["d2"], "{layers:?}");
-    assert_eq!(used("Big"), ["b2"], "{layers:?}");
+    let button = &output.components["Button"];
+    let layers = &button.inheritance;
+    assert!(layers.iter().all(|layer| layer.used.is_empty()), "{layers:?}");
+    let notable: Vec<&str> = button.notable_inherited.keys().map(String::as_str).collect();
+    assert_eq!(notable, ["b2", "d2"]);
 }
 
 /// A file-level element whose tag is a local binding of the same name as an imported component is not a call site of
