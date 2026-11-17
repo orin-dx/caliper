@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01XVVTnf61kWa7SqQcJtKvPC",
+  "agent_id": "a2363b9e3e722a8f7",
+  "subagent_type": "general-purpose",
+  "task_description": "Run acceptance on pushed 490 head cf51133b",
+  "token_usage": {
+    "input_tokens": 38,
+    "cache_creation_tokens": 59122,
+    "cache_read_tokens": 945325,
+    "output_tokens": 5609,
+    "api_call_count": 19
+  },
+  "started_at": "2026-11-16T17:59:11.349297-08:00",
+  "completed_at": "2026-11-16T18:02:53.403237-08:00"
+}
