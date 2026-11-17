@@ -503,8 +503,7 @@ async fn session(
 ) -> Result<SemanticOutcome, CallError> {
     let started = std::time::Instant::now();
     let Some(rpc) = programs.first() else { return Ok(SemanticOutcome::default()) };
-    let converters: Vec<Converter> =
-        programs.iter().map(|program| Converter::new(program.clone(), request.reverse_queries)).collect();
+    let converters = Converter::lanes(programs, request.reverse_queries);
     let interner = Arc::new(PropInterner::default());
     // The files in order; each worker takes the next one when it is done with its last, so a program whose files take
     // longer answers fewer of them.
