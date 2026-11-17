@@ -64,7 +64,7 @@ fn unresolved(name: &str) -> Value {
 }
 
 /// Initializers the structural lane folds, each with the value the checker gives it.
-const FOLDED_NUMBERS: [(&str, f64); 24] = [
+const FOLDED_NUMBERS: [(&str, f64); 25] = [
     ("1", 1.0),
     ("-1", -1.0),
     ("+1", 1.0),
@@ -78,6 +78,7 @@ const FOLDED_NUMBERS: [(&str, f64); 24] = [
     ("-8 >>> 28", 15.0),
     ("6 & 3", 2.0),
     ("6 | 1", 7.0),
+    ("3 | 1", 3.0),
     ("6 ^ 3", 5.0),
     ("2 ** 3", 8.0),
     ("7 % 4", 3.0),
@@ -150,6 +151,29 @@ fn a_member_that_reads_an_earlier_member_of_its_enum_has_its_value() {
     assert_eq!(props["d"], member("D", number(8.0)));
     assert_eq!(props["g"], member("G", string("xy")));
     assert_eq!(diagnostics, Vec::<String>::new());
+}
+
+/// A read names the enum being declared only when its object is that enum and no member is named like it; a read through
+/// another enum with an earlier member of the same name is not that member.
+#[test]
+fn a_read_through_another_object_or_a_shadowed_enum_name_is_not_an_earlier_member() {
+    let (props, _) = props_of(
+        r#"
+        enum Other { A = 100 }
+        enum E { A = 1, ViaOther = Other.A, Plain = E.A }
+        export function C(props: { viaOther: E.ViaOther; plain: E.Plain }) { return <b />; }
+        "#,
+    );
+    assert_eq!(props["viaOther"], unresolved("E.ViaOther"));
+    assert_eq!(props["plain"], member("Plain", number(1.0)));
+    // Inside `enum S`, the member `S` hides the enum, so `S.S` is no read of the enum's own member.
+    let (props, _) = props_of(
+        r#"
+        enum S { S = 1, B = S.S }
+        export function C(props: { b: S.B }) { return <b />; }
+        "#,
+    );
+    assert_eq!(props["b"], json!({ "kind": "named", "name": "S.B", "args": [] }));
 }
 
 /// Numbering counts up from the last known value; after one that is not known, no later member has a value.
