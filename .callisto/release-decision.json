@@ -3,7 +3,7 @@
   "entries": [
     {
       "package": "cargo/caliper-docgen",
-      "targetVersion": "0.9.0",
+      "targetVersion": "0.10.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -12,7 +12,7 @@
     },
     {
       "package": "cargo/caliper-docgen-core",
-      "targetVersion": "0.9.0",
+      "targetVersion": "0.10.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -21,7 +21,7 @@
     },
     {
       "package": "cargo/caliper-docgen-napi",
-      "targetVersion": "0.9.0",
+      "targetVersion": "0.10.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -30,25 +30,18 @@
     },
     {
       "package": "cargo/caliper-docgen-semantic",
-      "targetVersion": "0.3.0",
+      "targetVersion": "0.3.1",
       "reasons": [
         {
-          "kind": "changeset"
-        }
-      ]
-    },
-    {
-      "package": "cargo/caliper-docgen-tsc-client",
-      "targetVersion": "0.2.0",
-      "reasons": [
-        {
-          "kind": "changeset"
+          "kind": "cascade",
+          "from": "cargo/caliper-docgen-core",
+          "edgeKind": "Runtime"
         }
       ]
     },
     {
       "package": "npm/caliper-docgen",
-      "targetVersion": "0.9.0",
+      "targetVersion": "0.10.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -57,26 +50,7 @@
     },
     {
       "package": "npm/caliper-docgen-napi",
-      "targetVersion": "0.9.0",
-      "reasons": [
-        {
-          "kind": "fixedGroup",
-          "groupId": "napi-and-binding"
-        }
-      ]
-    },
-    {
-      "package": "npm/caliper-docgen-storybook",
-      "targetVersion": "0.9.0",
-      "reasons": [
-        {
-          "kind": "changeset"
-        }
-      ]
-    },
-    {
-      "package": "npm/caliper-docgen-vite-plugin",
-      "targetVersion": "0.9.0",
+      "targetVersion": "0.10.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -84,5 +58,5 @@
       ]
     }
   ],
-  "digest": "7329fffa169e4d89cab8ff7ca1a1619f0d502717a978d0c2944e0b13ee35fc3c"
+  "digest": "7cfc8173df5d0ce936d2afe6b638276af976cda1283de5e1fdaa2851e6fe73ef"
 }
