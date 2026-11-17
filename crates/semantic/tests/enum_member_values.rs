@@ -13,7 +13,7 @@ use camino::Utf8PathBuf;
 
 /// Single-member enums `enum E<i> { A = <init> }`, the initializer forms of TypeScript's enum grammar, and whether the
 /// structural lane folds it.
-const FORMS: [(&str, bool); 63] = [
+const FORMS: [(&str, bool); 65] = [
     ("1", true),
     ("-1", true),
     ("+1", true),
@@ -37,6 +37,8 @@ const FORMS: [(&str, bool); 63] = [
     ("6 & 3", true),
     ("6 | 1", true),
     ("3 | 1", true),
+    ("\"\\uD83D\\uDE00\"", true),
+    ("\"\\uD83D\" + \"\\uDE00\"", false),
     ("6 ^ 3", true),
     ("2 ** 3", true),
     ("2 ** -1", true),

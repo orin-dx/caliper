@@ -5,6 +5,7 @@
 //! answers the rest (a reference to a `const`, a template with substitutions, a call).
 
 use oxc_ast::ast::{BinaryOperator, Expression, TSEnumMemberName, UnaryOperator};
+use oxc_str::JSStr;
 use rustc_hash::FxHashMap;
 
 use crate::types::EnumValue;
@@ -28,12 +29,9 @@ pub(super) fn member_name(name: &TSEnumMemberName<'_>) -> Option<String> {
 pub(super) fn fold(expr: &Expression<'_>, enum_name: &str, earlier: &EarlierMembers) -> EnumValue {
     match expr {
         Expression::NumericLiteral(n) => number(n.value),
-        Expression::StringLiteral(s) => EnumValue::String(js_text::lossy(s.value).into_owned()),
+        Expression::StringLiteral(s) => text(s.value),
         Expression::TemplateLiteral(t) => match (t.expressions.is_empty(), t.quasis.first()) {
-            (true, Some(quasi)) => quasi
-                .value
-                .cooked
-                .map_or(EnumValue::Unknown, |cooked| EnumValue::String(js_text::lossy(cooked).into_owned())),
+            (true, Some(quasi)) => quasi.value.cooked.map_or(EnumValue::Unknown, text),
             _ => EnumValue::Unknown,
         },
         Expression::ParenthesizedExpression(p) => fold(&p.expression, enum_name, earlier),
@@ -56,9 +54,10 @@ pub(super) fn fold(expr: &Expression<'_>, enum_name: &str, earlier: &EarlierMemb
             _ => EnumValue::Unknown,
         },
         Expression::ComputedMemberExpression(m) => match (&m.object, &m.expression) {
-            (Expression::Identifier(object), Expression::StringLiteral(key)) => {
-                self_member(object.name.as_str(), &js_text::lossy(key.value), enum_name, earlier)
-            }
+            (Expression::Identifier(object), Expression::StringLiteral(key)) => key
+                .value
+                .as_str()
+                .map_or(EnumValue::Unknown, |key| self_member(object.name.as_str(), key, enum_name, earlier)),
             _ => EnumValue::Unknown,
         },
         Expression::BooleanLiteral(_)
@@ -97,6 +96,13 @@ pub(super) fn fold(expr: &Expression<'_>, enum_name: &str, earlier: &EarlierMemb
         | Expression::TSInstantiationExpression(_)
         | Expression::V8IntrinsicExpression(_) => EnumValue::Unknown,
     }
+}
+
+/// The value of a string: its text when it is well-formed. A string holding a lone surrogate has no UTF-8 text, and
+/// folding it as the replacement character would publish a value TypeScript does not compute (`"\uD83D" + "\uDE00"` is
+/// one emoji there), so it is not a value here.
+fn text(value: JSStr<'_>) -> EnumValue {
+    value.as_str().map_or(EnumValue::Unknown, |text| EnumValue::String(text.to_owned()))
 }
 
 /// `object.member` where `object` is the enum itself and `member` is declared before it. A member named like the enum

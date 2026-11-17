@@ -92,11 +92,19 @@ const FOLDED_NUMBERS: [(&str, f64); 25] = [
     ("1 << 31", -2_147_483_648.0),
 ];
 
-const FOLDED_STRINGS: [(&str, &str); 6] =
-    [("\"a\"", "a"), ("'a'", "a"), ("`t`", "t"), ("\"a\" + \"b\"", "ab"), ("\"a\" + 1", "a1"), ("1 + \"a\"", "1a")];
+const FOLDED_STRINGS: [(&str, &str); 7] = [
+    ("\"a\"", "a"),
+    ("'a'", "a"),
+    ("`t`", "t"),
+    ("\"a\" + \"b\"", "ab"),
+    ("\"a\" + 1", "a1"),
+    ("1 + \"a\"", "1a"),
+    // A surrogate pair inside one literal is well-formed text.
+    ("\"\\uD83D\\uDE00\"", "\u{1f600}"),
+];
 
 /// Initializers the structural lane does not fold (the checker folds some of them).
-const UNFOLDED: [&str; 15] = [
+const UNFOLDED: [&str; 18] = [
     "compute()",
     "OTHER",
     "true",
@@ -112,6 +120,10 @@ const UNFOLDED: [&str; 15] = [
     "void 0",
     "B",
     "E.B",
+    // A lone surrogate is no text: TypeScript joins two halves into one emoji, and the replacement character is not it.
+    "\"\\uD83D\" + \"\\uDE00\"",
+    "\"\\uD83D\"",
+    "`\\uD83D`",
 ];
 
 #[test]
@@ -174,6 +186,19 @@ fn a_read_through_another_object_or_a_shadowed_enum_name_is_not_an_earlier_membe
         "#,
     );
     assert_eq!(props["b"], json!({ "kind": "named", "name": "S.B", "args": [] }));
+}
+
+/// A computed key holding a lone surrogate names no member: both halves read as the replacement character in a member
+/// name, so the key `E["\uDE00"]` must not find the member written `"\uD83D"`.
+#[test]
+fn a_member_read_by_a_key_with_a_lone_surrogate_is_unresolved() {
+    let (props, _) = props_of(
+        r#"
+        enum E { "\uD83D" = 1, B = E["\uDE00"] }
+        export function C(props: { b: E.B }) { return <b />; }
+        "#,
+    );
+    assert_eq!(props["b"], unresolved("E.B"));
 }
 
 /// Numbering counts up from the last known value; after one that is not known, no later member has a value.
