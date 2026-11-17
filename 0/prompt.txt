@@ -1,0 +1,1 @@
+Can we make sure that we push any session information from a worktree and branch?
