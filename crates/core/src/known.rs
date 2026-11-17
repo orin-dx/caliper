@@ -141,7 +141,8 @@ fn resolve_cva_variant_props(
                     let mut variant_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
                     for entry in enum_entries {
-                        variant_map.entry(entry.name.clone()).or_default().push(entry.value.to_display_string());
+                        let values = variant_map.entry(entry.name.clone()).or_default();
+                        values.extend(entry.value.to_display_string());
                     }
 
                     if variant_map.is_empty() {
@@ -196,7 +197,7 @@ fn resolve_inferred_recipe_props(
     let entries = enum_key(name).and_then(|key| global.enums.get(&key))?;
     let mut variants = std::collections::BTreeMap::<String, Vec<String>>::new();
     for entry in entries {
-        variants.entry(entry.name.clone()).or_default().push(entry.value.to_display_string());
+        variants.entry(entry.name.clone()).or_default().extend(entry.value.to_display_string());
     }
     let props = variants
         .into_iter()

@@ -170,9 +170,9 @@ fn an_ambient_const_enum_counts_up_like_any_other() {
 
 #[test]
 fn an_enum_with_a_value_that_is_not_a_literal_keeps_the_unresolved_name_and_its_warning() {
-    for members in ["Low = compute(), High = 1", "Low = 1, High = Low", "Low = true", "Low = 1 << 2", ""] {
+    for members in ["Low = compute(), High = 1", "Low = true", "Low = OTHER", "Low = 1 / 0", ""] {
         let source = format!(
-            "declare const compute: () => number;\nenum Level {{ {members} }}\n\
+            "declare const compute: () => number;\ndeclare const OTHER: number;\nenum Level {{ {members} }}\n\
              export function C(props: {{ level: Level }}) {{ return <b />; }}"
         );
         let (props, diagnostics) = props_of(&[("case.tsx", source.as_str())]);

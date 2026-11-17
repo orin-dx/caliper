@@ -610,7 +610,7 @@ fn enum_member(name: &str, consuming_file: &Utf8Path, ctx: &ResolutionContext) -
     let value = match &entry.value {
         EnumValue::String(s) => EnumMemberValue::String(s.clone()),
         EnumValue::Number(n) => EnumMemberValue::Number(*n),
-        EnumValue::Bool(_) | EnumValue::Spread { .. } => return None,
+        EnumValue::Bool(_) | EnumValue::Spread { .. } | EnumValue::Unknown => return None,
     };
     Some(PropType::EnumMember { enum_name: unmarked(enum_name).into(), member: member.into(), value })
 }
