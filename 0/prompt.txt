@@ -1,0 +1,35 @@
+We've updated the entire hooks and setup, please PR it for me
+
+---
+
+go
+
+---
+
+<task-notification>
+<task-id>b6y1fsrjh</task-id>
+<tool-use-id>toolu_01SGp8hLoPvNCLQ78FEwruDS</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/fb0a20f8-8818-4b01-ba46-f6b27c94466b/tasks/b6y1fsrjh.output</output-file>
+<status>completed</status>
+<summary>Background command "rtk gh pr create --base main --head chore/entire-hooks-refresh --title "chore: refresh Entire hooks setup" --body-file /tmp/claude-501/pr-body.md" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+❯ Can't we just use entire properly for this?
+
+---
+
+should be merged now right?
+
+---
+
+cleanup please
+
+---
+
+Can we make sure that we push any session information from a worktree and branch?
+
+---
+
+push it
