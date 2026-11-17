@@ -96,13 +96,10 @@ impl PropsType {
                 CollectedTypeAlias::Passthrough { target: part, .. }
                 | CollectedTypeAlias::Partial { base: part, .. }
                 | CollectedTypeAlias::Required { base: part, .. } => read.part(part, &declared, &lookup),
-                // `Omit<Base, Keys>` as the props type: its keys decide only whether it is declined; its base is read as
-                // a part (a `Pick` in it selects, an interface is a base).
+                // `Omit<Base, Keys>` as the props type: read as the same `Omit` written in place, so only a `Pick` in
+                // its base selects keys; its members are not inherited, as an omitted one does not reach.
                 CollectedTypeAlias::Omit { base, keys, .. } => {
-                    let mut omitted = Self::default();
-                    omitted.keys(keys, &declared, &lookup, 0);
-                    read.declined |= omitted.declined;
-                    read.part(base, &declared, &lookup);
+                    read.picks("Omit", &[base.clone(), keys.clone()], &declared, &lookup, 0);
                 }
                 CollectedTypeAlias::LiteralUnion { .. } => {}
             },
@@ -175,12 +172,16 @@ impl PropsType {
                 let mut omitted = Self::default();
                 omitted.keys(keys, from, lookup, 0);
                 self.declined |= omitted.declined;
+                let (base, at) = written_at(base, from);
                 if let CollectedType::Named { name, args } = base {
-                    self.picks(name, args, from, lookup, depth + 1);
+                    self.picks(name, args, &at, lookup, depth + 1);
                 }
             }
-            ("Partial" | "Required" | "Readonly", [CollectedType::Named { name, args }, ..]) => {
-                self.picks(name, args, from, lookup, depth + 1);
+            ("Partial" | "Required" | "Readonly", [base, ..]) => {
+                let (base, at) = written_at(base, from);
+                if let CollectedType::Named { name, args } = base {
+                    self.picks(name, args, &at, lookup, depth + 1);
+                }
             }
             // An alias, generic or not: its instantiation with `args` is what the props type selects.
             (_, args) => {

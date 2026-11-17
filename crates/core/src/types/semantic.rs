@@ -179,7 +179,7 @@ pub struct SemanticTarget {
     /// under [`ResolverFacts::NoFallback`] ([`ResolverFacts::ready`]), whose merge keeps no structural description.
     pub described: rustc_hash::FxHashSet<String>,
     /// Which props `@types/react` declares the checker reports: `None` for all of them, else only these names. The
-    /// session decides from `htmlAttributes` (`react_types::react_props_wanted`); the checker never filters by itself.
+    /// session decides from `htmlAttributes` (`react_types::react_props_wanted_for`); the checker never filters by itself.
     pub react_wanted: Option<rustc_hash::FxHashSet<String>>,
     /// What the merge of the answer decides its collapsed layers from, when the caller merges it that way: the checker
     /// then converts only the props the merge keeps, and reports each other one by name and `parent` with
@@ -426,7 +426,7 @@ fn apply_props(
     cx: CollapseContext,
 ) -> MergedProps {
     // The whole-project merge replaces the props. Of `@types/react`'s it takes those the structural answer lists, as
-    // the session's merge does (`checker_prop_used`): relevance decided them there (ADR 0028), and the rest are names
+    // the session's merge does (`react_types::checker_prop_kept`): relevance decided them there (ADR 0028), and the rest are names
     // in the inheritance layers. The expanded view (`collapseInheritedProps: none`) takes every one the checker finds,
     // also where the structural pass found none (`ReturnType<typeof makeProps>`): this merge reads no
     // `htmlAttributes`, so it is `full`'s answer.

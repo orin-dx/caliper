@@ -448,12 +448,12 @@ pub fn react_attribute_mode(
     if expanded { mode } else { crate::pipeline::HtmlAttributeMode::Curated }
 }
 
-/// The names `entry`, a structural answer, shows as typed rows in `props` (its `notableInherited` rows are merged as
-/// layer members, `types::semantic::layer_notable`). A name relevance puts forward that the answer holds only in a
-/// layer's `used` list stays a name in both lanes, so the lanes list the same rows. The one answer of which names are
-/// visible that both checker merges and the checker's request read.
+/// The names `entry`, a structural answer, shows as typed rows: its `props` and its `notableInherited` (a curated
+/// attribute, a member the body reads). A name relevance puts forward that the answer holds only in a layer's `used`
+/// list stays a name in both lanes, so the lanes list the same rows. The one answer of which names are visible that
+/// both checker merges and the checker's request read.
 pub fn visible_rows(entry: &crate::types::ComponentEntry) -> std::collections::BTreeSet<String> {
-    entry.props.keys().cloned().collect()
+    entry.props.keys().chain(entry.notable_inherited.keys()).cloned().collect()
 }
 
 /// Whether a checker merge takes the checker's prop `name` under `mode` ([`react_attribute_mode`]): its own props

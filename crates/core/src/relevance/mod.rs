@@ -58,14 +58,14 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     let ambient: BTreeSet<&str> =
         members.iter().filter(|member| member.ambient).map(|member| member.name.as_str()).collect();
     let declined = inputs.props_type.declined;
-    // A `Pick` whose key set is not proven selected its members deliberately: none is narrowed, React's included.
-    let left = if inputs.narrows && !inputs.props_type.unproven_pick {
+    // A `Pick` whose key set is not proven selected its members deliberately: none is narrowed, React's included, and
+    // the checker's merges take every React prop it finds (`Placement::expanded`).
+    let narrows = inputs.narrows && !inputs.props_type.unproven_pick;
+    let left = if narrows {
         sources(entry, shown.collapsed.iter().filter(|name| !declined || ambient.contains(name.as_str())))
     } else {
         Vec::new()
     };
-    // A selection whose keys are not proven is listed as the checker reads it: every React prop it finds is taken.
-    let narrows = inputs.narrows && !inputs.props_type.unproven_pick;
     entry.relevance = Some(std::sync::Arc::new(Placement { left, used, narrows }));
     narrow(entry);
 }

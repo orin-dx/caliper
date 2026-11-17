@@ -495,6 +495,8 @@ fn every_explicit_key_set_lists_what_it_selects_as_the_checker_reads_it() {
         ("IndexedKeys", "Pick<Attrs, Names['k']>"),
         ("KeyofArgument", "Pick<Attrs, keyof Chosen>"),
         ("MappedLiteral", "{ [K in 'id' | 'title']?: string }"),
+        ("ReadonlyThroughGeneric", "Ro<Pick<Attrs, 'id' | 'title'>>"),
+        ("OmitAlias", "Dropped"),
     ];
     let mut text = String::from(
         "import type { HTMLAttributes, ComponentProps } from 'react';\n\
@@ -502,6 +504,8 @@ fn every_explicit_key_set_lists_what_it_selects_as_the_checker_reads_it() {
          type Select<T, K extends keyof T> = Pick<T, K>;\n\
          type Select2<T, K extends keyof T> = Select<T, K>;\n\
          type Drop<T, K extends keyof T> = Omit<T, K>;\n\
+         type Ro<T> = Readonly<T>;\n\
+         type Dropped = Omit<Pick<Attrs, 'id' | 'title' | 'lang'>, 'lang'>;\n\
          type Keys = 'id' | 'title';\n\
          interface Names { k: 'id' | 'title' }\n\
          interface Chosen { id?: string; title?: string }\n",
