@@ -25,6 +25,17 @@ pub(super) fn member_name(name: &TSEnumMemberName<'_>) -> Option<String> {
     }
 }
 
+/// The name a read of an earlier member can spell: [`member_name`] for a name with UTF-8 text, `None` for one holding a
+/// lone surrogate. Its lossy text is shared with every other such name (and with a written U+FFFD), so a lookup by it
+/// could find the wrong member.
+pub(super) fn readable_name(name: &TSEnumMemberName<'_>) -> Option<String> {
+    match name {
+        TSEnumMemberName::Identifier(id) => Some(id.name.as_str().to_owned()),
+        TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => s.value.as_str().map(str::to_owned),
+        TSEnumMemberName::ComputedTemplateString(_) => None,
+    }
+}
+
 /// `expr` folded, in the scope of an enum called `enum_name` whose earlier members are `earlier`.
 pub(super) fn fold(expr: &Expression<'_>, enum_name: &str, earlier: &EarlierMembers) -> EnumValue {
     match expr {

@@ -201,6 +201,19 @@ fn a_member_read_by_a_key_with_a_lone_surrogate_is_unresolved() {
     assert_eq!(props["b"], unresolved("E.B"));
 }
 
+/// A member whose name holds a lone surrogate shares its lossy text with a written U+FFFD, so it is not an earlier
+/// member a read can find: `E["�"]` is the first member, as TypeScript reads it.
+#[test]
+fn a_name_with_a_lone_surrogate_does_not_shadow_a_member_with_the_same_lossy_text() {
+    let (props, _) = props_of(
+        r#"
+        enum E { "�" = 1, "\uD83D" = 2, B = E["�"] }
+        export function C(props: { b: E.B }) { return <b />; }
+        "#,
+    );
+    assert_eq!(props["b"], member("B", number(1.0)));
+}
+
 /// Numbering counts up from the last known value; after one that is not known, no later member has a value.
 #[test]
 fn auto_increment_follows_only_known_values() {

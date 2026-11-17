@@ -258,7 +258,7 @@ impl<'src> SourceDataCollector<'src> {
                     EnumValue::Number(n) => Some(n + 1.0),
                     EnumValue::String(_) | EnumValue::Bool(_) | EnumValue::Spread { .. } | EnumValue::Unknown => None,
                 };
-                if let Some(name) = super::enum_fold::member_name(&member.id) {
+                if let Some(name) = super::enum_fold::readable_name(&member.id) {
                     earlier.insert(name, value.clone());
                 }
                 value
