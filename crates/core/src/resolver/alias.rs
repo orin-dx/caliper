@@ -516,6 +516,7 @@ fn resolve_mapped_chain(
 ) -> ResolvedChain {
     let mut chain = ResolvedChain::empty();
     let generated = copies_a_generated_key_set(keys);
+    // Only the keys an interface declares are its copies; a literal key beside them (`keyof Conditions | 'x'`) is not.
     for key in keys {
         // A `keyof` operand needs only the names (`ResolveState::keys_only`).
         let prop_type = if state.keys_only {
@@ -547,7 +548,7 @@ fn resolve_mapped_chain(
             key.parent.clone(),
             key.parent.iter().cloned().collect(),
         );
-        prop.copied_from_large_keys = generated;
+        prop.copied_from_large_keys = generated && key.parent.is_some();
         chain.props.push(ctx.share(prop));
     }
     chain
@@ -561,19 +562,22 @@ fn resolve_mapped_chain(
 /// keys (`keyof ButtonVariant`) are below the threshold.
 fn copies_a_generated_key_set(keys: &[super::evaluate::Key]) -> bool {
     use crate::types::options::{COLLAPSE_THRESHOLD, LARGE_API_SOURCE};
-    let Some(first) = keys.first() else { return false };
-    if keys.len() <= COLLAPSE_THRESHOLD || keys.iter().any(|key| key.parent.is_none()) {
+    let copied: Vec<&super::evaluate::Key> = keys.iter().filter(|key| key.parent.is_some()).collect();
+    let Some(first) = copied.first() else { return false };
+    if copied.len() <= COLLAPSE_THRESHOLD {
         return false;
     }
-    let react = keys
+    let react = copied
         .iter()
         .filter_map(|key| key.parent.as_ref())
         .all(|parent| crate::origin::declaration_origin(&parent.file_name).is_ambient());
+    if copied.len() > LARGE_API_SOURCE || react {
+        return true;
+    }
     // `CollectedType` has no equality; its derived `Debug` text is its exact structure.
     let declared = |key: &super::evaluate::Key| key.value.as_ref().map(|value| format!("{value:?}"));
     let one_type = declared(first);
-    let table = one_type.is_some() && keys.iter().all(|key| key.required && declared(key) == one_type);
-    keys.len() > LARGE_API_SOURCE || react || table
+    one_type.is_some() && copied.iter().all(|key| key.required && declared(key) == one_type)
 }
 
 /// Resolve an intersection's members and merge them as TypeScript does (`ResolvedChain::intersect_member`). An HTML layer

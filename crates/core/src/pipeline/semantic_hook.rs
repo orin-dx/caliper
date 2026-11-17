@@ -218,7 +218,13 @@ impl SemanticHook {
         cx: CollapseContext,
         priority: Priority,
     ) -> ComponentAnswer {
-        let mode = crate::react_types::react_attribute_mode(mode, crate::react_types::expanded(&answer.entry));
+        // Without a placement (evidence not gathered) the run's own option says whether this is the expanded view.
+        let expanded = answer
+            .entry
+            .relevance
+            .as_ref()
+            .map_or(cx.mode == crate::types::options::CollapseInheritedProps::None, |placement| placement.expanded());
+        let mode = crate::react_types::react_attribute_mode(mode, expanded);
         // The checker converts only the props this merge keeps, decided from the structural answer and `cx`: an answer
         // is kept and joined for those too, so another structural answer is never merged with props left unconverted.
         let layering = Layering::of(&answer.entry, cx);

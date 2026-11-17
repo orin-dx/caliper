@@ -378,7 +378,7 @@ fn ambient_is_decided_per_declaration_and_the_generated_rule_holds_in_the_projec
 
 #[test]
 fn the_expanded_view_keeps_the_react_props_only_the_checker_finds_in_the_cli_merge() {
-    // Entire finding on change 288 (react_types.rs:452), the CLI's whole-project merge: props written
+    // The CLI's whole-project merge: props written
     // `ReturnType<typeof makeProps>` give the structural pass none, so asking for the React props it lists asks for
     // none. `collapseInheritedProps: none` takes every React prop the checker finds; a collapsing mode stays narrowed.
     let made = "import type { HTMLAttributes } from 'react';\n\

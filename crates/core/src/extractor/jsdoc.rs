@@ -34,8 +34,8 @@ impl<'src> SourceDataCollector<'src> {
 
         let upper = self.comments.partition_point(|c| c.span_end <= span_start);
         let mut found: Option<usize> = None;
-        // The gap is measured to what follows each comment: the declaration, or the next `//` note of a run. A doc
-        // comment followed by a run of `//` notes still documents the declaration after them, as TypeScript reads it
+        // The gap is measured to what follows each comment: the declaration, or the next note of a run. A doc
+        // comment followed by a run of notes still documents the declaration after them, as TypeScript reads it
         // (React Aria's `@private` `GlobalDOMEvents` has eight lines of notes in between). The walk ends at the first
         // doc comment, claimed or not, so it never crosses a sibling's documentation.
         let mut next_start = span_start;
@@ -46,9 +46,7 @@ impl<'src> SourceDataCollector<'src> {
                 // is farther still — nothing left in range.
                 break;
             }
-            if !c.is_block {
-                next_start = c.span_start;
-            }
+            next_start = c.span_start;
             // Only `/** */` documents; a plain `/* */` note is skipped so the doc comment before it still counts.
             let is_doc_comment = c.is_block && self.source[c.span_start as usize..].starts_with("/**");
             if is_doc_comment {
