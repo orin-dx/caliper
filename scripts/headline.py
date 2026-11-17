@@ -18,6 +18,14 @@ import oracle_data
 # an issue, and so does any rise from the last record: a wrong type in Storybook is the one thing a reader cannot see.
 WRONG_GATE = 0.001
 
+# The coverage floor. Coverage is the share of every prop of the components Caliper reports that the oracle judged
+# (correct, less precise or wrong); the rest it did not check (not judged, no checker type, missing, named only). Below
+# the floor, "correct of the judged props" says little, because most props were never compared. The first checker-based
+# record (2026-11-15, universe 5) read 88 to 99% on shadcn, antd and Spectrum, and 37% on Mantine and 24.5% on Chakra
+# (62.9% and 75.5% not judged, 0 wrong): a gap with nothing in it, and the floor sits in it. It rests on one run, so a
+# corpus under it opens an issue to look, not a verdict.
+COVERAGE_FLOOR = 0.5
+
 # Budgets for one whole run (process start included) of the checker, the default, over a pinned corpus with dependencies
 # loaded, per corpus: `ms` and `rss_mib`. They are "something is badly wrong" limits, not tuning: 4 times the time and 2
 # times the peak memory measured on the fixed build (docs/measurement.md, "The budgets"), since a CI runner is slower
@@ -75,9 +83,21 @@ def wrong_rate(h):
     return h['wrong'] / judged(h) if judged(h) else 0.0
 
 
+def coverage(h):
+    """The props the oracle judged, of every prop of the components Caliper reports. It needs only fields every record
+    has, so a record from before `not_judged` was kept reads the same way."""
+    return judged(h) / h['props'] if h['props'] else 1.0
+
+
+def judged_rate(h):
+    """Correct, of the props that were judged: the headline rate. It says nothing about the props the oracle did not
+    check; `coverage` and the not judged share show those."""
+    return h['correct'] / judged(h) if judged(h) else 0.0
+
+
 def share(h, kind):
-    """One kind, of every prop of the components Caliper reports."""
-    return h[kind] / h['props'] if h['props'] else 0.0
+    """One kind, of every prop of the components Caliper reports; a kind a record from before it existed lacks is 0."""
+    return h.get(kind, 0) / h['props'] if h['props'] else 0.0
 
 
 def own_peak(entry):
@@ -111,6 +131,10 @@ def findings(name, entry, previous):
                        f"{100 * rate:.2f}%{was}; the gate is {100 * WRONG_GATE:.1f}%")
         elif rose:
             out.append(f"{name}: wrong types rose to {h['wrong']:,} of {judged(h):,}, {100 * rate:.2f}%{was}")
+        if h['props'] and coverage(h) < COVERAGE_FLOOR:
+            out.append(f"{name}: the oracle judged only {judged(h):,} of {h['props']:,} props, {100 * coverage(h):.1f}% "
+                       f"(not judged {100 * share(h, 'not_judged'):.1f}%); the floor is {100 * COVERAGE_FLOOR:.0f}%, so "
+                       f"{100 * judged_rate(h):.1f}% correct of the judged props says little about the rest")
     return out + over_budget(name, entry)
 
 
@@ -130,9 +154,11 @@ HOW_TO_READ = (
     'How to read these numbers. The headline asks one question: for the components Caliper reports, are the types in its '
     "output right? Each prop is judged against TypeScript 7.1's checker, which is the truth here, not against another "
     'tool. A prop that Caliper lists only by name in a collapsed inheritance layer is surfaced, but a reader sees no type '
-    'for it, so it is counted apart. Recall against react-docgen-typescript (RDT) asks a different question, how much '
+    'for it, so it is counted apart. The headline rate is correct of the props that were judged (correct, less precise or '
+    'wrong), with its denominator shown; coverage is the share of all props that were judged, so a high rate over low '
+    'coverage means the oracle did not check most props. Recall against react-docgen-typescript (RDT) asks a different question, how much '
     'of what RDT reports Caliper also reports; it is information, because RDT is itself wrong on some props. Gates, '
-    f'which open an issue: more than {100 * WRONG_GATE:.1f}% wrong (or any rise), a silent-wrong answer to a question a '
+    f'which open an issue: more than {100 * WRONG_GATE:.1f}% wrong (or any rise), coverage under {100 * COVERAGE_FLOOR:.0f}%, a silent-wrong answer to a question a '
     "reader is asked, or a whole run over its corpus's time or memory budget "
     '(BUDGETS: limits for something badly wrong, not a tuning target). Time and memory drift from week to week is shown, not alarmed on.'
 )
@@ -156,11 +182,13 @@ def markdown(record):
     if not rows and not errors:
         return lines
     lines += ['### Headline: are the types Storybook shows right?', '', DEFINITIONS, '',
-              '| Corpus | Props | Correct | Less precise | Wrong | No checker type | Not judged | Missing | Named only |',
-              '| --- | --: | --: | --: | --: | --: | --: | --: | --: |']
+              '| Corpus | Props | Correct | Less precise | Wrong | No checker type | Not judged | Missing | Named only '
+              '| Correct of judged | Coverage |',
+              '| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |']
     for name, h in rows:
         cells = [f'{100 * share(h, kind):.{2 if kind == "wrong" else 1}f}%' for kind in KINDS]
-        lines.append(f"| {name} | {h['props']:,} | " + ' | '.join(cells) + ' |')
+        rate = f"{100 * judged_rate(h):.1f}% ({h['correct']:,} of {judged(h):,})"
+        lines.append(f"| {name} | {h['props']:,} | " + ' | '.join(cells) + f' | {rate} | {100 * coverage(h):.1f}% |')
     for name, error in errors:
-        lines.append(f'| {name} | unavailable: {error[:80]} | | | | | | | |')
+        lines.append(f'| {name} | unavailable: {error[:80]} | | | | | | | | | |')
     return lines + ['']

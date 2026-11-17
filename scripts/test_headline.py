@@ -29,6 +29,11 @@ HEADLINE = {'components': 40, 'props': 1000, 'correct': 800, 'less_precise': 100
             'not_judged': 0, 'missing': 30, 'named_only': 60}
 
 
+# Chakra in the oracle rerun of 2026-11-15: three quarters of the props were not judged, none wrong.
+CHAKRA = {'components': 620, 'props': 486834, 'correct': 81451, 'less_precise': 37951, 'wrong': 0, 'no_checker_type': 0,
+          'not_judged': 367432, 'missing': 0, 'named_only': 0}
+
+
 def entry(h=None, ms=1000, rss_mib=400, **extra):
     out = {'caliper': {'ms': ms, 'rss_mib': rss_mib}, **extra}
     if h is not None:
@@ -103,6 +108,22 @@ class Findings(unittest.TestCase):
                              ['chakra: a whole run\'s time is 2,500 ms, over the 2,000 ms budget',
                               "chakra: a whole run's peak memory is 700 MiB, over the 600 MiB budget"])
 
+    def test_coverage_under_the_floor_opens_an_issue_with_zero_wrong(self):
+        self.assertEqual(headline.findings('chakra', entry(CHAKRA), None),
+                         ['chakra: the oracle judged only 119,402 of 486,834 props, 24.5% (not judged 75.5%); the floor is 50%, '
+                          'so 68.2% correct of the judged props says little about the rest'])
+
+    def test_coverage_at_the_floor_or_in_a_record_without_not_judged_is_quiet(self):
+        at = {**HEADLINE, 'correct': 500, 'less_precise': 0, 'wrong': 0, 'not_judged': 500}
+        self.assertEqual(headline.findings('antd', entry(at), None), [])
+        self.assertEqual(headline.findings('antd', entry({k: v for k, v in HEADLINE.items() if k != 'not_judged'}), None)[1:], [])
+
+    def test_the_headline_rate_is_over_the_judged_props_and_coverage_is_of_all(self):
+        self.assertEqual(headline.judged_rate(CHAKRA), 81451 / 119402)
+        self.assertEqual(headline.coverage(CHAKRA), 119402 / 486834)
+        self.assertEqual((headline.judged_rate({**HEADLINE, 'correct': 0, 'less_precise': 0, 'wrong': 0}),
+                          headline.coverage({**HEADLINE, 'props': 0})), (0.0, 1.0))
+
     def test_a_run_inside_the_budget_is_quiet_however_much_it_drifted(self):
         with mock.patch.dict(headline.BUDGETS, {'chakra': {'ms': 2000, 'rss_mib': 600}}):
             self.assertEqual(headline.findings('chakra', entry(ms=2000, rss_mib=600), entry(ms=500, rss_mib=100)), [])
@@ -136,13 +157,23 @@ class Summary(unittest.TestCase):
         lines = headline.markdown(self.record(antd=entry(HEADLINE)))
         self.assertEqual(lines[2:4], ['### Headline: are the types Storybook shows right?', ''])
         self.assertEqual(lines[-4:-1], ['| Corpus | Props | Correct | Less precise | Wrong | No checker type | Not judged | Missing '
-                                       '| Named only |',
-                                       '| --- | --: | --: | --: | --: | --: | --: | --: | --: |',
-                                       '| antd | 1,000 | 80.0% | 10.0% | 0.20% | 0.8% | 0.0% | 3.0% | 6.0% |'])
+                                       '| Named only | Correct of judged | Coverage |',
+                                       '| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |',
+                                       '| antd | 1,000 | 80.0% | 10.0% | 0.20% | 0.8% | 0.0% | 3.0% | 6.0% '
+                                       '| 88.7% (800 of 902) | 90.2% |'])
+
+    def test_a_record_with_most_props_not_judged_shows_the_rate_over_the_judged_and_the_coverage(self):
+        lines = headline.markdown(self.record(chakra=entry(CHAKRA)))
+        self.assertEqual(lines[-2], '| chakra | 486,834 | 16.7% | 7.8% | 0.00% | 0.0% | 75.5% | 0.0% | 0.0% '
+                                    '| 68.2% (81,451 of 119,402) | 24.5% |')
+
+    def test_a_record_from_before_not_judged_was_kept_still_renders(self):
+        old = {k: v for k, v in HEADLINE.items() if k != 'not_judged'}
+        self.assertEqual(headline.markdown(self.record(antd=entry(old)))[-2].split('|')[7], ' 0.0% ')
 
     def test_an_oracle_that_failed_is_named(self):
         lines = headline.markdown(self.record(antd=entry(oracle={'error': 'tsx failed'})))
-        self.assertIn('| antd | unavailable: tsx failed | | | | | | | |', lines)
+        self.assertIn('| antd | unavailable: tsx failed | | | | | | | | | |', lines)
 
     def test_the_budgets_and_the_gate_in_the_text_are_the_ones_used(self):
         self.assertIn('more than 0.1% wrong', headline.HOW_TO_READ)
