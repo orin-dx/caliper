@@ -103,11 +103,13 @@ fn targets_with(output: &ExtractionOutput, cx: Option<CollapseContext>) -> Vec<T
             // Of `@types/react`'s props the whole-project merge keeps those the structural answer lists, as the
             // session does: relevance decided them there (ADR 0028, A2), so the checker reports those names and
             // converts no other DOM attribute. The expanded view (`collapseInheritedProps: none`) asks for all of them.
-            react_wanted: if cx.is_some_and(|cx| cx.mode == caliper_docgen_core::pipeline::CollapseInheritedProps::None)
-            {
+            react_wanted: if caliper_docgen_core::react_types::expanded(
+                entry,
+                cx.map_or(caliper_docgen_core::pipeline::CollapseInheritedProps::Dependencies, |cx| cx.mode),
+            ) {
                 None
             } else {
-                Some(entry.props.keys().cloned().collect())
+                Some(caliper_docgen_core::react_types::visible_rows(entry).into_iter().collect())
             },
         })
         .collect()

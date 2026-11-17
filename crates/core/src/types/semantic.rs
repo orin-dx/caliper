@@ -430,12 +430,13 @@ fn apply_props(
     // in the inheritance layers. The expanded view (`collapseInheritedProps: none`) takes every one the checker finds,
     // also where the structural pass found none (`ReturnType<typeof makeProps>`): this merge reads no
     // `htmlAttributes`, so it is `full`'s answer.
-    let expanded = crate::react_types::expanded(entry);
+    let expanded = crate::react_types::expanded(entry, cx.mode);
+    let visible = crate::react_types::visible_rows(entry);
     let mode = crate::react_types::react_attribute_mode(crate::types::options::HtmlAttributeMode::Full, expanded);
     let own: Vec<&Arc<SemanticProp>> = semantic
         .props
         .iter()
-        .filter(|prop| crate::react_types::checker_prop_used(mode, &prop.name, prop.react_declared, &entry.props))
+        .filter(|prop| crate::react_types::checker_prop_kept(mode, &prop.name, prop.react_declared, &visible))
         .collect();
     let (own, notable) = layer_checker_props(entry, own, &semantic.whole, cx);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
@@ -573,19 +574,27 @@ pub struct LayerFacts {
     notable: Vec<(String, PropParent)>,
 }
 
-/// The notable members (`className`, `style`, …) of `entry`'s collapsed layers that it does not list itself, each with
-/// its layer's source: the merge merges the checker's answer for each and moves it back to `notableInherited`.
+/// The notable members of `entry`'s collapsed layers that it does not list itself, each with its layer's source: the
+/// members the structural answer keeps typed in `notableInherited` from that same source (the curated `className`,
+/// `style`, …, and every member the body reads), whatever made them so. The merge merges the checker's answer for each
+/// and moves it back to `notableInherited`: one owner, the structural answer, says which are visible rows.
 fn layer_notable(entry: &ComponentEntry) -> Vec<(String, PropParent)> {
-    let notable_names = crate::react_types::notable_html_attrs("");
     entry
         .inheritance
         .iter()
         .filter(|layer| layer.html_element.is_none())
         .flat_map(|layer| {
+            let source = |prop: &std::sync::Arc<ParsedProp>| {
+                prop.parent
+                    .as_ref()
+                    .is_some_and(|parent| parent.name == layer.type_name && parent.file_name == layer.file_name)
+            };
             layer
                 .members
                 .iter()
-                .filter(|name| notable_names.contains(&name.as_str()) && !entry.props.contains_key(*name))
+                .filter(move |name| {
+                    !entry.props.contains_key(*name) && entry.notable_inherited.get(*name).is_some_and(source)
+                })
                 .map(|name| {
                     (name.clone(), PropParent { name: layer.type_name.clone(), file_name: layer.file_name.clone() })
                 })

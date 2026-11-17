@@ -4,6 +4,7 @@
 //! counted once per resolution context ([`project_sites`]) and joined where the answer becomes output, never kept with
 //! a resolution: an edit to any consumer changes them.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -14,11 +15,12 @@ use super::ResolutionContext;
 use super::import::{
     follow_reexports, lookup_interface, lookup_type_alias, resolve_import_specifier, resolve_to_canonical,
 };
+use super::substitute::apply_generic_args;
 use crate::relevance::call_sites::{self, FileUsages, SiteKey, site_key};
 use crate::relevance::forwarding::{self, Lane, Project};
 use crate::relevance::props_type::{Declaration, PropsType};
 use crate::relevance::{Body, CallSites, Inputs, Member};
-use crate::types::{ComponentEntry, ComponentMapping};
+use crate::types::{CollectedType, ComponentEntry, ComponentMapping};
 
 /// The call-site counts of every component of the project, by [`SiteKey`]; only components with evidence have one.
 pub(crate) type ProjectSites = FxHashMap<SiteKey, CallSites>;
@@ -88,12 +90,22 @@ impl Resolver<'_> {
     /// What `mapping`'s props type writes, each name it writes found where the file writing it imports or declares it.
     fn props_type(&self, mapping: &ComponentMapping) -> PropsType {
         let ctx = self.ctx;
-        PropsType::read(mapping, |name: &str, from: &Utf8Path| {
+        PropsType::read(mapping, |name: &str, args: &[CollectedType], from: &Utf8Path| {
             let (file, name) = resolve_to_canonical(name, from, ctx, &mut Vec::new())
                 .unwrap_or_else(|| (from.to_owned(), name.to_owned()));
+            let alias = || {
+                let (key, alias) = lookup_type_alias(ctx, file.as_str(), &name)?;
+                // Instantiated as the resolver reads it, so a generic alias's keys are the ones written at the use.
+                Some(if args.is_empty() {
+                    Cow::Borrowed(alias)
+                } else {
+                    let declared = (file.as_path(), key.as_str());
+                    Cow::Owned(apply_generic_args(alias.clone(), declared, args, from, ctx, &mut Vec::new()))
+                })
+            };
             lookup_interface(ctx, file.as_str(), &name)
                 .map(Declaration::Interface)
-                .or_else(|| lookup_type_alias(ctx, file.as_str(), &name).map(|(_, alias)| Declaration::Alias(alias)))
+                .or_else(|| alias().map(|alias| Declaration::Alias(Box::new(alias))))
                 .map(|declaration| (declaration, file))
         })
     }

@@ -448,9 +448,53 @@ pub fn react_attribute_mode(
     if expanded { mode } else { crate::pipeline::HtmlAttributeMode::Curated }
 }
 
-/// Whether `entry` is the expanded view: relevance decided it and lists every resolved prop ([`react_attribute_mode`]).
-pub(crate) fn expanded(entry: &crate::types::ComponentEntry) -> bool {
-    entry.relevance.as_ref().is_some_and(|placement| placement.expanded())
+/// The names `entry`, a structural answer, shows as typed rows in `props` (its `notableInherited` rows are merged as
+/// layer members, `types::semantic::layer_notable`). A name relevance puts forward that the answer holds only in a
+/// layer's `used` list stays a name in both lanes, so the lanes list the same rows. The one answer of which names are
+/// visible that both checker merges and the checker's request read.
+pub fn visible_rows(entry: &crate::types::ComponentEntry) -> std::collections::BTreeSet<String> {
+    entry.props.keys().cloned().collect()
+}
+
+/// Whether a checker merge takes the checker's prop `name` under `mode` ([`react_attribute_mode`]): its own props
+/// always; a `@types/react` prop under `Full`, else only where it is one of the `visible` rows ([`visible_rows`]).
+pub(crate) fn checker_prop_kept(
+    mode: crate::pipeline::HtmlAttributeMode,
+    name: &str,
+    react_declared: bool,
+    visible: &std::collections::BTreeSet<String>,
+) -> bool {
+    let react_row = !REACT_SPECIAL_PROPS.contains(&name);
+    match mode {
+        crate::pipeline::HtmlAttributeMode::Full => !react_declared || react_row,
+        crate::pipeline::HtmlAttributeMode::Curated | crate::pipeline::HtmlAttributeMode::None => {
+            !react_declared || (react_row && visible.contains(name))
+        }
+    }
+}
+
+/// The `@types/react` props the checker is asked to report for `entry` under `mode`: all under `Full`, else its
+/// [`visible_rows`], the only ones the checker merges take.
+pub fn react_props_wanted_for(
+    mode: crate::pipeline::HtmlAttributeMode,
+    entry: &crate::types::ComponentEntry,
+) -> Option<rustc_hash::FxHashSet<String>> {
+    match mode {
+        crate::pipeline::HtmlAttributeMode::Full => None,
+        crate::pipeline::HtmlAttributeMode::Curated | crate::pipeline::HtmlAttributeMode::None => {
+            Some(visible_rows(entry).into_iter().collect())
+        }
+    }
+}
+
+/// Whether `entry` lists every resolved prop ([`react_attribute_mode`]): its placement says so, or, with no placement
+/// (no evidence gathered), the run's `collapse` is the expanded view. The one answer both checker merges and the
+/// checker's request read.
+pub fn expanded(entry: &crate::types::ComponentEntry, collapse: crate::types::options::CollapseInheritedProps) -> bool {
+    entry
+        .relevance
+        .as_ref()
+        .map_or(collapse == crate::types::options::CollapseInheritedProps::None, |placement| placement.expanded())
 }
 
 /// [`checker_prop_used`] under `Curated` or `None`: a `@types/react` prop only where the structural answer lists it.

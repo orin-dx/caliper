@@ -472,3 +472,84 @@ fn a_read_promotes_a_member_of_a_collapsed_source_and_a_mapped_api_copy_is_liste
     }
     assert_eq!(checked, 12);
 }
+
+/// The prop a component lists as a row by `name`, from `props` or `notableInherited`.
+fn row<'e>(entry: &'e ComponentEntry, name: &str) -> Option<&'e caliper_docgen_core::types::ParsedProp> {
+    entry.props.get(name).or_else(|| entry.notable_inherited.get(name)).map(AsRef::as_ref)
+}
+
+#[test]
+fn every_explicit_key_set_lists_what_it_selects_as_the_checker_reads_it() {
+    // The grammar of key sets a props type selects React's attributes by, with the TypeScript checker as the oracle:
+    // the default view (both lanes) lists exactly what the checker's expanded view (`collapseInheritedProps: none`)
+    // says reaches. A selection is deliberate, so a `Pick` whose keys are not proven narrows nothing, React's included.
+    let forms = [
+        ("Direct", "Pick<Attrs, 'id' | 'title'>"),
+        ("Generic", "Select<Attrs, 'id' | 'title'>"),
+        ("AliasOfAlias", "Select2<Attrs, 'id' | 'title'>"),
+        ("KeysAlias", "Pick<Attrs, Keys>"),
+        ("Intersected", "Select<Attrs, 'id'> & Select<Attrs, 'title'>"),
+        ("PartialOfGeneric", "Partial<Select<Attrs, 'id' | 'title'>>"),
+        ("OmitThroughGeneric", "Drop<Pick<Attrs, 'id' | 'title' | 'lang'>, 'lang'>"),
+        ("ComponentPropsPick", "Pick<ComponentProps<'div'>, 'id' | 'title'>"),
+        ("IndexedKeys", "Pick<Attrs, Names['k']>"),
+        ("KeyofArgument", "Pick<Attrs, keyof Chosen>"),
+        ("MappedLiteral", "{ [K in 'id' | 'title']?: string }"),
+    ];
+    let mut text = String::from(
+        "import type { HTMLAttributes, ComponentProps } from 'react';\n\
+         type Attrs = HTMLAttributes<HTMLDivElement>;\n\
+         type Select<T, K extends keyof T> = Pick<T, K>;\n\
+         type Select2<T, K extends keyof T> = Select<T, K>;\n\
+         type Drop<T, K extends keyof T> = Omit<T, K>;\n\
+         type Keys = 'id' | 'title';\n\
+         interface Names { k: 'id' | 'title' }\n\
+         interface Chosen { id?: string; title?: string }\n",
+    );
+    for (name, form) in &forms {
+        text.push_str(&format!("export function {name}(props: {form} & {{ own?: string }}) {{ return null; }}\n"));
+    }
+    let files = [("Components.tsx", text)];
+    let (_dir, [structural, checker]) = both_lanes(&files, CollapseInheritedProps::Dependencies);
+    let (_dir, [structural_all, oracle]) = both_lanes(&files, CollapseInheritedProps::None);
+    let mut wrong = Vec::new();
+    for (name, form) in &forms {
+        let want = rows(&oracle.components[*name]);
+        // The checker lane against the checker: a selection is listed as TypeScript reads it.
+        let got = rows(&checker.components[*name]);
+        if got != want {
+            wrong.push(format!("{name} `{form}` checker: {got:?}, the checker reads {want:?}"));
+        }
+        // The structural lane against its own expanded view: relevance drops nothing selected, whatever the resolver
+        // could read of the form.
+        let (got, read) = (rows(&structural.components[*name]), rows(&structural_all.components[*name]));
+        if got != read {
+            wrong.push(format!("{name} `{form}` structural: {got:?}, its expanded view {read:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+#[test]
+fn every_row_the_body_promotes_has_the_checkers_type() {
+    // A member the body reads from a collapsed source of each kind (a project source past 200 members, React's) is a
+    // visible row, so the checker's merge converts and keeps it: its type is the checker's, as in the expanded view,
+    // also where the structural pass cannot read it (`ReturnType<typeof makeValue>`).
+    let text = format!(
+        "import type {{ HTMLAttributes }} from 'react';\n\
+         function makeValue() {{ return {{ size: 1, label: 'x' }}; }}\n\
+         export interface Huge {{ {}h5?: ReturnType<typeof makeValue>; }}\n\
+         export function Reads(props: Huge & HTMLAttributes<HTMLDivElement> & {{ own?: string }}) \
+         {{ return <div title={{props.title}}>{{props.h5?.label}}</div>; }}\n",
+        fields("h", 5) + &(6..210).map(|i| format!("h{i}?: string; ")).collect::<String>()
+    );
+    let files = [("Components.tsx", text)];
+    let (_dir, [structural, checker]) = both_lanes(&files, CollapseInheritedProps::Dependencies);
+    let (_dir, [_, oracle]) = both_lanes(&files, CollapseInheritedProps::None);
+    for name in ["h5", "title"] {
+        let listed = row(&checker.components["Reads"], name).unwrap_or_else(|| panic!("{name} is a row"));
+        let expanded = row(&oracle.components["Reads"], name).unwrap();
+        assert_eq!(listed.prop_type, expanded.prop_type, "{name}: the checker's type");
+        assert!(row(&structural.components["Reads"], name).is_some(), "{name} is a structural row");
+    }
+}

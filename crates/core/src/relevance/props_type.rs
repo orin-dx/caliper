@@ -21,12 +21,13 @@ use crate::types::output::{InheritedLayer, ParsedProp, PropParent, PropType};
 const MAX_ALIAS_DEPTH: u8 = 8;
 
 /// A declaration the props type names, as the caller finds it by name from the component's file.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum Declaration<'a> {
     /// An interface.
     Interface(&'a CollectedInterface),
-    /// A type alias.
-    Alias(&'a CollectedTypeAlias),
+    /// A type alias, instantiated with the arguments it is written with (`Select<Attrs, 'id'>` is `Pick<Attrs, 'id'>`):
+    /// a generic alias read without its arguments would name its parameters, not the keys selected.
+    Alias(Box<std::borrow::Cow<'a, CollectedTypeAlias>>),
 }
 
 /// What a component's props type says itself, read once from its syntax.
@@ -45,12 +46,19 @@ pub(crate) struct PropsType {
     /// A `Pick` or `Omit` in it names keys that are not a finite union of string literals (`string`, a branded or
     /// template key): which members reach is not proven, so relevance narrows none of its listing.
     pub(crate) declined: bool,
+    /// A `Pick` in it selects keys that are not a finite union of string literals: the members it selects were chosen
+    /// deliberately but which they are is not proven, so relevance narrows nothing of the listing, React's included.
+    pub(crate) unproven_pick: bool,
 }
 
-/// Finds a name written in a file: the declaration it names and the file declaring it, through imports.
-pub(crate) trait Lookup<'a>: Fn(&str, &Utf8Path) -> Option<(Declaration<'a>, Utf8PathBuf)> {}
+/// Finds a name written with type arguments in a file: the declaration it names (an alias instantiated with the
+/// arguments) and the file declaring it, through imports.
+pub(crate) trait Lookup<'a>:
+    Fn(&str, &[CollectedType], &Utf8Path) -> Option<(Declaration<'a>, Utf8PathBuf)>
+{
+}
 
-impl<'a, F: Fn(&str, &Utf8Path) -> Option<(Declaration<'a>, Utf8PathBuf)>> Lookup<'a> for F {}
+impl<'a, F: Fn(&str, &[CollectedType], &Utf8Path) -> Option<(Declaration<'a>, Utf8PathBuf)>> Lookup<'a> for F {}
 
 impl PropsType {
     /// The members a forwarding target's props type reaches outside the ambient declarations, as `forwarding` takes them:
@@ -69,7 +77,7 @@ impl PropsType {
         let from = mapping.file_path.as_path();
         // `props: Pick<Base, Keys>` is the mapping's own name and arguments, not a declaration to look up.
         read.pick(&mapping.props_type_name, &mapping.props_type_args, from, &lookup);
-        match lookup(&mapping.props_type_name, from) {
+        match lookup(&mapping.props_type_name, &mapping.props_type_args, from) {
             // A props type that is itself an ambient interface (`props: React.HTMLAttributes<HTMLDivElement>`)
             // declares nothing of the component's own: its members are React's, as when the component extends it.
             Some((Declaration::Interface(interface), declared))
@@ -79,8 +87,8 @@ impl PropsType {
                 read.own.extend(interface.props.iter().map(|prop| prop.name.clone()));
                 read.bases(interface, &lookup, 0);
             }
-            Some((Declaration::Alias(alias), declared)) => match alias {
-                CollectedTypeAlias::Pick { keys, .. } => read.keys(keys, &declared, &lookup, 0),
+            Some((Declaration::Alias(alias), declared)) => match &**alias {
+                CollectedTypeAlias::Pick { keys, .. } => read.pick_keys(keys, &declared, &lookup),
                 // A union's arms are each the props type (a discriminated union's fields are its own).
                 CollectedTypeAlias::Intersection { members, .. } | CollectedTypeAlias::Union { members, .. } => {
                     members.iter().for_each(|member| read.part(member, &declared, &lookup));
@@ -88,7 +96,15 @@ impl PropsType {
                 CollectedTypeAlias::Passthrough { target: part, .. }
                 | CollectedTypeAlias::Partial { base: part, .. }
                 | CollectedTypeAlias::Required { base: part, .. } => read.part(part, &declared, &lookup),
-                CollectedTypeAlias::Omit { .. } | CollectedTypeAlias::LiteralUnion { .. } => {}
+                // `Omit<Base, Keys>` as the props type: its keys decide only whether it is declined; its base is read as
+                // a part (a `Pick` in it selects, an interface is a base).
+                CollectedTypeAlias::Omit { base, keys, .. } => {
+                    let mut omitted = Self::default();
+                    omitted.keys(keys, &declared, &lookup, 0);
+                    read.declined |= omitted.declined;
+                    read.part(base, &declared, &lookup);
+                }
+                CollectedTypeAlias::LiteralUnion { .. } => {}
             },
             None => {}
         }
@@ -114,7 +130,7 @@ impl PropsType {
         if depth >= MAX_ALIAS_DEPTH {
             return;
         }
-        if let Some((Declaration::Interface(base), declared)) = lookup(name, from)
+        if let Some((Declaration::Interface(base), declared)) = lookup(name, &[], from)
             && !crate::origin::is_ambient_declaration(declared.as_str(), Some(&base.tags))
         {
             self.inherited.extend(base.props.iter().map(|prop| prop.name.clone()));
@@ -132,6 +148,7 @@ impl PropsType {
             CollectedType::Intersection(parts) | CollectedType::Union(parts) => {
                 parts.iter().for_each(|part| self.part(part, from, lookup));
             }
+            CollectedType::AtFile { file, inner } => self.part(inner, file, lookup),
             CollectedType::Named { name, args } => {
                 self.pick(name, args, from, lookup);
                 self.inherit(name, from, lookup, 0);
@@ -152,7 +169,7 @@ impl PropsType {
             return;
         }
         match (name, args) {
-            ("Pick", [_, keys]) => self.keys(keys, from, lookup, 0),
+            ("Pick", [_, keys]) => self.pick_keys(keys, from, lookup),
             ("Omit", [base, keys]) => {
                 // The omitted keys are not picked; only whether they are a closed set of literals is kept.
                 let mut omitted = Self::default();
@@ -165,11 +182,12 @@ impl PropsType {
             ("Partial" | "Required" | "Readonly", [CollectedType::Named { name, args }, ..]) => {
                 self.picks(name, args, from, lookup, depth + 1);
             }
-            (_, []) => {
-                let Some((Declaration::Alias(alias), declared)) = lookup(name, from) else { return };
-                let base = match alias {
+            // An alias, generic or not: its instantiation with `args` is what the props type selects.
+            (_, args) => {
+                let Some((Declaration::Alias(alias), declared)) = lookup(name, args, from) else { return };
+                let base = match &**alias {
                     CollectedTypeAlias::Pick { keys, .. } => {
-                        self.keys(keys, &declared, lookup, 0);
+                        self.pick_keys(keys, &declared, lookup);
                         return;
                     }
                     CollectedTypeAlias::Omit { base, keys, .. } => {
@@ -186,12 +204,22 @@ impl PropsType {
                     | CollectedTypeAlias::Union { .. }
                     | CollectedTypeAlias::Intersection { .. } => return,
                 };
+                // An argument an instantiation substituted is read where it was written (`AtFile`).
+                let (base, at) = written_at(base, &declared);
                 if let CollectedType::Named { name, args } = base {
-                    self.picks(name, args, &declared, lookup, depth + 1);
+                    self.picks(name, args, &at, lookup, depth + 1);
                 }
             }
-            _ => {}
         }
+    }
+
+    /// The keys a `Pick` selects ([`Self::keys`]); a key set not proven marks the props type's selection unproven.
+    fn pick_keys<'a>(&mut self, keys: &CollectedType, from: &Utf8Path, lookup: &impl Lookup<'a>) {
+        let mut picked = Self::default();
+        picked.keys(keys, from, lookup, 0);
+        self.picked.extend(picked.picked);
+        self.declined |= picked.declined;
+        self.unproven_pick |= picked.declined;
     }
 
     /// The string literal keys `keys` written in `from` names, through unions and aliases, each alias found from the
@@ -201,13 +229,15 @@ impl PropsType {
             CollectedType::StringLiteral(key) => {
                 self.picked.insert(key.to_string());
             }
+            // A key set an instantiation substituted, read where it was written.
+            CollectedType::AtFile { file, inner } => self.keys(inner, file, lookup, depth),
             CollectedType::Union(keys) => keys.iter().for_each(|key| self.keys(key, from, lookup, depth)),
-            CollectedType::Named { name, args } if args.is_empty() && depth < MAX_ALIAS_DEPTH => {
-                let Some((Declaration::Alias(alias), declared)) = lookup(name, from) else {
+            CollectedType::Named { name, args } if depth < MAX_ALIAS_DEPTH => {
+                let Some((Declaration::Alias(alias), declared)) = lookup(name, args, from) else {
                     self.declined = true;
                     return;
                 };
-                match alias {
+                match &**alias {
                     CollectedTypeAlias::LiteralUnion { members, .. } => self.picked.extend(members.iter().cloned()),
                     CollectedTypeAlias::Passthrough { target, .. } => self.keys(target, &declared, lookup, depth + 1),
                     CollectedTypeAlias::Union { members, .. } => {
@@ -229,6 +259,15 @@ impl PropsType {
     /// Whether `parent` is the interface the props type is.
     fn declares(&self, parent: &PropParent) -> bool {
         self.interface.as_ref().is_some_and(|(name, file)| *name == parent.name && *file == parent.file_name)
+    }
+}
+
+/// `ty` and the file it is written in: an `AtFile` (an argument substituted into a declaration of another file) names
+/// its own file.
+fn written_at<'t>(ty: &'t CollectedType, from: &Utf8Path) -> (&'t CollectedType, Utf8PathBuf) {
+    match ty {
+        CollectedType::AtFile { file, inner } => written_at(inner, file),
+        _ => (ty, from.to_owned()),
     }
 }
 
@@ -383,15 +422,18 @@ mod tests {
         data.interfaces
             .get(&key)
             .map(Declaration::Interface)
-            .or_else(|| data.type_aliases.get(&key).map(Declaration::Alias))
+            .or_else(|| {
+                data.type_aliases.get(&key).map(|alias| Declaration::Alias(Box::new(std::borrow::Cow::Borrowed(alias))))
+            })
             .map(|declaration| (declaration, path.to_owned()))
     }
 
     /// The props type of each component of `text`, read from its syntax.
     fn props_types(path: &Utf8Path, text: &str) -> Vec<(String, PropsType)> {
         let data = parse_file(path, text);
-        let read =
-            |mapping: &ComponentMapping| PropsType::read(mapping, |name: &str, _: &Utf8Path| lookup(&data, path, name));
+        let read = |mapping: &ComponentMapping| {
+            PropsType::read(mapping, |name: &str, _: &[CollectedType], _: &Utf8Path| lookup(&data, path, name))
+        };
         data.component_mappings.iter().map(|mapping| (mapping.component_name.clone(), read(mapping))).collect()
     }
 
@@ -600,7 +642,7 @@ mod tests {
         let (here, there) = (Utf8Path::new("/fixtures/Button.tsx"), Utf8Path::new("/fixtures/props.ts"));
         let (component, declarations) = (parse_file(here, component), parse_file(there, declarations));
         // Only the props type is imported; every other name is found in the file that writes it.
-        let lookup = |name: &str, from: &Utf8Path| {
+        let lookup = |name: &str, _: &[CollectedType], from: &Utf8Path| {
             let (data, path) = match (from == here, name) {
                 (true, "Props") => (&declarations, there),
                 (true, _) => (&component, here),

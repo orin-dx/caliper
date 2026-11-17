@@ -58,12 +58,15 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     let ambient: BTreeSet<&str> =
         members.iter().filter(|member| member.ambient).map(|member| member.name.as_str()).collect();
     let declined = inputs.props_type.declined;
-    let left = if inputs.narrows {
+    // A `Pick` whose key set is not proven selected its members deliberately: none is narrowed, React's included.
+    let left = if inputs.narrows && !inputs.props_type.unproven_pick {
         sources(entry, shown.collapsed.iter().filter(|name| !declined || ambient.contains(name.as_str())))
     } else {
         Vec::new()
     };
-    entry.relevance = Some(std::sync::Arc::new(Placement { left, used, narrows: inputs.narrows }));
+    // A selection whose keys are not proven is listed as the checker reads it: every React prop it finds is taken.
+    let narrows = inputs.narrows && !inputs.props_type.unproven_pick;
+    entry.relevance = Some(std::sync::Arc::new(Placement { left, used, narrows }));
     narrow(entry);
 }
 
@@ -118,13 +121,15 @@ pub struct Placement {
     /// The rows [`decide`] puts forward that the structural answer holds only as names in a collapsed layer: named in
     /// that layer's `used` list.
     used: BTreeSet<String>,
-    /// Whether the listing follows the decision ([`Inputs::narrows`]); off in the expanded view.
+    /// Whether the listing follows the decision ([`Inputs::narrows`]); off in the expanded view and for a `Pick` whose
+    /// keys are not proven.
     narrows: bool,
 }
 
 impl Placement {
-    /// Whether the answer is the expanded view (`collapseInheritedProps: none`): it lists every resolved prop, so a
-    /// checker merge takes every `@types/react` prop the checker finds.
+    /// Whether the answer lists every resolved prop: the expanded view (`collapseInheritedProps: none`), or a `Pick`
+    /// whose keys are not proven (what it selects is deliberate). A checker merge then takes every `@types/react` prop
+    /// the checker finds.
     pub(crate) fn expanded(&self) -> bool {
         !self.narrows
     }
