@@ -515,6 +515,8 @@ fn resolve_mapped_chain(
     depth: u8,
 ) -> ResolvedChain {
     let mut chain = ResolvedChain::empty();
+    let generated = copies_a_generated_key_set(keys);
+    // Only the keys an interface declares are its copies; a literal key beside them (`keyof Conditions | 'x'`) is not.
     for key in keys {
         // A `keyof` operand needs only the names (`ResolveState::keys_only`).
         let prop_type = if state.keys_only {
@@ -536,18 +538,46 @@ fn resolve_mapped_chain(
             .get("default")
             .or_else(|| key.tags.get("defaultValue"))
             .map(|value| DefaultValue { value: value.trim().to_owned(), computed: false });
-        chain.props.push(ctx.share(ParsedProp::new(
+        let mut prop = ParsedProp::new(
             key.name.clone(),
             prop_type,
             optional.map_or(key.required, |optional| !optional),
             default_value,
             key.description.clone(),
             key.tags.clone(),
-            None,
-            vec![],
-        )));
+            key.parent.clone(),
+            key.parent.iter().cloned().collect(),
+        );
+        prop.copied_from_large_keys = generated && key.parent.is_some();
+        chain.props.push(ctx.share(prop));
     }
     chain
+}
+
+/// Whether a mapped type over `keys` copies a generated set, by the nature of the key interface, never by its name: the
+/// keys of interfaces (`keyof Conditions`), past `COLLAPSE_THRESHOLD`, that are generated themselves (past
+/// `LARGE_API_SOURCE`, or React's own) or a table: every member required and of one declared type (Chakra's
+/// `Conditions`, 130 selectors each `string`). A props interface of the same size is the component's API: its members
+/// are optional or typed apart (a 40-member API copied with `{ [K in keyof Api]?: V }`), and a recipe's few variant
+/// keys (`keyof ButtonVariant`) are below the threshold.
+fn copies_a_generated_key_set(keys: &[super::evaluate::Key]) -> bool {
+    use crate::types::options::{COLLAPSE_THRESHOLD, LARGE_API_SOURCE};
+    let copied: Vec<&super::evaluate::Key> = keys.iter().filter(|key| key.parent.is_some()).collect();
+    let Some(first) = copied.first() else { return false };
+    if copied.len() <= COLLAPSE_THRESHOLD {
+        return false;
+    }
+    let react = copied
+        .iter()
+        .filter_map(|key| key.parent.as_ref())
+        .all(|parent| crate::origin::declaration_origin(&parent.file_name).is_ambient());
+    if copied.len() > LARGE_API_SOURCE || react {
+        return true;
+    }
+    // `CollectedType` has no equality; its derived `Debug` text is its exact structure.
+    let declared = |key: &super::evaluate::Key| key.value.as_ref().map(|value| format!("{value:?}"));
+    let one_type = declared(first);
+    one_type.is_some() && copied.iter().all(|key| key.required && declared(key) == one_type)
 }
 
 /// Resolve an intersection's members and merge them as TypeScript does (`ResolvedChain::intersect_member`). An HTML layer

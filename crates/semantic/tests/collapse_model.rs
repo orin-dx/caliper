@@ -199,7 +199,11 @@ fn the_structural_and_the_checker_lane_give_the_same_layers_and_props() {
                         Layers::new()
                     };
                     assert_eq!(layers(&checker, &key), expected, "layers of {case}");
-                    if load_dependencies {
+                    // `With{name}` gets relevance's placement from the structural answer, which narrows a
+                    // dependency's members its body never reads into a layer of names (ADR 0028, A2); the structural
+                    // answer gives `Only{name}` no member of this source, so it has no placement and the size rule
+                    // alone decides. They agree where nothing narrows.
+                    if load_dependencies && (collapse == CollapseInheritedProps::None || collapses) {
                         assert_eq!(layers(&checker, &key), layers(&checker, &format!("With{name}")), "{case}");
                     }
                     let listed = props(&checker, &key);
@@ -278,9 +282,12 @@ fn a_source_collapses_by_the_members_that_reach_the_component() {
             let entry = &output.components[&key];
             let huge: Vec<_> = entry.inheritance.iter().filter(|layer| layer.type_name == "Huge").collect();
             let listed = entry.props.keys().filter(|prop| prop.starts_with('h')).count();
+            // A source under the size rule is one of the component's main props (ADR 0028, A2): listed whole, with no
+            // evidence needed.
             if collapses {
                 assert_eq!(huge.len(), 1, "{lane} {key}: one Huge layer");
                 assert_eq!(huge[0].total_props as usize, *reaching, "{lane} {key}: what the layer holds");
+                assert_eq!(listed, 0, "{lane} {key}: listed");
             } else {
                 assert!(huge.is_empty(), "{lane} {key}: no Huge layer");
                 assert_eq!(listed, *reaching, "{lane} {key}: listed");
@@ -581,7 +588,8 @@ fn a_checker_only_source_collapses_only_where_it_is_proven_to_reach_whole() {
 /// The red team's repros of change 267 (`redteam-collapse.md`), in both lanes:
 /// - D1: a prop a project file declares is the component's own, never React's, so an own prop of a React name beside an
 ///   element layer is kept (`OwnOverReact`, `KeyRef`); a dependency's redeclaration of a React name stays React's, left
-///   to the element layer (`CpwrAndDep`, `LegendLike`);
+///   to the element layer, unless the dependency's own small source declares it too: then it is API, listed
+///   (`CpwrAndDep`, `LegendLike`);
 /// - D2, D3, D4, D7: a prop is shown once, the listed one wins over a layer member and a name sits in one layer
 ///   (`assert_shown_once`);
 /// - D5: an `Omit` whose keys are not a finite union of string literals collapses nothing, so no layer holds a member
@@ -626,15 +634,21 @@ fn redteam_each_prop_is_shown_once_and_never_lost() {
             ("OwnOverReact", &["className", "onClick", "title", "own"][..]),
             ("KeyRef", &["key"]),
             ("Redeclared", &["a1", "className"]),
-            ("LegendLike", &["hideIcon", "payload"]),
+            ("LegendLike", &["hideIcon"]),
         ] {
             let listed = props(output, key);
             wrong.extend(
                 own.iter().filter(|name| !listed.contains(**name)).map(|name| format!("{lane} {key}: {name} dropped")),
             );
         }
-        // A dependency's redeclaration of a React name stays React's, left to the element layer (the structural lane
-        // lists React's attributes for these forms, out of scope here).
+        // A member of a small dependency source is one of the component's main props: listed with no evidence
+        // (ADR 0028, A2).
+        if !props(output, "LegendLike").contains("payload") {
+            wrong.push(format!("{lane} LegendLike: payload not listed"));
+        }
+        // A dependency's redeclaration of a React name is the dependency's API (ADR 0028, A2: a member is ambient only
+        // when every declaration of it is), so it is listed: `DepLegend` declares 4, and `Omit<DepBig, 'onClick'>`
+        // reaches with 200, not past `LARGE_API_SOURCE`.
         if lane == "checker" {
             for (key, react) in [
                 ("CpwrAndDep", &["className", "style", "id", "children"][..]),
@@ -644,8 +658,8 @@ fn redteam_each_prop_is_shown_once_and_never_lost() {
                 wrong.extend(
                     react
                         .iter()
-                        .filter(|name| listed.contains(**name))
-                        .map(|name| format!("{lane} {key}: {name} listed")),
+                        .filter(|name| !listed.contains(**name))
+                        .map(|name| format!("{lane} {key}: {name} not listed")),
                 );
             }
         }

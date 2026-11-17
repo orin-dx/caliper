@@ -255,7 +255,12 @@ fn the_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_html_at
                 "{key} under {mode:?}: the curated attributes are the structural pass's"
             );
             if mode == HtmlAttributeMode::Full && key == "Div" {
-                assert!(names(&before).iter().any(|name| name == "className"), "Full lists the real attributes");
+                // Full makes the real attributes known; with no evidence for them they are names in the layer, not
+                // rows (ADR 0028, A2), in both lanes alike.
+                let known = |answer: &caliper_docgen_core::pipeline::ComponentAnswer| {
+                    answer.entry.inheritance.iter().any(|layer| layer.members.iter().any(|name| name == "className"))
+                };
+                assert!(known(&before) && known(&after), "Full knows the real attributes");
             }
         }
     }

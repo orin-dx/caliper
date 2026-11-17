@@ -32,6 +32,12 @@ pub(super) struct Key {
     pub(super) description: String,
     /// The JSDoc tags of the source member (`@default "md"`).
     pub(super) tags: std::collections::BTreeMap<String, String>,
+    /// The interface that declares the key, for `keyof` an interface: a homomorphic mapped type's member keeps it as its
+    /// `parent`, as TypeScript keeps the member's declaration (`{ [K in keyof Conditions]?: V }`). `None` for keys of
+    /// any other form.
+    pub(super) parent: Option<crate::types::PropParent>,
+    /// The source member's declared type, for `keyof` an interface (`Key::parent`); `None` for keys of any other form.
+    pub(super) value: Option<CollectedType>,
 }
 
 /// `ty` with a decidable conditional replaced by its branch, or an indexed access by the member it reads. `None` when
@@ -115,6 +121,8 @@ pub(super) fn mapped_keys(
                             required: true,
                             description: String::new(),
                             tags: Default::default(),
+                            parent: None,
+                            value: None,
                         }),
                         _ => None,
                     })
@@ -133,7 +141,14 @@ pub(super) fn mapped_keys(
             Some(
                 names
                     .map(|name| {
-                        Some(Key { name: name?, required: true, description: String::new(), tags: Default::default() })
+                        Some(Key {
+                            name: name?,
+                            required: true,
+                            description: String::new(),
+                            tags: Default::default(),
+                            parent: None,
+                            value: None,
+                        })
                     })
                     .collect::<Option<_>>()?,
             )
@@ -141,7 +156,14 @@ pub(super) fn mapped_keys(
         other => Some(
             literal_set(other)?
                 .into_iter()
-                .map(|name| Key { name, required: true, description: String::new(), tags: Default::default() })
+                .map(|name| Key {
+                    name,
+                    required: true,
+                    description: String::new(),
+                    tags: Default::default(),
+                    parent: None,
+                    value: None,
+                })
                 .collect(),
         ),
     }
@@ -506,6 +528,8 @@ pub(super) fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionC
                     required: f.required,
                     description: f.description.clone(),
                     tags: Default::default(),
+                    parent: None,
+                    value: None,
                 })
                 .collect(),
         ),
@@ -542,6 +566,11 @@ fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8
                 required: prop.required,
                 description: prop.description.clone(),
                 tags: prop.tags.clone(),
+                parent: Some(crate::types::PropParent {
+                    name: iface.name.to_string(),
+                    file_name: iface.file_path.to_string(),
+                }),
+                value: Some(prop.collected_type.clone()),
             });
         }
     }

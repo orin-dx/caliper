@@ -13,6 +13,7 @@ fn entry(name: &str, props: &[(&str, &Arc<ParsedProp>)], notable: &[(&str, &Arc<
         list.iter().map(|(key, prop)| ((*key).to_owned(), Arc::clone(prop))).collect()
     };
     ComponentEntry {
+        relevance: None,
         display_name: name.into(),
         file_path: format!("src/{name}.tsx").into(),
         description: String::new(),

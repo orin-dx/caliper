@@ -434,6 +434,7 @@ mod serde_key_casing_tests {
         props.insert("label".to_string(), std::sync::Arc::new(prop));
 
         let entry = ComponentEntry {
+            relevance: None,
             display_name: "Widget".to_string(),
             file_path: "Widget.tsx".into(),
             description: String::new(),

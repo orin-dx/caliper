@@ -232,17 +232,33 @@ impl<'a> Visit<'a> for Finder<'_> {
         self.walk_function(it.span, |finder| walk::walk_arrow_function_expression(finder, it));
     }
 
-    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+    fn visit_jsx_element(&mut self, it: &JSXElement<'a>) {
         if self.owned == 0 {
-            self.usages.push(usage_of(it, self.scoping));
+            self.usages.push(usage_of(&it.opening_element, passes_children(it), self.scoping));
         }
-        walk::walk_jsx_opening_element(self, it);
+        walk::walk_jsx_element(self, it);
     }
 }
 
-/// One file-level element: its tag keyed by binding ([`scoped`]), and its attributes.
-fn usage_of(it: &JSXOpeningElement<'_>, scoping: &Scoping) -> JsxUsage {
-    let attributes = it
+/// Whether `element` passes the `children` prop through its JSX children: the JSX transform sets `children` from
+/// them, after every attribute, unless all it has is layout whitespace (text of spaces with a line break) or empty
+/// expressions (`{/* comment */}`), which the transform drops.
+fn passes_children(element: &JSXElement<'_>) -> bool {
+    element.children.iter().any(|child| match child {
+        JSXChild::Text(text) => {
+            // JSX whitespace is spaces, tabs and line terminators; any other character (a no-break space) is text.
+            let layout = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r');
+            !(text.value.contains(['\n', '\r']) && text.value.chars().all(layout))
+        }
+        JSXChild::ExpressionContainer(container) => !matches!(container.expression, JSXExpression::EmptyExpression(_)),
+        JSXChild::Element(_) | JSXChild::Fragment(_) | JSXChild::Spread(_) => true,
+    })
+}
+
+/// One file-level element: its tag keyed by binding ([`scoped`]), and its attributes, `children` last when its JSX
+/// children pass it ([`passes_children`]).
+fn usage_of(it: &JSXOpeningElement<'_>, children: bool, scoping: &Scoping) -> JsxUsage {
+    let mut attributes: Vec<JsxUsageAttribute> = it
         .attributes
         .iter()
         .map(|attribute| match attribute {
@@ -250,6 +266,9 @@ fn usage_of(it: &JSXOpeningElement<'_>, scoping: &Scoping) -> JsxUsage {
             JSXAttributeItem::SpreadAttribute(_) => JsxUsageAttribute::Spread,
         })
         .collect();
+    if children {
+        attributes.push(JsxUsageAttribute::Named("children".to_owned()));
+    }
     JsxUsage { tag: scoped(scoping, tag_of(&it.name), &it.name), attributes }
 }
 
@@ -324,8 +343,9 @@ impl<'s, 'a> Reader<'s, 'a> {
                 self.whole.remove(&symbol);
                 continue;
             }
+            let whole = self.whole.get(&symbol).copied();
             for reference in self.scoping.get_resolved_references(symbol) {
-                self.classify(reference.node_id());
+                self.classify(reference.node_id(), whole);
             }
         }
         // A key's first read is its earliest in the source.
@@ -452,8 +472,9 @@ impl<'s, 'a> Reader<'s, 'a> {
         (parent, child)
     }
 
-    /// Classifies one reference to the props object; any use not named here hands it on.
-    fn classify(&mut self, reference: NodeId) {
+    /// Classifies one reference to the props object (or a rest binding of it, `whole`); any use not named here hands it
+    /// on.
+    fn classify(&mut self, reference: NodeId, whole: Option<SpreadOf>) {
         let (parent, child) = self.through_wrappers(reference);
         let read = match self.nodes.kind(parent) {
             AstKind::StaticMemberExpression(member) if member.object.span() == child => {
@@ -467,8 +488,26 @@ impl<'s, 'a> Reader<'s, 'a> {
             AstKind::VariableDeclarator(declarator)
                 if declarator.init.as_ref().is_some_and(|init| init.span() == child) =>
             {
-                match &declarator.id {
-                    BindingPattern::ObjectPattern(object) => self.destructure(object),
+                match (&declarator.id, whole) {
+                    (BindingPattern::ObjectPattern(object), _) => self.destructure(object),
+                    // `const p = props`: an alias is the props object itself, followed as it is (a binding ever
+                    // written is dropped when its references are classified). Only `const` and `let`: a `var` can be
+                    // redeclared or read before it holds the value.
+                    (BindingPattern::BindingIdentifier(id), Some(whole))
+                        if matches!(
+                            self.nodes.kind(self.nodes.parent_id(parent)),
+                            AstKind::VariableDeclaration(declaration) if matches!(
+                                declaration.kind,
+                                oxc_ast::ast::VariableDeclarationKind::Const
+                                    | oxc_ast::ast::VariableDeclarationKind::Let
+                            )
+                        ) =>
+                    {
+                        match id.symbol_id.get() {
+                            Some(symbol) => self.track(symbol, whole),
+                            None => self.facts.handed_on = true,
+                        }
+                    }
                     _ => self.facts.handed_on = true,
                 }
                 return;
@@ -688,7 +727,9 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
         self.in_nested(nested, |elements| walk::walk_class(elements, it));
     }
 
-    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+    fn visit_jsx_element(&mut self, element: &JSXElement<'a>) {
+        let it = &element.opening_element;
+        let children = passes_children(element);
         if self.nested > 0 {
             // A nested component's elements are not this body's: a spread of the props or a rest binding there is
             // recorded nowhere, so it hands them on.
@@ -696,9 +737,9 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
                 matches!(attribute, JSXAttributeItem::SpreadAttribute(spread)
                     if self.reader.whole_expr(&spread.argument).is_some())
             });
-            self.nested_usages.push(usage_of(it, self.reader.scoping));
+            self.nested_usages.push(usage_of(it, children, self.reader.scoping));
         } else {
-            let attributes = it
+            let mut attributes: Vec<JsxAttributeFact> = it
                 .attributes
                 .iter()
                 .map(|attribute| match attribute {
@@ -711,10 +752,14 @@ impl<'a> Visit<'a> for Elements<'_, '_, 'a> {
                     }
                 })
                 .collect();
+            // JSX children set `children` after every attribute, so it is fixed after any spread.
+            if children {
+                attributes.push(JsxAttributeFact::Named { name: "children".to_owned(), prop: None });
+            }
             self.elements
                 .push(JsxElementFact { tag: scoped(self.reader.scoping, tag_of(&it.name), &it.name), attributes });
         }
-        walk::walk_jsx_opening_element(self, it);
+        walk::walk_jsx_element(self, element);
     }
 }
 

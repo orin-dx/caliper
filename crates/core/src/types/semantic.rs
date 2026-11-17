@@ -3,7 +3,7 @@
 //! The backend (`caliper-docgen-semantic`) owns the process, the protocol and the checker walk; this module owns only
 //! the result shape and the merge rules of `docs/type-checker-integration.md`, so `crates/core` stays free of I/O.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
@@ -179,7 +179,7 @@ pub struct SemanticTarget {
     /// under [`ResolverFacts::NoFallback`] ([`ResolverFacts::ready`]), whose merge keeps no structural description.
     pub described: rustc_hash::FxHashSet<String>,
     /// Which props `@types/react` declares the checker reports: `None` for all of them, else only these names. The
-    /// session decides from `htmlAttributes` (`react_types::react_props_wanted`); the checker never filters by itself.
+    /// session decides from `htmlAttributes` (`react_types::react_props_wanted_for`); the checker never filters by itself.
     pub react_wanted: Option<rustc_hash::FxHashSet<String>>,
     /// What the merge of the answer decides its collapsed layers from, when the caller merges it that way: the checker
     /// then converts only the props the merge keeps, and reports each other one by name and `parent` with
@@ -425,21 +425,25 @@ fn apply_props(
     resolver: ResolverFacts,
     cx: CollapseContext,
 ) -> MergedProps {
-    // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers. A component
-    // with no layer has nowhere to leave them: a context's `Provider` (`value`, `children`) or a `th`/`td` attribute
-    // intersection names no element. Its `@types/react` props the structural pass lists stay, as the curated mode
-    // keeps them (`targets_of` asks the checker for those names only, `key` among them only if the component lists it).
-    let layered = !entry.inheritance.is_empty();
+    // The whole-project merge replaces the props. Of `@types/react`'s it takes those the structural answer lists, as
+    // the session's merge does (`react_types::checker_prop_kept`): relevance decided them there (ADR 0028), and the rest are names
+    // in the inheritance layers. The expanded view (`collapseInheritedProps: none`) takes every one the checker finds,
+    // also where the structural pass found none (`ReturnType<typeof makeProps>`): this merge reads no
+    // `htmlAttributes`, so it is `full`'s answer.
+    let expanded = crate::react_types::expanded(entry, cx.mode);
+    let visible = crate::react_types::visible_rows(entry);
+    let mode = crate::react_types::react_attribute_mode(crate::types::options::HtmlAttributeMode::Full, expanded);
     let own: Vec<&Arc<SemanticProp>> = semantic
         .props
         .iter()
-        .filter(|prop| !prop.react_declared || (!layered && entry.props.contains_key(&prop.name)))
+        .filter(|prop| crate::react_types::checker_prop_kept(mode, &prop.name, prop.react_declared, &visible))
         .collect();
     let (own, notable) = layer_checker_props(entry, own, &semantic.whole, cx);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
     let merged = replace_props(entry, own.into_iter(), &merge, shared, memo);
     move_notable(entry, &notable);
     listed_props_leave_layers(entry, true);
+    crate::relevance::narrow(entry);
     merged
 }
 
@@ -562,28 +566,56 @@ pub struct LayerFacts {
     parents: Vec<PropParent>,
     /// Each inheritance layer's source, by type name and file.
     sources: Vec<(String, String)>,
-    /// The members of every inheritance layer, each by (name, the layer's type name, its file) ([`Held`]).
-    members: std::collections::BTreeSet<(String, String, String)>,
+    /// The members of every inheritance layer under the layer's source, by type name and file ([`Held`]): sources in
+    /// order, each once with its layers' names sorted and each once, and no source without a name. Grouped so that a
+    /// source's path is held once per component, not once per name.
+    members: Vec<SourceMembers>,
     /// The notable members of its collapsed layers it does not list, with their source ([`layer_notable`]).
     notable: Vec<(String, PropParent)>,
 }
 
-/// The notable members (`className`, `style`, …) of `entry`'s collapsed layers that it does not list itself, each with
-/// its layer's source: the merge merges the checker's answer for each and moves it back to `notableInherited`.
+/// The notable members of `entry`'s collapsed layers that it does not list itself, each with its layer's source: the
+/// members the structural answer keeps typed in `notableInherited` from that same source (the curated `className`,
+/// `style`, …, and every member the body reads), whatever made them so. The merge merges the checker's answer for each
+/// and moves it back to `notableInherited`: one owner, the structural answer, says which are visible rows.
 fn layer_notable(entry: &ComponentEntry) -> Vec<(String, PropParent)> {
-    let notable_names = crate::react_types::notable_html_attrs("");
     entry
         .inheritance
         .iter()
         .filter(|layer| layer.html_element.is_none())
         .flat_map(|layer| {
+            let source = |prop: &std::sync::Arc<ParsedProp>| {
+                prop.parent
+                    .as_ref()
+                    .is_some_and(|parent| parent.name == layer.type_name && parent.file_name == layer.file_name)
+            };
             layer
                 .members
                 .iter()
-                .filter(|name| notable_names.contains(&name.as_str()) && !entry.props.contains_key(*name))
+                .filter(move |name| {
+                    !entry.props.contains_key(*name) && entry.notable_inherited.get(*name).is_some_and(source)
+                })
                 .map(|name| {
                     (name.clone(), PropParent { name: layer.type_name.clone(), file_name: layer.file_name.clone() })
                 })
+        })
+        .collect()
+}
+
+/// A layer source, by type name and file, with the names of its members, sorted and each once.
+type SourceMembers = ((String, String), Box<[Box<str>]>);
+
+/// The members of `entry`'s inheritance layers by source, as [`LayerFacts`] holds them.
+fn layer_members(entry: &ComponentEntry) -> Vec<SourceMembers> {
+    let mut members: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
+    for layer in entry.inheritance.iter().filter(|layer| !layer.members.is_empty()) {
+        let names = members.entry((layer.type_name.as_str(), layer.file_name.as_str())).or_default();
+        names.extend(layer.members.iter().map(String::as_str));
+    }
+    members
+        .into_iter()
+        .map(|((type_name, file_name), names)| {
+            ((type_name.to_owned(), file_name.to_owned()), names.into_iter().map(Box::from).collect())
         })
         .collect()
 }
@@ -601,13 +633,7 @@ impl LayerFacts {
             listed: entry.props.keys().cloned().collect(),
             parents,
             sources: entry.inheritance.iter().map(|layer| (layer.type_name.clone(), layer.file_name.clone())).collect(),
-            members: entry
-                .inheritance
-                .iter()
-                .flat_map(|layer| {
-                    layer.members.iter().map(|name| (name.clone(), layer.type_name.clone(), layer.file_name.clone()))
-                })
-                .collect(),
+            members: layer_members(entry),
             notable: layer_notable(entry),
         }
     }
@@ -653,7 +679,9 @@ impl Layering {
             .facts
             .members
             .iter()
-            .map(|(name, type_name, file_name)| (name.as_str(), type_name.as_str(), file_name.as_str()))
+            .flat_map(|((type_name, file_name), names)| {
+                names.iter().map(|name| (&**name, type_name.as_str(), file_name.as_str()))
+            })
             .chain(layers.iter().flat_map(|layer| {
                 layer.members.iter().map(|name| (name.as_str(), layer.type_name.as_str(), layer.file_name.as_str()))
             }))

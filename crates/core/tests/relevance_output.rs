@@ -53,10 +53,14 @@ fn a_collapsed_layer_names_the_ambient_members_consumers_pass() {
         let layer = button.inheritance.iter().find(|layer| layer.type_name == type_name).unwrap();
         layer.used.iter().map(String::as_str).collect()
     };
-    // Ambient and passed at every call site, or read in the body: a `used` name in its layer, in the layer's order.
-    assert_eq!(used("DomBits"), ["d1", "d2"]);
-    // A project member put forward is a typed row, never a `used` name; with nothing put forward, none is named.
-    assert_eq!(used("Big"), [] as [&str; 0]);
+    // Ambient and passed at every call site: a `used` name in its layer. A member the body reads is a typed row: the
+    // collapsed source keeps it typed (ADR 0028, A2: reads promote from layers).
+    assert_eq!(used("DomBits"), ["d1"]);
+    // A project member passed at the floor whose source is collapsed has no typed row to list: it is named in `used`
+    // instead, so evidence never goes unnamed.
+    assert_eq!(used("Big"), ["b1"]);
+    let notable: Vec<&str> = button.notable_inherited.keys().map(String::as_str).collect();
+    assert_eq!(notable, ["b2", "d2"]);
 }
 
 #[test]
@@ -67,14 +71,14 @@ fn the_canonical_json_writes_used_at_schema_version_8() {
     assert_eq!(json["schemaVersion"], 8);
     let layers = json["components"]["Button"]["inheritance"].as_array().unwrap();
     let dom = layers.iter().find(|layer| layer["typeName"] == "DomBits").unwrap();
-    assert_eq!(dom["used"], serde_json::json!(["d1", "d2"]));
+    assert_eq!(dom["used"], serde_json::json!(["d1"]));
     assert!(json["components"]["Button"].get("relevance").is_none());
     let big = layers.iter().find(|layer| layer["typeName"] == "Big").unwrap();
-    assert!(big.get("used").is_none(), "an empty `used` is not written");
+    assert_eq!(big["used"], serde_json::json!(["b1"]));
 }
 
-/// A collapsed ambient prop the signature gives a destructuring default is read by the body, so its layer names it in
-/// `used`; a default on a project member adds nothing (it is a typed row).
+/// A collapsed ambient prop the signature gives a destructuring default is read by the body, so its collapsed source
+/// keeps it typed: a row, not a `used` name; so does a defaulted project member.
 #[test]
 fn a_collapsed_ambient_prop_with_a_destructuring_default_is_used() {
     let dir = tempfile::Builder::new().prefix("RelevanceDefault").tempdir().unwrap();
@@ -100,10 +104,11 @@ fn a_collapsed_ambient_prop_with_a_destructuring_default_is_used() {
         ..PipelineOptions::default()
     };
     let output = extract(&options);
-    let layers = &output.components["Button"].inheritance;
-    let used = |type_name: &str| layers.iter().find(|layer| layer.type_name == type_name).unwrap().used.clone();
-    assert_eq!(used("DomBits"), ["d2"], "{layers:?}");
-    assert!(used("Big").is_empty(), "a project member is a typed row, never `used`: {layers:?}");
+    let button = &output.components["Button"];
+    let layers = &button.inheritance;
+    assert!(layers.iter().all(|layer| layer.used.is_empty()), "{layers:?}");
+    let notable: Vec<&str> = button.notable_inherited.keys().map(String::as_str).collect();
+    assert_eq!(notable, ["b2", "d2"]);
 }
 
 /// A file-level element whose tag is a local binding of the same name as an imported component is not a call site of
@@ -143,4 +148,66 @@ fn a_local_binding_named_like_an_imported_component_is_not_its_call_site() {
     let output = extract(&options);
     let layer = &output.components["Button"].inheritance[0];
     assert_eq!(layer.used, ["d2"], "the imported binding's sites only: {layer:?}");
+}
+
+/// JSX children pass `children`, as the JSX transform does: three `<Box>…</Box>` sites put the ambient `children`
+/// forward, while layout whitespace and an empty expression pass nothing.
+#[test]
+fn jsx_children_pass_children_at_a_call_site() {
+    let dir = tempfile::Builder::new().prefix("RelevanceChildren").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    std::fs::create_dir_all(root.join("vendor/@types/react")).unwrap();
+    let fields: String = (0..33).map(|i| format!("d{i}?: string; ")).collect();
+    std::fs::write(
+        root.join("vendor/@types/react/dom.ts"),
+        format!("export interface DomBits {{ children?: string; {fields}}}\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("Box.tsx"),
+        "import type { DomBits } from './vendor/@types/react/dom';\n\
+         export interface BoxProps extends DomBits { tone?: string }\n\
+         export function Box(props: BoxProps) { return null; }\n",
+    )
+    .unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        use_cache: false,
+        html_attributes: HtmlAttributeMode::None,
+        collapse_inherited_props: CollapseInheritedProps::All,
+        ..PipelineOptions::default()
+    };
+    let used = |sites: &str| {
+        std::fs::write(root.join("Page.tsx"), format!("import {{ Box }} from './Box';\n{sites}")).unwrap();
+        extract(&options).components["Box"].inheritance[0].used.clone()
+    };
+    let passed = used(
+        "export const a = <Box>x</Box>;\nexport const b = <Box>{'y'}</Box>;\nexport const c = <Box><b /></Box>;\n",
+    );
+    assert_eq!(passed, ["children"]);
+    let none =
+        used("export const a = <Box>\n</Box>;\nexport const b = <Box>{/* none */}</Box>;\nexport const c = <Box />;\n");
+    assert!(none.is_empty(), "{none:?}");
+}
+
+/// A homomorphic mapped type's member keeps the interface that declares its key as its `parent`, as the checker says
+/// (`{ [K in keyof Conditions]?: V }`, Chakra's condition props): relevance needs the source in both lanes, or a member
+/// the checker gives a source and the structural answer does not stays listed in both.
+#[test]
+fn a_member_of_a_mapped_type_over_keyof_an_interface_has_that_interface_as_parent() {
+    let dir = tempfile::Builder::new().prefix("RelevanceMapped").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    std::fs::write(
+        root.join("Box.tsx"),
+        "export interface Conds { _hover: string; _active: string }\n\
+         type ByCondition = { [K in keyof Conds]?: number };\n\
+         export function Box(props: ByCondition & { tone?: string }) { return null; }\n",
+    )
+    .unwrap();
+    let options = PipelineOptions { src_dirs: vec![root.clone()], use_cache: false, ..PipelineOptions::default() };
+    let output = extract(&options);
+    let hover = &output.components["Box"].props["_hover"];
+    let parent = hover.parent.as_ref().expect("a parent");
+    assert_eq!((parent.name.as_str(), parent.file_name.as_str()), ("Conds", root.join("Box.tsx").as_str()));
+    assert!(output.components["Box"].props["tone"].parent.is_none(), "a type literal's field has none");
 }

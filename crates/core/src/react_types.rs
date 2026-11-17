@@ -418,41 +418,65 @@ pub fn is_curated_html_attr(element: &str, name: &str) -> bool {
         || notable_html_attrs(element).contains(&name)
 }
 
-/// Whether the checker's answer for a prop is used, under `mode`. The structural pass keeps the props the checker does
-/// not return either way, so this decides only what the checker adds: its own props always, and the props
-/// `@types/react` declares (`children`, `aria-*`, handlers, `className`) as `mode` defines them. `Full` takes all of
-/// them; `Curated` and `None` take those the structural pass lists among the component's props (`children` through
-/// `PropsWithChildren`), because the curated attributes and the none-mode absence are the structural pass's to give.
-pub fn checker_prop_used(
+/// The `htmlAttributes` mode the checker's React props are taken by, from the run's `mode` and whether the structural
+/// answer is the `expanded` view (`collapseInheritedProps: none`, which lists every resolved prop). Expanded, the
+/// run's own mode: `Full` takes every React prop the checker finds, also where the structural pass found none (props
+/// written `ReturnType<typeof makeProps>`). Otherwise `Curated`: which React props are rows is relevance's decision
+/// (ADR 0028), made once on the structural answer.
+pub fn react_attribute_mode(
+    mode: crate::pipeline::HtmlAttributeMode,
+    expanded: bool,
+) -> crate::pipeline::HtmlAttributeMode {
+    if expanded { mode } else { crate::pipeline::HtmlAttributeMode::Curated }
+}
+
+/// The names `entry`, a structural answer, shows as typed rows: its `props` and its `notableInherited` (a curated
+/// attribute, a member the body reads). A name relevance puts forward that the answer holds only in a layer's `used`
+/// list stays a name in both lanes, so the lanes list the same rows. The one answer of which names are visible that
+/// both checker merges and the checker's request read.
+pub fn visible_rows(entry: &crate::types::ComponentEntry) -> std::collections::BTreeSet<String> {
+    entry.props.keys().chain(entry.notable_inherited.keys()).cloned().collect()
+}
+
+/// Whether a checker merge takes the checker's prop `name` under `mode` ([`react_attribute_mode`]): its own props
+/// always; a `@types/react` prop under `Full`, else only where it is one of the `visible` rows ([`visible_rows`]).
+pub(crate) fn checker_prop_kept(
     mode: crate::pipeline::HtmlAttributeMode,
     name: &str,
     react_declared: bool,
-    structural_props: &std::collections::BTreeMap<String, std::sync::Arc<crate::types::ParsedProp>>,
+    visible: &std::collections::BTreeSet<String>,
 ) -> bool {
-    use crate::pipeline::HtmlAttributeMode;
-    if !react_declared {
-        return true;
-    }
-    if REACT_SPECIAL_PROPS.contains(&name) {
-        return false;
-    }
+    let react_row = !REACT_SPECIAL_PROPS.contains(&name);
     match mode {
-        HtmlAttributeMode::Full => true,
-        HtmlAttributeMode::Curated | HtmlAttributeMode::None => structural_props.contains_key(name),
+        crate::pipeline::HtmlAttributeMode::Full => !react_declared || react_row,
+        crate::pipeline::HtmlAttributeMode::Curated | crate::pipeline::HtmlAttributeMode::None => {
+            !react_declared || (react_row && visible.contains(name))
+        }
     }
 }
 
-/// The `@types/react` props the checker is asked to report under `mode`: `None` for all of them, else only these
-/// names. Asking for fewer is the same answer as [`checker_prop_used`] gives, without converting the types of
-/// hundreds of DOM attributes per component.
-pub fn react_props_wanted(
+/// The `@types/react` props the checker is asked to report for `entry` under `mode`: all under `Full`, else its
+/// [`visible_rows`], the only ones the checker merges take.
+pub fn react_props_wanted_for(
     mode: crate::pipeline::HtmlAttributeMode,
-    structural_props: &std::collections::BTreeMap<String, std::sync::Arc<crate::types::ParsedProp>>,
+    entry: &crate::types::ComponentEntry,
 ) -> Option<rustc_hash::FxHashSet<String>> {
     match mode {
         crate::pipeline::HtmlAttributeMode::Full => None,
-        _ => Some(structural_props.keys().cloned().collect()),
+        crate::pipeline::HtmlAttributeMode::Curated | crate::pipeline::HtmlAttributeMode::None => {
+            Some(visible_rows(entry).into_iter().collect())
+        }
     }
+}
+
+/// Whether `entry` lists every resolved prop ([`react_attribute_mode`]): its placement says so, or, with no placement
+/// (no evidence gathered), the run's `collapse` is the expanded view. The one answer both checker merges and the
+/// checker's request read.
+pub fn expanded(entry: &crate::types::ComponentEntry, collapse: crate::types::options::CollapseInheritedProps) -> bool {
+    entry
+        .relevance
+        .as_ref()
+        .map_or(collapse == crate::types::options::CollapseInheritedProps::None, |placement| placement.expanded())
 }
 
 /// Returns the curated list of notable HTML attribute prop names for a given element.
@@ -840,5 +864,47 @@ mod tests {
         assert_eq!(notable_html_attrs("div"), generic);
         assert_eq!(notable_html_attrs("span"), generic);
         assert_eq!(notable_html_attrs(""), generic, "an empty element name should also hit the generic default");
+    }
+
+    #[test]
+    fn a_notable_inherited_row_is_visible_and_wanted_from_the_checker() {
+        // A member the body reads from a collapsed source is kept typed in `notableInherited`: both checker merges keep
+        // it and the checker's request names it, as for a row in `props`.
+        let prop = |name: &str| {
+            let prop = crate::types::output::ParsedProp::new(
+                name.to_owned(),
+                crate::types::output::PropType::Any,
+                false,
+                None,
+                String::new(),
+                std::collections::BTreeMap::new(),
+                None,
+                vec![],
+            );
+            (name.to_owned(), std::sync::Arc::new(prop))
+        };
+        let entry = crate::types::ComponentEntry {
+            relevance: None,
+            display_name: "Button".to_owned(),
+            file_path: "/p/button.tsx".into(),
+            description: String::new(),
+            props: [prop("variant")].into_iter().collect(),
+            inheritance: vec![],
+            notable_inherited: [prop("title")].into_iter().collect(),
+            discriminant_prop: None,
+            composes: vec![],
+            tags: std::collections::BTreeMap::new(),
+            methods: vec![],
+            detected_by: crate::types::DetectionRule::FunctionDeclaration,
+            exported: true,
+            exports: vec![crate::types::ComponentExport::named("Button")],
+        };
+        let visible = visible_rows(&entry);
+        assert_eq!(visible.iter().map(String::as_str).collect::<Vec<_>>(), ["title", "variant"]);
+        let curated = crate::pipeline::HtmlAttributeMode::Curated;
+        assert!(checker_prop_kept(curated, "title", true, &visible));
+        assert!(!checker_prop_kept(curated, "onClick", true, &visible));
+        let wanted = react_props_wanted_for(curated, &entry).expect("curated names what it wants");
+        assert!(wanted.contains("title") && wanted.contains("variant") && !wanted.contains("onClick"));
     }
 }

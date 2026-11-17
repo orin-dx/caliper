@@ -27,7 +27,6 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use super::ComponentAnswer;
 use crate::pipeline::HtmlAttributeMode;
-use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::options::CollapseContext;
 use crate::types::semantic::{
@@ -218,6 +217,7 @@ impl SemanticHook {
         cx: CollapseContext,
         priority: Priority,
     ) -> ComponentAnswer {
+        let mode = crate::react_types::react_attribute_mode(mode, crate::react_types::expanded(&answer.entry, cx.mode));
         // The checker converts only the props this merge keeps, decided from the structural answer and `cx`: an answer
         // is kept and joined for those too, so another structural answer is never merged with props left unconverted.
         let layering = Layering::of(&answer.entry, cx);
@@ -335,10 +335,11 @@ impl SemanticHook {
             return;
         };
         let structural = answer.entry.props.clone();
+        let visible = crate::react_types::visible_rows(&answer.entry);
         let used: Vec<&Arc<SemanticProp>> = component
             .props
             .iter()
-            .filter(|prop| checker_prop_used(mode, &prop.name, prop.react_declared, &structural))
+            .filter(|prop| crate::react_types::checker_prop_kept(mode, &prop.name, prop.react_declared, &visible))
             .collect();
         // The props of a collapsed source are its layer's, not listed again.
         let (used, notable) =
@@ -356,6 +357,7 @@ impl SemanticHook {
         );
         crate::types::semantic::move_notable(&mut answer.entry, &notable);
         crate::types::semantic::listed_props_leave_layers(&mut answer.entry, true);
+        crate::relevance::narrow(&mut answer.entry);
         let superseding = Superseding::new(&answer.key, &answer.entry, structural_left);
         drop_superseded(&mut answer.diagnostics, &[superseding]);
         answer.diagnostics.extend(diagnostics);
@@ -394,7 +396,7 @@ fn target_of(answer: &ComponentAnswer, mode: HtmlAttributeMode, layering: Layeri
             .filter(|prop| !prop.description.is_empty())
             .map(|prop| prop.name.clone())
             .collect(),
-        react_wanted: react_props_wanted(mode, &answer.entry.props),
+        react_wanted: crate::react_types::react_props_wanted_for(mode, &answer.entry),
         layering: Some(layering),
     }
 }

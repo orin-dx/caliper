@@ -86,6 +86,7 @@ fn format_component_renders_header_description_props_table_and_inherited_note() 
         )
     };
     let entry = ComponentEntry {
+        relevance: None,
         display_name: "Widget".into(),
         file_path: "src/Widget.tsx".into(),
         description: "A widget.".into(),

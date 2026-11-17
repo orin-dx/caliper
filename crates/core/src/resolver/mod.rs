@@ -937,7 +937,7 @@ pub(crate) fn resolve_component_tracked(
         // The evidence reads other files (the props type's declarations, a forwarding target's props), so it is read
         // while the answer's dependencies are recorded. A panic gathering it leaves it unknown, never the answer lost.
         let label = format!("relevance:{}", mapping.component_name);
-        let evidence = crate::panic_guard::contain_panic(&label, || relevance_inputs::evidence(mapping, ctx));
+        let evidence = crate::panic_guard::contain_panic(&label, || relevance_inputs::evidence(mapping, ctx, &entry));
         (entry, diagnostics, evidence)
     });
     deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
@@ -957,6 +957,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
 /// The entry of a candidate with nothing to document: no props and no layers, which the output leaves out.
 fn unpublished_entry(mapping: &ComponentMapping) -> ComponentEntry {
     ComponentEntry {
+        relevance: None,
         display_name: mapping.component_name.clone(),
         file_path: mapping.file_path.clone(),
         description: mapping.description.clone(),
@@ -1137,6 +1138,7 @@ pub(crate) fn resolve_component_shared(
     let discriminant_prop = chain.discriminant_prop;
 
     let mut entry = ComponentEntry {
+        relevance: None,
         display_name: mapping.component_name.clone(),
         file_path: mapping.file_path.clone(),
         description: mapping.description.clone(),

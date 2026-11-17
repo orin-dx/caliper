@@ -28,6 +28,8 @@ fn options(root: &Utf8Path, load_dependencies: bool) -> PipelineOptions {
         src_dirs: vec![root.join("src")],
         cache_dir: Some(root.join("cache")),
         load_dependencies,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: crate::pipeline::CollapseInheritedProps::None,
         ..Default::default()
     }
 }

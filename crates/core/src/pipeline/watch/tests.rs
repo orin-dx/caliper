@@ -1515,6 +1515,9 @@ fn editing_a_wrapper_callees_result_type_updates_the_components_it_builds() {
              export const Button = factory<ButtonFactory>((props) => <button>{props.label}</button>);\n",
         ),
     ]);
+    // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+    let options =
+        PipelineOptions { collapse_inherited_props: crate::pipeline::CollapseInheritedProps::None, ..options };
     let session = WatchSession::new(options.clone());
     let _initial = session.initialize();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();

@@ -34,20 +34,28 @@ impl<'src> SourceDataCollector<'src> {
 
         let upper = self.comments.partition_point(|c| c.span_end <= span_start);
         let mut found: Option<usize> = None;
+        // The gap is measured to what follows each comment: the declaration, or the next note of a run. A doc
+        // comment followed by a run of notes still documents the declaration after them, as TypeScript reads it
+        // (React Aria's `@private` `GlobalDOMEvents` has eight lines of notes in between). The walk ends at the first
+        // doc comment, claimed or not, so it never crosses a sibling's documentation.
+        let mut next_start = span_start;
         for i in (0..upper).rev() {
             let c = &self.comments[i];
-            if span_start - c.span_end > PROXIMITY_THRESHOLD {
+            if next_start - c.span_end > PROXIMITY_THRESHOLD {
                 // Comments are sorted ascending by span, so every earlier comment
                 // is farther still — nothing left in range.
                 break;
             }
+            next_start = c.span_start;
             // Only `/** */` documents; a plain `/* */` note is skipped so the doc comment before it still counts.
             let is_doc_comment = c.is_block && self.source[c.span_start as usize..].starts_with("/**");
-            if is_doc_comment && !self.consumed_jsdoc.contains(&c.span_end) {
+            if is_doc_comment {
                 // A comment documents the declaration right after it, so one that something else stands between belongs
                 // to that something: the props of `function Badge(props: { a: string })` follow the component's
                 // comment, but `Badge(props:` is in the way.
-                if documents_what_follows(&self.source[c.span_end as usize..span_start as usize]) {
+                if !self.consumed_jsdoc.contains(&c.span_end)
+                    && documents_what_follows(&self.source[c.span_end as usize..span_start as usize])
+                {
                     found = Some(i);
                 }
                 break;
@@ -60,6 +68,10 @@ impl<'src> SourceDataCollector<'src> {
         let raw = &self.source[c.span_start as usize..c.span_end as usize];
         let text = parse_jsdoc_text(raw);
         let tags = extract_jsdoc_tags(raw);
+        // A file's own documentation documents no declaration, however close the first one is.
+        if tags.keys().any(|tag| matches!(tag.as_str(), "packageDocumentation" | "file" | "fileoverview" | "module")) {
+            return (String::new(), BTreeMap::new());
+        }
         if !text.is_empty() || !tags.is_empty() {
             self.consumed_jsdoc.insert(span_end);
         }

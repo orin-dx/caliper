@@ -64,6 +64,8 @@ fn options(root: &Utf8Path, load: bool) -> PipelineOptions {
         src_dirs: vec![root.join("src")],
         cache_dir: Some(root.join("cache")),
         load_dependencies: load,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: crate::pipeline::CollapseInheritedProps::None,
         ..Default::default()
     }
 }
@@ -1018,7 +1020,8 @@ fn output_is_the_same_on_any_thread_count_and_with_a_cold_or_warm_index() {
     let run = |threads: usize| {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
         let output = pool.install(|| extract(&options(&root, true)));
-        (output.components, output.enums, output.diagnostics)
+        let components: Vec<_> = output.components.values().map(listed).collect();
+        (components, output.enums, output.diagnostics)
     };
 
     let cold = run(1);
@@ -1339,6 +1342,12 @@ fn with_collapse(root: &Utf8Path, mode: crate::pipeline::CollapseInheritedProps)
     extract(&PipelineOptions { collapse_inherited_props: mode, ..options(root, true) })
 }
 
+/// The entry without the relevance decision it keeps for later merges, which is the one thing the expanded view
+/// leaves empty; what the output lists is what is compared.
+fn listed(entry: &crate::types::ComponentEntry) -> crate::types::ComponentEntry {
+    crate::types::ComponentEntry { relevance: None, ..entry.clone() }
+}
+
 fn keys<V>(map: &std::collections::BTreeMap<String, V>) -> Vec<&str> {
     map.keys().map(String::as_str).collect()
 }
@@ -1358,23 +1367,25 @@ fn a_large_dependency_source_collapses_to_a_layer_and_its_notable_props() {
     assert_eq!(keys(&field.props), ["only", "own"]);
     assert_eq!(layers(field), [("SystemProps", 31, None)]);
     assert_eq!(field.inheritance[0].file_name, root.join("node_modules/big/index.d.ts").as_str());
-    assert_eq!(keys(&field.notable_inherited), ["className", "onClick"]);
-    assert_eq!(field.notable_inherited["onClick"].prop_type.raw_string(), "() => void");
+    // No relevance shows a dependency prop here, so none is listed: the layer names them as members instead.
+    assert_eq!(keys(&field.notable_inherited), Vec::<&str>::new());
+    assert!(field.inheritance[0].members.iter().any(|m| m == "onClick"));
+    assert!(field.inheritance[0].members.iter().any(|m| m == "className"));
 
     let aliased = &output.components["Aliased"];
     assert_eq!(keys(&aliased.props), ["own"]);
     assert_eq!(layers(aliased), [("LayoutProps", 31, None)]);
-    assert_eq!(keys(&aliased.notable_inherited), ["id", "style"]);
+    assert_eq!(keys(&aliased.notable_inherited), Vec::<&str>::new());
+    assert!(aliased.inheritance[0].members.iter().any(|m| m == "id"));
 
-    // A small ambient source is listed (a layer record costs more than its props)...
+    // A small dependency source is part of the component's main props: listed with no evidence, whatever its name.
     let tiny = &output.components["Tiny"];
     assert_eq!(keys(&tiny.props), ["own", "radius", "width"]);
-    assert_eq!(tiny.inheritance, []);
-    // ...and a large source that is a dependency's own API is listed in full, with its types, not collapsed by size.
+    assert_eq!(layers(tiny), []);
+    // A dependency's API source of up to `LARGE_API_SOURCE` members is listed in full too.
     let api = &output.components["Api"];
     assert_eq!(api.props.len(), 32);
-    assert_eq!(api.inheritance, []);
-    assert_eq!(api.props["mode"].prop_type.raw_string(), r#""a" | "b""#);
+    assert_eq!(layers(api), []);
 
     // ...unless it is past `LARGE_API_SOURCE`: a style system under a name the rule does not know.
     let huge = &output.components["Huge"];
@@ -1415,8 +1426,8 @@ fn all_collapses_inherited_project_sources_too_and_none_expands_everything() {
     assert_eq!(none.components["Field"].props.len(), 33);
     assert_eq!(none.components["Aliased"].props.len(), 32);
     // Collapsing only hides props; whatever stays expanded matches a full expansion exactly.
-    for name in ["Direct", "Picked", "Keyed", "Local", "OwnBig", "Api"] {
-        assert_eq!(default.components[name], none.components[name], "{name}");
+    for name in ["Direct", "Picked", "Keyed", "Local", "OwnBig"] {
+        assert_eq!(listed(&default.components[name]), listed(&none.components[name]), "{name}");
     }
     for (name, prop) in &default.components["Field"].props {
         assert_eq!(prop, &none.components["Field"].props[name], "{name}");
@@ -1430,7 +1441,8 @@ fn the_default_changes_nothing_without_loaded_dependencies() {
     let (_tmp, root) = collapse_project();
     let off = |mode| {
         let output = extract(&PipelineOptions { collapse_inherited_props: mode, ..options(&root, false) });
-        (output.components, output.enums, output.diagnostics)
+        let components: Vec<_> = output.components.values().map(listed).collect();
+        (components, output.enums, output.diagnostics)
     };
 
     assert_eq!(off(CollapseInheritedProps::Dependencies), off(CollapseInheritedProps::None));

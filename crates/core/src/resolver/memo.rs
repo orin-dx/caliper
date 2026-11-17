@@ -159,6 +159,9 @@ impl<T: Clone> Recording<T> {
             && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(key) == *present)
             && (!reads.needs_empty_scope || state.binds_nothing())
             && reads.in_scope.iter().all(|(name, present)| state.binds(name) == *present)
+            && reads.body_reads.iter().all(|(name, read)| {
+                mapping.is_some_and(|mapping| crate::types::global::body_reads(mapping, name) == *read)
+            })
             && reads.defaults.iter().all(|(name, found)| {
                 mapping.is_some_and(|mapping| {
                     mapping.param_defaults.get(name.as_str()).map(|d| (d.value.as_str(), d.computed))
@@ -260,6 +263,7 @@ impl<T: Clone> Memo<T> {
         reads.named = first_reads(reads.named);
         reads.in_scope = first_reads(reads.in_scope);
         reads.defaults = first_reads(reads.defaults);
+        reads.body_reads = first_reads(reads.body_reads);
         let named_unevaluated = state.named_unevaluated;
         state.named_unevaluated = entry_unevaluated || named_unevaluated;
         state.reads = enclosing;
@@ -281,6 +285,7 @@ impl<T: Clone> Memo<T> {
             + reads.named.len()
             + reads.in_scope.len()
             + reads.defaults.len()
+            + reads.body_reads.len()
             + reads.visited_added.len();
         let recording = Recording {
             value: value.clone(),
@@ -307,6 +312,7 @@ impl<T: Clone> Memo<T> {
                 && r.reads.in_scope == recording.reads.in_scope
                 && r.reads.needs_empty_scope == recording.reads.needs_empty_scope
                 && r.reads.defaults == recording.reads.defaults
+                && r.reads.body_reads == recording.reads.body_reads
         };
         // Components resolving the same chain concurrently record it several times; one copy is enough.
         let duplicate = recordings.iter().any(|r| same(r));

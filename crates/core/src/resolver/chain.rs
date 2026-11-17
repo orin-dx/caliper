@@ -286,15 +286,18 @@ pub(super) fn resolve_props_chain(
                     state,
                 )
             {
-                let notable = fields
+                let notable: Vec<_> = fields
                     .iter()
-                    .filter(|field| field.is_member() && is_notable(&field.name))
-                    .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()));
+                    .filter(|field| {
+                        field.is_member() && (is_notable(&field.name) || state.body_reads(mapping, &field.name))
+                    })
+                    .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()))
+                    .collect();
                 return collapsed_source(
                     &canonical_name,
                     file_path,
                     fields.iter().map(|field| field.name.clone()).collect(),
-                    notable.collect(),
+                    notable,
                     ctx,
                     state,
                     depth,
@@ -430,7 +433,8 @@ pub(super) fn resolve_props_chain(
     ResolvedChain::empty_with_compose(type_name.to_owned())
 }
 
-/// Whether a collapsed source keeps `name` as a notable prop: the element-independent curated attributes.
+/// Whether a collapsed source keeps `name` as a notable prop: the element-independent curated attributes. A member
+/// the component's body reads is kept too (`ResolveState::body_reads`).
 fn is_notable(name: &str) -> bool {
     react_types::notable_html_attrs("").contains(&name)
 }
@@ -590,7 +594,9 @@ fn resolve_interface_members(
 
     // Its parents are sources of their own, resolved above; only this interface's members collapse.
     if ctx.collapses(&iface.file_path, &iface.name, iface.props.iter().map(|prop| prop.name.as_str()), depth, state) {
-        let notable = iface.props.iter().filter(|prop| is_notable(&prop.name)).map(|prop| {
+        let kept: Vec<bool> =
+            iface.props.iter().map(|prop| is_notable(&prop.name) || state.body_reads(mapping, &prop.name)).collect();
+        let notable = iface.props.iter().zip(kept).filter(|(_, kept)| *kept).map(|(prop, _)| {
             let ty = match &substitution {
                 Some(subst) => super::substitute::substitute_type(&prop.collected_type, subst),
                 None => prop.collected_type.clone(),

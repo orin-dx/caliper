@@ -333,6 +333,7 @@ mod tests {
         );
 
         let entry = ComponentEntry {
+            relevance: None,
             display_name: "Button".into(),
             file_path: "src/Button.tsx".into(),
             props,
@@ -585,6 +586,7 @@ mod tests {
         inheritance: Vec<crate::types::InheritedLayer>,
     ) -> ComponentEntry {
         ComponentEntry {
+            relevance: None,
             display_name: "Widget".into(),
             file_path: "src/Widget.tsx".into(),
             props: props.into_iter().map(|prop| (prop.name.clone(), prop)).collect(),

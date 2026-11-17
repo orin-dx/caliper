@@ -59,7 +59,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 42: a file-level tag bound in an inner scope is `JsxTag::Scoped` too, and a JSX spread of the whole props object no
 ///     longer sets `BodyFacts::handed_on`.
 /// 43: `ComponentMapping::factory_type_params`: the type parameters of a factory call's render function.
-const CACHE_SCHEMA_VERSION: u32 = 43;
+/// 44: a JSX element's children pass `children`: a `Named("children")` attribute after its others.
+const CACHE_SCHEMA_VERSION: u32 = 45;
 
 const DATA_FILE: &str = "dts.msgpack";
 

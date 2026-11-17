@@ -149,10 +149,19 @@ impl Resolved {
     }
 }
 
-/// Whether `before` and `after` publish different layers. Relevance writes only the layers' `used` lists, so this is
-/// how a kept resolution's answer can move between revisions: the one rule both kinds of revision report it by.
+/// Whether `before` and `after` publish different layers or list different props. Relevance writes the layers'
+/// `used` lists and moves props between the listing and the layers, so this is how a kept resolution's answer can move
+/// between revisions: the one rule both kinds of revision report it by. The listing is compared too, since a prop can
+/// leave it for a layer that already holds its name, which leaves the layers unchanged.
 fn layers_differ(before: Option<&ComponentEntry>, after: Option<&ComponentEntry>) -> bool {
-    before.map(|entry| entry.inheritance.as_slice()) != after.map(|entry| entry.inheritance.as_slice())
+    let published = |entry: &ComponentEntry| {
+        (
+            entry.inheritance.clone(),
+            entry.props.keys().cloned().collect::<Vec<_>>(),
+            entry.notable_inherited.keys().cloned().collect::<Vec<_>>(),
+        )
+    };
+    before.map(published) != after.map(published)
 }
 
 /// Writes the `used` lists relevance decides for `entry` from its `evidence` and the revision's `sites`; without

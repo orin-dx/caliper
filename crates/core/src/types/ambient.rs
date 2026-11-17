@@ -86,10 +86,13 @@ fn is_word(text: &str) -> bool {
     text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Whether `file` declares the DOM's ambient attributes and handlers (`@types/react`, Spectrum's shared DOM types): by
-/// path, never by name ([`crate::origin::declaration_origin`]).
+/// Whether `file` declares DOM attributes and handlers (`@types/react`, Spectrum's shared DOM types), by path. Only the
+/// collapse threshold reads it (a source here past 30 members may be a layer); whether a member is listed is decided
+/// per declaration ([`crate::origin::is_ambient_declaration`]). A source counts the members it declares itself, and
+/// the only `dom.d.ts` source past 30, `GlobalDOMEvents`, is one React Aria marks private.
 fn is_dom_file(file: &str) -> bool {
-    crate::origin::declaration_origin(file).is_ambient()
+    use crate::origin::Origin;
+    matches!(crate::origin::declaration_origin(file), Origin::React | Origin::SharedDom)
 }
 
 fn is_dom_type(type_name: &str) -> bool {

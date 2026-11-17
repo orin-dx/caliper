@@ -28,6 +28,11 @@ fn component(tag: &str, attributes: Vec<JsxAttributeFact>) -> JsxElementFact {
     JsxElementFact { tag: JsxTag::Identifier(tag.into()), attributes }
 }
 
+/// The `children` an element's JSX children set, after every attribute.
+fn children() -> JsxAttributeFact {
+    named("children", None)
+}
+
 fn usage(tag: JsxTag) -> JsxUsage {
     JsxUsage { tag, attributes: vec![] }
 }
@@ -114,7 +119,8 @@ fn every_other_use_of_the_props_object_hands_it_on() {
         "useMemo(() => 1, [props])",
         "props[key]",
         "typeof props",
-        "const copy = props",
+        // A `var` alias can be redeclared or read before it holds the value (`const`/`let` aliases are followed).
+        "var copy = props",
         "const [first] = props",
         "useY(rest)",
         "({ ...rest })",
@@ -196,7 +202,7 @@ fn attributes_keep_their_order_around_a_spread_and_the_spread_says_what_it_sprea
     assert_eq!(
         facts.elements,
         [
-            intrinsic("section", vec![]),
+            intrinsic("section", vec![children()]),
             intrinsic(
                 "input",
                 vec![named("id", Some("id")), JsxAttributeFact::Spread(SpreadOf::Rest), named("type", None)]
@@ -254,7 +260,7 @@ fn forward_ref_and_memo_wrapped_functions_are_read_through_the_wrapper() {
     assert_eq!(b.elements, [intrinsic("a", vec![named("ref", None), named("href", Some("href"))])]);
     let m = facts(source, "M");
     assert_eq!(reads(&m), ["label"]);
-    assert_eq!(m.elements, [intrinsic("span", vec![])]);
+    assert_eq!(m.elements, [intrinsic("span", vec![children()])]);
 }
 
 #[test]
@@ -290,7 +296,7 @@ fn a_nested_component_keeps_its_props_uses_and_its_elements_go_to_the_file() {
     let scoped = |tag: &str, attributes| JsxElementFact { tag: JsxTag::Scoped(tag.into()), attributes };
     assert_eq!(
         facts.elements,
-        [intrinsic("ul", vec![]), scoped("Row", vec![named("item", None)]), scoped("Empty", vec![])]
+        [intrinsic("ul", vec![children()]), scoped("Row", vec![named("item", None)]), scoped("Empty", vec![])]
     );
     assert_eq!(reads(&facts), ["label", "items"]);
     let tags: Vec<&JsxTag> = data.jsx_usages.iter().map(|usage| &usage.tag).collect();
@@ -332,7 +338,10 @@ fn jsx_outside_every_component_body_is_a_usage_of_the_file() {
     assert_eq!(
         data.jsx_usages,
         [
-            usage(JsxTag::Intrinsic("svg:g".into())),
+            JsxUsage {
+                tag: JsxTag::Intrinsic("svg:g".into()),
+                attributes: vec![JsxUsageAttribute::Named("children".into())]
+            },
             JsxUsage {
                 tag: JsxTag::Member("Icon.Star".into()),
                 attributes: vec![JsxUsageAttribute::Named("size".into()), JsxUsageAttribute::Spread],
@@ -374,7 +383,7 @@ fn a_var_in_a_nested_function_is_another_binding() {
     );
     assert_eq!(
         facts.elements,
-        [intrinsic("i", vec![named("data-s", None)]), intrinsic("b", vec![named("data-s", Some("size"))])]
+        [intrinsic("i", vec![named("data-s", None)]), intrinsic("b", vec![named("data-s", Some("size")), children()])]
     );
 }
 
@@ -549,7 +558,7 @@ fn rest_bindings_in_different_scopes_are_all_recorded() {
 fn jsx_in_a_parameter_default_is_the_components() {
     let data = parse("export const C = ({ icon = <Icon size=\"sm\" /> }: P) => <span>{icon}</span>;");
     let facts = data.component_mappings[0].body.clone().unwrap();
-    assert_eq!(facts.elements, [component("Icon", vec![named("size", None)]), intrinsic("span", vec![])]);
+    assert_eq!(facts.elements, [component("Icon", vec![named("size", None)]), intrinsic("span", vec![children()])]);
     assert_eq!(data.jsx_usages, []);
 }
 
@@ -846,7 +855,7 @@ fn a_member_in_each_syntax_context_is_a_read_only_where_known_and_never_silently
         "props[k]",
         "props?.[k]",
         "use(props)",
-        "const p = props",
+        "var p = props",
         "const [p] = props",
         "({ ...props })",
         "[...props]",
