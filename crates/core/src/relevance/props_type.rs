@@ -414,6 +414,8 @@ mod tests {
         export function ByPick(props: Pick<Big, 'p1' | 'p2'> & { own?: boolean }) { return null; }\n\
         export function ByOmit({ p5 = 'x' }: Omit<Big, 'p1'> & { own?: boolean }) { return null; }\n\
         export function ByRequired(props: Small & { own?: boolean }) { return null; }\n\
+        type Dropped = Omit<Big, 'p1'>;\n\
+        export function ByOmitAlias(props: Dropped) { return null; }\n\
         export function ByPickAlone(props: Pick<Big, 'tone'>) { return null; }\n\
         export function ByPickedBase(props: Picks) { return null; }\n\
         export function ByUnion(props: Either) { return null; }\n";
@@ -514,6 +516,10 @@ mod tests {
         assert_eq!((names(&pick.picked), names(&pick.own)), (vec!["p1", "p2"], vec!["own"]));
         let omit = props_type("ByOmit");
         assert_eq!((names(&omit.picked), names(&omit.own), names(&omit.defaulted)), (vec![], vec!["own"], vec!["p5"]));
+        // An `Omit` alias as the props type is the `Omit` written in place: nothing of its base is inherited, as an
+        // omitted member does not reach.
+        let alias = props_type("ByOmitAlias");
+        assert_eq!((names(&alias.inherited), names(&alias.picked)), (vec![], vec![]));
         assert_eq!(names(&props_type("ByPickAlone").picked), ["tone"]);
         let base = props_type("ByPickedBase");
         assert_eq!((names(&base.picked), names(&base.own)), (vec!["p3", "p4", "p6", "p7"], vec!["x"]));

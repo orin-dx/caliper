@@ -105,7 +105,7 @@ fn targets_with(output: &ExtractionOutput, cx: Option<CollapseContext>) -> Vec<T
             // converts no other DOM attribute. The expanded view (`collapseInheritedProps: none`) asks for all of them.
             react_wanted: if caliper_docgen_core::react_types::expanded(
                 entry,
-                cx.map_or(caliper_docgen_core::pipeline::CollapseInheritedProps::Dependencies, |cx| cx.mode),
+                cx.map_or_else(Default::default, |cx| cx.mode),
             ) {
                 None
             } else {
