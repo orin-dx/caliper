@@ -3,17 +3,18 @@
 //! The props parameter of `function Poly<E extends ElementType = "div">(props: PolyProps<E>)` is `PolyProps<E>` with `E`
 //! open, which has two props where `<Poly />` has every attribute of a `div`. The checker's API has no request that
 //! instantiates a signature, so the instantiation is written as source: one file, held in the checker's memory and never
-//! on disk (`createSnapshot` with a `fileSystem` layer), declares for each such component
+//! on disk (`updateSnapshot` with a `fileSystem` layer), declares for each such component
 //!
 //! ```ts
 //! import type { "Poly" as CaliperComponent0 } from "/project/src/Poly.tsx"; export type CaliperProbe0 = Parameters<typeof CaliperComponent0<"div">>[0];
 //! ```
 //!
-//! and the props are those of `CaliperProbe0`, read as any props type is. The file is added to a second snapshot of the
-//! same program, made only when a requested component is generic, so a project without one sends no request more. A
-//! line the checker reports an error on (a default it prints with a name the file cannot see) sends that component to
-//! its structural result with the error as the reason, and a checker that does not load the file sends them all; a
-//! result is never read from an instantiation that did not form.
+//! and the props are those of `CaliperProbe0`, read as any props type is. The file is added to a snapshot derived from the
+//! one that answered the other components, its program rooted at the probe file too, made only when a requested
+//! component is generic, so a project without one sends no request more. A line the checker reports an error on (a
+//! default it prints with a name the file cannot see) sends that component to its structural result with the error as
+//! the reason, and a checker that does not load the file sends them all; a result is never read from an instantiation
+//! that did not form.
 //!
 //! A printed default is text, and the probe file is another module than the component's: a name it prints may resolve
 //! there to another symbol than it does in the component's module (the module's own `FormData` against the global
@@ -110,8 +111,8 @@ fn written(target: &Target, instantiation: &Instantiation) -> String {
     format!("{}<{}>", target.display_name, instantiation.arguments.join(", "))
 }
 
-/// Answers each generic component from its instantiation, in a snapshot of `rpc`'s program over `root_files` with the
-/// probe file added. The snapshot is released before this returns.
+/// Answers each generic component from its instantiation, in a snapshot derived from `rpc`'s whose program is
+/// rooted at `root_files` and the probe file ([`Rpc::layered`]). The snapshot is released before this returns.
 pub(crate) async fn answer(
     rpc: &Rpc,
     root_files: &[String],
