@@ -561,7 +561,15 @@ async fn session(
     // The files no lane took before the heap passed its budget.
     let unasked = std::mem::take(&mut *queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
     left.extend(unasked.into_iter().flatten().map(|target| target.key));
+    let type_memo =
+        converters.iter().map(Converter::memo_stats).fold((0, 0), |sum, (hits, misses)| (sum.0 + hits, sum.1 + misses));
+    let mut converters = Some(converters);
     if !generic.is_empty() {
+        // Every lane is done and nothing reads the converters' memos again: the instantiations are answered by a
+        // program and converter of their own, so what the lanes built is freed before it is built, not after. This is
+        // freed in a one-shot run too, where the end of the process would free it: it is the run's peak otherwise.
+        drop(converters.take());
+        rpc.release_lanes().await;
         let keys = generic.iter().map(|(target, _)| target.key.clone()).collect::<Vec<_>>();
         let instantiated = match watch.passed() {
             true => Err(CallError::OverBudget),
@@ -596,7 +604,7 @@ async fn session(
     tracing::debug!(
         requests = ?rpc.calls(),
         files = files.len(),
-        type_memo = ?converters.iter().map(Converter::memo_stats).fold((0, 0), |sum, (hits, misses)| (sum.0 + hits, sum.1 + misses)),
+        type_memo = ?type_memo,
         total_ms = started.elapsed().as_millis() as u64,
         heap_peak_mib = watch.peak() >> 20,
         heap_budget_mib = request.heap_budget.map(|budget| budget.bytes() >> 20),
