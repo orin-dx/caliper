@@ -375,6 +375,85 @@ fn past_size_budget(converted: &PropType, budget: usize) -> bool {
         if count > budget {
             return true;
         }
+        push_inner(ty, &mut pending);
+    }
+    false
+}
+
+/// Pushes every type directly inside `ty` onto `pending`: fields and index keys, signatures, arguments, tuple elements
+/// and template holes.
+fn push_inner<'a>(ty: &'a PropType, pending: &mut Vec<&'a PropType>) {
+    match ty {
+        PropType::String
+        | PropType::Number
+        | PropType::Boolean
+        | PropType::Null
+        | PropType::Undefined
+        | PropType::Any
+        | PropType::Never
+        | PropType::Unknown
+        | PropType::Void
+        | PropType::BigInt
+        | PropType::StringLiteral(_)
+        | PropType::NumberLiteral(_)
+        | PropType::BoolLiteral(_)
+        | PropType::BigIntLiteral(_)
+        | PropType::UniqueSymbol { .. }
+        | PropType::EnumMember { .. }
+        | PropType::Truncated { .. }
+        | PropType::ReactNode
+        | PropType::CssProperties
+        | PropType::Ref { .. }
+        | PropType::ElementType
+        | PropType::HtmlAttributes { .. }
+        | PropType::LiteralUnion { .. }
+        | PropType::SxProps
+        | PropType::Opaque(_) => {}
+        PropType::TemplateLiteral(parts) => pending.extend(parts.iter().filter_map(|part| match part {
+            TemplatePart::Text(_) => None,
+            TemplatePart::Type(ty) => Some(ty),
+        })),
+        PropType::Union(members)
+        | PropType::Intersection(members)
+        | PropType::Named { args: members, .. }
+        | PropType::Recursive { args: members, .. } => pending.extend(members),
+        PropType::Array(inner) | PropType::Readonly(inner) => pending.push(inner),
+        PropType::Tuple(elements) => pending.extend(elements.iter().map(|element| &element.element_type)),
+        PropType::Object(fields) => push_fields(fields, pending),
+        PropType::Callable { signatures, fields } => {
+            for signature in signatures {
+                pending.extend(signature.params.iter().map(|param| &param.param_type));
+                pending.push(&signature.return_type);
+            }
+            push_fields(fields, pending);
+        }
+        PropType::Function { params, return_type, .. } => {
+            pending.extend(params.iter().map(|param| &param.param_type));
+            pending.push(return_type);
+        }
+    }
+}
+
+/// The types of `fields` for [`past_size_budget`] and [`fingerprint`]: each field's, and an index signature's key type.
+fn push_fields<'a>(fields: &'a [ObjectField], pending: &mut Vec<&'a PropType>) {
+    for field in fields {
+        pending.push(&field.prop_type);
+        if let Some(key) = &field.index_key {
+            pending.push(key);
+        }
+    }
+}
+
+/// A hash of everything in `ty` that tells most types apart: each type's kind, how many types it holds directly, and its
+/// names, texts and values. What it leaves out (a field's flags, a tuple's labels) only puts more types in one bucket of
+/// [`Trees`], which tells them apart by equality. `None` for a type holding a number that equality cannot vouch for:
+/// NaN equals nothing, and `-0` equals `0` but is written apart.
+fn fingerprint(ty: &PropType) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+    let mut pending = vec![ty];
+    while let Some(ty) = pending.pop() {
+        std::mem::discriminant(ty).hash(&mut hasher);
         match ty {
             PropType::String
             | PropType::Number
@@ -386,13 +465,6 @@ fn past_size_budget(converted: &PropType, budget: usize) -> bool {
             | PropType::Unknown
             | PropType::Void
             | PropType::BigInt
-            | PropType::StringLiteral(_)
-            | PropType::NumberLiteral(_)
-            | PropType::BoolLiteral(_)
-            | PropType::BigIntLiteral(_)
-            | PropType::UniqueSymbol { .. }
-            | PropType::EnumMember { .. }
-            | PropType::Truncated { .. }
             | PropType::ReactNode
             | PropType::CssProperties
             | PropType::Ref { .. }
@@ -400,41 +472,66 @@ fn past_size_budget(converted: &PropType, budget: usize) -> bool {
             | PropType::HtmlAttributes { .. }
             | PropType::LiteralUnion { .. }
             | PropType::SxProps
-            | PropType::Opaque(_) => {}
-            PropType::TemplateLiteral(parts) => pending.extend(parts.iter().filter_map(|part| match part {
-                TemplatePart::Text(_) => None,
-                TemplatePart::Type(ty) => Some(ty),
-            })),
-            PropType::Union(members)
-            | PropType::Intersection(members)
-            | PropType::Named { args: members, .. }
-            | PropType::Recursive { args: members, .. } => pending.extend(members),
-            PropType::Array(inner) | PropType::Readonly(inner) => pending.push(inner),
-            PropType::Tuple(elements) => pending.extend(elements.iter().map(|element| &element.element_type)),
-            PropType::Object(fields) => push_fields(fields, &mut pending),
-            PropType::Callable { signatures, fields } => {
-                for signature in signatures {
-                    pending.extend(signature.params.iter().map(|param| &param.param_type));
-                    pending.push(&signature.return_type);
+            | PropType::Opaque(_)
+            | PropType::TemplateLiteral(_)
+            | PropType::Union(_)
+            | PropType::Intersection(_)
+            | PropType::Array(_)
+            | PropType::Readonly(_)
+            | PropType::Tuple(_)
+            | PropType::Function { .. } => {}
+            PropType::StringLiteral(text) => text.hash(&mut hasher),
+            PropType::UniqueSymbol { name } => name.hash(&mut hasher),
+            PropType::NumberLiteral(number) => vouched(*number)?.hash(&mut hasher),
+            PropType::BoolLiteral(value) => value.hash(&mut hasher),
+            PropType::BigIntLiteral(value) => value.as_str().hash(&mut hasher),
+            PropType::EnumMember { enum_name, member, value } => {
+                enum_name.hash(&mut hasher);
+                member.hash(&mut hasher);
+                match value {
+                    EnumMemberValue::String(text) => text.hash(&mut hasher),
+                    EnumMemberValue::Number(number) => vouched(*number)?.hash(&mut hasher),
                 }
-                push_fields(fields, &mut pending);
             }
-            PropType::Function { params, return_type, .. } => {
-                pending.extend(params.iter().map(|param| &param.param_type));
-                pending.push(return_type);
+            PropType::Truncated { text, .. } => text.hash(&mut hasher),
+            PropType::Named { name, .. } | PropType::Recursive { name, .. } => name.hash(&mut hasher),
+            PropType::Object(fields) | PropType::Callable { fields, .. } => {
+                fields.iter().for_each(|field| field.name.hash(&mut hasher));
             }
         }
+        let before = pending.len();
+        push_inner(ty, &mut pending);
+        (pending.len() - before).hash(&mut hasher);
     }
-    false
+    Some(hasher.finish())
 }
 
-/// The types of `fields` for [`past_size_budget`]: each field's, and an index signature's key type.
-fn push_fields<'a>(fields: &'a [ObjectField], pending: &mut Vec<&'a PropType>) {
-    for field in fields {
-        pending.push(&field.prop_type);
-        if let Some(key) = &field.index_key {
-            pending.push(key);
+/// The bits of `number` when equality tells it from every number written otherwise: not NaN, and not `-0`.
+fn vouched(number: f64) -> Option<u64> {
+    (!number.is_nan() && !(number == 0.0 && number.is_sign_negative())).then(|| number.to_bits())
+}
+
+/// The converted types of a session's memos, each held once however many entries of however many lanes convert to it:
+/// Chakra's 3.6 million memo types are about 7,500 distinct ones. A tree is shared only with one equal to it, so what
+/// an entry recalls is what was converted.
+#[derive(Default)]
+pub(crate) struct Trees {
+    by_fingerprint: Mutex<FxHashMap<u64, Vec<Arc<PropType>>>>,
+}
+
+impl Trees {
+    /// The tree equal to `converted` held before, or a copy of it, held from now on. A copy of its own, not held, for a
+    /// tree that cannot be [fingerprinted](fingerprint).
+    fn share(&self, converted: &PropType) -> Arc<PropType> {
+        let Some(fingerprint) = fingerprint(converted) else { return Arc::new(converted.clone()) };
+        let mut trees = self.by_fingerprint.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bucket = trees.entry(fingerprint).or_default();
+        if let Some(held) = bucket.iter().find(|held| ***held == *converted) {
+            return held.clone();
         }
+        let held = Arc::new(converted.clone());
+        bucket.push(held.clone());
+        held
     }
 }
 
@@ -445,7 +542,8 @@ struct Entry {
     asked: Arc<[u64]>,
     /// Those of `asked` that did enclose it.
     enclosed_by: Vec<u64>,
-    converted: PropType,
+    /// Shared with every other entry of the session that converted to an equal type ([`Trees`]).
+    converted: Arc<PropType>,
 }
 
 impl Entry {
@@ -605,6 +703,8 @@ struct State {
     /// property symbols, but six in ten of those were listed by a component before (the same style props reached
     /// through the same instantiation), and their types need not be asked again.
     symbol_types: Mutex<SymbolTypes>,
+    /// What the memo's entries hold, shared with the other lanes of the session ([`Converter::lanes`]).
+    trees: Arc<Trees>,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -627,6 +727,20 @@ pub(crate) struct Converter {
 impl Converter {
     pub(crate) fn new(rpc: Arc<Rpc>, reverse: bool) -> Self {
         Self { rpc, state: Arc::new(State::default()), reverse }
+    }
+
+    /// A converter for each program of one session, their memos holding each converted type once between them. The
+    /// trees go when the last of the converters does.
+    pub(crate) fn lanes(programs: &[Arc<Rpc>], reverse: bool) -> Vec<Self> {
+        let trees = Arc::new(Trees::default());
+        programs
+            .iter()
+            .map(|rpc| Self {
+                rpc: rpc.clone(),
+                state: Arc::new(State { trees: trees.clone(), ..State::default() }),
+                reverse,
+            })
+            .collect()
     }
 
     /// The type of each symbol of a component's props, in order: those asked about before in this snapshot from what
@@ -817,7 +931,7 @@ impl Converter {
                 if let Some(frame) = &cx.frame {
                     frame.absorb(&entry.asked, &cx.enclosing);
                 }
-                return Ok(entry.converted.clone());
+                return Ok(PropType::clone(&entry.converted));
             }
             self.state.misses.fetch_add(1, Ordering::Relaxed);
             let frame = Arc::new(Frame::new(cx.enclosing.len()));
@@ -832,7 +946,7 @@ impl Converter {
                 parent.absorb(&asked, &cx.enclosing);
             }
             let enclosed_by = cx.enclosing.iter().copied().filter(|id| asked.binary_search(id).is_ok()).collect();
-            let entry = Arc::new(Entry { asked, enclosed_by, converted: converted.clone() });
+            let entry = Arc::new(Entry { asked, enclosed_by, converted: self.state.trees.share(&converted) });
             if let Ok(mut memo) = self.state.memo.lock() {
                 memo.entry((info.id, cx.depth)).or_default().push(entry);
             }
@@ -1902,6 +2016,85 @@ mod tests {
         // union, object, number, string, named, tuple, null, function, any, void, template, number
         assert!(!past_size_budget(&ty, 12));
         assert!(past_size_budget(&ty, 11));
+    }
+
+    /// A condition object as Chakra's style props hold it many times over: fields each cut or a back-reference.
+    fn conditions(required: bool, last: PropType) -> PropType {
+        let field = |name: &str, prop_type| ObjectField {
+            name: name.into(),
+            prop_type,
+            required,
+            description: String::new(),
+            readonly: false,
+            index_key: None,
+        };
+        PropType::Object(vec![
+            field("_hover", PropType::Truncated { text: "SystemStyleObject".into(), limit: TruncationLimit::Depth }),
+            field("_focus", PropType::Recursive { name: "Conditions".into(), args: vec![PropType::String] }),
+            field("base", PropType::Union(vec![PropType::StringLiteral("sm".into()), last])),
+        ])
+    }
+
+    /// Equal trees, built apart, are held once; a tree that differs anywhere, also where the fingerprint does not look
+    /// (a field's flag) or only by the sign of a zero, is held apart, and each held tree is equal to the one shared.
+    #[test]
+    fn equal_trees_are_held_once_and_any_difference_keeps_them_apart() {
+        let trees = Trees::default();
+        let first = trees.share(&conditions(true, PropType::NumberLiteral(1.0)));
+        let again = trees.share(&conditions(true, PropType::NumberLiteral(1.0)));
+        assert!(Arc::ptr_eq(&first, &again));
+        assert_eq!(*first, conditions(true, PropType::NumberLiteral(1.0)));
+
+        let flag = trees.share(&conditions(false, PropType::NumberLiteral(1.0)));
+        assert_eq!(fingerprint(&flag), fingerprint(&first));
+        assert!(!Arc::ptr_eq(&flag, &first));
+        assert_eq!(*flag, conditions(false, PropType::NumberLiteral(1.0)));
+
+        let zero = trees.share(&conditions(true, PropType::NumberLiteral(0.0)));
+        let negative = trees.share(&conditions(true, PropType::NumberLiteral(-0.0)));
+        assert!(!Arc::ptr_eq(&zero, &negative));
+        // Neither `-0` nor NaN is held, so no later tree is matched against them by an equality that cannot tell.
+        assert_eq!(fingerprint(&negative), None);
+        assert_eq!(fingerprint(&conditions(true, PropType::NumberLiteral(f64::NAN))), None);
+        let held: usize = trees.by_fingerprint.lock().unwrap().values().map(Vec::len).sum();
+        assert_eq!(held, 3);
+        assert_eq!(
+            serde_json::to_string(&*negative).unwrap(),
+            serde_json::to_string(&conditions(true, PropType::NumberLiteral(-0.0))).unwrap()
+        );
+
+        // NaN is equal to nothing, so it is never shared, and still recalled as converted.
+        let nan = trees.share(&conditions(true, PropType::NumberLiteral(f64::NAN)));
+        let nan_again = trees.share(&conditions(true, PropType::NumberLiteral(f64::NAN)));
+        assert!(!Arc::ptr_eq(&nan, &nan_again));
+        assert_eq!(
+            serde_json::to_string(&*nan).unwrap(),
+            serde_json::to_string(&conditions(true, PropType::NumberLiteral(f64::NAN))).unwrap()
+        );
+    }
+
+    /// The fingerprint tells apart trees that hold the same types in another shape, so a bucket rarely holds more than
+    /// one: `A | (B | C)` and `(A | B) | C`, and an object's fields by name.
+    #[test]
+    fn the_fingerprint_reads_the_shape_and_the_names() {
+        let union = PropType::Union;
+        let a = || PropType::StringLiteral("a".into());
+        let b = || PropType::StringLiteral("b".into());
+        assert_ne!(
+            fingerprint(&union(vec![a(), union(vec![b(), PropType::Null])])),
+            fingerprint(&union(vec![union(vec![a(), b()]), PropType::Null]))
+        );
+        assert_ne!(fingerprint(&union(vec![a()])), fingerprint(&union(vec![b()])));
+        let renamed = match conditions(true, PropType::Null) {
+            PropType::Object(mut fields) => {
+                if let Some(field) = fields.first_mut() {
+                    field.name = "_active".into();
+                }
+                PropType::Object(fields)
+            }
+            other => other,
+        };
+        assert_ne!(fingerprint(&renamed), fingerprint(&conditions(true, PropType::Null)));
     }
 
     /// A key borrowed from a property finds the owned key kept for an equal property, read from an answer of its own,
