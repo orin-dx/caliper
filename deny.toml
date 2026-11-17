@@ -1,7 +1,13 @@
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+    # Review by 2026-12-17. humantime 2.4.0 is unmaintained because chrono is (chronotope/chrono#1768); it is a
+    # duration formatter with no memory-safety or logic defect. Path: trycmd 1.2.1 -> humantime-serde -> humantime, and
+    # trycmd is a dev-dependency of crates/cli only (CLI snapshot tests), so it never ships in a binary or the library.
+    # No safe upgrade exists: trycmd 1.2.1 is the latest release and humantime has no patched version.
+    { id = "RUSTSEC-2026-0542", reason = "unmaintained, test-only via trycmd; review by 2026-12-17" },
+]
 
 [licenses]
 version = 2
