@@ -119,7 +119,8 @@ fn every_other_use_of_the_props_object_hands_it_on() {
         "useMemo(() => 1, [props])",
         "props[key]",
         "typeof props",
-        "const copy = props",
+        // A `var` alias can be redeclared or read before it holds the value (`const`/`let` aliases are followed).
+        "var copy = props",
         "const [first] = props",
         "useY(rest)",
         "({ ...rest })",
@@ -854,7 +855,7 @@ fn a_member_in_each_syntax_context_is_a_read_only_where_known_and_never_silently
         "props[k]",
         "props?.[k]",
         "use(props)",
-        "const p = props",
+        "var p = props",
         "const [p] = props",
         "({ ...props })",
         "[...props]",

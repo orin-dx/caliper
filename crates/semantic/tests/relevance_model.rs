@@ -277,11 +277,12 @@ fn both_lanes(
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, source).unwrap();
     }
+    // React's attributes known (`full`, the default), so a DOM member the body reads can be a row.
     let options = PipelineOptions {
         src_dirs: vec![root.clone()],
         use_cache: false,
         collapse_inherited_props: collapse,
-        html_attributes: HtmlAttributeMode::None,
+        html_attributes: HtmlAttributeMode::Full,
         ..PipelineOptions::default()
     };
     let structural = extract(&options);
@@ -394,6 +395,34 @@ fn the_expanded_view_keeps_the_react_props_only_the_checker_finds_in_the_cli_mer
     assert_eq!(rows(&structural.components["Made"]), Vec::<String>::new());
     let (_dir, [_, narrowed]) = both_lanes(&files, CollapseInheritedProps::Dependencies);
     assert_eq!(rows(&narrowed.components["Made"]), ["label"]);
+}
+
+#[test]
+fn a_one_hop_alias_of_the_props_reads_as_the_props_and_a_react_props_type_is_not_own() {
+    // Pattern evaluation probe (iii), in both lanes. `const`/`let` aliases of the props object (or a rest binding) are
+    // the props object; a `var` alias, or one written, hands it on (promotes nothing, hides nothing). A props type
+    // that is React's own interface (`props: HTMLAttributes<HTMLDivElement>`) declares nothing of the component's: the
+    // aliased destructure lists `title` alone, not React's 55 members (the over-promotion's root cause).
+    let text = "import type { HTMLAttributes } from 'react';\n\
+        type Div = HTMLAttributes<HTMLDivElement>;\n\
+        export function A(props: HTMLAttributes<HTMLDivElement>) { const p = props; const { title } = p; return <div title={title} />; }\n\
+        export function B(props: Div) { const p = props; return <div title={p.title} />; }\n\
+        export function C(props: Div) { let p = props; const { title } = p; return <div title={title} {...props} />; }\n\
+        export function D({ own, ...rest }: Div & { own?: string }) { const r = rest; return <div lang={r.lang}>{own}</div>; }\n\
+        export function E(props: Div) { const p = props; const q = p; return <div title={q.title} />; }\n";
+    let (_dir, lanes) = both_lanes(&[("Components.tsx", text.to_owned())], CollapseInheritedProps::Dependencies);
+    for (lane, output) in ["structural", "checker"].iter().zip(&lanes) {
+        let got: Vec<(&str, Vec<String>)> =
+            ["A", "B", "C", "D", "E"].iter().map(|name| (*name, rows(&output.components[*name]))).collect();
+        let want: Vec<(&str, Vec<String>)> = vec![
+            ("A", vec!["title".to_owned()]),
+            ("B", vec!["title".to_owned()]),
+            ("C", vec!["title".to_owned()]),
+            ("D", vec!["lang".to_owned(), "own".to_owned()]),
+            ("E", vec!["title".to_owned()]),
+        ];
+        assert_eq!(got, want, "{lane}");
+    }
 }
 
 #[test]

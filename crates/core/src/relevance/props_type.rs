@@ -70,6 +70,10 @@ impl PropsType {
         // `props: Pick<Base, Keys>` is the mapping's own name and arguments, not a declaration to look up.
         read.pick(&mapping.props_type_name, &mapping.props_type_args, from, &lookup);
         match lookup(&mapping.props_type_name, from) {
+            // A props type that is itself an ambient interface (`props: React.HTMLAttributes<HTMLDivElement>`)
+            // declares nothing of the component's own: its members are React's, as when the component extends it.
+            Some((Declaration::Interface(interface), declared))
+                if crate::origin::is_ambient_declaration(declared.as_str(), Some(&interface.tags)) => {}
             Some((Declaration::Interface(interface), _)) => {
                 read.interface = Some((interface.name.to_string(), interface.file_path.to_string()));
                 read.own.extend(interface.props.iter().map(|prop| prop.name.clone()));

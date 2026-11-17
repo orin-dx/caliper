@@ -343,8 +343,9 @@ impl<'s, 'a> Reader<'s, 'a> {
                 self.whole.remove(&symbol);
                 continue;
             }
+            let whole = self.whole.get(&symbol).copied();
             for reference in self.scoping.get_resolved_references(symbol) {
-                self.classify(reference.node_id());
+                self.classify(reference.node_id(), whole);
             }
         }
         // A key's first read is its earliest in the source.
@@ -471,8 +472,9 @@ impl<'s, 'a> Reader<'s, 'a> {
         (parent, child)
     }
 
-    /// Classifies one reference to the props object; any use not named here hands it on.
-    fn classify(&mut self, reference: NodeId) {
+    /// Classifies one reference to the props object (or a rest binding of it, `whole`); any use not named here hands it
+    /// on.
+    fn classify(&mut self, reference: NodeId, whole: Option<SpreadOf>) {
         let (parent, child) = self.through_wrappers(reference);
         let read = match self.nodes.kind(parent) {
             AstKind::StaticMemberExpression(member) if member.object.span() == child => {
@@ -486,8 +488,26 @@ impl<'s, 'a> Reader<'s, 'a> {
             AstKind::VariableDeclarator(declarator)
                 if declarator.init.as_ref().is_some_and(|init| init.span() == child) =>
             {
-                match &declarator.id {
-                    BindingPattern::ObjectPattern(object) => self.destructure(object),
+                match (&declarator.id, whole) {
+                    (BindingPattern::ObjectPattern(object), _) => self.destructure(object),
+                    // `const p = props`: an alias is the props object itself, followed as it is (a binding ever
+                    // written is dropped when its references are classified). Only `const` and `let`: a `var` can be
+                    // redeclared or read before it holds the value.
+                    (BindingPattern::BindingIdentifier(id), Some(whole))
+                        if matches!(
+                            self.nodes.kind(self.nodes.parent_id(parent)),
+                            AstKind::VariableDeclaration(declaration) if matches!(
+                                declaration.kind,
+                                oxc_ast::ast::VariableDeclarationKind::Const
+                                    | oxc_ast::ast::VariableDeclarationKind::Let
+                            )
+                        ) =>
+                    {
+                        match id.symbol_id.get() {
+                            Some(symbol) => self.track(symbol, whole),
+                            None => self.facts.handed_on = true,
+                        }
+                    }
                     _ => self.facts.handed_on = true,
                 }
                 return;
