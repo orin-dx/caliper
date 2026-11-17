@@ -1,0 +1,65 @@
+<task-notification>
+<task-id>a8ad7961595a3abf8</task-id>
+<tool-use-id>toolu_01Spx8mKyx2sSJKVFhcCPsPn</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/6f993b0f-3007-4088-bd26-63eda356278e/tasks/a8ad7961595a3abf8.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review medium cf51133b..HEAD" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>```json
+[
+  {
+    "file": "crates/core/src/react_types.rs",
+    "line": 425,
+    "summary": "The old `checker_prop_used`, `react_prop_listed` and `react_props_wanted` are left in place after the diff replaced every caller with `checker_prop_kept`, `visible_rows` and `react_props_wanted_for`. A grep finds no remaining uses.",
+    "failure_scenario": "The two rule sets sit side by side, and the old one keys only on `entry.props`, not on `notable_inherited`. A later caller who picks the old helpers gets a different set of kept React props than the checker merges. This undoes the 'one owner' consolidation the diff set out to make. Because the functions are `pub`, the compiler does not warn that they are dead."
+  },
+  {
+    "file": "crates/core/src/types/semantic.rs",
+    "line": 435,
+    "summary": "`apply_props` now calls `expanded(entry, cx.mode)`. With no placement and `cx.mode == None` it returns true, which selects `Full` mode and takes every React prop. Before, a missing placement always meant not expanded.",
+    "failure_scenario": "A whole-project merge runs on an entry with no relevance placement, with `collapseInheritedProps: none`. The `react_attribute_mode(Full, true)` call then lets every `@types/react` prop through, where the old code gave `Curated`. This is the one call site where the no-placement fallback changes behaviour, and it may leak DOM attributes into entries that never gathered evidence."
+  },
+  {
+    "file": "crates/core/src/relevance/props_type.rs",
+    "line": 280,
+    "summary": "`unproven_pick` is set only in `pick_keys`, which `read` and `pick` reach. The `Omit` alias arm of `read`, and `Pick` reached through `picks` or an alias base, set `declined` but not `unproven_pick`. Whether the forwarding lane's props types are merged is not shown.",
+    "failure_scenario": "The props type is `type Props = Omit&lt;Pick&lt;Base, string&gt;, 'x'&gt;`, or `Pick` sits inside `Partial&lt;&gt;`. The Omit arm calls `picks`, which reaches `pick_keys` and sets the flag in that case. But a `Pick&lt;Attrs, string&gt;` that reaches only the `declined` path does not set it. Relevance then still narrows React members, even though the key set is unproven."
+  },
+  {
+    "file": "crates/core/src/resolver/relevance_inputs.rs",
+    "line": 101,
+    "summary": "The lookup clones the whole `CollectedTypeAlias` and runs `apply_generic_args` on every call with non-empty args. It then wraps the result in `Box&lt;Cow&lt;...&gt;&gt;`, which is two layers of indirection.",
+    "failure_scenario": "`pick`, `keys` and `picks` call `lookup` repeatedly for each component's props type. Each generic alias instantiation allocates a fresh clone, and nothing caches it. On a large library with many generic aliases this is wasted work on the resolver path. `Declaration::Alias` could hold the `Cow` directly (or an `Arc`) instead of a `Box&lt;Cow&gt;`."
+  },
+  {
+    "file": "crates/core/src/relevance/props_type.rs",
+    "line": 190,
+    "summary": "The catch-all arm `(_, args)` in `picks` replaces `(_, [])` plus `_ =&gt; {}`. It now calls `lookup` (import resolution and `apply_generic_args`) for every named generic type the walk reaches, such as `ComponentProps&lt;'div'&gt;` or `Array&lt;T&gt;`. Previously those were skipped.",
+    "failure_scenario": "A props type like `Foo&lt;Bar&lt;Baz&gt;&gt;` triggers import resolution and generic substitution for names that are not aliases. This costs time and memory, which matters for resolver changes. Any side effect of `apply_generic_args` on an unexpected alias with arguments is also newly reachable here."
+  },
+  {
+    "file": "crates/core/src/types/semantic.rs",
+    "line": 584,
+    "summary": "`layer_notable` now selects members only when `entry.notable_inherited` has the name with a `parent` matching the layer's type name and file. An entry whose `notable_inherited` prop has `parent: None` is silently skipped. The old rule used the curated notable list.",
+    "failure_scenario": "A notable member such as `className` is recorded in `notable_inherited` without a parent, or with a parent that differs from the layer's. The checker's type for it is then never merged back, and the prop keeps its structural type. The failure is silent."
+  },
+  {
+    "file": "crates/semantic/src/lib.rs",
+    "line": 106,
+    "summary": "When `cx` is `None`, the code substitutes `Dependencies` as the default collapse mode. That duplicates a policy that is also encoded inside `expanded`, and it can disagree with the hook, which uses the real `cx.mode`.",
+    "failure_scenario": "The default for a missing context is hard-coded here. If the pipeline's default collapse mode changes, or the no-placement fallback differs, `targets_with(None)` asks the checker for a different `react_wanted` set than the merge keeps. The mismatch drops React props."
+  }
+]
+```
+
+I read the diff and the surrounding code but did not build or run any tests.</result>
+<usage><subagent_tokens>66168</subagent_tokens><tool_uses>4</tool_uses><duration_ms>36556</duration_ms></usage>
+</task-notification>
+
+---
+
+change #288 has pending findings that need to be addressed
+
+---
+
+Why do we need to specify rustup/toolchain/etc???? Why are we not using moon, just, etc

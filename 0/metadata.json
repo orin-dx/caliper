@@ -1,0 +1,152 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7KQPWESRA38FCDKEXKQXE3Y",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-17T03:10:01.403393Z",
+  "branch": "fix/list-rule-patterns",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/core/src/react_types.rs",
+    "crates/core/src/relevance/props_type.rs",
+    "crates/semantic/src/lib.rs",
+    "docs/adr/0022-ask-a-warm-checker-for-the-requested-component.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "77c9362bf0bf",
+  "checkpoint_transcript_start": 322,
+  "transcript_lines_at_start": 322,
+  "compact_transcript_start": 26,
+  "token_usage": {
+    "input_tokens": 54,
+    "cache_creation_tokens": 36452,
+    "cache_read_tokens": 3117094,
+    "output_tokens": 14938,
+    "api_call_count": 26,
+    "subagent_tokens": {
+      "input_tokens": 10,
+      "cache_creation_tokens": 63731,
+      "cache_read_tokens": 211996,
+      "output_tokens": 4111,
+      "api_call_count": 5
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 100,
+    "cache_creation_tokens": 105331,
+    "cache_read_tokens": 4770395,
+    "output_tokens": 26029,
+    "api_call_count": 46,
+    "subagent_tokens": {
+      "input_tokens": 10,
+      "cache_creation_tokens": 63731,
+      "cache_read_tokens": 211996,
+      "output_tokens": 4111,
+      "api_call_count": 5
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 4,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 4,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Triage the results of an automated /code-review of the cf51133b..HEAD diff (Rust crate changes around React prop relevance/collapse and the checker merge), fix the valid findings, and commit the review-round changes.",
+    "outcome": "Findings 1 (dead legacy helpers) and 6 (duplicated default collapse policy, ADR reference) were fixed; findings 2, 3 and 5 were dismissed after checking the code, and finding 4 (perf) was measured as unmeasurable via an A/B release build. Pinning tests were added for visible_rows and the Omit alias (both mutations now fail), the final gate was run, and the changes were committed and pushed.",
+    "learnings": {
+      "repo": [
+        "Review-round changes touch crates/core (react_types.rs, relevance/props_type.rs), crates/semantic/src/lib.rs, and ADR 0022 (ask-a-warm-checker-for-the-requested-component).",
+        "The repo has accept.sh and ab.sh scripts for acceptance gating and A/B comparison of base vs. fixed release binaries on fixtures such as Chakra.",
+        "Consolidation to a single owner for kept React props uses checker_prop_kept, visible_rows and react_props_wanted_for; the old checker_prop_used, react_prop_listed and react_props_wanted were pub and thus not flagged dead by the compiler.",
+        "The project uses mutation proofs (re-running tests against deliberate mutations) to verify new tests actually pin behavior.",
+        "Plain rustc resolves to 1.99.1 in this environment, so explicit toolchain overrides are unnecessary."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/react_types.rs",
+          "line": 425,
+          "finding": "Legacy helpers checker_prop_used, react_prop_listed and react_props_wanted were left as dead pub functions after callers moved to the new helpers; they were deleted."
+        },
+        {
+          "path": "crates/semantic/src/lib.rs",
+          "line": 106,
+          "finding": "When cx is None the code hard-coded Dependencies as the default collapse mode, duplicating policy inside expanded; this was fixed to avoid divergence."
+        },
+        {
+          "path": "crates/core/src/relevance/props_type.rs",
+          "line": 190,
+          "finding": "The catch-all arm in picks now calls lookup for every named generic type; the perf concern was measured as negligible (flat RSS within ±15 MiB, time within noise, identical output)."
+        },
+        {
+          "path": "crates/core/src/types/semantic.rs",
+          "line": 435,
+          "finding": "Review claimed expanded(entry, cx.mode) with no placement and mode None selects Full; this finding was dismissed after checking the code."
+        }
+      ],
+      "workflow": [
+        "Triage reviewer findings against actual code before acting, since the reviewer did not build or run tests.",
+        "Settle performance-related review concerns with a release-build A/B comparison of time, peak RSS and output identity rather than speculation.",
+        "Add tests that pin review-round changes and verify them by re-running each mutation to confirm failure.",
+        "Run the full gate on the final tree before committing."
+      ]
+    },
+    "friction": [
+      "Machine was under heavy load (load average 29), making timing comparisons noisy.",
+      "One tool call surfaced as a bash_placeholder, indicating a minor tooling glitch.",
+      "Needed to locate the cf51133b base binary and build both base and fixed release binaries for comparison."
+    ],
+    "open_items": [
+      "Findings 2, 3 and 5 were dismissed without code changes; details were deferred to the summary rather than recorded in the code.",
+      "Finding 4's suggestion to hold the Cow directly or an Arc in Declaration::Alias instead of Box<Cow> was not pursued since no cost was measurable."
+    ]
+  }
+}
