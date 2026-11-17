@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01MMEbqMMWm38nxVW8SiqAiY",
+  "agent_id": "a0789e9dbd64e468e",
+  "subagent_type": "general-purpose",
+  "task_description": "P0: opaque kinds and checker_decides",
+  "token_usage": {
+    "input_tokens": 42,
+    "cache_creation_tokens": 54708,
+    "cache_read_tokens": 1355147,
+    "output_tokens": 11705,
+    "api_call_count": 21
+  },
+  "started_at": "2026-11-14T17:38:10.749508-08:00",
+  "completed_at": "2026-11-16T18:38:43.247576-08:00"
+}

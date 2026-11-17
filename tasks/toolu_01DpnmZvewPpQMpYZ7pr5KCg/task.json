@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01DpnmZvewPpQMpYZ7pr5KCg",
+  "agent_id": "aa89924d29caf9f76",
+  "subagent_type": "general-purpose",
+  "task_description": "Red-team JSX evidence extractor (no fixes)",
+  "token_usage": {
+    "input_tokens": 86,
+    "cache_creation_tokens": 168569,
+    "cache_read_tokens": 5235776,
+    "output_tokens": 77682,
+    "api_call_count": 43
+  },
+  "started_at": "2026-11-15T17:34:53.954509-08:00",
+  "completed_at": "2026-11-16T18:38:43.268672-08:00"
+}
