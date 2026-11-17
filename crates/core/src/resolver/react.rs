@@ -5,8 +5,8 @@ use oxc_resolver::Resolver;
 
 use crate::types::*;
 
-use super::collected::resolve_collected_type;
 use super::ResolutionContext;
+use super::collected::resolve_collected_type;
 
 /// Map a React builtin type name to the appropriate `PropType`.
 pub(super) fn react_type_to_prop_type(
@@ -22,9 +22,13 @@ pub(super) fn react_type_to_prop_type(
 
     match strip {
         // React node types.
-        "ReactNode" | "ReactElement" | "JSX.Element" | "ReactPortal" | "ReactFragment" | "ReactChild" => {
-            PropType::ReactNode
-        }
+        "ReactNode" | "ReactPortal" | "ReactFragment" | "ReactChild" => PropType::ReactNode,
+
+        // An element is narrower than a node (no strings, numbers or `null`): kept by name, as the checker states it.
+        "ReactElement" | "JSX.Element" => PropType::Named {
+            name: strip.into(),
+            args: args.iter().map(|a| resolve_collected_type(a, consuming_file, ctx, state, depth + 1)).collect(),
+        },
 
         // CSS properties.
         "CSSProperties" | "CSSObject" => PropType::CssProperties,

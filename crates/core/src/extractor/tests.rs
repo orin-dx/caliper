@@ -693,7 +693,14 @@ fn test_type_alias_omit() {
     match alias.unwrap() {
         CollectedTypeAlias::Omit { base, keys, .. } => {
             assert_eq!(base.to_raw_string(), "FullProps");
-            assert_eq!(keys.as_string_union_keys(), vec!["b".to_owned(), "c".to_owned()]);
+            assert!(
+                matches!(keys, CollectedType::Union(members) if matches!(
+                    members.as_slice(),
+                    [CollectedType::StringLiteral(first), CollectedType::StringLiteral(second)]
+                        if first == "b" && second == "c"
+                )),
+                "expected keys to be the union of \"b\" and \"c\", got {keys:?}"
+            );
         }
         other => panic!("Expected Omit, got {:?}", other),
     }
@@ -1476,7 +1483,7 @@ fn a_member_destructured_from_an_import_and_an_imported_name_re_bound_are_aliase
         .iter()
         .map(|m| {
             assert_eq!(m.rule, ImportedMemberAlias);
-            (m.component_name.as_str(), format!("{:?}", m.props_type_args), m.exported)
+            (m.component_name.as_str(), format!("{:?}", m.props_type_args), m.exported())
         })
         .collect();
     assert_eq!(
@@ -1668,11 +1675,15 @@ fn functions_used_only_as_functions_are_not_components() {
 }
 
 #[test]
-fn a_component_is_exported_when_its_module_exports_it_or_attaches_it_to_an_export() {
-    let exports = |path: &str, source: &str| -> Vec<(String, bool)> {
+fn a_component_records_the_exports_its_module_has_for_it_or_for_the_export_it_is_attached_to() {
+    let exports = |path: &str, source: &str| -> Vec<(String, Vec<String>)> {
         let data = parse_file(Utf8Path::new(path), source);
-        let mut found: Vec<(String, bool)> =
-            data.component_mappings.iter().map(|m| (m.component_name.to_string(), m.exported)).collect();
+        let mut found: Vec<(String, Vec<String>)> = data
+            .component_mappings
+            .iter()
+            .inspect(|m| assert_eq!(m.exported(), !m.exports.is_empty()))
+            .map(|m| (m.component_name.to_string(), m.exports.iter().map(ToString::to_string).collect()))
+            .collect();
         found.sort_unstable();
         found
     };
@@ -1698,24 +1709,219 @@ fn a_component_is_exported_when_its_module_exports_it_or_attaches_it_to_an_expor
     "#;
     assert_eq!(
         exports("/test/exports.tsx", source),
-        vec![
-            ("Arrow".to_string(), true),
-            ("Card".to_string(), true),
-            ("Defaulted".to_string(), true),
-            ("Direct".to_string(), true),
-            ("Header".to_string(), true),
-            ("Internal".to_string(), false),
-            ("Item".to_string(), true),
-            ("MenuItem".to_string(), true),
-            ("MenuRoot".to_string(), true),
-            ("Orphan".to_string(), false),
-            ("Renamed".to_string(), true),
-        ]
+        named(&[
+            ("Arrow", &["Arrow"]),
+            ("Card", &["Card"]),
+            ("Defaulted", &["default"]),
+            ("Direct", &["Direct"]),
+            ("Header", &["Card.Header"]),
+            ("Internal", &[]),
+            ("Item", &["Direct.Item"]),
+            ("Menu", &["Menu"]),
+            ("MenuItem", &["Menu.Item"]),
+            ("Orphan", &[]),
+            ("Public", &["Public"]),
+        ])
     );
     assert_eq!(
         exports("/test/fancy-badge.tsx", "export default function (props: { tone: string }) { return <span />; }"),
-        vec![("FancyBadge".to_string(), true)]
+        named(&[("FancyBadge", &["default"])])
     );
+    // The module's default is `Menu`, so `Item` is `default.Item`, and never the default itself; one function under two
+    // names has both; sub-components attached to each other in a cycle end at the first path that reaches them.
+    let source = r#"
+        interface P { label: string }
+        function Item(props: P) { return <li />; }
+        function Menu(props: P) { return <ul />; }
+        Menu.Item = Item;
+        export default Menu;
+        function Ping(props: P) { return <i />; }
+        function Pong(props: P) { return <u />; }
+        Ping.Pong = Pong;
+        Pong.Ping = Ping;
+        export { Ping as Game };
+    "#;
+    assert_eq!(
+        exports("/test/menu.tsx", source),
+        named(&[("Game", &["Game"]), ("Item", &["default.Item"]), ("Menu", &["default"]), ("Pong", &["Game.Pong"]),])
+    );
+    assert_eq!(
+        exports(
+            "/test/twice.tsx",
+            "export function Twice(props: { a: string }) { return <b />; } export default Twice;"
+        ),
+        named(&[("Twice", &["Twice", "default"])])
+    );
+}
+
+// A component exported under one other name is reported under that name: `export { _Card as Card }` is `Card`, not the
+// implementation's `_Card`. The exports stay what identifies it (ADR 0027).
+#[test]
+fn a_component_exported_under_another_name_is_named_by_that_export() {
+    let named = |source: &str| -> Vec<(String, Vec<String>)> {
+        let data = parse_file(Utf8Path::new("/test/aliased.tsx"), source);
+        let mut found: Vec<(String, Vec<String>)> = data
+            .component_mappings
+            .iter()
+            .map(|m| (m.component_name.to_string(), m.exports.iter().map(ToString::to_string).collect()))
+            .collect();
+        found.sort_unstable();
+        found
+    };
+    let pair = |name: &str, exports: &[&str]| (name.to_owned(), exports.iter().map(ToString::to_string).collect());
+    let source = r#"
+        interface P { label: string }
+        function _Card(props: P) { return <div />; }
+        function Wrapped(props: P) { return <b />; }
+        function Twice(props: P) { return <i />; }
+        function Taken(props: P) { return <u />; }
+        export function Shown(props: P) { return <s />; }
+        function Labeled(props: P) { return <em />; }
+        function Both(props: P) { return <p />; }
+        Labeled.displayName = "Tagged";
+        export { _Card as Card, Wrapped as DialogTrigger, Twice as One, Twice as Two, Taken as Shown, Labeled as Name };
+        export { Both as Pair };
+        export default Both;
+    "#;
+    assert_eq!(
+        named(source),
+        [
+            pair("Card", &["Card"]),
+            pair("DialogTrigger", &["DialogTrigger"]),
+            pair("Pair", &["Pair", "default"]),
+            pair("Shown", &["Shown"]),
+            pair("Tagged", &["Name"]),
+            pair("Taken", &["Shown"]),
+            pair("Twice", &["One", "Two"]),
+        ]
+    );
+}
+
+#[test]
+fn an_inline_sub_component_has_only_the_exports_of_the_parent_it_is_attached_to() {
+    // Each mapping is told apart by its props type, as its name `Item` is shared.
+    let exports = |source: &str| -> Vec<(String, String, Vec<String>)> {
+        let data = parse_file(Utf8Path::new("/test/items.tsx"), source);
+        let mut found: Vec<(String, String, Vec<String>)> = data
+            .component_mappings
+            .iter()
+            .map(|m| {
+                (
+                    m.component_name.to_string(),
+                    m.props_type_name.to_string(),
+                    m.exports.iter().map(ToString::to_string).collect(),
+                )
+            })
+            .collect();
+        found.sort_unstable();
+        found
+    };
+    let row = |name: &str, props: &str, exports: &[&str]| {
+        (name.to_string(), props.to_string(), exports.iter().map(ToString::to_string).collect::<Vec<_>>())
+    };
+    let source = r#"
+        interface AProps { a: string }
+        interface BProps { b: string }
+        export function A(props: AProps) { return <ul />; }
+        export function B(props: BProps) { return <ol />; }
+        A.Item = (props: AProps) => <li />;
+        B.Item = (props: BProps) => <li />;
+    "#;
+    assert_eq!(
+        exports(source),
+        [
+            row("A", "AProps", &["A"]),
+            row("B", "BProps", &["B"]),
+            row("Item", "AProps", &["A.Item"]),
+            row("Item", "BProps", &["B.Item"])
+        ]
+    );
+    let source = r#"
+        interface AProps { a: string }
+        interface BProps { b: string }
+        interface CProps { c: string }
+        function ARoot(props: AProps) { return <ul />; }
+        export const A = Object.assign(ARoot, { Item: (props: AProps) => <li /> });
+        export function B(props: BProps) { return <ol />; }
+        B.Item = (props: BProps) => <li />;
+        function C(props: CProps) { return <p />; }
+        C.Item = (props: CProps) => <li />;
+        const shown = <C c="x" />;
+    "#;
+    assert_eq!(
+        exports(source),
+        [
+            row("A", "AProps", &["A"]),
+            row("B", "BProps", &["B"]),
+            row("C", "CProps", &[]),
+            row("Item", "AProps", &["A.Item"]),
+            row("Item", "BProps", &["B.Item"]),
+            row("Item", "CProps", &[]),
+        ]
+    );
+    // A binding that shares the inline sub-component's name keeps its own exports.
+    let source = r#"
+        interface AProps { a: string }
+        interface IProps { i: string }
+        export function A(props: AProps) { return <ul />; }
+        A.Item = (props: AProps) => <li />;
+        export default function Item(props: IProps) { return <li />; }
+    "#;
+    assert_eq!(
+        exports(source),
+        [row("A", "AProps", &["A"]), row("Item", "AProps", &["A.Item"]), row("Item", "IProps", &["default"])]
+    );
+    let source = r#"
+        interface AProps { a: string }
+        interface IProps { i: string }
+        export function A(props: AProps) { return <ul />; }
+        A.Item = (props: AProps) => <li />;
+        function Item(props: IProps) { return <li />; }
+        const shown = <Item i="x" />;
+    "#;
+    assert_eq!(
+        exports(source),
+        [row("A", "AProps", &["A"]), row("Item", "AProps", &["A.Item"]), row("Item", "IProps", &[])]
+    );
+}
+
+#[test]
+fn a_binding_is_not_taken_for_an_inline_sub_component_of_the_same_name() {
+    let source = r#"
+        interface AProps { a: string }
+        interface BaseProps { base: string }
+        export function A(props: AProps) { return <ul />; }
+        A.Item = (props: AProps) => <li />;
+        export const Item = Base;
+        function Base(props: BaseProps) { return <li />; }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/binding.tsx"), source);
+    let mut found: Vec<(String, String, Vec<String>)> = data
+        .component_mappings
+        .iter()
+        .map(|m| {
+            (
+                m.component_name.to_string(),
+                m.props_type_name.to_string(),
+                m.exports.iter().map(ToString::to_string).collect(),
+            )
+        })
+        .collect();
+    found.sort_unstable();
+    let row = |name: &str, props: &str, exports: &[&str]| {
+        (name.to_string(), props.to_string(), exports.iter().map(ToString::to_string).collect::<Vec<_>>())
+    };
+    assert_eq!(
+        found,
+        [row("A", "AProps", &["A"]), row("Item", "AProps", &["A.Item"]), row("Item", "BaseProps", &["Item"]),]
+    );
+}
+
+fn named(expected: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
+    expected
+        .iter()
+        .map(|(name, exports)| (name.to_string(), exports.iter().map(ToString::to_string).collect()))
+        .collect()
 }
 
 #[test]
@@ -1753,6 +1959,44 @@ fn test_enum_collected() {
     let entries = entries.unwrap();
     assert_eq!(entries.len(), 4);
     assert!(entries.iter().any(|e| e.name == "Up"));
+}
+
+#[test]
+fn an_enum_member_has_one_value_for_its_entry_and_its_union() {
+    let data = parse_file(
+        Utf8Path::new("/test/level.ts"),
+        "enum Level { Low, Mid = 5, High }\nenum Tone { Primary = \"primary\" }\nenum Tone { Secondary = \"secondary\" }",
+    );
+    let values = |key: &str| -> Vec<(String, EnumValue)> {
+        data.enums[key].iter().map(|entry| (entry.name.clone(), entry.value.clone())).collect()
+    };
+    assert_eq!(
+        values("/test/level.ts:Level"),
+        vec![
+            ("Low".to_string(), EnumValue::Number(0.0)),
+            ("Mid".to_string(), EnumValue::Number(5.0)),
+            ("High".to_string(), EnumValue::Number(6.0)),
+        ]
+    );
+    assert_eq!(
+        values("/test/level.ts:Tone"),
+        vec![
+            ("Primary".to_string(), EnumValue::String("primary".to_string())),
+            ("Secondary".to_string(), EnumValue::String("secondary".to_string())),
+        ]
+    );
+}
+
+#[test]
+fn an_enum_in_a_function_body_does_not_touch_the_entries_of_a_module_level_enum() {
+    let data = parse_file(
+        Utf8Path::new("/test/local.ts"),
+        "function before() { enum Level { Early = 0 } return Level.Early }\n\
+         enum Level { Low = 1 }\n\
+         function after() { enum Level { High = 2 } return Level.High }",
+    );
+    let names: Vec<&str> = data.enums["/test/local.ts:Level"].iter().map(|entry| entry.name.as_str()).collect();
+    assert_eq!(names, ["Low"]);
 }
 
 #[test]
@@ -1904,7 +2148,14 @@ fn omit_with_a_literal_base_is_collected_structurally_for_the_resolver_to_report
     match data.type_aliases.get(&format!("{}:BadOmit2", path)) {
         Some(CollectedTypeAlias::Omit { base, keys, .. }) => {
             assert!(matches!(base, CollectedType::StringLiteral(s) if s == "not a type reference"));
-            assert_eq!(keys.as_string_union_keys(), vec!["a".to_owned(), "b".to_owned()]);
+            assert!(
+                matches!(keys, CollectedType::Union(members) if matches!(
+                    members.as_slice(),
+                    [CollectedType::StringLiteral(first), CollectedType::StringLiteral(second)]
+                        if first == "a" && second == "b"
+                )),
+                "expected keys to be the union of \"a\" and \"b\", got {keys:?}"
+            );
         }
         other => panic!("expected an Omit alias, got {other:?}"),
     }
@@ -2021,7 +2272,11 @@ fn deeply_chained_conditional_types_hit_the_depth_guard_not_the_bracket_heuristi
     // See SPEC-EXTRACTOR-001's AC-023 for the single-child-vs-multi-child
     // distinction this exact count is pinned to.
     let count = data.diagnostics.iter().filter(|d| d.code == DiagnosticCode::MaxDepthExceeded).count();
-    assert_eq!(count, 4, "expected exactly 4 MaxDepthExceeded diagnostics (one per TSConditionalType child branch that crosses the threshold), got {count}: {:?}", data.diagnostics);
+    assert_eq!(
+        count, 4,
+        "expected exactly 4 MaxDepthExceeded diagnostics (one per TSConditionalType child branch that crosses the threshold), got {count}: {:?}",
+        data.diagnostics
+    );
     assert!(data.diagnostics.iter().all(|d| d.severity == DiagnosticSeverity::Warning));
 }
 
@@ -2764,6 +3019,366 @@ fn a_component_declared_inside_a_function_body_is_reported_not_mapped() {
 }
 
 #[test]
+fn a_ts_file_that_imports_react_values_has_its_create_element_components_detected() {
+    let source = "import { createElement, forwardRef } from 'react';\n\
+        interface BoxProps { tone: string }\n\
+        export const Box = forwardRef<HTMLDivElement, BoxProps>((props, ref) => createElement('div', { ref }));\n\
+        export function Plain(props: BoxProps) { return createElement('span', null, props.tone); }";
+    let data = parse_file(Utf8Path::new("/test/box.ts"), source);
+    let found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    assert_eq!(found, [("Box", "BoxProps"), ("Plain", "BoxProps")]);
+}
+
+#[test]
+fn a_ts_file_without_a_react_value_import_has_no_components() {
+    let source = "import type { ReactNode } from 'react';\n\
+        interface Opts { a: string }\n\
+        export function Builder(opts: Opts): ReactNode { return null; }";
+    let data = parse_file(Utf8Path::new("/test/builder.ts"), source);
+    assert_eq!(data.component_mappings.len(), 0);
+    assert_eq!(data.diagnostics.len(), 0);
+}
+
+#[test]
+fn same_name_interface_declarations_in_one_file_merge_their_members() {
+    let source = "interface Props { a: string }\n\
+        interface Props { b: number }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/merge.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["a", "b"]]);
+}
+
+/// The entries declaring an interface called `name`, by the key's part after the file (`Props`, `Props@f0`), with each
+/// entry's members.
+fn interface_entries<'d>(data: &'d SourceData, name: &str) -> Vec<(String, Vec<&'d str>)> {
+    let mut entries: Vec<(String, Vec<&str>)> = data
+        .interfaces
+        .iter()
+        .filter(|(_, iface)| iface.name == name)
+        .map(|(key, iface)| {
+            let (_, local) = key.split_once(".tsx:").expect("a key names its file");
+            (local.to_owned(), iface.props.iter().map(|p| p.name.as_str()).collect())
+        })
+        .collect();
+    entries.sort();
+    entries
+}
+
+#[test]
+fn a_same_name_interface_in_a_function_body_is_an_entry_of_its_own() {
+    let source = "function helper() { interface Props { internal: number } }\n\
+        interface Props { label: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/scoped.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props".to_owned(), vec!["label"]), ("Props@f0".to_owned(), vec!["internal"])]
+    );
+}
+
+#[test]
+fn an_interface_in_a_class_static_block_is_an_entry_of_its_own() {
+    let source = "class Helper { static { interface Props { internal: number } } }\n\
+        interface Props { label: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/static-block.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props".to_owned(), vec!["label"]), ("Props@b0".to_owned(), vec!["internal"])]
+    );
+}
+
+#[test]
+fn an_interface_only_declared_in_a_function_body_is_still_collected_for_factory_results() {
+    let source = "function makeBox() { interface LocalProps { label: string } return (p: LocalProps) => <div />; }\n\
+        export const Box = makeBox();";
+    let data = parse_file(Utf8Path::new("/test/factory-local.tsx"), source);
+    assert_eq!(interface_entries(&data, "LocalProps"), [("LocalProps@f0".to_owned(), vec!["label"])]);
+}
+
+#[test]
+fn a_function_body_interface_declared_between_module_level_ones_leaves_them_merged() {
+    let source = "interface Props { label: string }\n\
+        function helper() { interface Props { internal: number } }\n\
+        interface Props { extra: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/scoped-after.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props".to_owned(), vec!["label", "extra"]), ("Props@f0".to_owned(), vec!["internal"])]
+    );
+}
+
+#[test]
+fn same_name_interfaces_in_two_sibling_functions_are_two_entries() {
+    let source = "function a() { interface Props { a: string } }\n\
+        function b() { interface Props { b: string } }";
+    let data = parse_file(Utf8Path::new("/test/siblings.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props@f0".to_owned(), vec!["a"]), ("Props@f1".to_owned(), vec!["b"])]
+    );
+}
+
+#[test]
+fn same_name_interfaces_in_one_function_body_merge() {
+    let source = "function f() { interface Props { a: string } interface Props { b: string } }";
+    let data = parse_file(Utf8Path::new("/test/same-scope.tsx"), source);
+    assert_eq!(interface_entries(&data, "Props"), [("Props@f0".to_owned(), vec!["a", "b"])]);
+}
+
+#[test]
+fn same_name_interfaces_in_sibling_blocks_of_one_function_do_not_merge() {
+    let source = "function f() { { interface Props { a: string } } { interface Props { b: string } } }";
+    let data = parse_file(Utf8Path::new("/test/blocks.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props@f0.b0".to_owned(), vec!["a"]), ("Props@f0.b1".to_owned(), vec!["b"])]
+    );
+}
+
+#[test]
+fn an_interface_in_a_switch_case_does_not_merge_with_the_module_level_one() {
+    let source = "interface Props { label: string }\n\
+        switch (x) { case 1: interface Props { internal: number } break; }";
+    let data = parse_file(Utf8Path::new("/test/switch.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props".to_owned(), vec!["label"]), ("Props@s0".to_owned(), vec!["internal"])]
+    );
+}
+
+#[test]
+fn a_ts_file_with_only_type_specifiers_from_react_has_no_components() {
+    let source = "import { type ReactNode, type FC } from 'react';\n\
+        interface Opts { a: string }\n\
+        export function Builder(opts: Opts): ReactNode { return null; }";
+    let data = parse_file(Utf8Path::new("/test/typed.ts"), source);
+    assert_eq!(data.component_mappings.len(), 0);
+    assert_eq!(data.diagnostics.len(), 0);
+}
+
+#[test]
+fn merging_a_described_interface_keeps_the_first_ones_tags() {
+    let source = "/** @deprecated use Other */\n\
+        interface Props { a: string }\n\
+        /** The props. */\n\
+        interface Props { b: number }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/tags.tsx"), source);
+    let iface = data.interfaces.iter().find(|(key, _)| key.ends_with(":Props")).map(|(_, iface)| iface).unwrap();
+    assert_eq!(iface.tags.get("deprecated").map(String::as_str), Some("use Other"));
+    assert_eq!(iface.description, "The props.");
+}
+
+#[test]
+fn an_object_assign_compound_is_emitted_under_the_exported_root_name() {
+    let source = "interface P { a: string }\n\
+        function RootImpl(props: P) { return <div />; }\n\
+        function Item(props: P) { return <div />; }\n\
+        function Label(props: P) { return <div />; }\n\
+        export const Root = Object.assign(RootImpl, { Item, Label });";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let mut found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    found.sort_unstable();
+    assert_eq!(found, [("Item", "P"), ("Label", "P"), ("Root", "P")]);
+    let diagnostics: Vec<&str> = data.diagnostics.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(diagnostics, Vec::<&str>::new());
+}
+
+#[test]
+fn inline_sub_components_in_an_object_assign_declaration_are_emitted() {
+    let source = "interface P { a: string }\n\
+        interface ItemProps { b: string }\n\
+        interface LabelProps { c: string }\n\
+        function RootImpl(props: P) { return <div />; }\n\
+        export const Root = Object.assign(RootImpl, {\n\
+            Item: (props: ItemProps) => <i />,\n\
+            Label: function (props: LabelProps) { return <b />; },\n\
+        });";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let mut found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    found.sort_unstable();
+    assert_eq!(found, [("Item", "ItemProps"), ("Label", "LabelProps"), ("Root", "P")]);
+}
+
+#[test]
+fn a_property_assigned_inline_sub_component_is_emitted() {
+    let source = "interface P { a: string }\n\
+        interface ItemProps { b: string }\n\
+        interface LabelProps { c: string }\n\
+        export const Root = (props: P) => <div />;\n\
+        Root.Item = (props: ItemProps) => <i />;\n\
+        Root.Label = function (props: LabelProps) { return <b />; };";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let mut found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    found.sort_unstable();
+    assert_eq!(found, [("Item", "ItemProps"), ("Label", "LabelProps"), ("Root", "P")]);
+}
+
+#[test]
+fn a_property_assigned_memo_or_forward_ref_sub_component_is_reported_as_skipped() {
+    let source = "interface P { a: string }\n\
+        export const Root = (props: P) => <div />;\n\
+        Root.Item = memo((props: P) => <i />);\n\
+        Root.Label = forwardRef<HTMLElement, P>((props, ref) => <b />);";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let skipped: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skipped,
+        [
+            "'Item' is a property-assigned sub-component wrapped in memo(), which is not read; only an inline \
+             function or a named component is",
+            "'Label' is a property-assigned sub-component wrapped in forwardRef(), which is not read; only an \
+             inline function or a named component is",
+        ]
+    );
+}
+
+#[test]
+fn a_property_assigned_value_that_is_not_a_component_wrapper_gets_no_skip_note() {
+    let source = "interface P { a: string }\n\
+        export const Root = (props: P) => <div />;\n\
+        Root.Context = createContext(null);\n\
+        Root.Version = 1;";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let skipped: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(skipped, Vec::<&str>::new());
+}
+
+#[test]
+fn a_component_cast_to_vfc_or_void_function_component_keeps_its_props() {
+    let source = "import type { VFC, VoidFunctionComponent } from 'react';\n\
+        import { forwardRef } from 'react';\n\
+        interface Props { label: string }\n\
+        const InnerA = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        const InnerB = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        const A = InnerA as VFC<{ a: string }>;\n\
+        const B = InnerB as VoidFunctionComponent<{ b: string }>;\n\
+        export { A, B };";
+    let data = parse_file(Utf8Path::new("/fixtures/cast.tsx"), source);
+    let path = "/fixtures/cast.tsx";
+    let mappings: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    let names_of = |component: &str| -> Vec<String> {
+        let matching: Vec<&&str> =
+            mappings.iter().filter(|(name, _)| *name == component).map(|(_, props)| props).collect();
+        assert_eq!(matching.len(), 1, "expected one mapping named {component}, got {mappings:?}");
+        match data.type_aliases.get(&format!("{path}:{}", matching[0])) {
+            Some(CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. }) => {
+                fields.iter().map(|f| f.name.to_string()).collect()
+            }
+            other => panic!("expected a Passthrough object alias for {component}, got {other:?} from {mappings:?}"),
+        }
+    };
+    assert_eq!(names_of("A"), ["a"]);
+    assert_eq!(names_of("B"), ["b"]);
+}
+
+#[test]
+fn exporting_a_cast_component_under_the_name_of_another_local_leaves_that_local_mapped() {
+    let source = "import type { VFC } from 'react';\n\
+        import { forwardRef } from 'react';\n\
+        interface Props { label: string }\n\
+        interface Q { q: string }\n\
+        const InnerA = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        function B(props: Q) { return <div />; }\n\
+        const A = InnerA as VFC<{ a: string }>;\n\
+        export { A as B };";
+    let data = parse_file(Utf8Path::new("/fixtures/cast-rename.tsx"), source);
+    let local_b: Vec<&str> = data
+        .component_mappings
+        .iter()
+        .filter(|m| m.component_name == "B" && m.rule != crate::types::DetectionRule::FcAnnotation)
+        .map(|m| m.props_type_name.as_str())
+        .collect();
+    assert_eq!(local_b, ["Q"]);
+}
+
+#[test]
+fn preact_compat_element_type_is_react_everywhere() {
+    let source = "import type { ReactElement } from 'preact/compat';\n\
+        function build(): ReactElement { throw new Error(); }\n\
+        export function Name(props: { id: string }) { return build(); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
+fn a_call_to_h_is_render_evidence() {
+    let source = "import { h } from 'preact';\n\
+        export function Name(props: { id: string }) { return h('div', null, props.id); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
+fn a_member_call_named_h_is_not_render_evidence() {
+    let source = "import { codec } from './codec';\n\
+        export function Encode(props: { id: string }) { return codec.h(props.id); }";
+    assert_eq!(components_in(source), Vec::<String>::new());
+}
+
+#[test]
+fn preacts_namespace_h_call_is_render_evidence_and_not_a_tagged_factory() {
+    let source = "import * as Preact from 'preact';\n\
+        import type { ComponentProps } from 'preact/compat';\n\
+        type ButtonProps = ComponentProps<'button'>;\n\
+        export const Button = Preact.h('button', {});\n\
+        export function Name(props: { id: string }) { return Preact.h('div', null, props.id); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
+fn a_local_function_named_h_is_not_render_evidence() {
+    let source = "function h(id: string) { return { id }; }\n\
+        export function Hash(props: { id: string }) { return h(props.id); }";
+    assert_eq!(components_in(source), Vec::<String>::new());
+}
+
+#[test]
+fn a_component_passed_to_a_local_h_is_not_counted_as_rendered() {
+    let source = "function h(value: unknown) { return value; }\n\
+        function Row(props: { id: string }, ref: unknown) { return <i />; }\n\
+        export const rows = h(Row);";
+    assert_eq!(components_in(source), Vec::<String>::new());
+}
+
+#[test]
+fn a_component_passed_to_preacts_h_is_counted_as_rendered() {
+    let source = "import { h } from 'preact';\n\
+        function Row(props: { id: string }, ref: unknown) { return <i />; }\n\
+        export const rows = h(Row, null);";
+    assert_eq!(components_in(source), ["Row"]);
+}
+
+#[test]
+fn a_component_passed_to_the_jsx_runtime_is_counted_as_rendered() {
+    let source = "import { jsx } from 'react/jsx-runtime';\n\
+        function Row(props: { id: string }, ref: unknown) { return <i />; }\n\
+        export const rows = jsx(Row, {});";
+    assert_eq!(components_in(source), ["Row"]);
+}
+
+#[test]
 fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
     let source = r#"
         const config = {};
@@ -2774,4 +3389,167 @@ fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
 
     assert!(data.component_mappings.is_empty(), "got {:?}", data.component_mappings);
     assert!(data.diagnostics.is_empty(), "expected no diagnostics, got {:?}", data.diagnostics);
+}
+
+#[test]
+fn a_function_body_interface_keeps_its_type_names_as_written() {
+    let source = "type T = number;\n\
+        interface Props<T> { value: T }\n\
+        function make() { type Item = { id: string }; interface Row { item: Item } return (p: Row) => <div />; }\n\
+        export const Box = make();";
+    let data = parse_file(Utf8Path::new("/test/names.tsx"), source);
+    let type_of = |interface: &str, prop: &str| -> String {
+        let iface = data.interfaces.values().find(|i| i.name == interface).expect("interface is collected");
+        match &iface.props.iter().find(|p| p.name == prop).expect("prop is collected").collected_type {
+            CollectedType::Named { name, .. } => name.to_string(),
+            other => panic!("expected a named type, got {other:?}"),
+        }
+    };
+    assert_eq!(type_of("Props", "value"), "T");
+    assert_eq!(type_of("Row", "item"), "Item");
+}
+
+/// Each component of a file as (name, props type, exports), sorted by name.
+fn identities(path: &str, source: &str) -> Vec<(String, String, Vec<String>)> {
+    let data = parse_file(Utf8Path::new(path), source);
+    let mut found: Vec<(String, String, Vec<String>)> = data
+        .component_mappings
+        .iter()
+        .map(|m| {
+            (
+                m.component_name.to_string(),
+                m.props_type_name.to_string(),
+                m.exports.iter().map(ToString::to_string).collect(),
+            )
+        })
+        .collect();
+    found.sort_unstable();
+    found
+}
+
+fn identity(name: &str, props: &str, exports: &[&str]) -> (String, String, Vec<String>) {
+    (name.to_owned(), props.to_owned(), exports.iter().map(ToString::to_string).collect())
+}
+
+#[test]
+fn an_anonymous_default_is_its_own_component_beside_a_named_export_of_its_file_stem() {
+    let expected = vec![identity("E", "NamedProps", &["E"]), identity("E (default)", "DefaultProps", &["default"])];
+    let forward_ref = "import { forwardRef } from 'react';\ninterface NamedProps { a: string }\ninterface DefaultProps { b: string }\n";
+    for (label, body) in [
+        (
+            "forwardRef default after the named export",
+            "export const E = forwardRef<HTMLDivElement, NamedProps>((props, ref) => <div ref={ref} />);\n\
+             export default forwardRef<HTMLDivElement, DefaultProps>((props, ref) => <i ref={ref} />);\n",
+        ),
+        (
+            "forwardRef default before the named export",
+            "export default forwardRef<HTMLDivElement, DefaultProps>((props, ref) => <i ref={ref} />);\n\
+             export const E = forwardRef<HTMLDivElement, NamedProps>((props, ref) => <div ref={ref} />);\n",
+        ),
+        (
+            "function default",
+            "export function E(props: NamedProps) { return <div />; }\n\
+             export default function (props: DefaultProps) { return <i />; }\n",
+        ),
+        (
+            "arrow default",
+            "export const E = (props: NamedProps) => <div />;\nexport default (props: DefaultProps) => <i />;\n",
+        ),
+        (
+            "memo default",
+            "import { memo } from 'react';\nexport const E = (props: NamedProps) => <div />;\n\
+             export default memo(function (props: DefaultProps) { return <i />; });\n",
+        ),
+        (
+            "class default",
+            "import { Component } from 'react';\nexport const E = (props: NamedProps) => <div />;\n\
+             export default class extends Component<DefaultProps> { render() { return <i />; } }\n",
+        ),
+    ] {
+        let source = format!("{forward_ref}{body}");
+        assert_eq!(identities("/test/E.tsx", &source), expected, "{label}");
+    }
+}
+
+#[test]
+fn an_anonymous_default_keeps_the_stem_name_when_no_component_of_the_file_has_it() {
+    let source = "interface P { a: string }\nexport const Other = (props: P) => <b />;\n\
+                  export default function (props: P) { return <i />; }\n";
+    assert_eq!(
+        identities("/test/E.tsx", source),
+        vec![identity("E", "P", &["default"]), identity("Other", "P", &["Other"])]
+    );
+}
+
+#[test]
+fn a_default_export_a_call_wraps_is_an_export_of_the_component_it_wraps() {
+    let table = "import * as React from 'react';\ninterface P { a: string }\nconst InternalTable = (props: P) => <div />;\n\
+                 export default React.forwardRef(InternalTable) as RefTable;\n";
+    assert_eq!(identities("/test/Table.tsx", table), vec![identity("InternalTable", "P", &["default"])]);
+
+    let nested = "import { memo, forwardRef } from 'react';\ninterface P { a: string }\nconst Card = (props: P) => <div />;\n\
+                  export default memo(forwardRef(Card));\n";
+    assert_eq!(identities("/test/Wrapped.tsx", nested), vec![identity("Card", "P", &["default"])]);
+    assert_eq!(identities("/test/Card.tsx", nested), vec![identity("Card", "P", &["default"])]);
+    let typed = "import { memo, forwardRef } from 'react';\ninterface P { a: string }\ninterface Q { b: string }\n\
+                 const Card = (props: Q) => <div />;\nexport default memo(forwardRef<HTMLDivElement, P>(Card));\n";
+    assert_eq!(
+        identities("/test/Card.tsx", typed),
+        vec![identity("Card", "Q", &[]), identity("Card (default)", "P", &["default"])]
+    );
+
+    let beside = "import * as React from 'react';\ninterface P { a: string }\ninterface Q { b: string }\n\
+                  export const Table = (props: Q) => <div />;\nconst InternalTable = (props: P) => <div />;\n\
+                  export default React.forwardRef(InternalTable) as RefTable;\n";
+    assert_eq!(
+        identities("/test/Table.tsx", beside),
+        vec![identity("InternalTable", "P", &["default"]), identity("Table", "Q", &["Table"])]
+    );
+
+    let not_a_wrapper =
+        "interface P { a: string }\nconst Inner = (props: P) => <div />;\nexport default makePanel(Inner);\n";
+    assert_eq!(identities("/test/Panel.tsx", not_a_wrapper), vec![identity("Inner", "P", &[])]);
+}
+
+#[test]
+fn a_default_export_a_component_alias_wraps_is_an_export_of_the_component_it_wraps() {
+    let prelude = "import * as React from 'react';\nimport { forwardRef, memo } from 'react';\nimport { observer } from 'mobx-react';\n\
+                   interface P { a: string }\nconst Root = (props: P) => <div />;\nconst Item = (props: P) => <li />;\n";
+    for (label, default) in [
+        ("an unwrapped identifier", "export default Root;"),
+        ("React.forwardRef", "export default React.forwardRef(Root);"),
+        ("forwardRef as T", "export default forwardRef(Root) as RefRoot;"),
+        ("memo", "export default memo(Root);"),
+        ("memo(forwardRef)", "export default memo(forwardRef(Root));"),
+        ("observer", "export default observer(Root);"),
+        ("a withX higher-order component", "export default withTheme(Root);"),
+        ("a curried wrapper", "export default connect(mapState)(Root);"),
+        ("Object.assign", "export default Object.assign(Root, { Item });"),
+        ("Object.assign of forwardRef", "export default Object.assign(forwardRef(Root), { Item });"),
+        ("Object.assign of memo(forwardRef)", "export default Object.assign(memo(forwardRef(Root)), { Item });"),
+        ("a parenthesized call", "export default (memo(Root));"),
+        ("an as expression", "export default Object.assign(Root, { Item }) as typeof Root;"),
+        ("a satisfies expression", "export default Object.assign(Root, { Item }) satisfies object;"),
+    ] {
+        let found = identities("/test/Menu.tsx", &format!("{prelude}{default}\n"));
+        let root =
+            found.iter().find(|(name, ..)| name == "Root").unwrap_or_else(|| panic!("{label}: no Root in {found:?}"));
+        assert_eq!(root.2, vec!["default".to_owned()], "{label}: {found:?}");
+        assert!(found.iter().all(|(name, ..)| name == "Root" || name == "Item"), "{label}: {found:?}");
+    }
+}
+
+#[test]
+fn a_default_export_no_component_alias_wraps_records_no_export_for_what_it_receives() {
+    let prelude =
+        "import { forwardRef } from 'react';\ninterface P { a: string }\nconst Root = (props: P) => <div />;\n";
+    for (label, default) in [
+        ("a factory call", "export default makePanel(Root);"),
+        ("styled(Component) alone", "export default styled(Root);"),
+        ("a call with the component second", "export default wrap(1, Root);"),
+        ("a call with no argument", "export default forwardRef();"),
+    ] {
+        let found = identities("/test/Menu.tsx", &format!("{prelude}{default}\n"));
+        assert_eq!(found, vec![identity("Root", "P", &[])], "{label}");
+    }
 }

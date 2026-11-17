@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "ReactElement"
+      }
+    ],
+    "alias": "ReactElement"
+  },
+  "text": "ReactElement<unknown, string | JSXElementConstructor<any>> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/03-reactelement.tsx"
+    },
+    "order": null
+  }
+}

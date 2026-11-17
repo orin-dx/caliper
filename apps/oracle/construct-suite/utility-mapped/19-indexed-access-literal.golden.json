@@ -1,0 +1,30 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "x"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ x: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/19-indexed-access-literal.tsx"
+    },
+    "order": null
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "intersection",
+        "members": [
+          {
+            "k": "object",
+            "fields": [
+              "a"
+            ],
+            "index": false,
+            "alias": "A"
+          },
+          {
+            "k": "object",
+            "fields": [
+              "b"
+            ],
+            "index": false,
+            "alias": "B"
+          }
+        ],
+        "alias": "Both"
+      }
+    ],
+    "alias": "Both"
+  },
+  "text": "Both<boolean, string[]> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/27-intersection-in-generic-alias.tsx"
+    },
+    "order": null
+  }
+}

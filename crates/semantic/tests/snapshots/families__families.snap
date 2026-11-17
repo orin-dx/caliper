@@ -1,0 +1,4168 @@
+---
+source: crates/semantic/tests/families.rs
+expression: "answer(&project(true), None)"
+---
+{
+  "components": {
+    "Boxes": [
+      {
+        "name": "box",
+        "required": false,
+        "type": {
+          "kind": "intersection",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "color",
+                  "propType": {
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "stringLiteral",
+                        "value": "blue"
+                      },
+                      {
+                        "kind": "stringLiteral",
+                        "value": "red"
+                      }
+                    ]
+                  },
+                  "required": false,
+                  "description": ""
+                },
+                {
+                  "name": "as",
+                  "propType": {
+                    "kind": "elementType"
+                  },
+                  "required": false,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "named",
+              "name": "Omit",
+              "args": [
+                {
+                  "kind": "htmlAttributes",
+                  "element": "div",
+                  "omitted": []
+                },
+                {
+                  "kind": "stringLiteral",
+                  "value": "color"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "boxed",
+        "required": false,
+        "type": {
+          "kind": "intersection",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "value",
+                  "propType": {
+                    "kind": "string"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "truncated",
+              "text": "Boxed",
+              "limit": {
+                "type": "members",
+                "total": 113
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "Dependency": [
+      {
+        "name": "omitted",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "Omit",
+          "args": [
+            {
+              "kind": "named",
+              "name": "DepWide",
+              "args": []
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "f001"
+            }
+          ]
+        }
+      },
+      {
+        "name": "partial",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "Partial",
+          "args": [
+            {
+              "kind": "named",
+              "name": "DepWide",
+              "args": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "extended",
+        "required": true,
+        "type": {
+          "kind": "intersection",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "own",
+                  "propType": {
+                    "kind": "string"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "second",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": false,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "named",
+              "name": "DepWide",
+              "args": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "chain",
+        "required": true,
+        "type": {
+          "kind": "intersection",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "third",
+                  "propType": {
+                    "kind": "boolean"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "own",
+                  "propType": {
+                    "kind": "string"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "second",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": false,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "named",
+              "name": "DepWide",
+              "args": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "small",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "b",
+              "propType": {
+                "kind": "number"
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Generics": [
+      {
+        "name": "mixed",
+        "required": false,
+        "type": {
+          "kind": "intersection",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "extra",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "value",
+                  "propType": {
+                    "kind": "string"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "truncated",
+              "text": "MixedBases",
+              "limit": {
+                "type": "members",
+                "total": 152
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "plain",
+        "required": false,
+        "type": {
+          "kind": "intersection",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "extra",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "value",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "named",
+              "name": "DepWide",
+              "args": []
+            },
+            {
+              "kind": "named",
+              "name": "DepSmall",
+              "args": []
+            }
+          ]
+        }
+      }
+    ],
+    "Own": [
+      {
+        "name": "wide",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "o001",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 1.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o002",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 2.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o003",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 3.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o004",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 4.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o005",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 5.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o006",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 6.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o007",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 7.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o008",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 8.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o009",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 9.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o010",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 10.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o011",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 11.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o012",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 12.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o013",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 13.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o014",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 14.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o015",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 15.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o016",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 16.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o017",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 17.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o018",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 18.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o019",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 19.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o020",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 20.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o021",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 21.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o022",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 22.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o023",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 23.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o024",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 24.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o025",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 25.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o026",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 26.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o027",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 27.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o028",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 28.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o029",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 29.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o030",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 30.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o031",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 31.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o032",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 32.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o033",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 33.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o034",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 34.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o035",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 35.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o036",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 36.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o037",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 37.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o038",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 38.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o039",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 39.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o040",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 40.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o041",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 41.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o042",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 42.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o043",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 43.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o044",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 44.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o045",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 45.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o046",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 46.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o047",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 47.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o048",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 48.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o049",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 49.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o050",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 50.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o051",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 51.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o052",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 52.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o053",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 53.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o054",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 54.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o055",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 55.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o056",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 56.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o057",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 57.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o058",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 58.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o059",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 59.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o060",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 60.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o061",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 61.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o062",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 62.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o063",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 63.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o064",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 64.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o065",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 65.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o066",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 66.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o067",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 67.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o068",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 68.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o069",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 69.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o070",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 70.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o071",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 71.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o072",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 72.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o073",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 73.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o074",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 74.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o075",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 75.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o076",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 76.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o077",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 77.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o078",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 78.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o079",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 79.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o080",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 80.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o081",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 81.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o082",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 82.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o083",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 83.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o084",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 84.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o085",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 85.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o086",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 86.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o087",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 87.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o088",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 88.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o089",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 89.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o090",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 90.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o091",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 91.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o092",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 92.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o093",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 93.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o094",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 94.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o095",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 95.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o096",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 96.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o097",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 97.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o098",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 98.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o099",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 99.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o100",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 100.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o101",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 101.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o102",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 102.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o103",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 103.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o104",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 104.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o105",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 105.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o106",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 106.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o107",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 107.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o108",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 108.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o109",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 109.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o110",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 110.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o111",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 111.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o112",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 112.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o113",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 113.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o114",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 114.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o115",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 115.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o116",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 116.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o117",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 117.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o118",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 118.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o119",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 119.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o120",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 120.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o121",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 121.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o122",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 122.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o123",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 123.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o124",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 124.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o125",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 125.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o126",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 126.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o127",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 127.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o128",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 128.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o129",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 129.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o130",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 130.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o131",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 131.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o132",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 132.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o133",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 133.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o134",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 134.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o135",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 135.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o136",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 136.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o137",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 137.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o138",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 138.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o139",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 139.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o140",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 140.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o141",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 141.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o142",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 142.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o143",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 143.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o144",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 144.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o145",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 145.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o146",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 146.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o147",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 147.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o148",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 148.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o149",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 149.0
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "o150",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 150.0
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "nested",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "o001",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 1.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o002",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 2.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o003",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 3.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o004",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 4.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o005",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 5.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o006",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 6.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o007",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 7.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o008",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 8.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o009",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 9.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o010",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 10.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o011",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 11.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o012",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 12.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o013",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 13.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o014",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 14.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o015",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 15.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o016",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 16.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o017",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 17.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o018",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 18.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o019",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 19.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o020",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 20.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o021",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 21.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o022",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 22.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o023",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 23.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o024",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 24.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o025",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 25.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o026",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 26.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o027",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 27.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o028",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 28.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o029",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 29.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o030",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 30.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o031",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 31.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o032",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 32.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o033",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 33.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o034",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 34.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o035",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 35.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o036",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 36.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o037",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 37.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o038",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 38.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o039",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 39.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o040",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 40.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o041",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 41.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o042",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 42.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o043",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 43.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o044",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 44.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o045",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 45.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o046",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 46.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o047",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 47.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o048",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 48.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o049",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 49.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o050",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 50.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o051",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 51.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o052",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 52.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o053",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 53.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o054",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 54.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o055",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 55.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o056",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 56.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o057",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 57.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o058",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 58.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o059",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 59.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o060",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 60.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o061",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 61.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o062",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 62.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o063",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 63.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o064",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 64.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o065",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 65.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o066",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 66.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o067",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 67.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o068",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 68.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o069",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 69.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o070",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 70.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o071",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 71.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o072",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 72.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o073",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 73.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o074",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 74.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o075",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 75.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o076",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 76.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o077",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 77.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o078",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 78.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o079",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 79.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o080",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 80.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o081",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 81.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o082",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 82.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o083",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 83.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o084",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 84.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o085",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 85.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o086",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 86.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o087",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 87.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o088",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 88.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o089",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 89.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o090",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 90.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o091",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 91.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o092",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 92.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o093",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 93.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o094",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 94.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o095",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 95.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o096",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 96.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o097",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 97.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o098",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 98.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o099",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 99.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o100",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 100.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o101",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 101.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o102",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 102.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o103",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 103.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o104",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 104.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o105",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 105.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o106",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 106.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o107",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 107.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o108",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 108.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o109",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 109.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o110",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 110.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o111",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 111.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o112",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 112.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o113",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 113.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o114",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 114.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o115",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 115.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o116",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 116.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o117",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 117.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o118",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 118.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o119",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 119.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o120",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 120.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o121",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 121.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o122",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 122.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o123",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 123.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o124",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 124.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o125",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 125.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o126",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 126.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o127",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 127.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o128",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 128.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o129",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 129.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o130",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 130.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o131",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 131.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o132",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 132.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o133",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 133.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o134",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 134.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o135",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 135.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o136",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 136.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o137",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 137.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o138",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 138.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o139",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 139.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o140",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 140.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o141",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 141.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o142",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 142.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o143",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 143.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o144",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 144.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o145",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 145.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o146",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 146.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o147",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 147.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o148",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 148.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o149",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 149.0
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "o150",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 150.0
+                    },
+                    "required": false,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Polymorphic": [
+      {
+        "name": "at",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "as",
+              "propType": {
+                "kind": "elementType"
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "top",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "a"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "abbr"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "address"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "animate"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "animateMotion"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "animateTransform"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "area"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "article"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "aside"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "audio"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "b"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "base"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "bdi"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "bdo"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "big"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "blockquote"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "body"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "br"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "button"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "canvas"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "caption"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "center"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "circle"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "cite"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "clipPath"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "code"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "col"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "colgroup"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "data"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "datalist"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dd"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "defs"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "del"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "desc"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "details"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dfn"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dialog"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "div"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dl"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dt"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "ellipse"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "em"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "embed"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feBlend"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feColorMatrix"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feComponentTransfer"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feComposite"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feConvolveMatrix"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feDiffuseLighting"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feDisplacementMap"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feDistantLight"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feDropShadow"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFlood"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFuncA"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFuncB"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFuncG"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFuncR"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feGaussianBlur"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feImage"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feMerge"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feMergeNode"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feMorphology"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feOffset"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "fePointLight"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feSpecularLighting"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feSpotLight"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feTile"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feTurbulence"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "fieldset"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "figcaption"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "figure"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "filter"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "footer"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "foreignObject"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "form"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "g"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h1"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h2"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h3"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h4"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h5"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h6"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "head"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "header"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "hgroup"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "hr"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "html"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "i"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "iframe"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "image"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "img"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "input"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "ins"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "kbd"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "keygen"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "label"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "legend"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "li"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "line"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "linearGradient"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "link"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "main"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "map"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "mark"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "marker"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "mask"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "menu"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "menuitem"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "meta"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "metadata"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "meter"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "mpath"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "nav"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "noindex"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "noscript"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "object"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "ol"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "optgroup"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "option"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "output"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "p"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "param"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "path"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "pattern"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "picture"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "polygon"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "polyline"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "pre"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "progress"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "q"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "radialGradient"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "rect"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "rp"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "rt"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "ruby"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "s"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "samp"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "script"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "search"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "section"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "select"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "set"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "slot"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "small"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "source"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "span"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "stop"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "strong"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "style"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "sub"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "summary"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "sup"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "svg"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "switch"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "symbol"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "table"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "tbody"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "td"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "template"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "text"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "textPath"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "textarea"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "tfoot"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "th"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "thead"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "time"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "title"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "tr"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "track"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "tspan"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "u"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "ul"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "use"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "var"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "video"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "view"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "wbr"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "webview"
+            },
+            {
+              "kind": "named",
+              "name": "ComponentClass",
+              "args": [
+                {
+                  "kind": "any"
+                }
+              ]
+            },
+            {
+              "kind": "named",
+              "name": "FunctionComponent",
+              "args": [
+                {
+                  "kind": "any"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "few",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "as",
+              "propType": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "stringLiteral",
+                    "value": "a"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "b"
+                  },
+                  {
+                    "kind": "named",
+                    "name": "ComponentClass",
+                    "args": [
+                      {
+                        "kind": "object",
+                        "fields": []
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "named",
+                    "name": "FunctionComponent",
+                    "args": [
+                      {
+                        "kind": "object",
+                        "fields": []
+                      }
+                    ]
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "custom",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "as",
+              "propType": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "elementType"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "custom-widget"
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "both",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "as",
+              "propType": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "elementType"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "another-one"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "custom-widget"
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Terminals": [
+      {
+        "name": "node",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "reactNode"
+            },
+            {
+              "kind": "function",
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "open",
+                  "type": {
+                    "kind": "boolean"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "reactNode"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "portal",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "string"
+            },
+            {
+              "kind": "named",
+              "name": "ReactPortal",
+              "args": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "mixed",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "reactNode"
+            },
+            {
+              "kind": "named",
+              "name": "Promise",
+              "args": [
+                {
+                  "kind": "number"
+                }
+              ]
+            },
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "id",
+                  "propType": {
+                    "kind": "string"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "Wrappers": [
+      {
+        "name": "link",
+        "required": false,
+        "type": {
+          "kind": "named",
+          "name": "Omit",
+          "args": [
+            {
+              "kind": "named",
+              "name": "Omit",
+              "args": [
+                {
+                  "kind": "htmlAttributes",
+                  "element": "a",
+                  "omitted": []
+                },
+                {
+                  "kind": "stringLiteral",
+                  "value": "ref"
+                }
+              ]
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "href"
+            }
+          ]
+        }
+      },
+      {
+        "name": "picked",
+        "required": false,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "disabled",
+              "propType": {
+                "kind": "boolean"
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "type",
+              "propType": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "stringLiteral",
+                    "value": "button"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "submit"
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "partial",
+        "required": false,
+        "type": {
+          "kind": "named",
+          "name": "Partial",
+          "args": [
+            {
+              "kind": "htmlAttributes",
+              "element": "div",
+              "omitted": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "twice",
+        "required": false,
+        "type": {
+          "kind": "named",
+          "name": "Omit",
+          "args": [
+            {
+              "kind": "named",
+              "name": "Omit",
+              "args": [
+                {
+                  "kind": "htmlAttributes",
+                  "element": "span",
+                  "omitted": []
+                },
+                {
+                  "kind": "stringLiteral",
+                  "value": "color"
+                }
+              ]
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "style"
+            }
+          ]
+        }
+      },
+      {
+        "name": "detailed",
+        "required": false,
+        "type": {
+          "kind": "named",
+          "name": "DetailedHTMLProps",
+          "args": [
+            {
+              "kind": "named",
+              "name": "InputHTMLAttributes",
+              "args": [
+                {
+                  "kind": "named",
+                  "name": "HTMLInputElement",
+                  "args": []
+                }
+              ]
+            },
+            {
+              "kind": "named",
+              "name": "HTMLInputElement",
+              "args": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "direct",
+        "required": false,
+        "type": {
+          "kind": "named",
+          "name": "AnchorHTMLAttributes",
+          "args": [
+            {
+              "kind": "named",
+              "name": "HTMLAnchorElement",
+              "args": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "required",
+        "required": false,
+        "type": {
+          "kind": "named",
+          "name": "Required",
+          "args": [
+            {
+              "kind": "htmlAttributes",
+              "element": "a",
+              "omitted": []
+            }
+          ]
+        }
+      },
+      {
+        "name": "unknownElement",
+        "required": false,
+        "type": {
+          "kind": "named",
+          "name": "Omit",
+          "args": [
+            {
+              "kind": "named",
+              "name": "HTMLAttributes",
+              "args": [
+                {
+                  "kind": "named",
+                  "name": "HTMLTableCellElement",
+                  "args": []
+                }
+              ]
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "color"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

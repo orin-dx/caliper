@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "false",
+        "of": "boolean"
+      },
+      {
+        "k": "lit",
+        "value": "true",
+        "of": "boolean"
+      }
+    ]
+  },
+  "text": "boolean | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/07-boolean-plain.tsx"
+    },
+    "order": null
+  }
+}

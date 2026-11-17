@@ -20,11 +20,11 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use rstest::rstest;
-use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
-use rustix::termios::{tcgetattr, LocalModes, OutputModes};
+use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+use rustix::termios::{LocalModes, OutputModes, tcgetattr};
 
 mod common;
-use common::strip_ansi;
+use common::{install_stub_typescript, strip_ansi};
 
 const WIDGET: &str = "export function Widget(props: { label: string }) { return null; }\n";
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -66,6 +66,7 @@ struct Watch {
 
 fn watched_dir() -> tempfile::TempDir {
     let src = tempfile::TempDir::new().unwrap();
+    install_stub_typescript(src.path());
     std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
     src
 }

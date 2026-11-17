@@ -1,93 +1,71 @@
 // The structural comparison behind src/oracle.ts: both sides' prop types reduced to one shape, and one verdict per
 // pair. Pure: nothing here talks to the checker.
+import { HTML_ATTRIBUTE_MEMBERS } from './html-attribute-members.ts'
+import { SEVERITY, type Verdict } from './vocabulary.ts'
+
+/** The primitive a literal is a value of: `"0"` and `0` spell the same `value` and are two types. */
+export type LiteralKind = 'string' | 'number' | 'bigint' | 'boolean'
+
+/** A name that is a recognized React HTML-attributes family: the attributes of `element`, less the `omitted` keys
+ * (`HTMLAttributes<HTMLDivElement>`, or `Omit<…, "color">` of it). The name stays what it is for every comparison
+ * that reads names; only the intersection rule below reads the family. */
+export interface HtmlFamily {
+  element: string
+  omitted: string[]
+}
 
 /** A type reduced to what both sides can state: kind, literal value, members, fields, parameters. `alias` is the
  * checker's name for it (an alias, or the interface that declares it), which Caliper may print instead. */
 export type Norm = (
   | { k: 'prim'; name: string }
-  | { k: 'lit'; value: string }
+  | { k: 'lit'; value: string; of: LiteralKind }
   | { k: 'union'; members: Norm[] }
   | { k: 'intersection'; members: Norm[] }
   | { k: 'array'; element: Norm }
   | { k: 'tuple'; elements: Norm[] }
   | { k: 'function'; params: { optional: boolean; rest: boolean; type: Norm }[]; returns: Norm }
-  | { k: 'object'; fields: string[]; index: boolean }
-  | { k: 'name'; name: string }
+  | { k: 'object'; fields: string[]; index: boolean; indexValue?: Norm }
+  | { k: 'name'; name: string; family?: HtmlFamily }
   | { k: 'param'; name: string; fallback?: Norm; constraint?: Norm }
   | { k: 'opaque' }
   | { k: 'error' }
 ) & { alias?: string }
 
-export type Verdict = 'identical' | 'spelled' | 'less precise' | 'wrong' | 'checker any/error'
-
 export const MAX_DEPTH = 3
-export const VERDICTS: Verdict[] = ['identical', 'spelled', 'less precise', 'wrong', 'checker any/error']
-const RANK: Verdict[] = ['identical', 'spelled', 'less precise', 'wrong']
 
 /** A type name without `React.` or a namespace qualifier. */
 export const bareName = (name: string) => name.replace(/^.*\./, '')
 export const prim = (name: string): Norm => ({ k: 'prim', name })
+export const lit = (value: string, of: LiteralKind): Norm => ({ k: 'lit', value, of })
 
-const TERMINALS: Record<string, string> = {
-  reactNode: 'ReactNode',
-  cssProperties: 'CSSProperties',
-  elementType: 'ElementType',
-  htmlAttributes: 'HTMLAttributes',
-  ref: 'Ref',
-  sxProps: 'SxProps',
-}
-const PRIMITIVES = new Set(['string', 'number', 'boolean', 'null', 'undefined', 'any', 'unknown', 'never', 'void'])
-const LITERALS = new Set(['stringLiteral', 'numberLiteral', 'boolLiteral'])
+/** `{}`: an object with no property and no index signature. The one place that decides it, for every reader of a
+ * `Norm`: an index-only object (`{ [key: string]: V }`) has no fields either, and is not empty. */
+export const isBareObject = (m: Norm) => m.k === 'object' && m.fields.length === 0 && !m.index
 
-/** Caliper's canonical `PropType` JSON, normalized. */
-export function caliperNorm(t: any, depth = 0): Norm {
-  if (!t || depth > MAX_DEPTH) return { k: 'opaque' }
-  if (PRIMITIVES.has(t.kind)) return prim(t.kind)
-  if (LITERALS.has(t.kind)) return { k: 'lit', value: String(t.value) }
-  const inner = (m: any) => caliperNorm(m, depth + 1)
-  switch (t.kind) {
-    case 'literalUnion': {
-      return { k: 'union', members: t.members.map((m: string) => ({ k: 'lit', value: m })) }
-    }
-    case 'union': {
-      return { k: 'union', members: t.members.map((m: any) => inner(m)) }
-    }
-    case 'intersection': {
-      const parts: Norm[] = t.members.map((m: any) => inner(m))
-      const meaningful = parts.filter((m) => !(m.k === 'object' && m.fields.length === 0))
-      return meaningful.length === 1 ? meaningful[0] : { k: 'intersection', members: parts }
-    }
-    case 'array': {
-      return { k: 'array', element: inner(t.element) }
-    }
-    case 'tuple': {
-      return { k: 'tuple', elements: (t.elements ?? t.members ?? []).map((m: any) => inner(m)) }
-    }
-    case 'object': {
-      return { k: 'object', fields: t.fields.map((field: any) => field.name).toSorted(), index: false }
-    }
-    case 'function': {
-      const params = (t.params ?? []).map((p: any) => ({ optional: false, rest: false, type: inner(p.type) }))
-      return { k: 'function', params, returns: inner(t.returnType) }
-    }
-    case 'named': {
-      return { k: 'name', name: bareName(t.name) }
-    }
-    default: {
-      return TERMINALS[t.kind] ? { k: 'name', name: TERMINALS[t.kind] } : { k: 'opaque' }
-    }
-  }
-}
-
-const worst = (vs: Verdict[]): Verdict => vs.reduce((a, b) => (RANK.indexOf(b) > RANK.indexOf(a) ? b : a), 'identical')
-const best = (vs: Verdict[]): Verdict => vs.reduce((a, b) => (RANK.indexOf(b) < RANK.indexOf(a) ? b : a), 'wrong')
-const isLit = (n: Norm, value?: string) => n.k === 'lit' && (value === undefined || n.value === value)
+const rank = (v: Verdict) => SEVERITY.indexOf(v)
+const worst = (vs: Verdict[]): Verdict => vs.reduce((a, b) => (rank(b) > rank(a) ? b : a), 'identical')
+const best = (vs: Verdict[]): Verdict => vs.reduce((a, b) => (rank(b) < rank(a) ? b : a), 'wrong')
+const isBool = (n: Norm, value: string) => n.k === 'lit' && n.of === 'boolean' && n.value === value
 const isUndefined = (m: Norm) => m.k === 'prim' && m.name === 'undefined'
 const WIDENING = new Set(['string', 'number', 'boolean'])
 
+/** An empty object type, or `Record<…>` (its arguments are not kept): what `string & {}` intersects with. */
+const isEmptyObject = (m: Norm) => isBareObject(m) || (m.k === 'name' && m.name === 'Record')
+
+/** Whether `m` is the primitive `name`, or `name & {}`, or a union with either. */
+function absorbs(m: Norm, name: string): boolean {
+  if (m.k === 'prim') return m.name === name
+  if (m.k === 'union') return m.members.some((member) => absorbs(member, name))
+  return m.k === 'intersection' && m.members.some(isEmptyObject) && m.members.some((member) => absorbs(member, name))
+}
+
+/** A name or opaque type that Caliper (or the checker) did not expand: what it holds is unknown, so no member beside it
+ * can prove the other side wrong. */
+const isUnexpanded = (m: Norm) => m.k === 'name' || m.k === 'opaque'
+
 /** Union members without `undefined` (an optional prop's, which both sides treat as optional), flattened, with
  * `true | false` as `boolean`. */
-function members(n: Norm, written = false): Norm[] {
+function members(n: Norm, coverLiterals = false): Norm[] {
   const flat: Norm[] = []
   const push = (m: Norm) => {
     if (m.k === 'union') m.members.forEach(push)
@@ -96,27 +74,50 @@ function members(n: Norm, written = false): Norm[] {
   }
   push(n)
   // `'default' | 'large' | string` is `string` to the checker: a literal that a primitive of its kind in the same
-  // union already covers adds nothing, so a union Caliper wrote with it reads the same as one without. Only Caliper's
-  // (`written`): the checker's `"blue" | … | (string & {})` keeps its literals, which are what a reader sees. A
-  // `true`/`false` literal is boolean's, not string's.
-  const has = (name: string) => flat.some((m) => m.k === 'prim' && m.name === name)
-  const covered = (m: Norm) =>
-    written &&
-    m.k === 'lit' &&
-    m.value !== 'true' &&
-    m.value !== 'false' &&
-    (/^-?\d+(\.\d+)?$/.test(m.value) ? has('number') : has('string'))
+  // union already covers adds nothing, so a union written with it holds the same values as one without. The checker's
+  // `"blue" | … | (string & {})` keeps its literals for the reader, so `compare` scores it spelled, not identical. A
+  // literal is covered by the primitive of its own kind only: `"0"` is not covered by `number`, `true` not by `string`.
+  // `string & {}` and `string & Record<never, never>` (the `LiteralUnion` spellings) are `string` for this purpose.
+  const has = (name: string) => flat.some((m) => absorbs(m, name))
+  const covered = (m: Norm) => coverLiterals && m.k === 'lit' && has(m.of)
   const kept = flat.filter((m) => !covered(m))
-  if (kept.some((m) => isLit(m, 'true')) && kept.some((m) => isLit(m, 'false'))) {
-    return [...kept.filter((m) => !isLit(m, 'true') && !isLit(m, 'false')), prim('boolean')]
+  if (kept.some((m) => isBool(m, 'true')) && kept.some((m) => isBool(m, 'false'))) {
+    return [...kept.filter((m) => !isBool(m, 'true') && !isBool(m, 'false')), prim('boolean')]
   }
   return kept
+}
+
+/** The members of React's `ReactNode` (the `bigint` and `Promise` of React 19 when there), by kind and by the
+ * checker's name for each object. */
+const REACT_NODE_PRIMS = ['null', 'string', 'number', 'boolean']
+const REACT_NODE_OBJECTS = ['ReactElement', 'ReactPortal', 'Iterable']
+const isReactNodeMember = (m: Norm) =>
+  (m.k === 'prim' && [...REACT_NODE_PRIMS, 'bigint'].includes(m.name)) ||
+  (m.k === 'object' && m.alias !== undefined && [...REACT_NODE_OBJECTS, 'Promise'].includes(m.alias))
+
+/** The checker's union members with `ReactNode`'s own taken back into one union named `ReactNode`, when Caliper's union
+ * names `ReactNode` and the checker's holds all of its members: TypeScript keeps the alias only on a union of exactly
+ * them, so `ReactNode | ((open: boolean) => ReactNode)` arrives flattened. Unchanged otherwise. */
+function withReactNode(cm: Norm[], km: Norm[]): Norm[] {
+  if (!cm.some((m) => m.k === 'name' && m.name === 'ReactNode')) return km
+  const span = km.filter((m) => isReactNodeMember(m))
+  const has = (m: Norm) =>
+    span.some(
+      (s) => (s.k === 'prim' && m.k === 'prim' && s.name === m.name) || (s.k === 'object' && s.alias === m.alias),
+    )
+  const required: Norm[] = [
+    ...REACT_NODE_PRIMS.map((name) => prim(name)),
+    ...REACT_NODE_OBJECTS.map((alias): Norm => ({ k: 'object', fields: [], index: false, alias })),
+  ]
+  if (!required.every((m) => has(m))) return km
+  return [...km.filter((m) => !isReactNodeMember(m)), { k: 'union', members: span, alias: 'ReactNode' }]
 }
 
 /** Two unions: each checker member covered by one of Caliper's (a missing member makes Caliper's type too narrow),
  * and each of Caliper's matched by one of the checker's (an extra member makes it too wide, unless it widens
  * literals). */
-function compareUnions(cm: Norm[], km: Norm[], depth: number): Verdict {
+function compareUnions(cm: Norm[], checkerMembers: Norm[], depth: number): Verdict {
+  const km = withReactNode(cm, checkerMembers)
   const kCovered = km.map((m) => best(cm.map((cMember) => compare(cMember, m, depth + 1))))
   const cMatched = cm.map((m) => {
     const verdict = best(km.map((kMember) => compare(m, kMember, depth + 1)))
@@ -126,7 +127,32 @@ function compareUnions(cm: Norm[], km: Norm[], depth: number): Verdict {
       km.some((kMember) => kMember.k === 'lit' || (kMember.k === 'prim' && kMember.name === m.name))
     return verdict === 'wrong' && widens ? 'less precise' : verdict
   })
-  return worst([...kCovered, ...cMatched])
+  const verdict = worst([...kCovered, ...cMatched])
+  // A union with a name or opaque member (`MantineColor | 'initials'`, a template literal) may hold the other side's
+  // values in that member, so a member it cannot match is not proof of a different type.
+  return verdict === 'wrong' && [...cm, ...km].some((m) => isUnexpanded(m)) ? 'less precise' : verdict
+}
+
+/** An intersection of one object literal and one recognized HTML-attributes family (`{ color?; as? } & Omit<
+ * HTMLAttributes<div>, "color">`), against the checker's one flat object. The checker flattens the intersection, so the
+ * object holds the literal's own members plus the family's members less the omitted keys. Equal sets are the same type;
+ * a member the flat object lacks is wrong, and one it has beyond them (an omitted key it still has, a member the family
+ * does not) leaves the intersection less precise, as every intersection Caliper left as written is. A family with no
+ * member table, or an intersection of any other shape, is left as written. */
+function flattenedFamily(c: Norm & { k: 'intersection' }, flat: Norm & { k: 'object' }): Verdict {
+  const [first, second] = c.members
+  const literal = first.k === 'object' ? first : second
+  const named = first.k === 'object' ? second : first
+  const family = named.k === 'name' ? named.family : undefined
+  const familyMembers = family && HTML_ATTRIBUTE_MEMBERS[family.element]
+  if (c.members.length !== 2 || literal.k !== 'object' || !family || !familyMembers || literal.index || flat.index) {
+    return 'less precise'
+  }
+  const omitted = new Set(family.omitted)
+  const expected = new Set([...literal.fields, ...familyMembers.filter((name) => !omitted.has(name))])
+  const actual = new Set(flat.fields)
+  if ([...expected].some((name) => !actual.has(name))) return 'wrong'
+  return actual.size === expected.size ? 'identical' : 'less precise'
 }
 
 function compareFunctions(c: Norm & { k: 'function' }, k: Norm & { k: 'function' }, depth: number): Verdict {
@@ -137,8 +163,7 @@ function compareFunctions(c: Norm & { k: 'function' }, k: Norm & { k: 'function'
       verdicts.push(kp.optional || kp.rest ? 'less precise' : 'wrong')
     } else {
       verdicts.push(compare(cp.type, kp.type, depth + 1))
-      // A marker the checker has and this side lost. Caliper's function types record neither, so every optional or rest
-      // parameter reads less precise there; a tool that keeps the markers is held to them, not capped by them.
+      // A marker the checker has and this side lost.
       if ((kp.optional && !cp.optional) || (kp.rest && !cp.rest)) verdicts.push('less precise')
     }
   }
@@ -153,7 +178,7 @@ function compareOne(c: Norm, k: Norm, depth: number): Verdict {
       return c.k === 'prim' && c.name === k.name ? 'identical' : 'wrong'
     }
     case 'lit': {
-      if (c.k === 'lit') return c.value === k.value ? 'identical' : 'wrong'
+      if (c.k === 'lit') return c.value === k.value && c.of === k.of ? 'identical' : 'wrong'
       return c.k === 'prim' && WIDENING.has(c.name) ? 'less precise' : 'wrong'
     }
     case 'array': {
@@ -171,7 +196,16 @@ function compareOne(c: Norm, k: Norm, depth: number): Verdict {
       if (c.k !== 'object') return c.k === 'prim' && c.name === 'object' ? 'less precise' : 'wrong'
       const own = new Set(c.fields)
       if (c.fields.some((f) => !k.fields.includes(f))) return 'wrong'
-      return k.fields.some((f) => !own.has(f)) || k.index ? 'less precise' : 'identical'
+      // An index signature Caliper has and the checker does not describes a different type.
+      if (c.index && !k.index) return 'wrong'
+      const verdicts: Verdict[] = [
+        k.fields.some((f) => !own.has(f)) || (k.index && !c.index) ? 'less precise' : 'identical',
+      ]
+      // Both state an index: its value type is compared, and one a side does not state is not proof of agreement.
+      if (c.index && k.index) {
+        verdicts.push(c.indexValue && k.indexValue ? compare(c.indexValue, k.indexValue, depth + 1) : 'less precise')
+      }
+      return worst(verdicts)
     }
     case 'intersection': {
       if (c.k !== 'intersection') return 'less precise'
@@ -195,9 +229,16 @@ function compareOne(c: Norm, k: Norm, depth: number): Verdict {
   }
 }
 
-/** How Caliper's normalized type `c` stands against the checker's `k`. */
+/** How Caliper's normalized type `c` stands against the checker's `k`. A checker union that spells literals a
+ * primitive in it already covers (`'a' | 'b' | (string & {})`) holds the values Caliper's `string` does, spelled
+ * another way. */
 export function compare(c: Norm, k: Norm, depth = 0): Verdict {
-  if (depth > MAX_DEPTH) return 'identical'
+  const verdict = compareValues(c, k, depth)
+  return verdict === 'identical' && members(k).length !== members(k, true).length ? 'spelled' : verdict
+}
+
+function compareValues(c: Norm, k: Norm, depth: number): Verdict {
+  if (depth > MAX_DEPTH) return 'not judged'
   // The checker has no type to compare with: an error, `any`, or a top-level `unknown` where Caliper has a type
   // (most often a declaration the program couldn't resolve).
   const uninformative =
@@ -205,7 +246,7 @@ export function compare(c: Norm, k: Norm, depth = 0): Verdict {
   if (uninformative && !(c.k === 'prim' && k.k === 'prim' && c.name === k.name)) {
     return depth === 0 ? 'checker any/error' : 'identical'
   }
-  const km = members(k)
+  const km = members(k, true)
   // An optional prop of type `never` reads `undefined` in the checker, which `members` drops as the optional marker.
   if (km.length === 0 && c.k === 'prim' && c.name === 'never') return 'identical'
   if (c.k === 'name') {
@@ -219,13 +260,17 @@ export function compare(c: Norm, k: Norm, depth = 0): Verdict {
     // resolves to another name).
     return 'less precise'
   }
-  if (k.k === 'opaque') return 'identical'
+  // A type the checker side stopped short of holds whatever Caliper wrote, so agreement is not what it says.
+  if (k.k === 'opaque') return 'not judged'
   if (c.k === 'opaque') return 'less precise'
   if (c.k === 'prim' && (c.name === 'any' || c.name === 'unknown') && !(k.k === 'prim' && k.name === c.name)) {
     return 'less precise'
   }
   // An intersection Caliper left as written, which the checker reduced (`Mode & …` to a literal union).
-  if (c.k === 'intersection' && !km.some((m) => m.k === 'intersection')) return 'less precise'
+  if (c.k === 'intersection' && !km.some((m) => m.k === 'intersection')) {
+    const [flat] = km
+    return km.length === 1 && flat.k === 'object' ? flattenedFamily(c, flat) : 'less precise'
+  }
   const cm = members(c, true)
   if (cm.length !== 1 || km.length !== 1) return compareUnions(cm, km, depth)
   const [cOne] = cm

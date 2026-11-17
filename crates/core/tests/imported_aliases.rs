@@ -3,7 +3,7 @@
 //! package's component documents that component's props; an alias of a component the project declares under the same
 //! name is that component, not a second one.
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::{DetectionRule, ExtractionOutput};
 use camino::Utf8PathBuf;
 use tempfile::TempDir;

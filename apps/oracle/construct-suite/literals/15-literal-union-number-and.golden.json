@@ -1,0 +1,52 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "1",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "2",
+        "of": "number"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      }
+    ]
+  },
+  "text": "1 | 2 | (number & {}) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/15-literal-union-number-and.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "1",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "2",
+        "of": "number"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      }
+    ]
+  }
+}

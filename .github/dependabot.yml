@@ -30,6 +30,11 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
+    # The checker the product links (ADR 0026). A bump moves the npm `tsrs` of apps/oracle and these exact pins
+    # together, after construct:parity passes on the new release (apps/oracle/construct-suite/README.md), never as a
+    # routine update.
+    ignore:
+      - dependency-name: "tsrs_*"
     groups:
       # oxc_resolver is versioned separately from the lockstep oxc_* crates, so it gets its own PR.
       oxc-resolver:
@@ -57,6 +62,9 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 3
+    # Moves with the Cargo pins of tsrs_api and tsrs_vfs (see the cargo entry above).
+    ignore:
+      - dependency-name: "tsrs"
     groups:
       routine-npm:
         applies-to: version-updates

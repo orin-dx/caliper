@@ -45,6 +45,7 @@ fn test_simple_interface_resolution() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
+            scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -122,6 +123,7 @@ fn test_extends_clause_prefers_project_defined_sx_props_over_known_shortcut() {
         format!("{}:SxProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:SxProps", file_path),
+            scope: Default::default(),
             name: "SxProps".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -142,6 +144,7 @@ fn test_extends_clause_prefers_project_defined_sx_props_over_known_shortcut() {
         format!("{}:ThemeButtonProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:ThemeButtonProps", file_path),
+            scope: Default::default(),
             name: "ThemeButtonProps".into(),
             file_path: file_path.clone(),
             props: vec![],
@@ -185,6 +188,7 @@ fn test_field_typed_as_project_defined_sx_props_is_not_replaced_by_known_shortcu
         format!("{}:SxProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:SxProps", file_path),
+            scope: Default::default(),
             name: "SxProps".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -205,6 +209,7 @@ fn test_field_typed_as_project_defined_sx_props_is_not_replaced_by_known_shortcu
         format!("{}:WidgetProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:WidgetProps", file_path),
+            scope: Default::default(),
             name: "WidgetProps".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -286,6 +291,7 @@ fn test_indexed_access_into_generic_interface_field_substitutes_type_arg() {
         format!("{}:RenderableProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:RenderableProps", file_path),
+            scope: Default::default(),
             name: "RenderableProps".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -338,6 +344,7 @@ fn test_indexed_access_into_ambient_dom_interface_walks_extends_chain() {
         format!("{}:HTMLDivElement", lib_file),
         CollectedInterface {
             scoped_key: format!("{}:HTMLDivElement", lib_file),
+            scope: Default::default(),
             name: "HTMLDivElement".into(),
             file_path: lib_file.clone(),
             props: vec![],
@@ -350,6 +357,7 @@ fn test_indexed_access_into_ambient_dom_interface_walks_extends_chain() {
         format!("{}:HTMLElement", lib_file),
         CollectedInterface {
             scoped_key: format!("{}:HTMLElement", lib_file),
+            scope: Default::default(),
             name: "HTMLElement".into(),
             file_path: lib_file.clone(),
             props: vec![RawProp {
@@ -505,6 +513,7 @@ fn test_default_value_jsdoc_mismatch_emits_diagnostic() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
+            scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -606,6 +615,7 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
         format!("{}:PropsBase", file_path),
         CollectedInterface {
             scoped_key: format!("{}:PropsBase", file_path),
+            scope: Default::default(),
             name: "PropsBase".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -626,6 +636,7 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
         format!("{}:PropsSingle", file_path),
         CollectedInterface {
             scoped_key: format!("{}:PropsSingle", file_path),
+            scope: Default::default(),
             name: "PropsSingle".into(),
             file_path: file_path.clone(),
             props: vec![
@@ -657,6 +668,7 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
         format!("{}:PropsMulti", file_path),
         CollectedInterface {
             scoped_key: format!("{}:PropsMulti", file_path),
+            scope: Default::default(),
             name: "PropsMulti".into(),
             file_path: file_path.clone(),
             props: vec![
@@ -750,6 +762,7 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
             format!("{}:{}", file_path, iface_name),
             CollectedInterface {
                 scoped_key: format!("{}:{}", file_path, iface_name),
+                scope: Default::default(),
                 name: iface_name.into(),
                 file_path: file_path.clone(),
                 props: vec![
@@ -792,6 +805,7 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
         format!("{}:PropsBase", file_path),
         CollectedInterface {
             scoped_key: format!("{}:PropsBase", file_path),
+            scope: Default::default(),
             name: "PropsBase".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -863,6 +877,7 @@ fn test_extends_builtin_html_attrs_creates_inherited_layer() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
+            scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
             props: vec![],
@@ -910,6 +925,7 @@ fn test_html_attribute_mode_curated_does_not_expand_real_button_attrs() {
         format!("{}:ButtonHTMLAttributes", react_file),
         CollectedInterface {
             scoped_key: format!("{}:ButtonHTMLAttributes", react_file),
+            scope: Default::default(),
             name: "ButtonHTMLAttributes".into(),
             file_path: react_file.clone().into(),
             props: vec![RawProp {
@@ -930,6 +946,7 @@ fn test_html_attribute_mode_curated_does_not_expand_real_button_attrs() {
         format!("{}:ButtonProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:ButtonProps", file_path),
+            scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
             props: vec![],
@@ -979,6 +996,7 @@ fn test_html_attribute_mode_full_expands_real_button_attrs() {
         format!("{}:ButtonHTMLAttributes", react_file),
         CollectedInterface {
             scoped_key: format!("{}:ButtonHTMLAttributes", react_file),
+            scope: Default::default(),
             name: "ButtonHTMLAttributes".into(),
             file_path: react_file.clone().into(),
             props: vec![RawProp {
@@ -999,6 +1017,7 @@ fn test_html_attribute_mode_full_expands_real_button_attrs() {
         format!("{}:ButtonProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:ButtonProps", file_path),
+            scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
             props: vec![],
@@ -1044,6 +1063,7 @@ fn test_html_attribute_mode_none_suppresses_notable_inherited() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
+            scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
             props: vec![],
@@ -1105,6 +1125,7 @@ fn test_component_props_without_ref_in_intersection_alias() {
                     description: String::new(),
                     readonly: false,
                     index_key: None,
+                    tags: Default::default(),
                 }]),
             ],
             file_path: file_path.clone(),
@@ -1117,6 +1138,7 @@ fn test_component_props_without_ref_in_intersection_alias() {
         iface_key,
         CollectedInterface {
             scoped_key: format!("{}:ButtonProps", file_path),
+            scope: Default::default(),
             name: "ButtonProps".into(),
             file_path: file_path.clone(),
             props: vec![],
@@ -1181,6 +1203,7 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
         format!("{}:RowHeights", file_path),
         CollectedInterface {
             scoped_key: format!("{}:RowHeights", file_path),
+            scope: Default::default(),
             name: "RowHeights".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -1201,6 +1224,7 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
         format!("{}:ColumnWidths", file_path),
         CollectedInterface {
             scoped_key: format!("{}:ColumnWidths", file_path),
+            scope: Default::default(),
             name: "ColumnWidths".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -1221,6 +1245,7 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
         format!("{}:TableProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:TableProps", file_path),
+            scope: Default::default(),
             name: "TableProps".into(),
             file_path: file_path.clone(),
             props: vec![],
@@ -1284,6 +1309,7 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
         format!("{}:SiblingA", types_file),
         CollectedInterface {
             scoped_key: format!("{}:SiblingA", types_file),
+            scope: Default::default(),
             name: "SiblingA".into(),
             file_path: types_file.clone(),
             props: vec![RawProp {
@@ -1304,6 +1330,7 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
         format!("{}:SiblingB", types_file),
         CollectedInterface {
             scoped_key: format!("{}:SiblingB", types_file),
+            scope: Default::default(),
             name: "SiblingB".into(),
             file_path: types_file.clone(),
             props: vec![RawProp {
@@ -1343,6 +1370,7 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
         format!("{}:WidgetProps", consumer_file),
         CollectedInterface {
             scoped_key: format!("{}:WidgetProps", consumer_file),
+            scope: Default::default(),
             name: "WidgetProps".into(),
             file_path: consumer_file.clone(),
             props: vec![RawProp {
@@ -1404,6 +1432,7 @@ fn test_generic_interface_own_type_params_suppress_diagnostic() {
         format!("{}:WidgetProps", file_path),
         CollectedInterface {
             scoped_key: format!("{}:WidgetProps", file_path),
+            scope: Default::default(),
             name: "WidgetProps".into(),
             file_path: file_path.clone(),
             props: vec![
@@ -1484,6 +1513,7 @@ fn test_generic_type_alias_substitution() {
         base_key,
         CollectedInterface {
             scoped_key: format!("{}:Base", file_path),
+            scope: Default::default(),
             name: "Base".into(),
             file_path: file_path.clone(),
             props: vec![
@@ -1518,6 +1548,7 @@ fn test_generic_type_alias_substitution() {
         overrides_key,
         CollectedInterface {
             scoped_key: format!("{}:Overrides", file_path),
+            scope: Default::default(),
             name: "Overrides".into(),
             file_path: file_path.clone(),
             props: vec![
@@ -1646,13 +1677,13 @@ fn resolved_chain_give_up_pushes_diagnostic_and_populates_composes() {
     assert_eq!(state.diagnostics, vec![diag]);
 }
 
-// ── Test 12: Template literal — opaque on unresolvable parts ─────────────
+// ── Test 12: Template literal — a pattern on unresolvable parts ──────────
 
 #[test]
-fn test_template_literal_opaque_on_unknown_type() {
+fn test_template_literal_stays_a_pattern_on_unknown_type() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
-    // `compact-${UnknownSize}` — UnknownSize is not in global, so opaque.
+    // `compact-${UnknownSize}` — UnknownSize is not in global, so it cannot be expanded.
     let ct = CollectedType::TemplateLiteral(vec![
         CollectedType::StringLiteral("compact-".into()),
         CollectedType::Named { name: "UnknownSize".into(), args: vec![] },
@@ -1667,10 +1698,13 @@ fn test_template_literal_opaque_on_unknown_type() {
         &mut state,
         0,
     );
-    assert!(
-        matches!(&result, PropType::Opaque(d) if matches!(d.reason(), OpaqueReason::TemplateLiteral { .. })),
-        "Expected Opaque TemplateLiteral, got {:?}",
-        result
+    // The pattern is kept: the hole is the name it could not expand.
+    assert_eq!(
+        result,
+        PropType::TemplateLiteral(vec![
+            TemplatePart::Text("compact-".into()),
+            TemplatePart::Type(PropType::Named { name: "UnknownSize".into(), args: vec![] }),
+        ])
     );
     assert!(
         state.diagnostics.iter().any(|d| d.code == DiagnosticCode::TemplateLiteralOpaque),
@@ -1819,7 +1853,7 @@ fn a_generic_function_types_own_parameters_are_placeholders_not_types_to_look_up
     let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/b.tsx"), &ctx, &mut state, 0);
     assert_eq!(result.raw_string(), "<T>(item: T) => T");
     assert_eq!(state.diagnostics, vec![]);
-    assert!(state.in_scope_type_params.is_empty(), "the function's own parameters leave scope with it");
+    assert!(state.scope.is_empty(), "the function's own parameters leave scope with it");
 }
 
 #[test]
@@ -1890,6 +1924,7 @@ fn test_unhandled_intersection_member_gets_diagnostic_not_silent_drop() {
             description: String::new(),
             readonly: false,
             index_key: None,
+            tags: Default::default(),
         }]),
     ]);
 
@@ -2092,6 +2127,7 @@ fn test_self_referential_extends_emits_diagnostic_instead_of_silent_default() {
         scoped_key.clone(),
         CollectedInterface {
             scoped_key: scoped_key.clone(),
+            scope: Default::default(),
             name: "LoopProps".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -2162,6 +2198,7 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
         key("Base"),
         CollectedInterface {
             scoped_key: key("Base"),
+            scope: Default::default(),
             name: "Base".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -2183,6 +2220,7 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
             key(name),
             CollectedInterface {
                 scoped_key: key(name),
+                scope: Default::default(),
                 name: name.into(),
                 file_path: file_path.clone(),
                 props: vec![RawProp {
@@ -2204,6 +2242,7 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
         key("C"),
         CollectedInterface {
             scoped_key: key("C"),
+            scope: Default::default(),
             name: "C".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -2278,6 +2317,7 @@ fn self_referential_type_alias_used_directly_as_a_field_type_is_caught_immediate
         key("Props"),
         CollectedInterface {
             scoped_key: key("Props"),
+            scope: Default::default(),
             name: "Props".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -2341,6 +2381,7 @@ fn two_unrelated_fields_sharing_the_same_type_are_not_falsely_flagged_as_a_cycle
         key("Shared"),
         CollectedInterface {
             scoped_key: key("Shared"),
+            scope: Default::default(),
             name: "Shared".into(),
             file_path: file_path.clone(),
             props: vec![RawProp {
@@ -2361,6 +2402,7 @@ fn two_unrelated_fields_sharing_the_same_type_are_not_falsely_flagged_as_a_cycle
         key("Props"),
         CollectedInterface {
             scoped_key: key("Props"),
+            scope: Default::default(),
             name: "Props".into(),
             file_path: file_path.clone(),
             props: vec![
@@ -2439,6 +2481,7 @@ fn test_non_cyclic_depth_exhaustion_emits_max_depth_diagnostic() {
             format!("{}:{}", file_path, name),
             CollectedInterface {
                 scoped_key: format!("{}:{}", file_path, name),
+                scope: Default::default(),
                 name: name.clone().into(),
                 file_path: file_path.clone(),
                 props: vec![],
@@ -2682,9 +2725,31 @@ fn ts_lib_paths_keep_the_files_found_and_name_only_the_missing_one() {
 }
 
 #[test]
-fn ts_lib_paths_are_empty_and_silent_without_typescript() {
+fn ts_lib_paths_report_a_missing_typescript_package() {
     let tmp = tempfile::TempDir::new().unwrap();
-    assert_eq!(lib_paths_from(tmp.path()), TsLibs::default());
+
+    let libs = lib_paths_from(tmp.path());
+
+    assert_eq!(libs.paths, Vec::<String>::new());
+    assert_eq!(
+        libs.diagnostic,
+        Some(Diagnostic {
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "The 'typescript' package is not installed in or above '{}' — native and DOM globals (Date, \
+                 HTMLElement, Promise, …) will appear as unexpanded named references",
+                tmp.path().canonicalize().unwrap().display()
+            ),
+            file: None,
+            line: None,
+            column: None,
+            help: Some(
+                "Install typescript as a dependency of the project (for example `npm install -D typescript`).".into()
+            ),
+            code: DiagnosticCode::MissingTypeLibrary,
+            affects: Vec::new(),
+        })
+    );
 }
 
 // ── interface chains resolved once per run (`memo`) ─────────────────────────
@@ -2741,7 +2806,7 @@ fn resolve_shared_with(
     let mut results = BTreeMap::new();
     for name in components {
         let fresh = parsed_ctx(dir, files, options);
-        let flat = |(entry, diagnostics, deps): (ComponentEntry, ResolvedDiagnostics, deps::Dependencies)| {
+        let flat = |(entry, diagnostics, deps, _): (ComponentEntry, ResolvedDiagnostics, deps::Dependencies, _)| {
             (entry, diagnostics.flatten(), deps)
         };
         let alone = flat(resolve_component_tracked(&mapping(&fresh, name), &fresh));
@@ -2892,6 +2957,24 @@ fn an_interface_chain_expanded_for_a_pick_is_not_reused_where_it_collapses() {
 }
 
 #[test]
+fn collapsing_all_leaves_a_node_modules_source_alone_whichever_separator_the_path_uses() {
+    let options = PipelineOptions {
+        collapse_inherited_props: crate::types::options::CollapseInheritedProps::All,
+        ..Default::default()
+    };
+    let ctx = ResolutionContext::new(Arc::new(GlobalSourceData::default()), &options);
+    let state = ResolveState::default();
+    let names: Vec<String> = (0..31).map(|i| format!("p{i}")).collect();
+    let collapses =
+        |file: &str| ctx.collapses(Utf8Path::new(file), "Props", names.iter().map(String::as_str), 1, &state);
+
+    assert!(!collapses("/proj/node_modules/pkg/index.d.ts"));
+    assert!(!collapses(r"C:\proj\node_modules\pkg\index.d.ts"));
+    assert!(collapses("/proj/src/Props.ts"));
+    assert!(collapses(r"C:\proj\src\Props.ts"));
+}
+
+#[test]
 fn an_interface_chain_cut_short_by_a_cycle_is_not_reused_where_the_cycle_is_not_open() {
     // P reaches Base through Loop, so Base's own `extends Loop` closes a cycle there; Q reaches Base at the same depth
     // through Z, where Loop has not been entered, so Base's chain takes Loop's props.
@@ -2997,13 +3080,15 @@ fn component_mapping_is_the_first_match_a_scan_finds() {
             crate::types::DetectionRule::FunctionDeclaration,
         )
     };
-    let mut global = GlobalSourceData::default();
-    global.component_mappings = vec![
-        mapping("Button", "FirstProps", "/a/button.tsx"),
-        mapping("Button", "SecondProps", "/b/button.tsx"),
-        mapping("Button", "ShadowedProps", "/a/button.tsx"),
-        mapping("Card", "CardProps", "/a/card.tsx"),
-    ];
+    let global = GlobalSourceData {
+        component_mappings: vec![
+            mapping("Button", "FirstProps", "/a/button.tsx"),
+            mapping("Button", "SecondProps", "/b/button.tsx"),
+            mapping("Button", "ShadowedProps", "/a/button.tsx"),
+            mapping("Card", "CardProps", "/a/card.tsx"),
+        ],
+        ..Default::default()
+    };
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
     let props_of = |file: &str, name: &str| {
         ctx.component_mapping(Utf8Path::new(file), name).map(|found| found.props_type_name.to_string())
@@ -3023,4 +3108,120 @@ fn component_mapping_is_the_first_match_a_scan_finds() {
             .map(|found| found.props_type_name.to_string()),
         Some("SecondProps".to_owned())
     );
+}
+
+// ── type parameter scope: no answer depends on what was resolved before it ──
+
+const SCOPE_MATRIX: &str = r#"
+type T = number;
+type Value = number;
+interface Cell<A> { value: A }
+type Read<A> = Cell<A>['value'];
+interface Box<X> { value: X }
+interface Props<Value> { value: Value }
+type Saved = Value;
+type Fixed = { value: Value };
+type Id<Value> = Value;
+type Pair<A, B> = { first: A; second: B };
+export function Generic<T>(p: { value: Read<T> }) { return null; }
+export function Plain(p: { value: Read<number> }) { return null; }
+export function ModuleT(p: { value: Read<T> }) { return null; }
+export function Member<T>(p: { value: Box<T>['value'] }) { return null; }
+export function Filled(p: Props<Value>) { return null; }
+export function Passed<Value>(p: Props<Value>) { return null; }
+export function Unfilled(p: Props) { return null; }
+export function SavedUse<Value>(p: { value: Saved }) { return null; }
+export function FixedUse<Value>(p: { fixed: Fixed }) { return null; }
+export function IdUse<Value>(p: { value: Id<Value> }) { return null; }
+export function IdModule(p: { value: Id<Value> }) { return null; }
+export function PairUse(p: { pair: Pair<Value> }) { return null; }
+export function Keyed<Keys extends string>(p: Record<Keys, Value>) { return null; }
+type ReadV<X extends { v: unknown }> = X['v'];
+export function ReadObject<T>(p: { v: ReadV<{ v: T }> }) { return null; }
+export function ReadModule(p: { v: ReadV<{ v: T }> }) { return null; }
+export function ReadInterface<T>(p: { v: Cell<[T, number]>['value'] }) { return null; }
+export function ReadPlain(p: { v: Cell<[number, number]>['value'] }) { return null; }
+"#;
+
+const SCOPE_COMPONENTS: [&str; 17] = [
+    "Generic",
+    "Plain",
+    "ModuleT",
+    "Member",
+    "Filled",
+    "Passed",
+    "Unfilled",
+    "SavedUse",
+    "FixedUse",
+    "IdUse",
+    "IdModule",
+    "PairUse",
+    "Keyed",
+    "ReadObject",
+    "ReadModule",
+    "ReadInterface",
+    "ReadPlain",
+];
+
+#[test]
+fn type_parameter_scope_answers_do_not_depend_on_the_order_components_resolve_in() {
+    // Each component's result on a context that already resolved others must equal its result on a fresh context
+    // (`resolve_shared` asserts it, so every memoized lookup is replayed against a fresh state), forwards, backwards
+    // and in shuffled orders; the printed props must then also agree across orders.
+    let (_tmp, dir) = canonical_temp_dir();
+    let files = [("Comp.tsx", SCOPE_MATRIX)];
+    let forward: Vec<&str> = SCOPE_COMPONENTS.to_vec();
+    let mut orders: Vec<Vec<&str>> = vec![forward.clone(), forward.iter().rev().copied().collect()];
+    let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+    for _ in 0..24 {
+        let mut order = forward.clone();
+        for i in (1..order.len()).rev() {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            order.swap(i, usize::try_from(seed >> 33).unwrap() % (i + 1));
+        }
+        orders.push(order);
+    }
+
+    let mut first_texts: Option<BTreeMap<String, String>> = None;
+    for order in orders {
+        let (_ctx, results) = resolve_shared(&dir, &files, &order);
+        let texts: BTreeMap<String, String> = results
+            .iter()
+            .map(|(name, (entry, _, _))| {
+                let props: Vec<String> = entry
+                    .props
+                    .iter()
+                    .map(|(prop, parsed)| format!("{prop}: {}", parsed.prop_type.raw_string()))
+                    .collect();
+                (name.clone(), props.join("; "))
+            })
+            .collect();
+        match &first_texts {
+            Some(first) => assert_eq!(&texts, first, "order {order:?}"),
+            None => first_texts = Some(texts),
+        }
+    }
+
+    let by_name = first_texts.unwrap();
+    let expected = [
+        ("Generic", "value: T"),
+        ("Plain", "value: number"),
+        ("ModuleT", "value: number"),
+        ("Member", "value: T"),
+        ("Filled", "value: number"),
+        ("Passed", "value: Value"),
+        ("Unfilled", "value: Value"),
+        ("SavedUse", "value: number"),
+        ("FixedUse", "fixed: { value: number }"),
+        ("IdUse", "value: Value"),
+        ("IdModule", "value: number"),
+        ("PairUse", "pair: { first: number; second: B }"),
+        ("ReadObject", "v: T"),
+        ("ReadModule", "v: number"),
+        ("ReadInterface", "v: [T, number]"),
+        ("ReadPlain", "v: [number, number]"),
+    ];
+    for (name, props) in expected {
+        assert_eq!(by_name[name], props, "{name}");
+    }
 }

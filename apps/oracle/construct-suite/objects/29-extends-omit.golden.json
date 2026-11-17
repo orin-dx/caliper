@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "b",
+          "c"
+        ],
+        "index": false,
+        "alias": "Rest"
+      }
+    ],
+    "alias": "Rest"
+  },
+  "text": "Rest | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/29-extends-omit.tsx"
+    },
+    "order": null
+  }
+}

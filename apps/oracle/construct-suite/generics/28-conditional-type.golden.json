@@ -1,0 +1,28 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "text",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"text\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/28-conditional-type.tsx"
+    },
+    "order": null
+  }
+}

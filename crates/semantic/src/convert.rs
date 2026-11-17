@@ -1,227 +1,1813 @@
-//! A checker type reduced to the existing [`PropType`], where that is lossless; otherwise the checker's own text as a
-//! `Named` type. The output schema is unchanged: nothing here adds a variant.
+//! A checker type converted to [`PropType`] from the checker's structured answers: type flags, a union's members, a
+//! reference's type arguments, a tuple's element flags, an object's properties, index and call signatures, an alias's
+//! symbol and arguments. The printed type (`typeToString`) names things for display and for the two facts the
+//! structure does not state (see [`crate::printed`]); no shape is read from it.
+//!
+//! The conversion of a type is a function of the type, how deep it sits and which instantiations enclose it, never of
+//! the order the checker was asked in, so the memo can be keyed by the checker's type handle (valid inside one
+//! snapshot) without making the output depend on query order. A handle is also what tells one instantiation from
+//! another while a type is being expanded (`Box<Box<string>>` is two instantiations of one declaration): only its
+//! equality is read, inside one conversion, so the answer does not depend on the numbers. The recursion marker that
+//! results is named by the declaration (the alias or interface) and holds no handle. The memo is keyed by the enclosing
+//! instantiations a conversion actually asked about, not by all of them (see [`State::memo`]).
+//!
+//! Every descent into the parts of a type (members, properties, elements, holes) passes [`Converter::enter`], which
+//! decides before anything is fetched or converted whether the type is an enclosing instantiation (a back-reference),
+//! sits too deep, or is too wide.
+//!
+//! What stays a name instead of an expansion, the named boundary: an object type declared in a dependency
+//! (`node_modules`) or an interface or class of the TypeScript lib (`Date`, `HTMLElement`, `Promise<T>`), with its type
+//! arguments; a function type is always expanded, since its parameters are what a reader wants. The lib's type-level
+//! utilities (`Partial`, `Pick`, `Omit`, `Record`) are evaluated, not named: their result is the type, unless it is
+//! wider than the budget and what it applies to has a name (see [`Converter::over_budget`]). A dependency's union of
+//! literals is expanded too, since its members are the values a control offers. What the caps cut is a typed
+//! [`PropType::Truncated`], never the checker's text standing in as a name. The width of an object counts only the
+//! members the project did not declare: its own are listed whole.
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use caliper_docgen_core::types::{FunctionParam, ObjectField, PropType};
+use caliper_docgen_core::react_types::{html_element_for, html_element_from_type_arg, is_intrinsic_tag};
+use caliper_docgen_core::types::semantic::{SemanticProp, degraded_type, unresolved_type};
+use caliper_docgen_core::types::{
+    BigIntValue, CallSignature, EnumMemberValue, FunctionParam, ObjectField, OpaqueReason, PropType,
+    SignatureKind as Kind, TemplatePart, TruncationLimit, TupleElement, TupleElementKind, TupleLabel,
+};
 use rustc_hash::FxHashMap;
 
-use crate::rpc::{flag, CallError, Rpc, SymbolInfo, TypeInfo};
+use crate::declared::Declared;
+use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
+use crate::rpc::{
+    CallError, CompactSymbol, IndexInfo, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, SymbolRef,
+    TypeInfo, decode, flag,
+};
+use serde_json::value::RawValue;
 
-/// Nesting past which a type is written as the checker prints it.
-const MAX_DEPTH: u8 = 4;
-/// An inline object type with more fields than this is written as the checker prints it.
-const MAX_INLINE_FIELDS: usize = 16;
+/// Nesting past which an object, union or intersection is cut with [`TruncationLimit::Depth`].
+const MAX_DEPTH: u8 = 5;
+/// The most properties an object type lists at the top (a prop's own type) and below it that the project did not declare
+/// itself (see [`is_own`]): what it declared is never cut.
+const MAX_FIELDS: [usize; 2] = [100, 40];
+/// The most members a union or intersection lists at the top and below it.
+const MAX_MEMBERS: [usize; 2] = [500, 120];
+/// The most types one converted type holds, itself and every type inside it counted ([`past_size_budget`]): a type with
+/// more is cut with [`TruncationLimit::Depth`] where it is converted, and the memo keeps the cut form. The caps above
+/// bound each object, union and intersection, but not what the project declared itself (see [`is_own`]), so a style
+/// system in the project's own source (Chakra's `SystemStyleObject`: about 700 properties, each a value or an object
+/// of 130 conditions) expanded to 25 MB of JSON per prop and 42 GB of memory for one extract.
+///
+/// What is enforced is this count (18,724 types), not a byte size. It is chosen so that no type under 256 KiB of JSON
+/// is ever cut: a type in the output is a JSON object with at least a `kind` (`{"kind":"any"}`, 14 bytes, is the
+/// smallest), so a type of more than this many types is more than 256 KiB. On real projects a type averages about 40
+/// bytes, so the cut falls near 0.75 MB of JSON: Chakra's largest prop type left whole is 732 KB. The largest prop
+/// type of Mantine's core is 196 KB; Chakra's style props were 25 MB. The cut is reported as a depth truncation, since
+/// a limit kind of its own would change the output schema.
+const MAX_SIZE: usize = 256 * 1024 / MIN_TYPE_BYTES;
+/// The fewest bytes one type takes in the JSON output: `{"kind":"any"}`.
+const MIN_TYPE_BYTES: usize = 14;
+// One type past the budget is more than 256 KiB.
+const _: () = assert!((MAX_SIZE + 1) * MIN_TYPE_BYTES > 256 * 1024);
+/// How many of React's tag names (see [`is_tag`]) a union has to list to be React's `ElementType` (`JSX.IntrinsicElements`
+/// has over 170): the tag names are the one part of it that no declaration identifies.
+const MIN_INTRINSIC_TAGS: usize = 100;
+/// The lib's utility aliases that keep the properties of the type they are applied to, and so can stand for it.
+const UTILITIES: [&str; 5] = ["Omit", "Pick", "Partial", "Required", "Readonly"];
 
-type Cache = Mutex<FxHashMap<(u64, u8), PropType>>;
+/// What a descent found at [`Converter::enter`].
+enum Gate<T> {
+    /// The type is not expanded: it is a back-reference, or a cap cut it.
+    Stop(PropType),
+    /// The parts of the type, and the context to convert them in.
+    Open { parts: T, inner: Cx },
+}
+
 type Converted<'a> = Pin<Box<dyn Future<Output = Result<PropType, CallError>> + Send + 'a>>;
+
+/// What an object's members are known as when its type is entered.
+enum Listed {
+    /// The checker was asked for them.
+    Members(ObjectMembers),
+    /// How many properties an earlier map over the same keys had, none of them the project's (see [`State::maps`]). It
+    /// is only handed out where that is more than the budget allows, so the type is cut and no list is needed.
+    Counted(usize),
+}
+
+/// What [`Converter::over_budget`] reads of the members of an object it cuts.
+struct Excess {
+    /// The type has call or construct signatures.
+    signatures: bool,
+    /// How many of its properties the project did not declare.
+    outside: usize,
+    /// The properties the project declared.
+    own: Vec<SymbolInfo>,
+    indexes: Vec<IndexInfo>,
+}
+
+impl Excess {
+    fn of(members: ObjectMembers) -> Self {
+        let ObjectMembers { calls, constructs, properties, indexes } = members;
+        let (own, outside): (Vec<SymbolInfo>, Vec<SymbolInfo>) = properties.into_iter().partition(is_own);
+        Excess { signatures: !calls.is_empty() || !constructs.is_empty(), outside: outside.len(), own, indexes }
+    }
+
+    fn counted(outside: usize) -> Self {
+        Excess { signatures: false, outside, own: Vec::new(), indexes: Vec::new() }
+    }
+}
+
+/// What a map is remembered by: its constraint, as the checker's type handle, and the symbol that declares it.
+type MapKey = (u64, CompactSymbol);
+
+/// The key of a mapped type whose property count another map over the same keys can answer for: one no name stands for
+/// (an alias's arguments, `Partial<A>`, are what its properties come from, and the key holds none), with no `as` clause
+/// (which would rename the keys).
+fn map_key(info: &TypeInfo, origin: Option<&Origin>) -> Option<MapKey> {
+    if origin.is_some() || info.object_flags & flag::OBJECT_MAPPED == 0 || info.name_type.is_some() {
+        return None;
+    }
+    Some((info.constraint_type?, info.symbol.clone()?))
+}
+
+/// The number of properties of a map's listed members to remember, when the cut of another map over the same keys needs
+/// no more of them: the project declared none, so none is listed, and the map has no signature and no index signature,
+/// whose types are another map's own.
+fn settled_count(members: &ObjectMembers) -> Option<usize> {
+    let bare = members.calls.is_empty() && members.constructs.is_empty() && members.indexes.is_empty();
+    (bare && members.properties.iter().all(|property| !is_own(property))).then_some(members.properties.len())
+}
+
+/// Where a type sits: how deep, and which named instantiations (an alias or interface with its type arguments, as the
+/// checker's type handle) enclose it, outermost first.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Cx {
+    depth: u8,
+    enclosing: Arc<Vec<u64>>,
+    /// The conversion this context belongs to, which records which enclosing instantiations it asks about. `None` at
+    /// the roots.
+    frame: Option<Arc<Frame>>,
+}
+
+/// What one conversion has asked of the instantiations enclosing it, kept to build its memo entry (see
+/// [`State::memo`]).
+#[derive(Debug)]
+struct Frame {
+    /// How many instantiations enclosed the type when its conversion began: those below this are the outer context, the
+    /// rest were opened by the conversion itself.
+    base: usize,
+    asked: Mutex<Asked>,
+}
+
+#[derive(Debug, Default)]
+struct Asked {
+    /// The handles this conversion's own gate compared against its enclosing instantiations.
+    ids: Vec<u64>,
+    /// The sets asked by the conversions of its parts, each with the instantiations this conversion had opened by then:
+    /// those were answered inside it and do not depend on its outer context.
+    parts: Vec<(Arc<[u64]>, Vec<u64>)>,
+}
+
+impl Frame {
+    fn new(base: usize) -> Self {
+        Frame { base, asked: Mutex::default() }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Asked> {
+        self.asked.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn ask(&self, id: u64) {
+        self.lock().ids.push(id);
+    }
+
+    /// A part of this conversion was converted (or recalled) under `enclosing`, having asked about `asked`.
+    fn absorb(&self, asked: &Arc<[u64]>, enclosing: &[u64]) {
+        if !asked.is_empty() {
+            self.lock().parts.push((asked.clone(), enclosing.get(self.base..).unwrap_or_default().to_vec()));
+        }
+    }
+
+    /// Every handle the conversion asked about whose answer came from outside it: sorted, once each.
+    fn finish(&self) -> Arc<[u64]> {
+        let asked = self.lock();
+        let mut ids = asked.ids.clone();
+        for (part, opened) in &asked.parts {
+            ids.extend(part.iter().copied().filter(|id| !opened.contains(id)));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids.into()
+    }
+}
+
+impl Cx {
+    /// The context of what a name carries, its type arguments: one level down. Each argument is converted on its own
+    /// and passes [`Converter::enter`] if it has parts.
+    fn argument(&self) -> Cx {
+        Cx { depth: self.depth.saturating_add(1), enclosing: self.enclosing.clone(), frame: self.frame.clone() }
+    }
+
+    /// The context of the parts of a type that [`Converter::enter`] has admitted. Only a named instance is kept, since
+    /// only a name can be pointed back to.
+    fn below(&self, instance: Option<u64>) -> Cx {
+        let mut enclosing = self.enclosing.clone();
+        if let Some(id) = instance
+            && !enclosing.contains(&id)
+        {
+            let mut grown = (*enclosing).clone();
+            grown.push(id);
+            enclosing = Arc::new(grown);
+        }
+        Cx { depth: self.depth.saturating_add(1), enclosing, frame: self.frame.clone() }
+    }
+
+    /// Whether `id` is an instantiation being expanded around the type. The conversion in progress is recorded to have
+    /// asked, whichever the answer.
+    fn encloses(&self, id: u64) -> bool {
+        if let Some(frame) = &self.frame {
+            frame.ask(id);
+        }
+        self.enclosing.contains(&id)
+    }
+
+    fn limit<const N: usize>(&self, limits: [usize; N]) -> usize {
+        limits[usize::from(self.depth > 0).min(N - 1)]
+    }
+}
+
+/// What declares a type: the alias it was written through, else its interface or class.
+#[derive(Debug, Clone)]
+struct Origin {
+    name: String,
+    /// The declaring file as the checker keys it (lower-cased path).
+    file: String,
+    alias: bool,
+}
+
+impl Origin {
+    fn of(symbol: &SymbolInfo, alias: bool) -> Self {
+        let declaration = symbol.declarations.first().map(String::as_str);
+        Origin {
+            name: symbol.name.clone(),
+            file: declaration.map(|declaration| declared_in(declaration).to_string()).unwrap_or_default(),
+            alias,
+        }
+    }
+
+    fn in_dependency(&self) -> bool {
+        file_in_dependency(&self.file)
+    }
+
+    fn in_lib(&self) -> bool {
+        file_in_lib(&self.file)
+    }
+
+    fn in_react(&self) -> bool {
+        self.file.contains("/@types/react/")
+    }
+
+    /// Whether the name stands for the type: declared in a dependency, or an interface or class of the lib. An alias
+    /// of the lib is a type-level function (`Partial<T>`), and its result is the type.
+    fn is_boundary(&self) -> bool {
+        // The lib may itself sit under `node_modules` (`typescript/lib`, `@tsrs/<platform>`).
+        if self.in_lib() { !self.alias } else { self.in_dependency() }
+    }
+
+    /// The React type that PropType holds as a terminal, found by the declaration and not by how it prints.
+    /// `ReactElement` and `JSX.Element` are not `ReactNode`, which also admits strings, numbers and `null`: they keep
+    /// their names ([`Self::name`]).
+    fn react_terminal(&self) -> Option<PropType> {
+        if !self.in_react() {
+            return None;
+        }
+        match (self.name.as_str(), self.alias) {
+            ("ReactNode", true) => Some(PropType::ReactNode),
+            ("ElementType", true) => Some(PropType::ElementType),
+            ("CSSProperties", false) => Some(PropType::CssProperties),
+            _ => None,
+        }
+    }
+
+    /// The name a reference to the type is given. React's `JSX.Element` is named through its namespace: the checker's
+    /// `Element` is also the DOM's (which `@types/react` declares empty in `global.d.ts` for a program without it).
+    fn name(&self) -> String {
+        if self.in_react() && !self.alias && self.name == "Element" && !self.file.ends_with("/global.d.ts") {
+            return "JSX.Element".to_string();
+        }
+        self.name.clone()
+    }
+}
+
+/// Whether a union member is a tag of React's `JSX.IntrinsicElements`: a string literal (not an enum member) whose value
+/// that table lists. A literal the checker gave no value for is not one, so it is kept beside the terminal.
+fn is_tag(member: &TypeInfo) -> bool {
+    member.flags & flag::STRING_LITERAL != 0
+        && member.flags & flag::ENUM_LITERAL == 0
+        && member.value.as_ref().and_then(|value| value.as_str()).is_some_and(is_intrinsic_tag)
+}
+
+/// Whether the checker states the base types of this type in its own terms: the declaration of a class or interface
+/// does. An instantiation of a generic one (`Box<string>`, only a reference) does not state them in terms of its
+/// arguments, so a traversal that keeps the arguments cannot list what it inherits; one that wants only names reads the
+/// generic type instead ([`Converter::named_bases`]).
+fn states_bases(info: &TypeInfo) -> bool {
+    info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE) != 0
+}
+
+/// Where the base types of a type are to be asked, from what the checker says of the type itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BasesOf {
+    /// A class or interface declaration: the checker states them ([`states_bases`]).
+    Itself,
+    /// An instantiation of a generic type: its generic target states them.
+    Generic,
+    /// An object type no class or interface declares (a type literal, a mapped type): it has none.
+    None,
+    /// A union, a type parameter or any other type the checker was not asked about: whether it has bases is not known.
+    Unknown,
+}
+
+impl BasesOf {
+    fn of(info: &TypeInfo) -> Self {
+        if states_bases(info) {
+            Self::Itself
+        } else if info.object_flags & flag::OBJECT_REFERENCE != 0 {
+            Self::Generic
+        } else if info.flags & flag::OBJECT != 0 {
+            Self::None
+        } else {
+            Self::Unknown
+        }
+    }
+}
+
+fn file_in_dependency(file: &str) -> bool {
+    file.contains("/node_modules/")
+}
+
+fn file_in_lib(file: &str) -> bool {
+    let name = file.rsplit('/').next().unwrap_or("");
+    name.starts_with("lib.") && name.ends_with(".d.ts")
+}
+
+/// Whether a property is the project's own: its first declaration is in a file of the project, not a dependency or the
+/// lib. A property with no declaration (a mapped type's synthetic one) is not, so a wide mapped type is still cut.
+fn is_own(property: &SymbolInfo) -> bool {
+    property.declarations.first().is_some_and(|declaration| {
+        let file = declared_in(declaration);
+        !file_in_dependency(file) && !file_in_lib(file)
+    })
+}
+
+/// `declarations` entries read `"<node index>.<kind>.<path>"`: the path is lower-cased, as the checker keys files.
+pub(crate) fn declared_in(declaration: &str) -> &str {
+    declaration.splitn(3, '.').nth(2).unwrap_or("")
+}
+
+/// Whether `converted` holds more than `budget` types, itself and every type inside it counted. Counted on the tree,
+/// not by serializing it, and only as far as the budget: the walk stops at the first type past it.
+fn past_size_budget(converted: &PropType, budget: usize) -> bool {
+    let mut count = 0usize;
+    let mut pending = vec![converted];
+    while let Some(ty) = pending.pop() {
+        count += 1;
+        if count > budget {
+            return true;
+        }
+        match ty {
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::BigInt
+            | PropType::StringLiteral(_)
+            | PropType::NumberLiteral(_)
+            | PropType::BoolLiteral(_)
+            | PropType::BigIntLiteral(_)
+            | PropType::UniqueSymbol { .. }
+            | PropType::EnumMember { .. }
+            | PropType::Truncated { .. }
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::Ref { .. }
+            | PropType::ElementType
+            | PropType::HtmlAttributes { .. }
+            | PropType::LiteralUnion { .. }
+            | PropType::SxProps
+            | PropType::Opaque(_) => {}
+            PropType::TemplateLiteral(parts) => pending.extend(parts.iter().filter_map(|part| match part {
+                TemplatePart::Text(_) => None,
+                TemplatePart::Type(ty) => Some(ty),
+            })),
+            PropType::Union(members)
+            | PropType::Intersection(members)
+            | PropType::Named { args: members, .. }
+            | PropType::Recursive { args: members, .. } => pending.extend(members),
+            PropType::Array(inner) | PropType::Readonly(inner) => pending.push(inner),
+            PropType::Tuple(elements) => pending.extend(elements.iter().map(|element| &element.element_type)),
+            PropType::Object(fields) => push_fields(fields, &mut pending),
+            PropType::Callable { signatures, fields } => {
+                for signature in signatures {
+                    pending.extend(signature.params.iter().map(|param| &param.param_type));
+                    pending.push(&signature.return_type);
+                }
+                push_fields(fields, &mut pending);
+            }
+            PropType::Function { params, return_type, .. } => {
+                pending.extend(params.iter().map(|param| &param.param_type));
+                pending.push(return_type);
+            }
+        }
+    }
+    false
+}
+
+/// The types of `fields` for [`past_size_budget`]: each field's, and an index signature's key type.
+fn push_fields<'a>(fields: &'a [ObjectField], pending: &mut Vec<&'a PropType>) {
+    for field in fields {
+        pending.push(&field.prop_type);
+        if let Some(key) = &field.index_key {
+            pending.push(key);
+        }
+    }
+}
+
+/// A converted type, with the enclosing instantiations its conversion depended on.
+#[derive(Debug)]
+struct Entry {
+    /// Every handle the conversion compared against the instantiations enclosing it, sorted.
+    asked: Arc<[u64]>,
+    /// Those of `asked` that did enclose it.
+    enclosed_by: Vec<u64>,
+    converted: PropType,
+}
+
+impl Entry {
+    /// Whether the conversion would go the same way inside `enclosing`: among the handles it asked about, the ones
+    /// that enclose the type there are exactly `enclosed_by`.
+    fn holds_in(&self, enclosing: &[u64]) -> bool {
+        self.enclosed_by.iter().all(|id| enclosing.contains(id))
+            && enclosing.iter().all(|id| self.enclosed_by.contains(id) || self.asked.binary_search(id).is_err())
+    }
+}
+
+type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
+
+/// The parts of each type asked about so far, by (type handle, which parts), as the text the checker answered: read
+/// again on each use, which costs a fraction of the round trip, and is several times smaller than the read lists.
+type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<RawValue>>>;
+
+/// The props answered so far, by the hash of their [`PropKey`] and then the key itself, owned.
+type KeptProps = Mutex<FxHashMap<u64, Vec<(KeptKey, Arc<SemanticProp>)>>>;
+
+/// Everything a component's prop is made of ([`crate::component::props_of_type`]): its property's name, optionality and
+/// declarations, the symbol it is a member of (its JSDoc's key when it has no declaration: the symbol itself), its type's
+/// handle, and which of its JSDoc the component asks for. Two props of one snapshot with equal keys are the same prop: the
+/// type is converted from the handle alone at the top ([`Converter::convert_roots`]), and where it is declared and its
+/// JSDoc are read from the declarations, the parent and the symbol alone ([`crate::declared`]). Chakra's components
+/// share a thousand style props, each a union converted from the same handle, so a component after the first finds
+/// them here and neither converts, copies nor interns them again.
+///
+/// The key borrows what it is made of from the property: most props are found kept, and only one that is not is copied,
+/// into the [`KeptKey`] it is kept by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PropKey<'a> {
+    hash: u64,
+    name: &'a str,
+    optional: bool,
+    type_id: u64,
+    declarations: &'a [String],
+    parent: Option<&'a CompactSymbol>,
+    /// The symbol's reference, only for a property with no declaration.
+    symbol: Option<&'a str>,
+    description: bool,
+    tags: bool,
+}
+
+impl<'a> PropKey<'a> {
+    pub(crate) fn of(property: &'a SymbolInfo, prop_type: &TypeInfo, description: bool, tags: bool) -> Self {
+        use std::hash::{Hash, Hasher};
+        let optional = property.flags & flag::SYMBOL_OPTIONAL != 0;
+        let symbol = property.declarations.is_empty().then(|| property.reference.text());
+        let parent = property.parent.as_ref();
+        let mut hasher = rustc_hash::FxHasher::default();
+        (&property.name, optional, prop_type.id, &property.declarations, parent, symbol, description, tags)
+            .hash(&mut hasher);
+        PropKey {
+            hash: hasher.finish(),
+            name: &property.name,
+            optional,
+            type_id: prop_type.id,
+            declarations: &property.declarations,
+            parent,
+            symbol,
+            description,
+            tags,
+        }
+    }
+
+    /// Whether `kept` was made from what this key names.
+    fn names(&self, kept: &KeptKey) -> bool {
+        self.name == kept.name
+            && self.optional == kept.optional
+            && self.type_id == kept.type_id
+            && self.declarations == kept.declarations.as_slice()
+            && self.parent == kept.parent.as_ref()
+            && self.symbol == kept.symbol.as_deref()
+            && self.description == kept.description
+            && self.tags == kept.tags
+    }
+
+    fn to_kept(self) -> KeptKey {
+        KeptKey {
+            name: self.name.to_string(),
+            optional: self.optional,
+            type_id: self.type_id,
+            declarations: self.declarations.to_vec(),
+            parent: self.parent.cloned(),
+            symbol: self.symbol.map(str::to_string),
+            description: self.description,
+            tags: self.tags,
+        }
+    }
+}
+
+/// A [`PropKey`] that owns what it is made of, for a prop kept for the components after its own.
+#[derive(Debug)]
+struct KeptKey {
+    name: String,
+    optional: bool,
+    type_id: u64,
+    declarations: Vec<String>,
+    parent: Option<CompactSymbol>,
+    symbol: Option<String>,
+    description: bool,
+    tags: bool,
+}
+
+/// Which parts of a type [`Converter::parts`] asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Parts {
+    /// A union's, intersection's or template literal's members (`getTypesOfType`).
+    Members,
+    /// A reference's type arguments (`getTypeArguments`), the `this` type the checker appends included.
+    Arguments,
+}
+
+/// The type arguments a reference names, without the `this` type the checker appends to a class's or interface's.
+fn without_this(arguments: &[TypeInfo]) -> &[TypeInfo] {
+    let named = arguments.iter().rposition(|argument| !argument.is_this_type).map_or(0, |last| last + 1);
+    arguments.get(..named).unwrap_or_default()
+}
+
+#[derive(Default)]
+struct State {
+    /// Conversions by (type handle, depth), each entry with the enclosing instantiations it depended on. The handles
+    /// are valid inside this snapshot only.
+    ///
+    /// Why an entry may be reused where [`Entry::holds_in`] says. A conversion reads its context in two ways only: the
+    /// depth, which is in the key, and [`Cx::encloses`], the question whether a handle is an instantiation being
+    /// expanded around the type. Everything else it reads is the checker's answer about the type, which does not change
+    /// inside a snapshot. So a conversion is a deterministic walk whose every step is fixed by the type, the depth and
+    /// the answers to those questions, in the order they are asked. Run it again where each handle it asked about has
+    /// the same answer, and it asks the same questions in the same order and returns the same type. A handle that the
+    /// conversion opened itself is settled inside it (it was found not to enclose the type at its own gate, which is
+    /// recorded), so only the handles asked of the outer context are kept. A type in no cycle with its context asks
+    /// nothing that encloses it and holds everywhere; one in a cycle holds where the same part of the cycle encloses
+    /// it. Entries that hold in a context all agree, so which of them is found first, and so the order in which
+    /// types were first reached, cannot show in the output.
+    memo: Memo,
+    origins: Mutex<FxHashMap<(bool, CompactSymbol), Option<Origin>>>,
+    /// By (type handle, whether printed expanded: see [`Rpc::type_to_string_expanded`]).
+    printed: Mutex<FxHashMap<(u64, bool), String>>,
+    /// The parts of a type by its handle (see [`Parts`]). They are the checker's answer about the type, fixed inside the
+    /// snapshot, while the memo converts a type again at another depth or under other instantiations: kept, that
+    /// conversion asks for none of them again. Kept for the whole snapshot, since components of one library share
+    /// most of their types: kept per component, a program of every Chakra component answered 16 at a time held 16
+    /// copies of the same style props' members.
+    parts: PartsSeen,
+    /// Where props are declared ([`crate::declared`]), kept for the snapshot like the rest.
+    declared: crate::declared::Memo,
+    /// A map's property count by [`MapKey`]: a map without `as` has one property per key of its constraint and a cut reads
+    /// only that count, so a [`settled_count`] list stands for every map of its key (docs/type-checker-integration.md,
+    /// "Condition maps", says when that is exact). The handles are valid inside this snapshot only.
+    maps: Mutex<FxHashMap<MapKey, usize>>,
+    /// The props answered so far ([`crate::component::props_of_type`]), by what makes one ([`PropKey`]).
+    props: KeptProps,
+    /// The type of each symbol asked about so far, by its reference: what `getTypeOfSymbol` answers for a symbol does
+    /// not change inside a snapshot. Chakra's props types are each their own instantiation, so each lists its own
+    /// property symbols, but six in ten of those were listed by a component before (the same style props reached
+    /// through the same instantiation), and their types need not be asked again.
+    symbol_types: Mutex<SymbolTypes>,
+    hits: AtomicU64,
+    misses: AtomicU64,
+}
+
+/// The type of each symbol asked about, by its reference's text, each type held once however many symbols have it.
+#[derive(Default)]
+struct SymbolTypes {
+    by_symbol: FxHashMap<Box<str>, Arc<TypeInfo>>,
+    by_id: FxHashMap<u64, Arc<TypeInfo>>,
+}
 
 #[derive(Clone)]
 pub(crate) struct Converter {
     rpc: Arc<Rpc>,
-    cache: Arc<Cache>,
+    state: Arc<State>,
+    /// Ask the checker about the members of a type last to first. The answer is the same, and a test holds it to that.
+    reverse: bool,
 }
 
 impl Converter {
-    pub(crate) fn new(rpc: Arc<Rpc>) -> Self {
-        Self { rpc, cache: Arc::new(Mutex::new(FxHashMap::default())) }
+    pub(crate) fn new(rpc: Arc<Rpc>, reverse: bool) -> Self {
+        Self { rpc, state: Arc::new(State::default()), reverse }
     }
 
-    pub(crate) fn convert<'a>(&'a self, info: &'a TypeInfo, depth: u8) -> Converted<'a> {
-        Box::pin(async move {
-            let key = (info.id, depth);
-            if let Some(hit) = self.cache.lock().ok().and_then(|cache| cache.get(&key).cloned()) {
-                return Ok(hit);
+    /// The type of each symbol of a component's props, in order: those asked about before in this snapshot from what
+    /// the checker answered then, shared, and the others in one request. Only the props' own symbols go through it: a
+    /// component lists most of an earlier one's, while the members of the types inside a prop rarely repeat.
+    pub(crate) async fn types_of_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<Arc<TypeInfo>>, CallError> {
+        let mut types: Vec<Option<Arc<TypeInfo>>> = {
+            let known = self.state.symbol_types.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            symbols.iter().map(|symbol| known.by_symbol.get(symbol.text()).cloned()).collect()
+        };
+        let unknown: Vec<&SymbolRef> =
+            symbols.iter().zip(&types).filter(|(_, known)| known.is_none()).map(|(symbol, _)| *symbol).collect();
+        if !unknown.is_empty() {
+            let answered = self.rpc.types_of_symbols(&unknown).await?;
+            if answered.len() != unknown.len() {
+                return Err(CallError::Rejected(format!(
+                    "getTypesOfSymbols answered {} types for {} symbols",
+                    answered.len(),
+                    unknown.len()
+                )));
             }
-            let converted = self.uncached(info, depth).await?;
-            if let Ok(mut cache) = self.cache.lock() {
-                cache.insert(key, converted.clone());
+            let mut known = self.state.symbol_types.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut answered = answered.into_iter();
+            for (symbol, slot) in symbols.iter().zip(&mut types) {
+                if slot.is_none()
+                    && let Some(info) = answered.next()
+                {
+                    let shared = known.by_id.entry(info.id).or_insert_with(|| Arc::new(info)).clone();
+                    known.by_symbol.insert(Box::from(symbol.text()), shared.clone());
+                    *slot = Some(shared);
+                }
+            }
+        }
+        Ok(types.into_iter().flatten().collect())
+    }
+
+    /// Every type converted, in the order of `infos`, though when `reverse` is set the checker is asked last to first.
+    async fn convert_all(&self, infos: &[TypeInfo], cx: &Cx) -> Result<Vec<PropType>, CallError> {
+        let mut slots: Vec<Option<PropType>> = vec![None; infos.len()];
+        let order: Box<dyn Iterator<Item = usize> + Send> =
+            if self.reverse { Box::new((0..infos.len()).rev()) } else { Box::new(0..infos.len()) };
+        for index in order {
+            if let (Some(info), Some(slot)) = (infos.get(index), slots.get_mut(index)) {
+                *slot = Some(self.convert(info, cx).await?);
+            }
+        }
+        Ok(slots.into_iter().flatten().collect())
+    }
+
+    /// The prop made earlier in this snapshot from what `key` names, if one was.
+    pub(crate) fn known_prop(&self, key: &PropKey<'_>) -> Option<Arc<SemanticProp>> {
+        let props = self.state.props.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        props.get(&key.hash)?.iter().find(|(known, _)| key.names(known)).map(|(_, prop)| prop.clone())
+    }
+
+    /// Keeps `prop` as the prop `key` makes, for the components after this one.
+    pub(crate) fn keep_prop(&self, key: PropKey<'_>, prop: Arc<SemanticProp>) {
+        let mut props = self.state.props.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bucket = props.entry(key.hash).or_default();
+        if !bucket.iter().any(|(known, _)| key.names(known)) {
+            bucket.push((key.to_kept(), prop));
+        }
+    }
+
+    /// Memo hits and misses so far, for the debug line.
+    pub(crate) fn memo_stats(&self) -> (u64, u64) {
+        (self.state.hits.load(Ordering::Relaxed), self.state.misses.load(Ordering::Relaxed))
+    }
+
+    /// The own types of a component's props, from the top.
+    pub(crate) async fn convert_roots(&self, infos: &[TypeInfo]) -> Result<Vec<PropType>, CallError> {
+        self.convert_all(infos, &Cx::default()).await
+    }
+
+    /// Where each prop of `asked` is declared and what its JSDoc says ([`crate::declared`]).
+    pub(crate) async fn declared(&self, asked: &[crate::declared::Asked<'_>]) -> Result<Vec<Declared>, CallError> {
+        crate::declared::declared(&self.rpc, &self.state.declared, asked).await
+    }
+
+    /// The sources [`Self::composes`] found reached whole, named as a prop's `parent` names them.
+    pub(crate) async fn as_parents(
+        &self,
+        sources: Vec<(String, String)>,
+    ) -> Result<Vec<caliper_docgen_core::types::PropParent>, CallError> {
+        crate::declared::as_parents(&self.rpc, &self.state.declared, sources).await
+    }
+
+    /// The `@types/react` types a props type is made of, by name, in the order it names them: its bases and the members
+    /// of an intersection, seen through the project's and dependencies' own types and through a lib utility (`Omit`,
+    /// `Pick`) to what it applies to. A React type is found by where it is declared, as [`Origin::react_terminal`]
+    /// finds React's terminals, and is not looked into. `None` when a type on the way has bases the checker cannot be
+    /// asked for ([`Self::named_bases`]): the list would not be the answer, and an empty one would say there are none.
+    ///
+    /// The same walk finds the interfaces and classes the props type reaches whole (the second of the pair), each by
+    /// name and file as the checker keys it: those every member of which can reach the component. It is an allow-list.
+    /// A type is reached whole only through the edges that keep every member: the props type itself, an intersection's
+    /// members, a class's or interface's bases (a generic one's through its target), and the lib's own `Partial`,
+    /// `Required`, `Readonly` and `Omit` (named by the lib's alias: `Omit` only removes keys, and the members left are
+    /// the answer's props). A lib `Pick` selects: what it applies to is reached, but not whole, and stays so however
+    /// else it is reached. Any other type is not looked into: a mapped type, a project alias of one (TypeScript names
+    /// the type by the outermost alias, and the lib writes `Omit` as a `Pick`, so under a project alias the two cannot
+    /// be told apart), a conditional, a union. What it holds is not proven to reach whole, and the merge does not
+    /// collapse it (`SemanticComponent::whole`).
+    pub(crate) async fn composes(
+        &self,
+        props_type: &TypeInfo,
+    ) -> Result<(Option<Vec<String>>, Vec<(String, String)>), CallError> {
+        let mut names: Vec<String> = Vec::new();
+        let mut reached: Vec<(String, String)> = Vec::new();
+        let mut selected: Vec<(String, String)> = Vec::new();
+        let mut known = true;
+        let mut seen: Vec<(u64, bool)> = Vec::new();
+        // Each type with whether every edge on the way to it keeps every member.
+        let mut pending = vec![(props_type.clone(), true)];
+        while let Some((info, whole)) = pending.pop() {
+            if seen.contains(&(info.id, whole)) {
+                continue;
+            }
+            seen.push((info.id, whole));
+            let origin = self.origin(&info).await?;
+            if let Some(origin) = &origin {
+                if origin.in_react() {
+                    if !names.contains(&origin.name) {
+                        names.push(origin.name.clone());
+                    }
+                    continue;
+                }
+                if origin.alias && origin.in_lib() && UTILITIES.contains(&origin.name.as_str()) {
+                    let keeps = whole && origin.name != "Pick";
+                    let applied = self.rpc.alias_type_arguments(info.id).await?.into_iter().take(1);
+                    pending.extend(applied.map(|base| (base, keeps)));
+                    continue;
+                }
+            }
+            // A class or interface, or an instantiation of one: a source a prop's `parent` can name.
+            if info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0
+                && let Some(source) = self.symbol_origin(&info).await?
+            {
+                let into = if whole { &mut reached } else { &mut selected };
+                let key = (source.name, source.file);
+                if !into.contains(&key) {
+                    into.push(key);
+                }
+            }
+            let parts = if info.flags & flag::INTERSECTION != 0 {
+                self.parts(info.id, Parts::Members).await?
+            } else {
+                let Some(bases) = self.named_bases(&info).await? else {
+                    known = false;
+                    continue;
+                };
+                bases
+            };
+            // Last first onto the stack, so they are taken in the order the type names them.
+            pending.extend(parts.into_iter().rev().map(|part| (part, whole)));
+        }
+        reached.retain(|source| !selected.contains(source));
+        Ok((known.then_some(names), reached))
+    }
+
+    /// The base types of `info` for a traversal that wants their names and not their arguments. The checker states the
+    /// bases of the declaration of a class or interface; an instantiation of a generic one (`Props<string>`, only a
+    /// reference) has none of its own, so they are read from the generic type it instantiates, which names the same
+    /// types over its own type parameters. `None` when the checker cannot be asked ([`BasesOf::Unknown`]). A traversal
+    /// that keeps the arguments of what it finds ([`Self::base_layers`]) cannot read them this way, since
+    /// `HTMLAttributes<T>` is not `HTMLAttributes<HTMLDivElement>`, and tests [`states_bases`] of the type itself.
+    async fn named_bases(&self, info: &TypeInfo) -> Result<Option<Vec<TypeInfo>>, CallError> {
+        match BasesOf::of(info) {
+            BasesOf::Itself => Ok(Some(self.rpc.base_types(info.id).await?)),
+            BasesOf::Generic => {
+                let target = self.rpc.target_of_type(info.id).await?;
+                match BasesOf::of(&target) {
+                    BasesOf::Itself => Ok(Some(self.rpc.base_types(target.id).await?)),
+                    _ => Ok(info.is_tuple_type.then(Vec::new)),
+                }
+            }
+            BasesOf::None => Ok(Some(Vec::new())),
+            BasesOf::Unknown => Ok(None),
+        }
+    }
+
+    fn convert<'a>(&'a self, info: &'a TypeInfo, cx: &'a Cx) -> Converted<'a> {
+        Box::pin(async move {
+            // A memo hit copies the tree it recalls, and a conversion can build gigabytes of them between two requests.
+            crate::heap::step()?;
+            if let Some(entry) = self.recall(info.id, cx) {
+                self.state.hits.fetch_add(1, Ordering::Relaxed);
+                if let Some(frame) = &cx.frame {
+                    frame.absorb(&entry.asked, &cx.enclosing);
+                }
+                return Ok(entry.converted.clone());
+            }
+            self.state.misses.fetch_add(1, Ordering::Relaxed);
+            let frame = Arc::new(Frame::new(cx.enclosing.len()));
+            let own = Cx { depth: cx.depth, enclosing: cx.enclosing.clone(), frame: Some(frame.clone()) };
+            let mut converted = self.uncached(info, &own).await?;
+            if past_size_budget(&converted, MAX_SIZE) {
+                let origin = self.origin(info).await?;
+                converted = self.truncated(info, origin.as_ref(), TruncationLimit::Depth).await?;
+            }
+            let asked = frame.finish();
+            if let Some(parent) = &cx.frame {
+                parent.absorb(&asked, &cx.enclosing);
+            }
+            let enclosed_by = cx.enclosing.iter().copied().filter(|id| asked.binary_search(id).is_ok()).collect();
+            let entry = Arc::new(Entry { asked, enclosed_by, converted: converted.clone() });
+            if let Ok(mut memo) = self.state.memo.lock() {
+                memo.entry((info.id, cx.depth)).or_default().push(entry);
             }
             Ok(converted)
         })
     }
 
-    async fn uncached(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
+    /// How many properties the maps of `key` have, when one of them was listed and [`settled_count`] took it.
+    fn settled(&self, key: &MapKey) -> Option<usize> {
+        self.state.maps.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(key).copied()
+    }
+
+    /// Remembers the count of a map's listed members for the maps of its key, when [`settled_count`] takes it and the map
+    /// is [`invariant`](Self::invariant): the key does not say who declares the properties of a map that is not.
+    async fn settle(&self, key: MapKey, info: &TypeInfo, members: &ObjectMembers) {
+        if let Some(count) = settled_count(members)
+            && self.invariant(info).await
+        {
+            self.state.maps.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key, count);
+        }
+    }
+
+    /// Whether every map of this one's key and symbol has the same properties declared in the same places: its
+    /// declaration's constraint holds no type parameter, so no instantiation changes it. The checker's answer for the
+    /// map (the keys, as a handle) is then the one the declaration writes (`keyof Conditions`, and a handle is one type
+    /// inside a snapshot); where it is not, the map is homomorphic over a type its instantiation gives (`{ [K in keyof T]?:
+    /// T[K] }`, `{ [P in K]?: T[P] }` with `K extends keyof T`), and two instantiations over the same keys declare
+    /// their properties where their `T` does, a dependency's in one and the project's in the other. When the
+    /// declaration cannot be read, the map is not.
+    async fn invariant(&self, info: &TypeInfo) -> bool {
+        match self.rpc.target_of_type(info.id).await {
+            Ok(target) => target.constraint_type.is_some() && target.constraint_type == info.constraint_type,
+            Err(_) => false,
+        }
+    }
+
+    /// The entry for the type at this depth that holds inside the instantiations enclosing it, if there is one.
+    fn recall(&self, id: u64, cx: &Cx) -> Option<Arc<Entry>> {
+        let memo = self.state.memo.lock().ok()?;
+        memo.get(&(id, cx.depth))?.iter().find(|entry| entry.holds_in(&cx.enclosing)).cloned()
+    }
+
+    async fn uncached(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        if info.is_error() {
+            return Ok(unresolved_type(self.display(info.id).await?));
+        }
+        if let Some(simple) = simple(info) {
+            return Ok(simple);
+        }
         let flags = info.flags;
-        let simple = [
-            (flag::ANY, PropType::Any),
-            (flag::UNKNOWN, PropType::Unknown),
-            (flag::UNDEFINED, PropType::Undefined),
-            (flag::NULL, PropType::Null),
-            (flag::VOID, PropType::Void),
-            (flag::NEVER, PropType::Never),
-            (flag::STRING, PropType::String),
-            (flag::NUMBER, PropType::Number),
-            (flag::BOOLEAN, PropType::Boolean),
-            // A pattern such as `var(--${string})` or `Uppercase<string>` stands for strings.
-            (flag::TEMPLATE_LITERAL | flag::STRING_MAPPING, PropType::String),
-        ];
-        if let Some((_, known)) = simple.into_iter().find(|(bit, _)| flags & bit != 0) {
-            return Ok(known);
+        if flags & flag::TYPE_PARAMETER != 0 {
+            return self.type_parameter(info).await;
         }
-        if flags & (flag::ENUM_LITERAL | flag::ENUM | flag::TYPE_PARAMETER) != 0 {
-            return self.named(info).await;
+        if flags & (flag::STRING_LITERAL | flag::NUMBER_LITERAL | flag::BIG_INT_LITERAL) != 0 {
+            return self.literal(info).await;
         }
-        if flags & flag::STRING_LITERAL != 0 {
-            return match info.value.as_ref().and_then(|value| value.as_str()) {
-                Some(text) => Ok(PropType::StringLiteral(text.to_string())),
-                None => self.named(info).await,
-            };
-        }
-        if flags & flag::NUMBER_LITERAL != 0 {
-            return match info.value.as_ref().and_then(|value| value.as_f64()) {
-                Some(number) => Ok(PropType::NumberLiteral(number)),
-                None => self.named(info).await,
-            };
-        }
-        // The beta's responses carry neither `value` nor `intrinsicName` for `true` and `false`.
         if flags & flag::BOOLEAN_LITERAL != 0 {
-            return Ok(PropType::BoolLiteral(self.rpc.type_to_string(info.id).await? == "true"));
+            return Ok(PropType::BoolLiteral(self.boolean_value(info).await?));
         }
-        if depth >= MAX_DEPTH {
-            return self.named(info).await;
+        if flags & flag::UNIQUE_ES_SYMBOL != 0 {
+            let name = self.rpc.symbol_of_type(info.id).await?.map(|symbol| symbol.name);
+            return Ok(match name {
+                Some(name) => PropType::UniqueSymbol { name: name.into() },
+                None => named(self.display(info.id).await?, Vec::new()),
+            });
+        }
+        if flags & flag::TEMPLATE_LITERAL != 0 {
+            return self.template(info, cx).await;
+        }
+        // `Uppercase<string>` and its siblings: a name, since there is no shape to expand.
+        if flags & flag::STRING_MAPPING != 0 {
+            return Ok(named(self.display(info.id).await?, Vec::new()));
+        }
+        // Types the checker could not resolve because a type parameter is still open.
+        if flags & (flag::CONDITIONAL | flag::INDEXED_ACCESS | flag::INDEX | flag::SUBSTITUTION) != 0 {
+            let text = self.display(info.id).await?;
+            let reason = if flags & flag::CONDITIONAL != 0 {
+                OpaqueReason::ConditionalType
+            } else if flags & flag::INDEXED_ACCESS != 0 {
+                OpaqueReason::IndexedAccess { expression: text.clone() }
+            } else {
+                OpaqueReason::UnsupportedExpression
+            };
+            return Ok(degraded_type(text, reason));
         }
         if flags & flag::UNION != 0 {
-            return self.union(info, depth).await;
+            return self.union(info, cx).await;
         }
         if flags & flag::INTERSECTION != 0 {
-            return self.intersection(info, depth).await;
+            return self.intersection(info, cx).await;
         }
         if flags & flag::OBJECT != 0 {
-            return self.object(info, depth).await;
+            return self.object(info, cx).await;
         }
-        self.named(info).await
+        Ok(named(self.display(info.id).await?, Vec::new()))
     }
 
-    async fn named(&self, info: &TypeInfo) -> Result<PropType, CallError> {
-        Ok(PropType::Named { name: self.rpc.type_to_string(info.id).await?.into(), args: Vec::new() })
+    /// How the checker prints the type; only ever a name for display, a truncated type's text, or the source of the two
+    /// facts in [`crate::printed`].
+    async fn display(&self, id: u64) -> Result<String, CallError> {
+        self.printed(id, false).await
     }
 
-    /// `ReactNode` is a union alias of a dozen members; the alias is what the structural result reports too.
-    async fn react_alias(&self, info: &TypeInfo) -> Result<Option<PropType>, CallError> {
-        let Some(SymbolInfo { name, .. }) = self.rpc.alias_symbol(info.id).await? else { return Ok(None) };
-        Ok(match name.as_str() {
-            "ReactNode" => Some(PropType::ReactNode),
-            "ElementType" => Some(PropType::ElementType),
-            _ => None,
-        })
+    /// How the checker prints the type with an alias at the top expanded and nothing cut short: the text a signature's
+    /// parameter markers are read from, since the alias's name states no parameter list.
+    async fn display_expanded(&self, id: u64) -> Result<String, CallError> {
+        self.printed(id, true).await
     }
 
-    async fn members(&self, info: &TypeInfo, depth: u8) -> Result<Vec<PropType>, CallError> {
-        let mut converted = Vec::new();
-        for member in self.rpc.members(info.id).await? {
-            converted.push(self.convert(&member, depth + 1).await?);
+    async fn printed(&self, id: u64, expanded: bool) -> Result<String, CallError> {
+        let key = (id, expanded);
+        if let Some(text) = self.state.printed.lock().ok().and_then(|printed| printed.get(&key).cloned()) {
+            return Ok(text);
         }
-        Ok(converted)
+        let text =
+            if expanded { self.rpc.type_to_string_expanded(id).await? } else { self.rpc.type_to_string(id).await? };
+        if let Ok(mut printed) = self.state.printed.lock() {
+            printed.insert(key, text.clone());
+        }
+        Ok(text)
     }
 
-    async fn union(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
-        if let Some(known) = self.react_alias(info).await? {
+    /// The members or type arguments of a type, asked once per type however many conversions read them.
+    async fn parts(&self, id: u64, kind: Parts) -> Result<Vec<TypeInfo>, CallError> {
+        let key = (id, kind);
+        let known = self.state.parts.lock().ok().and_then(|parts| parts.get(&key).cloned());
+        let text = match known {
+            Some(text) => text,
+            None => {
+                let fetched: Arc<RawValue> = match kind {
+                    Parts::Members => self.rpc.members_text(id).await?,
+                    Parts::Arguments => self.rpc.type_arguments_text(id).await?,
+                }
+                .into();
+                if let Ok(mut parts) = self.state.parts.lock() {
+                    parts.insert(key, fetched.clone());
+                }
+                fetched
+            }
+        };
+        decode(&text)
+    }
+
+    /// The alias a type was written through, when it has one.
+    async fn alias_origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
+        match &info.alias_symbol {
+            Some(alias) => self.origin_of(alias, true, info.id).await,
+            None => Ok(None),
+        }
+    }
+
+    /// What declares the type, when it has a name of its own: an alias, or an interface, class or instantiation of one.
+    async fn origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
+        if info.alias_symbol.is_some() {
+            return self.alias_origin(info).await;
+        }
+        if info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0 {
+            return self.symbol_origin(info).await;
+        }
+        Ok(None)
+    }
+
+    /// The interface or class a type is, whatever alias it was written through.
+    async fn symbol_origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
+        match &info.symbol {
+            Some(symbol) => self.origin_of(symbol, false, info.id).await,
+            None => Ok(None),
+        }
+    }
+
+    /// The declaration behind a symbol, asked once per symbol however many types refer to it.
+    async fn origin_of(&self, symbol: &CompactSymbol, alias: bool, type_id: u64) -> Result<Option<Origin>, CallError> {
+        let key = (alias, symbol.clone());
+        if let Some(known) = self.state.origins.lock().ok().and_then(|origins| origins.get(&key).cloned()) {
             return Ok(known);
         }
-        let mut flat = Vec::new();
-        for member in self.members(info, depth).await? {
-            match member {
-                PropType::Union(inner) => flat.extend(inner),
-                other => flat.push(other),
-            }
+        let found =
+            if alias { self.rpc.alias_symbol(type_id).await? } else { self.rpc.symbol_of_type(type_id).await? };
+        // `__type` and `__object` are the checker's names for a type that has none.
+        let found = found.map(|symbol| Origin::of(&symbol, alias)).filter(|origin| !origin.name.starts_with("__"));
+        if let Ok(mut origins) = self.state.origins.lock() {
+            origins.insert(key, found.clone());
         }
-        // `boolean` is the union `false | true`.
-        let has_both = flat.contains(&PropType::BoolLiteral(true)) && flat.contains(&PropType::BoolLiteral(false));
-        let mut members: Vec<PropType> = Vec::new();
-        for member in flat {
-            let member = match member {
-                PropType::BoolLiteral(_) if has_both => PropType::Boolean,
-                other => other,
-            };
-            if !members.contains(&member) {
-                members.push(member);
-            }
-        }
-        Ok(if members.len() == 1 { members.swap_remove(0) } else { PropType::Union(members) })
+        Ok(found)
     }
 
-    async fn intersection(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
-        // `string & {}` (the keep-the-literals trick) is a string.
-        let mut members: Vec<PropType> = self
-            .members(info, depth)
-            .await?
-            .into_iter()
-            .filter(|member| !matches!(member, PropType::Object(fields) if fields.is_empty()))
-            .collect();
-        Ok(if members.len() == 1 { members.swap_remove(0) } else { PropType::Intersection(members) })
-    }
-
-    async fn object(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
-        if info.is_tuple_type {
-            let mut elements = Vec::new();
-            for element in self.rpc.type_arguments(info.id).await? {
-                elements.push(self.convert(&element, depth + 1).await?);
-            }
-            return Ok(PropType::Tuple(elements));
+    async fn type_parameter(&self, info: &TypeInfo) -> Result<PropType, CallError> {
+        if info.is_this_type {
+            return Ok(named("this".to_string(), Vec::new()));
         }
-        if info.object_flags & flag::OBJECT_REFERENCE != 0 && self.rpc.is_array(info.id).await? {
-            let arguments = self.rpc.type_arguments(info.id).await?;
-            let Some(element) = arguments.first() else { return self.named(info).await };
-            return Ok(PropType::Array(Box::new(self.convert(element, depth + 1).await?)));
-        }
-        let text = self.rpc.type_to_string(info.id).await?;
-        match text.as_str() {
-            "CSSProperties" | "React.CSSProperties" => return Ok(PropType::CssProperties),
-            "JSX.Element" | "Element" => return Ok(PropType::ReactNode),
-            _ if text.starts_with("ReactElement<") => return Ok(PropType::ReactNode),
-            _ => {}
-        }
-        if text.starts_with('(') || text.starts_with('<') {
-            return self.function(info, depth, text).await;
-        }
-        if text.starts_with('{') {
-            return self.inline_object(info, depth, text).await;
-        }
-        Ok(PropType::Named { name: text.into(), args: Vec::new() })
-    }
-
-    async fn function(&self, info: &TypeInfo, depth: u8, text: String) -> Result<PropType, CallError> {
-        let signatures = self.rpc.signatures(info.id).await?;
-        let [signature] = signatures.as_slice() else {
-            return Ok(PropType::Named { name: text.into(), args: Vec::new() });
+        let name = match self.rpc.symbol_of_type(info.id).await? {
+            Some(symbol) => symbol.name,
+            None => self.display(info.id).await?,
         };
+        Ok(named(name, Vec::new()))
+    }
+
+    async fn literal(&self, info: &TypeInfo) -> Result<PropType, CallError> {
+        let flags = info.flags;
+        let value = info.value.as_ref();
+        let known = if flags & flag::BIG_INT_LITERAL != 0 {
+            value.and_then(|value| value.as_str()).and_then(BigIntValue::parse).map(PropType::BigIntLiteral)
+        } else if flags & flag::STRING_LITERAL != 0 {
+            value.and_then(|value| value.as_str()).map(|text| PropType::StringLiteral(text.to_string()))
+        } else {
+            value.and_then(|value| value.as_f64()).map(PropType::NumberLiteral)
+        };
+        let Some(literal) = known else { return Ok(named(self.display(info.id).await?, Vec::new())) };
+        if flags & flag::ENUM_LITERAL == 0 {
+            return Ok(literal);
+        }
+        // A member of an enum is its value and keeps the enum's name.
+        let Some(member) = self.rpc.symbol_of_type(info.id).await? else { return Ok(literal) };
+        let Some(parent) = self.rpc.parent_of_symbol(&member.reference).await? else { return Ok(literal) };
+        let value = match literal {
+            PropType::StringLiteral(text) => EnumMemberValue::String(text),
+            PropType::NumberLiteral(number) => EnumMemberValue::Number(number),
+            other => return Ok(other),
+        };
+        Ok(PropType::EnumMember { enum_name: parent.name.into(), member: member.name.into(), value })
+    }
+
+    /// The beta's responses carry neither `value` nor, in some builds, `intrinsicName` for `true` and `false`.
+    async fn boolean_value(&self, info: &TypeInfo) -> Result<bool, CallError> {
+        if let Some(name) = info.intrinsic_name.as_deref() {
+            return Ok(name == "true");
+        }
+        if let Some(value) = info.value.as_ref().and_then(|value| value.as_bool()) {
+            return Ok(value);
+        }
+        Ok(self.display(info.id).await? == "true")
+    }
+
+    async fn template(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        let origin = self.alias_origin(info).await?;
+        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        let (holes, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let mut types = self.convert_all(&holes, &inner).await?.into_iter();
+        let mut parts = Vec::new();
+        for text in &info.texts {
+            if !text.is_empty() {
+                parts.push(TemplatePart::Text(text.clone()));
+            }
+            if let Some(hole) = types.next() {
+                parts.push(TemplatePart::Type(hole));
+            }
+        }
+        Ok(PropType::TemplateLiteral(parts))
+    }
+
+    /// The cut type for a cap: its declaration's name, else how the checker prints it.
+    async fn truncated(
+        &self,
+        info: &TypeInfo,
+        origin: Option<&Origin>,
+        limit: TruncationLimit,
+    ) -> Result<PropType, CallError> {
+        let text = match origin {
+            Some(origin) => origin.name.clone(),
+            None => self.display(info.id).await?,
+        };
+        Ok(PropType::Truncated { text, limit })
+    }
+
+    /// The reference back to a declaration that is being expanded around this type.
+    async fn recursive(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<PropType, CallError> {
+        let args = self.type_arguments_of(info, origin, cx).await?;
+        Ok(PropType::Recursive { name: origin.name.clone().into(), args })
+    }
+
+    /// The type arguments a name carries: an alias's own, or the instantiation's (without the `this` type the checker
+    /// appends to a class or interface).
+    async fn type_arguments_of(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<Vec<PropType>, CallError> {
+        if origin.alias {
+            if info.alias_type_arguments.is_empty() {
+                return Ok(Vec::new());
+            }
+            let arguments = self.rpc.alias_type_arguments(info.id).await?;
+            return self.convert_all(&arguments, &cx.argument()).await;
+        }
+        if info.object_flags & flag::OBJECT_REFERENCE == 0 {
+            return Ok(Vec::new());
+        }
+        let arguments = self.parts(info.id, Parts::Arguments).await?;
+        self.convert_all(without_this(&arguments), &cx.argument()).await
+    }
+
+    async fn named_type(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<PropType, CallError> {
+        let args = self.type_arguments_of(info, origin, cx).await?;
+        Ok(PropType::Named { name: origin.name().into(), args })
+    }
+
+    /// The one gate every descent into the parts of a type passes, before the parts are converted. It stops, in this
+    /// order, a type that is an instantiation already being expanded around it (a back-reference to its declaration,
+    /// whose arguments are the instantiation's), a type past [`MAX_DEPTH`], and a type whose `measure`d parts exceed the
+    /// `limits`. `measure` fetches the parts and says how many there are; it is not called for a type stopped before.
+    /// Otherwise the parts come back with the context to convert them in.
+    async fn enter<T, F, Fut>(
+        &self,
+        info: &TypeInfo,
+        origin: Option<&Origin>,
+        cx: &Cx,
+        limits: [usize; 2],
+        measure: F,
+    ) -> Result<Gate<T>, CallError>
+    where
+        T: Send,
+        F: FnOnce() -> Fut + Send,
+        Fut: Future<Output = Result<(T, usize), CallError>> + Send,
+    {
+        // The handle is the instantiation: `Box<string>` inside `Box<Box<string>>` is another type from the one around it.
+        if let Some(origin) = origin
+            && cx.encloses(info.id)
+        {
+            return Ok(Gate::Stop(self.recursive(info, origin, cx).await?));
+        }
+        if cx.depth >= MAX_DEPTH {
+            return Ok(Gate::Stop(self.truncated(info, origin, TruncationLimit::Depth).await?));
+        }
+        let (parts, total) = measure().await?;
+        if total > cx.limit(limits) {
+            let limit = TruncationLimit::Members { total: to_u32(total) };
+            return Ok(Gate::Stop(self.truncated(info, origin, limit).await?));
+        }
+        Ok(Gate::Open { parts, inner: cx.below(origin.map(|_| info.id)) })
+    }
+
+    async fn union(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        let origin = self.origin(info).await?;
+        if let Some(terminal) = origin.as_ref().and_then(Origin::react_terminal) {
+            return Ok(terminal);
+        }
+        // The width is checked below, after React's aliases flattened into the union are recognized: they are wide.
+        let gate = self.enter(info, origin.as_ref(), cx, [usize::MAX; 2], || self.members_of(info)).await?;
+        let (members, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        // `ReactNode | (() => void)` arrives with the alias flattened into its members: they are the terminal again.
+        let over = members.len() > cx.limit(MAX_MEMBERS);
+        let Some((terminal, absorbed)) = self.react_alias_members(&members, over).await? else {
+            if over {
+                let limit = TruncationLimit::Members { total: to_u32(members.len()) };
+                return self.truncated(info, origin.as_ref(), limit).await;
+            }
+            return Ok(union_of(self.convert_all(&members, &inner).await?));
+        };
+        let kept: Vec<TypeInfo> = members
+            .iter()
+            .zip(&absorbed)
+            .filter(|(_, absorbed)| !**absorbed)
+            .map(|(member, _)| member.clone())
+            .collect();
+        if kept.len() + 1 > cx.limit(MAX_MEMBERS) {
+            let limit = TruncationLimit::Members { total: to_u32(kept.len() + 1) };
+            return self.truncated(info, origin.as_ref(), limit).await;
+        }
+        let mut converted = self.convert_all(&kept, &inner).await?;
+        let first = absorbed.iter().position(|absorbed| *absorbed).unwrap_or_default();
+        let before = absorbed.iter().take(first).filter(|absorbed| !**absorbed).count();
+        converted.insert(before, terminal);
+        Ok(union_of(converted))
+    }
+
+    /// The members of a union that are a React alias the checker flattened into it, with the terminal they stand for,
+    /// when the union holds all of that alias's members. `ReactNode | Fn` and `ElementType | undefined` arrive without
+    /// the alias, so what is left to recognize it by is React's own declarations, never the printed text. `ElementType`
+    /// is recognized only where the union is wider than the budget: below it the members are listed, which keeps the
+    /// props of a constrained `ElementType<P>` in its component types' arguments, as it does at the top of a prop.
+    async fn react_alias_members(
+        &self,
+        members: &[TypeInfo],
+        over: bool,
+    ) -> Result<Option<(PropType, Vec<bool>)>, CallError> {
+        if let Some(absorbed) = self.react_node_members(members).await? {
+            return Ok(Some((PropType::ReactNode, absorbed)));
+        }
+        if !over {
+            return Ok(None);
+        }
+        Ok(self.element_type_members(members).await?.map(|absorbed| (PropType::ElementType, absorbed)))
+    }
+
+    /// Which members of a union are those of React's `ElementType`: the tag names of `JSX.IntrinsicElements` as string
+    /// literals and `ComponentType`'s two arms, `ComponentClass` and `FunctionComponent`. The tag names are many
+    /// ([`MIN_INTRINSIC_TAGS`]), which keeps a union of a few tags and a component type the author's own. Only a literal
+    /// that [`is_tag`] is taken: any other string literal is an alternative the author wrote beside `ElementType`, and
+    /// the terminal does not stand for it.
+    async fn element_type_members(&self, members: &[TypeInfo]) -> Result<Option<Vec<bool>>, CallError> {
+        let tags = members.iter().filter(|member| is_tag(member)).count();
+        if tags < MIN_INTRINSIC_TAGS {
+            return Ok(None);
+        }
+        let (mut class, mut function) = (false, false);
+        let mut absorbed = Vec::with_capacity(members.len());
+        for member in members {
+            let mut takes = is_tag(member);
+            if member.flags & flag::OBJECT != 0
+                && member.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0
+                && let Some(origin) = self.symbol_origin(member).await?
+                && origin.in_react()
+            {
+                match origin.name.as_str() {
+                    "ComponentClass" => (class, takes) = (true, true),
+                    "FunctionComponent" => (function, takes) = (true, true),
+                    _ => {}
+                }
+            }
+            absorbed.push(takes);
+        }
+        Ok((class && function).then_some(absorbed))
+    }
+
+    /// Which members of a union are the members of React's `ReactNode`, when the union holds all of them. The union has
+    /// `ReactElement`, `ReactPortal` and an `Iterable` of `ReactNode` (found by its argument's alias) and the primitives
+    /// `ReactNode` lists. It then also takes the other members `ReactNode` has (`bigint`, `Promise<AwaitedReactNode>`),
+    /// and leaves the rest. A union that has only some of them is the author's own and is expanded.
+    async fn react_node_members(&self, members: &[TypeInfo]) -> Result<Option<Vec<bool>>, CallError> {
+        let primitive = |flags: u64| flags & (flag::STRING | flag::NUMBER | flag::BOOLEAN | flag::BOOLEAN_LITERAL) != 0;
+        let has = |flags: u64| members.iter().any(|member| member.flags & flags != 0);
+        let listed = has(flag::STRING)
+            && has(flag::NUMBER)
+            && has(flag::BOOLEAN | flag::BOOLEAN_LITERAL)
+            && has(flag::NULL)
+            && has(flag::UNDEFINED);
+        if !listed {
+            return Ok(None);
+        }
+        let (mut element, mut portal, mut iterable) = (false, false, false);
+        let mut absorbed = Vec::with_capacity(members.len());
+        for member in members {
+            let flags = member.flags;
+            let takes = if primitive(flags) || flags & (flag::BIG_INT | flag::NULL | flag::UNDEFINED) != 0 {
+                true
+            } else if flags & flag::OBJECT != 0
+                && member.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0
+                && let Some(origin) = self.symbol_origin(member).await?
+            {
+                let react = origin.in_react() && !origin.alias;
+                let lib = origin.in_lib() && !origin.alias;
+                if react && origin.name == "ReactElement" {
+                    element = true;
+                    true
+                } else if react && origin.name == "ReactPortal" {
+                    portal = true;
+                    true
+                } else if lib && origin.name == "Iterable" && self.argument_is_alias(member, "ReactNode").await? {
+                    iterable = true;
+                    true
+                } else {
+                    lib && origin.name == "Promise" && self.argument_is_alias(member, "AwaitedReactNode").await?
+                }
+            } else {
+                false
+            };
+            absorbed.push(takes);
+        }
+        Ok((element && portal && iterable).then_some(absorbed))
+    }
+
+    /// Whether the first type argument of an instantiation is React's alias `name`.
+    async fn argument_is_alias(&self, info: &TypeInfo, name: &str) -> Result<bool, CallError> {
+        let arguments = self.parts(info.id, Parts::Arguments).await?;
+        let Some(first) = arguments.first() else { return Ok(false) };
+        Ok(self
+            .alias_origin(first)
+            .await?
+            .is_some_and(|origin| origin.in_react() && origin.alias && origin.name == name))
+    }
+
+    /// The members of a union, intersection or template literal, and how many there are.
+    async fn members_of(&self, info: &TypeInfo) -> Result<(Vec<TypeInfo>, usize), CallError> {
+        let members = self.parts(info.id, Parts::Members).await?;
+        let total = members.len();
+        Ok((members, total))
+    }
+
+    async fn intersection(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        let origin = self.origin(info).await?;
+        // A dependency's `Nested<Style>`-like alias is a name, as its interface would be.
+        if let Some(origin) = &origin
+            && origin.is_boundary()
+        {
+            return self.named_type(info, origin, cx).await;
+        }
+        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        let (members, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let mut converted: Vec<PropType> = Vec::with_capacity(members.len());
+        for member in self.convert_all(&members, &inner).await? {
+            if !converted.contains(&member) {
+                converted.push(member);
+            }
+        }
+        Ok(if converted.len() == 1 { converted.swap_remove(0) } else { PropType::Intersection(converted) })
+    }
+
+    async fn object(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        if info.is_tuple_type {
+            return self.tuple(info, cx).await;
+        }
+        if info.object_flags & flag::OBJECT_REFERENCE != 0
+            && let Some(own) = self.symbol_origin(info).await?
+            && own.in_lib()
+            && !own.alias
+            && matches!(own.name.as_str(), "Array" | "ReadonlyArray")
+        {
+            return self.array(info, own.name == "ReadonlyArray", cx).await;
+        }
+        let origin = self.origin(info).await?;
+        if let Some(terminal) = origin.as_ref().and_then(Origin::react_terminal) {
+            return Ok(terminal);
+        }
+        let boundary = origin.as_ref().filter(|origin| origin.is_boundary());
+        // A dependency's interface is a name unless it is callable; its properties are not asked for.
+        if let Some(origin) = boundary
+            && self.rpc.signatures(info.id, SignatureKind::Call).await?.is_empty()
+        {
+            return self.named_type(info, origin, cx).await;
+        }
+        // The width is not counted at the gate: only the members that are not the project's own are, below.
+        let key = map_key(info, origin.as_ref());
+        let gate = self
+            .enter(info, origin.as_ref(), cx, [usize::MAX; 2], || async {
+                let Some(key) = key else { return Ok((Listed::Members(self.rpc.object_members(info.id).await?), 0)) };
+                if let Some(outside) = self.settled(&key).filter(|outside| *outside > cx.limit(MAX_FIELDS)) {
+                    return Ok((Listed::Counted(outside), 0));
+                }
+                let members = self.rpc.object_members(info.id).await?;
+                self.settle(key, info, &members).await;
+                Ok((Listed::Members(members), 0))
+            })
+            .await?;
+        let (listed, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let members = match listed {
+            Listed::Members(members) => members,
+            Listed::Counted(outside) => {
+                return self.over_budget(info, origin.as_ref(), Excess::counted(outside), cx, &inner).await;
+            }
+        };
+        if let Some(origin) = boundary
+            && !members.properties.is_empty()
+        {
+            return self.named_type(info, origin, cx).await;
+        }
+        let outside = members.properties.iter().filter(|property| !is_own(property)).count();
+        if outside > cx.limit(MAX_FIELDS) {
+            return self.over_budget(info, origin.as_ref(), Excess::of(members), cx, &inner).await;
+        }
+        let ObjectMembers { calls, constructs, properties, indexes } = members;
+
+        // Which of a signature's parameters are optional is read from the printed type here, and nowhere else.
+        let Some(markers) = self.printed_markers(info.id, &calls, &constructs).await? else {
+            return self.unreadable_signatures(info.id).await;
+        };
+        let mut signatures = Vec::with_capacity(calls.len() + constructs.len());
+        for (kind, group, printed) in
+            [(Kind::Call, &calls, &markers.calls), (Kind::Construct, &constructs, &markers.constructs)]
+        {
+            for (index, signature) in group.iter().enumerate() {
+                let printed = printed.get(index).map(Vec::as_slice);
+                let Some((type_params, params, return_type)) = self.signature_parts(signature, printed, &inner).await?
+                else {
+                    return self.unreadable_signatures(info.id).await;
+                };
+                signatures.push(CallSignature { kind, type_params, params, return_type });
+            }
+        }
+        if signatures.len() == 1 && calls.len() == 1 && properties.is_empty() && indexes.is_empty() {
+            let CallSignature { type_params, params, return_type, .. } = signatures.swap_remove(0);
+            return Ok(PropType::Function { type_params, params, return_type: Box::new(return_type) });
+        }
+        let fields = self.fields(&properties, &indexes, &inner).await?;
+        if signatures.is_empty() {
+            return Ok(PropType::Object(fields));
+        }
+        Ok(PropType::Callable { signatures, fields })
+    }
+
+    /// An object with more members from outside the project (inherited from a dependency or the lib) than the budget
+    /// lists. What the project declared itself is never cut. The rest stands as what it is named through: the utility
+    /// wrapper that built the type (`Omit<HTMLAttributes<HTMLDivElement>, "color">`), or the base types of the interface
+    /// or class that inherits it. When neither can be named, the rest is a [`PropType::Truncated`] with the real count.
+    async fn over_budget(
+        &self,
+        info: &TypeInfo,
+        origin: Option<&Origin>,
+        excess: Excess,
+        cx: &Cx,
+        inner: &Cx,
+    ) -> Result<PropType, CallError> {
+        let Excess { signatures, outside, own, indexes } = excess;
+        let cut = TruncationLimit::Members { total: to_u32(outside) };
+        // A type with signatures is a function with properties: its shape is not a set of fields to split.
+        if signatures {
+            return self.truncated(info, origin, cut).await;
+        }
+        if let Some(origin) = origin
+            && origin.alias
+            && let Some(wrapper) = self.wrapper(info, origin, cx).await?
+        {
+            return Ok(wrapper);
+        }
+        // The declaration of a class or interface has base types; an instantiation of a generic one (`Box<string>`, only a
+        // reference) does not state them in terms of its arguments, so it is cut.
+        let layers = if origin.is_some_and(|origin| !origin.alias) && states_bases(info) {
+            self.base_layers(info, cx).await?
+        } else {
+            None
+        };
+        let mut parts = Vec::new();
+        if !own.is_empty() || !indexes.is_empty() {
+            parts.push(PropType::Object(self.fields(&own, &indexes, inner).await?));
+        }
+        match layers {
+            Some(layers) => parts.extend(layers),
+            None => parts.push(self.truncated(info, origin, cut).await?),
+        }
+        Ok(if parts.len() == 1 { parts.swap_remove(0) } else { PropType::Intersection(parts) })
+    }
+
+    /// What a type declared as `interface A extends B, C` stands on: each base type named (see [`Self::layer`]), a base
+    /// the project declares seen through to its own bases (its members are the project's own and are listed). `None`
+    /// when a base is neither.
+    async fn base_layers(&self, info: &TypeInfo, cx: &Cx) -> Result<Option<Vec<PropType>>, CallError> {
+        let mut layers: Vec<PropType> = Vec::new();
+        let mut pending: Vec<TypeInfo> = self.rpc.base_types(info.id).await?;
+        pending.reverse();
+        while let Some(base) = pending.pop() {
+            if let Some(layer) = self.layer(&base, cx).await? {
+                if !layers.contains(&layer) {
+                    layers.push(layer);
+                }
+                continue;
+            }
+            // A base declared in the project: its members are already among the type's own, and what it inherits is
+            // seen through to its own bases. An instantiation of a generic one does not state them, so what it
+            // inherits would be missing from the answer: the type is cut instead, with its count.
+            let declared_here = match self.origin(&base).await? {
+                Some(origin) => !origin.alias && !origin.in_dependency() && !origin.in_lib(),
+                None => false,
+            };
+            if !declared_here || !states_bases(&base) {
+                return Ok(None);
+            }
+            let mut inherited = self.rpc.base_types(base.id).await?;
+            inherited.reverse();
+            pending.extend(inherited);
+        }
+        // Members came from somewhere: bases that account for none of them are not an answer.
+        Ok((!layers.is_empty()).then_some(layers))
+    }
+
+    /// The lib's utility alias (`Omit`, `Pick`, `Partial`, `Required`, `Readonly`) a type was written through, kept as a
+    /// name with its arguments when what it applies to has a name of its own (see [`Self::layer`]).
+    async fn wrapper(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<Option<PropType>, CallError> {
+        if !origin.in_lib() || !UTILITIES.contains(&origin.name.as_str()) || info.alias_type_arguments.is_empty() {
+            return Ok(None);
+        }
+        let arguments = self.rpc.alias_type_arguments(info.id).await?;
+        let Some((first, keys)) = arguments.split_first() else { return Ok(None) };
+        let Some(applied) = Box::pin(self.layer(first, cx)).await? else { return Ok(None) };
+        let mut args = vec![applied];
+        args.extend(self.convert_all(keys, &cx.argument()).await?);
+        Ok(Some(PropType::Named { name: origin.name.clone().into(), args }))
+    }
+
+    /// A type that is named instead of expanded because the name says more than its members would: a React DOM
+    /// attribute type as [`PropType::HtmlAttributes`] (recognized by the declaring file and the interface's name, and the
+    /// element read from its type argument, never from the printed text), a utility wrapper over one (see
+    /// [`Self::wrapper`]), or an object a dependency or the lib declares, with its arguments. `None` for any other type.
+    async fn layer(&self, info: &TypeInfo, cx: &Cx) -> Result<Option<PropType>, CallError> {
+        let Some(origin) = self.origin(info).await? else { return Ok(None) };
+        if let Some(family) = self.html_family(info, &origin).await? {
+            return Ok(Some(family));
+        }
+        if origin.alias
+            && let Some(wrapper) = self.wrapper(info, &origin, cx).await?
+        {
+            return Ok(Some(wrapper));
+        }
+        if origin.is_boundary() {
+            return Ok(Some(self.named_type(info, &origin, cx).await?));
+        }
+        Ok(None)
+    }
+
+    /// The attributes of a DOM element, when `info` is one of React's attribute types for it: `HTMLAttributes<T>` and
+    /// the element-specific `*HTMLAttributes<T>`, `HTMLProps<T>`, `SVGAttributes<T>`, and `DetailedHTMLProps<A, T>`
+    /// through its first argument. The element comes from the interface's name where it names one (`AnchorHTMLAttributes`
+    /// is `a`), else from its type argument (`HTMLAttributes<HTMLSpanElement>` is `span`); a type argument that names no
+    /// known element leaves the type unrecognized, since `div` would be a guess.
+    async fn html_family(&self, info: &TypeInfo, origin: &Origin) -> Result<Option<PropType>, CallError> {
+        if !origin.in_react() {
+            return Ok(None);
+        }
+        if origin.alias {
+            if origin.name != "DetailedHTMLProps" || info.alias_type_arguments.is_empty() {
+                return Ok(None);
+            }
+            let arguments = self.rpc.alias_type_arguments(info.id).await?;
+            let Some(attributes) = arguments.first() else { return Ok(None) };
+            return match self.origin(attributes).await? {
+                Some(inner) if !inner.alias => Box::pin(self.html_family(attributes, &inner)).await,
+                _ => Ok(None),
+            };
+        }
+        let element = match origin.name.as_str() {
+            "HTMLAttributes" | "DOMAttributes" | "HTMLProps" | "AllHTMLAttributes" | "SVGAttributes" | "SVGProps" => {
+                let arguments = self.parts(info.id, Parts::Arguments).await?;
+                let Some(element) = without_this(&arguments).first() else { return Ok(None) };
+                let Some(declared) = self.symbol_origin(element).await? else { return Ok(None) };
+                html_element_from_type_arg(&declared.name)
+            }
+            name => html_element_for(name),
+        };
+        Ok(element.map(|element| PropType::HtmlAttributes { element: element.to_string(), omitted: Vec::new() }))
+    }
+
+    async fn array(&self, info: &TypeInfo, readonly: bool, cx: &Cx) -> Result<PropType, CallError> {
+        // Only an alias can name an array that contains itself (`type Loop = Loop[]`); `Array` is the lib's.
+        let origin = self.alias_origin(info).await?;
+        let gate = self
+            .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
+                let arguments = self.parts(info.id, Parts::Arguments).await?;
+                let total = arguments.len();
+                Ok((arguments, total))
+            })
+            .await?;
+        let (arguments, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let Some(element) = arguments.first() else {
+            return Ok(named(self.display(info.id).await?, Vec::new()));
+        };
+        let element = PropType::Array(Box::new(self.convert(element, &inner).await?));
+        // `readonly T[]` is `ReadonlyArray<T>`: the same reference through another declaration.
+        Ok(if readonly { PropType::Readonly(Box::new(element)) } else { element })
+    }
+
+    async fn tuple(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        let origin = self.alias_origin(info).await?;
+        let gate = self
+            .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
+                // The reference carries the arguments; the tuple type it instantiates carries how each element is declared.
+                let arguments = self.parts(info.id, Parts::Arguments).await?;
+                let target = self.rpc.target_of_type(info.id).await?;
+                let total = arguments.len();
+                Ok(((arguments, target), total))
+            })
+            .await?;
+        let ((arguments, target), inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let labels = if target.labeled_element_declarations.is_empty() {
+            None
+        } else {
+            tuple_labels(&self.display(info.id).await?, arguments.len())
+        };
+        let element_types = self.convert_all(&arguments, &inner).await?;
+        let mut elements = Vec::with_capacity(arguments.len());
+        for (index, element_type) in element_types.into_iter().enumerate() {
+            let element_flags = target.element_flags.get(index).copied().unwrap_or(1);
+            let kind = if element_flags & flag::ELEMENT_VARIADIC != 0 {
+                TupleElementKind::Variadic
+            } else if element_flags & flag::ELEMENT_REST != 0 {
+                TupleElementKind::Rest
+            } else if element_flags & flag::ELEMENT_OPTIONAL != 0 {
+                TupleElementKind::Optional
+            } else {
+                TupleElementKind::Required
+            };
+            let label = labels.as_ref().and_then(|labels| labels.get(index)).and_then(|label| TupleLabel::new(label));
+            // An optional element's type argument includes the `undefined` of leaving it out.
+            let element_type = without_undefined(element_type, kind == TupleElementKind::Optional);
+            elements.push(TupleElement { element_type, kind, label });
+        }
+        let tuple = PropType::Tuple(elements);
+        Ok(if target.readonly { PropType::Readonly(Box::new(tuple)) } else { tuple })
+    }
+
+    async fn fields(
+        &self,
+        properties: &[SymbolInfo],
+        indexes: &[IndexInfo],
+        cx: &Cx,
+    ) -> Result<Vec<ObjectField>, CallError> {
+        let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
+        let (types, readonly) = if references.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            (self.rpc.types_of_symbols(&references).await?, self.rpc.readonly_symbols(&references).await?)
+        };
+        let converted = self.convert_all(&types, cx).await?;
+        let mut fields = Vec::with_capacity(properties.len() + indexes.len());
+        for ((property, prop_type), readonly) in properties.iter().zip(converted).zip(readonly) {
+            let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
+            let prop_type = without_undefined(prop_type, !required);
+            let mut field = ObjectField::new(property_name(&property.name), prop_type, required, String::new());
+            field.readonly = readonly;
+            fields.push(field);
+        }
+        let sides: Vec<TypeInfo> =
+            indexes.iter().flat_map(|index| [index.key_type.clone(), index.value_type.clone()]).collect();
+        let mut sides = self.convert_all(&sides, cx).await?.into_iter();
+        for index in indexes {
+            let (Some(key), Some(value)) = (sides.next(), sides.next()) else { break };
+            let mut field = ObjectField::new("key", value, true, String::new());
+            field.readonly = index.is_readonly;
+            field.index_key = Some(Box::new(key));
+            fields.push(field);
+        }
+        Ok(fields)
+    }
+
+    /// The parameter markers of the signatures of an object type, as the checker prints the type (see
+    /// [`crate::printed`]): the only source of which parameters are optional, since the API's parameter symbols do not
+    /// say. `None` when some signature has a parameter and the printed type does not state one entry per signature.
+    async fn printed_markers(
+        &self,
+        id: u64,
+        calls: &[SignatureInfo],
+        constructs: &[SignatureInfo],
+    ) -> Result<Option<SignatureMarkers>, CallError> {
+        if !calls.iter().chain(constructs).any(|signature| !signature.parameters.is_empty()) {
+            let none = |count: usize| vec![Vec::new(); count];
+            return Ok(Some(SignatureMarkers { calls: none(calls.len()), constructs: none(constructs.len()) }));
+        }
+        let stated = signature_markers(&self.display_expanded(id).await?);
+        Ok(stated.filter(|stated| stated.calls.len() == calls.len() && stated.constructs.len() == constructs.len()))
+    }
+
+    /// A type whose signatures state parameters that cannot be told optional from required is not given a shape that
+    /// would assert one of them: it is opaque, with how the checker prints it.
+    async fn unreadable_signatures(&self, id: u64) -> Result<PropType, CallError> {
+        Ok(degraded_type(self.display_expanded(id).await?, OpaqueReason::UnsupportedExpression))
+    }
+
+    /// One signature's type parameters, parameters and return type; `None` when a parameter that is not the rest
+    /// parameter has no marker, since whether it is optional is then unknown and is not guessed.
+    async fn signature_parts(
+        &self,
+        signature: &SignatureInfo,
+        printed: Option<&[Marker]>,
+        cx: &Cx,
+    ) -> Result<Option<(Vec<String>, Vec<FunctionParam>, PropType)>, CallError> {
         let parameters = self.rpc.parameters(signature.id).await?;
+        let has_rest = signature.flags & flag::SIGNATURE_HAS_REST_PARAMETER != 0;
+        // A printed signature that does not give one entry per parameter states none of them.
+        let markers = printed.filter(|markers| markers.len() == parameters.len());
+        let known_without_markers = usize::from(has_rest);
+        if markers.is_none() && parameters.len() > known_without_markers {
+            return Ok(None);
+        }
         let references: Vec<_> = parameters.iter().map(|parameter| &parameter.reference).collect();
         let types = if references.is_empty() { Vec::new() } else { self.rpc.types_of_symbols(&references).await? };
-        let mut params = Vec::new();
-        for (parameter, ty) in parameters.iter().zip(&types) {
-            params.push(FunctionParam::new(Some(parameter.name.clone()), self.convert(ty, depth + 1).await?));
+        let converted = self.convert_all(&types, cx).await?;
+        let mut params = Vec::with_capacity(parameters.len());
+        for (index, (parameter, param_type)) in parameters.iter().zip(converted).enumerate() {
+            let marker = markers.and_then(|markers| markers.get(index)).copied().unwrap_or_default();
+            let rest = marker.rest || (has_rest && index + 1 == parameters.len());
+            let optional = marker.optional && !rest;
+            let param_type = without_undefined(param_type, optional);
+            // A destructured parameter has no name of its own; the checker calls it `__0`.
+            let name = (!is_destructured(&parameter.name)).then(|| parameter.name.clone());
+            params.push(FunctionParam { name, param_type, optional, rest });
         }
-        let return_type = self.rpc.return_type(signature.id).await?;
-        Ok(PropType::Function {
-            type_params: Vec::new(),
-            params,
-            return_type: Box::new(self.convert(&return_type, depth + 1).await?),
-        })
+        let return_info = self.rpc.return_type(signature.id).await?;
+        let return_type = self.convert(&return_info, cx).await?;
+        let mut type_params = Vec::new();
+        if !signature.type_parameters.is_empty() {
+            for parameter in self.rpc.type_parameters(signature.id).await? {
+                match self.rpc.symbol_of_type(parameter.id).await? {
+                    Some(symbol) => type_params.push(symbol.name),
+                    None => type_params.push(self.display(parameter.id).await?),
+                }
+            }
+        }
+        Ok(Some((type_params, params, return_type)))
     }
+}
 
-    async fn inline_object(&self, info: &TypeInfo, depth: u8, text: String) -> Result<PropType, CallError> {
-        let properties = self.rpc.properties(info.id).await?;
-        if properties.is_empty() || properties.len() > MAX_INLINE_FIELDS {
-            return Ok(PropType::Named { name: text.into(), args: Vec::new() });
-        }
-        let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
-        let types = self.rpc.types_of_symbols(&references).await?;
-        let mut fields = Vec::new();
-        for (property, ty) in properties.iter().zip(&types) {
-            let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
-            fields.push(ObjectField::new(
-                property.name.clone(),
-                without_undefined(self.convert(ty, depth + 1).await?, !required),
-                required,
-                String::new(),
-            ));
-        }
-        Ok(PropType::Object(fields))
+/// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
+/// `[brand]`. The id is the checker's and does not belong in an answer.
+fn property_name(name: &str) -> String {
+    const WELL_KNOWN: [&str; 15] = [
+        "iterator",
+        "asyncIterator",
+        "hasInstance",
+        "isConcatSpreadable",
+        "match",
+        "matchAll",
+        "replace",
+        "search",
+        "species",
+        "split",
+        "toPrimitive",
+        "toStringTag",
+        "unscopables",
+        "dispose",
+        "asyncDispose",
+    ];
+    let Some((symbol, _id)) = name.strip_prefix("__@").and_then(|rest| rest.rsplit_once('@')) else {
+        return name.to_string();
+    };
+    if WELL_KNOWN.contains(&symbol) { format!("[Symbol.{symbol}]") } else { format!("[{symbol}]") }
+}
+
+fn is_destructured(name: &str) -> bool {
+    name.strip_prefix("__").is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+}
+
+fn to_u32(count: usize) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+fn named(name: String, args: Vec<PropType>) -> PropType {
+    PropType::Named { name: name.into(), args }
+}
+
+/// The types whose conversion needs nothing but their flags.
+fn simple(info: &TypeInfo) -> Option<PropType> {
+    let flags = info.flags;
+    // `boolean` is the union `false | true` and carries both flags.
+    if flags & flag::BOOLEAN != 0 {
+        return Some(PropType::Boolean);
     }
+    let known = [
+        (flag::ANY, PropType::Any),
+        (flag::UNKNOWN, PropType::Unknown),
+        (flag::UNDEFINED, PropType::Undefined),
+        (flag::NULL, PropType::Null),
+        (flag::VOID, PropType::Void),
+        (flag::NEVER, PropType::Never),
+        (flag::STRING, PropType::String),
+        (flag::NUMBER, PropType::Number),
+        (flag::BIG_INT, PropType::BigInt),
+        (flag::ES_SYMBOL, named("symbol".to_string(), Vec::new())),
+        (flag::NON_PRIMITIVE, named("object".to_string(), Vec::new())),
+    ];
+    known.into_iter().find(|(bit, _)| flags & bit != 0).map(|(_, converted)| converted)
+}
+
+/// A union of converted members: `false | true` is `boolean`, a union inside a union is flattened, a repeated member
+/// is kept once, and a union of one is that member.
+fn union_of(converted: Vec<PropType>) -> PropType {
+    let mut flat = Vec::with_capacity(converted.len());
+    for member in converted {
+        match member {
+            PropType::Union(inner) => flat.extend(inner),
+            other => flat.push(other),
+        }
+    }
+    let both_booleans = flat.contains(&PropType::BoolLiteral(true)) && flat.contains(&PropType::BoolLiteral(false));
+    let mut members: Vec<PropType> = Vec::with_capacity(flat.len());
+    for member in flat {
+        let member = match member {
+            PropType::BoolLiteral(_) if both_booleans => PropType::Boolean,
+            other => other,
+        };
+        if !members.contains(&member) {
+            members.push(member);
+        }
+    }
+    if members.len() == 1 { members.swap_remove(0) } else { PropType::Union(members) }
 }
 
 /// An optional prop's type includes `undefined`; react-docgen-typescript drops it, as does the structural result.
@@ -229,12 +1815,248 @@ pub(crate) fn without_undefined(prop_type: PropType, optional: bool) -> PropType
     match prop_type {
         PropType::Union(members) if optional => {
             let mut kept: Vec<PropType> = members.into_iter().filter(|m| *m != PropType::Undefined).collect();
-            if kept.len() == 1 {
-                kept.swap_remove(0)
-            } else {
-                PropType::Union(kept)
-            }
+            if kept.len() == 1 { kept.swap_remove(0) } else { PropType::Union(kept) }
         }
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn type_of(flags: u64, object_flags: u64) -> TypeInfo {
+        serde_json::from_value(serde_json::json!({ "id": 1, "flags": flags, "objectFlags": object_flags })).unwrap()
+    }
+
+    fn property(fields: serde_json::Value) -> SymbolInfo {
+        let mut symbol = serde_json::json!({
+            "reference": { "kind": 1, "id": 40, "snapshot": 2 },
+            "name": "size",
+            "flags": 0,
+            "declarations": ["12.171./p/a.ts"],
+            "parent": { "id": 9, "file": "3" },
+        });
+        if let (Some(symbol), serde_json::Value::Object(fields)) = (symbol.as_object_mut(), fields) {
+            symbol.extend(fields);
+        }
+        serde_json::from_value(symbol).unwrap()
+    }
+
+    /// The size budget holds no type under 256 KiB of JSON: no type takes fewer bytes than [`MIN_TYPE_BYTES`], so a type
+    /// of more than [`MAX_SIZE`] types takes more than 256 KiB.
+    #[test]
+    fn no_type_under_256_kib_of_json_passes_the_size_budget() {
+        let leaves = [
+            PropType::String,
+            PropType::Number,
+            PropType::Boolean,
+            PropType::Null,
+            PropType::Undefined,
+            PropType::Any,
+            PropType::Never,
+            PropType::Unknown,
+            PropType::Void,
+            PropType::BigInt,
+            PropType::ReactNode,
+            PropType::CssProperties,
+            PropType::ElementType,
+            PropType::SxProps,
+        ];
+        let smallest = leaves.iter().map(|leaf| serde_json::to_string(leaf).unwrap().len()).min();
+        assert_eq!(smallest, Some(MIN_TYPE_BYTES));
+
+        // About the smallest type past the budget, a union of that many `any`, is more than 256 KiB; one type fewer fits.
+        let wide = PropType::Union(vec![PropType::Any; MAX_SIZE]);
+        assert!(past_size_budget(&wide, MAX_SIZE));
+        assert!(serde_json::to_string(&wide).unwrap().len() > 256 * 1024);
+        assert!(!past_size_budget(&PropType::Union(vec![PropType::Any; MAX_SIZE - 1]), MAX_SIZE));
+    }
+
+    /// Every type inside a type counts toward its size, wherever it sits: fields and index keys, signatures, arguments,
+    /// tuple elements and template holes.
+    #[test]
+    fn every_type_inside_a_type_counts_toward_its_size() {
+        let field = |prop_type| ObjectField {
+            name: "a".into(),
+            prop_type,
+            required: true,
+            description: String::new(),
+            readonly: false,
+            index_key: Some(Box::new(PropType::String)),
+        };
+        let param = |param_type| FunctionParam { name: None, param_type, optional: false, rest: false };
+        let ty = PropType::Union(vec![
+            PropType::Object(vec![field(PropType::Number)]),
+            PropType::Named {
+                name: "Box".into(),
+                args: vec![PropType::Tuple(vec![TupleElement::required(PropType::Null)])],
+            },
+            PropType::Function {
+                type_params: vec![],
+                params: vec![param(PropType::Any)],
+                return_type: Box::new(PropType::Void),
+            },
+            PropType::TemplateLiteral(vec![TemplatePart::Text("x".into()), TemplatePart::Type(PropType::Number)]),
+        ]);
+        // union, object, number, string, named, tuple, null, function, any, void, template, number
+        assert!(!past_size_budget(&ty, 12));
+        assert!(past_size_budget(&ty, 11));
+    }
+
+    /// A key borrowed from a property finds the owned key kept for an equal property, read from an answer of its own,
+    /// and no key that differs from it in any part.
+    #[test]
+    fn a_borrowed_prop_key_names_the_kept_key_of_an_equal_property_and_no_other() {
+        let prop_type = type_of(flag::STRING, 0);
+        let kept = property(serde_json::json!({}));
+        let kept_key = PropKey::of(&kept, &prop_type, true, false);
+        let stored = kept_key.to_kept();
+        let asked = property(serde_json::json!({}));
+
+        let found = PropKey::of(&asked, &prop_type, true, false);
+
+        assert!(found.names(&stored));
+        assert_eq!(found.hash, kept_key.hash);
+        assert_eq!(found, kept_key);
+        let other_type = type_of(flag::NUMBER, 0);
+        let other_type = TypeInfo { id: 2, ..other_type };
+        let differing = [
+            property(serde_json::json!({ "name": "tone" })),
+            property(serde_json::json!({ "flags": flag::SYMBOL_OPTIONAL })),
+            property(serde_json::json!({ "declarations": ["12.171./p/b.ts"] })),
+            property(serde_json::json!({ "parent": { "id": 10, "file": "3" } })),
+            property(serde_json::json!({ "parent": null })),
+        ];
+        for other in &differing {
+            assert!(!PropKey::of(other, &prop_type, true, false).names(&stored), "{other:?}");
+        }
+        assert!(!PropKey::of(&asked, &other_type, true, false).names(&stored));
+        assert!(!PropKey::of(&asked, &prop_type, false, false).names(&stored));
+        assert!(!PropKey::of(&asked, &prop_type, true, true).names(&stored));
+        // A property with no declaration is named by its symbol's reference.
+        let synthetic =
+            |id: u64| property(serde_json::json!({ "declarations": [], "reference": { "kind": 1, "id": id } }));
+        let (first, again, other) = (synthetic(50), synthetic(50), synthetic(51));
+        let stored = PropKey::of(&first, &prop_type, true, false).to_kept();
+        assert!(PropKey::of(&again, &prop_type, true, false).names(&stored));
+        assert!(!PropKey::of(&other, &prop_type, true, false).names(&stored));
+    }
+
+    #[test]
+    fn the_bases_of_a_declaration_are_its_own_and_those_of_an_instantiation_are_its_generic_targets() {
+        assert_eq!(BasesOf::of(&type_of(flag::OBJECT, flag::OBJECT_INTERFACE)), BasesOf::Itself);
+        assert_eq!(BasesOf::of(&type_of(flag::OBJECT, flag::OBJECT_CLASS)), BasesOf::Itself);
+        assert_eq!(BasesOf::of(&type_of(flag::OBJECT, flag::OBJECT_REFERENCE)), BasesOf::Generic);
+    }
+
+    #[test]
+    fn a_type_literal_has_no_bases_and_a_type_that_is_not_an_object_is_not_known_to() {
+        assert_eq!(BasesOf::of(&type_of(flag::OBJECT, 16)), BasesOf::None);
+        for flags in [flag::UNION, flag::TYPE_PARAMETER, flag::CONDITIONAL, flag::INDEXED_ACCESS, flag::STRING] {
+            assert_eq!(BasesOf::of(&type_of(flags, 0)), BasesOf::Unknown, "flags {flags}");
+        }
+    }
+
+    fn map_of(extra: serde_json::Value) -> TypeInfo {
+        let mut info = serde_json::json!({
+            "id": 9,
+            "flags": flag::OBJECT,
+            "objectFlags": flag::OBJECT_MAPPED,
+            "constraintType": 935,
+            "symbol": { "id": 1963 },
+        });
+        info.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(info).unwrap()
+    }
+
+    fn origin_named(name: &str) -> Origin {
+        Origin { name: name.to_string(), file: "/p/node_modules/dep/index.d.ts".to_string(), alias: true }
+    }
+
+    #[test]
+    fn a_map_is_remembered_by_its_constraint_and_its_symbol() {
+        let key = map_key(&map_of(serde_json::json!({})), None).unwrap();
+
+        assert_eq!(key, (935, CompactSymbol { id: 1963, file: None }));
+        assert_eq!(map_key(&map_of(serde_json::json!({ "id": 10, "templateType": 4 })), None), Some(key));
+    }
+
+    #[test]
+    fn a_map_with_a_name_type_a_name_or_no_constraint_is_not_remembered() {
+        assert_eq!(map_key(&map_of(serde_json::json!({ "nameType": 7 })), None), None);
+        assert_eq!(map_key(&map_of(serde_json::json!({})), Some(&origin_named("Partial"))), None);
+        assert_eq!(map_key(&map_of(serde_json::json!({ "constraintType": null })), None), None);
+        assert_eq!(map_key(&map_of(serde_json::json!({ "symbol": null })), None), None);
+        assert_eq!(map_key(&type_of(flag::OBJECT, flag::OBJECT_INTERFACE), None), None);
+    }
+
+    fn members(properties: &[&str], extra: serde_json::Value) -> ObjectMembers {
+        let property = |file: &str| serde_json::json!({ "reference": {}, "name": "k", "flags": 4, "declarations": [format!("8.173.{file}")] });
+        let mut listed = serde_json::json!({
+            "calls": [],
+            "constructs": [],
+            "properties": properties.iter().map(|file| property(file)).collect::<Vec<_>>(),
+            "indexes": [],
+        });
+        listed.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        ObjectMembers {
+            calls: serde_json::from_value(listed["calls"].clone()).unwrap(),
+            constructs: serde_json::from_value(listed["constructs"].clone()).unwrap(),
+            properties: serde_json::from_value(listed["properties"].clone()).unwrap(),
+            indexes: serde_json::from_value(listed["indexes"].clone()).unwrap(),
+        }
+    }
+
+    const DEPENDENCY: &str = "/p/node_modules/dep/index.d.ts";
+    const PROJECT: &str = "/p/src/theme.ts";
+
+    #[test]
+    fn the_count_of_a_list_with_nothing_of_the_projects_is_remembered() {
+        assert_eq!(settled_count(&members(&[DEPENDENCY; 45], serde_json::json!({}))), Some(45));
+        assert_eq!(settled_count(&members(&[], serde_json::json!({}))), Some(0));
+    }
+
+    #[test]
+    fn a_list_with_a_property_the_project_declares_a_signature_or_an_index_signature_is_not() {
+        let mut declared = vec![DEPENDENCY; 44];
+        declared.push(PROJECT);
+        assert_eq!(settled_count(&members(&declared, serde_json::json!({}))), None);
+
+        let signature = serde_json::json!([{ "id": 3 }]);
+        for kind in ["calls", "constructs"] {
+            let listed = members(&[DEPENDENCY; 45], serde_json::json!({ kind: signature }));
+            assert_eq!(settled_count(&listed), None, "{kind}");
+        }
+        let index = serde_json::json!([{ "keyType": { "id": 1, "flags": flag::STRING }, "valueType": { "id": 2, "flags": flag::STRING } }]);
+        assert_eq!(settled_count(&members(&[DEPENDENCY; 45], serde_json::json!({ "indexes": index }))), None);
+    }
+
+    #[test]
+    fn a_cut_reads_the_same_of_a_remembered_count_as_of_the_list_it_was_counted_from() {
+        let listed = Excess::of(members(&[DEPENDENCY; 45], serde_json::json!({})));
+        let counted = Excess::counted(45);
+
+        assert_eq!(
+            (listed.signatures, listed.outside, listed.own.len(), listed.indexes.len()),
+            (counted.signatures, counted.outside, counted.own.len(), counted.indexes.len())
+        );
+    }
+
+    #[test]
+    fn react_names_its_element_types_by_their_declaration_and_only_react_node_is_the_terminal() {
+        let react = |name: &str, file: &str, alias: bool| Origin {
+            name: name.to_string(),
+            file: format!("/p/node_modules/@types/react/{file}"),
+            alias,
+        };
+        assert_eq!(react("ReactNode", "index.d.ts", true).react_terminal(), Some(PropType::ReactNode));
+        for element in [react("ReactElement", "index.d.ts", false), react("Element", "index.d.ts", false)] {
+            assert_eq!(element.react_terminal(), None, "{}", element.name);
+        }
+        assert_eq!(react("Element", "index.d.ts", false).name(), "JSX.Element");
+        // The DOM's `Element`, which `@types/react` declares empty for a program without the DOM lib.
+        assert_eq!(react("Element", "global.d.ts", false).name(), "Element");
+        assert_eq!(react("ReactElement", "index.d.ts", false).name(), "ReactElement");
     }
 }

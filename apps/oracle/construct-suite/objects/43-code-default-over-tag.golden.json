@@ -1,0 +1,46 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "md",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "sm",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"md\" | \"sm\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {
+      "default": "'sm'"
+    },
+    "default": "'md'",
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/43-code-default-over-tag.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "sm",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "md",
+        "of": "string"
+      }
+    ]
+  }
+}

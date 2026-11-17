@@ -1,0 +1,27 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "unique symbol"
+      }
+    ]
+  },
+  "text": "unique symbol | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/24-unique-symbol.tsx"
+    },
+    "order": null
+  }
+}

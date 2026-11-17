@@ -13,12 +13,12 @@ use oxc_ast::ast::*;
 use oxc_span::Span;
 
 use crate::types::{
-    CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, ExtendsRef, FunctionResult,
-    TypeName, WrapperCallee,
+    CollectedType, CollectedTypeAlias, ComponentMapping, DeclarationScope, DetectionRule, DiagnosticCode, ExtendsRef,
+    FunctionResult, TypeName, WrapperCallee,
 };
 
-use super::evidence::{renders, FunctionShape, ReactBinding};
 use super::SourceDataCollector;
+use super::evidence::{FunctionShape, ReactBinding, renders};
 
 /// One type argument of a candidate wrapper call.
 pub(crate) struct WrapperTypeArg {
@@ -64,7 +64,7 @@ fn is_element_type_arg(ty: &TSType<'_>) -> bool {
 
 fn is_component_reference(name: &str) -> bool {
     // `_Box` is Mantine's spelling of an implementation component.
-    name.trim_start_matches(['_', '$']).starts_with(|c: char| c.is_ascii_uppercase())
+    super::is_pascal_case(name.trim_start_matches('$'))
 }
 
 /// How strongly the first argument says the call builds a component.
@@ -106,9 +106,7 @@ fn component_argument_evidence(
         Expression::StaticMemberExpression(m) if is_component_reference(m.property.name.as_str()) => {
             Ok(ArgumentEvidence::Sufficient)
         }
-        Expression::CallExpression(inner)
-            if react.is_react_wrapper(inner) || super::component::is_component_wrapper_call(inner) =>
-        {
+        Expression::CallExpression(inner) if super::component::is_component_wrapper(react, inner) => {
             Ok(ArgumentEvidence::Sufficient)
         }
         _ => Err("is given an argument that is not a render function, a tag or a component reference"),
@@ -199,10 +197,10 @@ impl<'src> SourceDataCollector<'src> {
         let has_config =
             matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        let element_builder = matches!(
-            callee.rsplit('.').next(),
-            Some("createElement" | "cloneElement" | "jsx" | "jsxs" | "jsxDEV" | "h")
-        );
+        let element_builder = match callee.rsplit_once('.') {
+            Some((receiver, name)) => super::evidence::is_element_factory_name(name, Some(receiver), &*self),
+            None => super::evidence::is_element_factory_name(&callee, None, &*self),
+        };
         if !is_tag || !has_config || element_builder {
             return false;
         }
@@ -249,7 +247,9 @@ impl<'src> SourceDataCollector<'src> {
         let (tagged, others): (Vec<_>, Vec<_>) =
             pending_wrappers.into_iter().zip(shared_tags).partition(|(pending, _)| pending.tag.is_some());
         for (pending, shared_tag) in others.into_iter().chain(tagged) {
-            if self.data.component_mappings.iter().any(|m| m.component_name == pending.name) {
+            // The anonymous default export is no binding of its name, so a binding of that name is no reason to skip it.
+            let bound = self.anonymous_default != Some(pending.span.start);
+            if bound && self.data.component_mappings.iter().any(|m| m.is_binding_named(&pending.name)) {
                 continue;
             }
             if let Some(tag) = &pending.tag {
@@ -323,6 +323,9 @@ impl<'src> SourceDataCollector<'src> {
             .with_doc(pending.description, pending.tags);
             if let Some(callee) = pending.callee {
                 mapping = mapping.with_wrapper_callee(callee);
+            }
+            if !bound {
+                mapping = mapping.without_binding();
             }
             self.data.component_mappings.push(mapping);
         }
@@ -414,6 +417,7 @@ impl<'src> SourceDataCollector<'src> {
         body: Option<&FunctionBody<'a>>,
     ) {
         let generic = type_parameters.is_some();
+        let declared = return_type.is_some();
         let (result, returned_call) = if let Some(annotation) = return_type {
             if !generic {
                 return;
@@ -435,7 +439,15 @@ impl<'src> SourceDataCollector<'src> {
         }
         let type_params = super::type_param_names(type_parameters);
         let key = self.scoped_key(name);
-        self.data.function_results.insert(key, FunctionResult { type_params, result, returned_call });
+        // A declared result type is written around the function; every other result is read from its body, whose
+        // scope is known once the body has been walked (`finish`).
+        let mut scope = self.current_scope();
+        self.body_result_keys.retain(|(recorded, _)| *recorded != key);
+        if let (false, Some(body)) = (declared, body) {
+            self.body_result_keys.push((key.clone(), body.span.start));
+            scope = DeclarationScope::default();
+        }
+        self.data.function_results.insert(key, FunctionResult { type_params, result, returned_call, scope });
     }
 
     /// A single top-level `return function Loader(props: Props) { ... }` or `return (props: Props) => ...` that
@@ -479,8 +491,7 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
-        let element_builder =
-            matches!(callee.name.as_str(), "createElement" | "cloneElement" | "jsx" | "jsxs" | "jsxDEV" | "h");
+        let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);
         if super::is_constant_name(name) || explained || element_builder || self.react_api(&call.callee).is_some() {
             return false;
         }
@@ -505,7 +516,7 @@ impl<'src> SourceDataCollector<'src> {
     /// Turn the recorded factory calls into mappings, now that every alias in the file has had its chance.
     pub(super) fn promote_factory_calls(&mut self) {
         for pending in std::mem::take(&mut self.pending_factory_calls) {
-            if self.data.component_mappings.iter().any(|m| m.component_name == pending.name) {
+            if self.data.component_mappings.iter().any(|m| m.is_binding_named(&pending.name)) {
                 continue;
             }
             self.data.component_mappings.push(

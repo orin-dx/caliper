@@ -10,15 +10,22 @@
 //! spreads deep. antd's `ButtonColorType` is `['default', 'primary', 'danger', ...PresetColors]` with `PresetColors`
 //! in another file.
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use caliper_docgen_core::types::DiagnosticSeverity;
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The `color` prop's type of the only component, and the messages of the warnings.
 fn color_of(files: &[(&str, &str)]) -> (Value, Vec<String>) {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
+    let lib = root.join("node_modules/typescript/lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(root.join("node_modules/typescript/package.json"), r#"{"name":"typescript","version":"5.9.3"}"#)
+        .unwrap();
+    for file in ["lib.es5.d.ts", "lib.dom.d.ts"] {
+        std::fs::write(lib.join(file), "").unwrap();
+    }
     for (name, body) in files {
         std::fs::write(root.join(name), body).unwrap();
     }

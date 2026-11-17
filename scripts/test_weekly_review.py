@@ -10,6 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import corpora
+import headline
 import weekly
 
 REACT = '/r/node_modules/@types/react/index.d.ts'
@@ -181,22 +182,140 @@ def record(reference_version=None, recall=0.9, ms=100):
 
 class RecallIsNotComparedAcrossReferences(unittest.TestCase):
     def test_same_reference_compares_recall(self):
-        self.assertEqual(weekly.findings(record(weekly.REFERENCE_VERSION, 0.5), record(weekly.REFERENCE_VERSION, 0.9)),
+        self.assertEqual(weekly.changes(record(weekly.REFERENCE_VERSION, 0.5), record(weekly.REFERENCE_VERSION, 0.9)),
                          ['antd: recall of components 90.0% -> 50.0%'])
 
     def test_another_reference_skips_recall_but_not_time(self):
         now, before = record(weekly.REFERENCE_VERSION, 0.5, ms=200), record(weekly.REFERENCE_VERSION - 1, 0.9)
-        self.assertEqual(weekly.findings(now, before), ['antd: time 100 -> 200'])
+        self.assertEqual(weekly.changes(now, before), ['antd: time 100 -> 200'])
         self.assertFalse(weekly.same_reference(now, before))
+
+    def test_records_made_before_the_export_alias_rule_are_not_compared(self):
+        # Version 3 pairs an aliased export (`export { A as B }`); a version 2 record has a smaller denominator.
+        self.assertGreaterEqual(weekly.REFERENCE_VERSION, 3)
+        self.assertFalse(weekly.same_reference(record(weekly.REFERENCE_VERSION, 0.5), record(2, 1.0)))
+        self.assertEqual(weekly.changes(record(weekly.REFERENCE_VERSION, 0.5), record(2, 1.0)), [])
 
     def test_a_record_without_a_version_is_version_one(self):
         self.assertTrue(weekly.same_reference(record(1), record()))
         self.assertFalse(weekly.same_reference(record(weekly.REFERENCE_VERSION), record()))
 
+    def universe(self, version, wrong, **extra):
+        """A corpus entry whose oracle counted the universe of `version`, with a headline of `wrong` wrong props."""
+        oracle = {'tools': {}, **({'universe_version': version} if version else {})}
+        return {'caliper': {'ms': 100, 'rss_mib': 100}, 'oracle': oracle, 'recall': {'caliper': {}},
+                'headline': {'components': 1, 'props': 2000, 'correct': 1900, 'less_precise': 0, 'wrong': wrong,
+                             'no_checker_type': 0, 'not_judged': 0, 'missing': 0, 'named_only': 0}, **extra}
+
+    def test_a_rise_in_wrong_types_is_not_read_against_another_universe(self):
+        now = {'corpora': {'antd': self.universe(2, 1)}}
+        before = {'corpora': {'antd': self.universe(None, 0)}}
+        self.assertEqual(weekly.findings(now, before), [])
+        again = {'corpora': {'antd': self.universe(2, 0)}}
+        self.assertEqual(len(weekly.findings(now, again)), 1)
+
+    def test_the_pairing_by_export_is_universe_version_3_and_is_not_compared_with_2(self):
+        now = {'corpora': {'antd': self.universe(3, 1)}}
+        before = {'corpora': {'antd': self.universe(2, 0)}}
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), [
+            "antd: the oracle's universe is version 3 now and was version 2 last week, so its props, agreement and wrong "
+            "types are not compared with last week's"])
+
+    def test_scoring_an_unjudged_prop_apart_is_universe_version_4_and_is_not_compared_with_3(self):
+        now = {'corpora': {'antd': self.universe(4, 1)}}
+        before = {'corpora': {'antd': self.universe(3, 0)}}
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), [
+            "antd: the oracle's universe is version 4 now and was version 3 last week, so its props, agreement and wrong "
+            "types are not compared with last week's"])
+
+    def test_the_checker_default_is_universe_version_5_and_is_not_compared_with_the_structural_record(self):
+        self.assertEqual(weekly.UNIVERSE_VERSION, 5)
+        now = {'corpora': {'antd': self.universe(5, 1)}}
+        before = {'corpora': {'antd': self.universe(4, 0)}}
+        self.assertEqual(weekly.findings(now, before), [])
+
+    def test_the_summary_says_the_universe_changed(self):
+        now = {'corpora': {'antd': self.universe(2, 0)}}
+        before = {'corpora': {'antd': self.universe(None, 0)}}
+        self.assertEqual(weekly.changes(now, before), [
+            "antd: the oracle's universe is version 2 now and was version 1 last week, so its props, agreement and wrong "
+            "types are not compared with last week's"])
+        self.assertEqual(weekly.changes(now, now), [])
+
+    def test_a_corpus_without_an_oracle_has_no_universe_to_differ(self):
+        self.assertTrue(weekly.same_universe({'caliper': {}}, {'oracle': {'tools': {}}}))
+        self.assertTrue(weekly.same_universe({'oracle': {'error': 'x'}}, {'oracle': {'tools': {}}}))
+
     def test_the_table_says_when_recall_was_not_compared(self):
         now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
         self.assertIn('version 1 of the rules, this one by version 2', weekly.markdown(now, [], 1))
         self.assertNotIn('not compared', weekly.markdown(now, []))
+
+    def test_the_recall_section_says_recall_is_not_correctness(self):
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        self.assertIn('It is not a measure of correctness', weekly.markdown(now, []))
+
+
+def shape_of_nov_2():
+    """The 2026-11-02 record (GitHub issue 279): one process-wide peak, 1901 MiB, for every tool on shadcn, antd and spectrum,
+    and times that moved 11 to 33% between two runs of the same code."""
+    def corpus(ms, rss, rdt_ms=5000):
+        return {'caliper': {'ms': ms, 'rss_mib': rss}, 'rdt': {'ms': rdt_ms, 'rss_mib': rss},
+                'react_docgen': {'ms': rdt_ms, 'rss_mib': rss}}
+    return {'corpora': {'shadcn': corpus(458, 1901), 'antd': corpus(137, 1901), 'spectrum': corpus(234, 1901)}}
+
+
+class OnlyCaliperOwnNumbersOpenAnIssueForCost(unittest.TestCase):
+    """The issue opens when a whole run of Caliper is over its budget (scripts/headline.py BUDGETS), never because a number
+    moved from last week and never because of another tool's numbers."""
+
+    def test_the_shape_of_issue_279_opens_nothing(self):
+        now, before = shape_of_nov_2(), shape_of_nov_2()
+        before['corpora']['shadcn']['caliper'].update(ms=607 // 2, rss_mib=1593)
+        self.assertEqual(weekly.findings(now, before), [])
+
+    def test_the_time_noise_of_issue_279_is_a_change_and_not_a_finding(self):
+        before = {'corpora': {'shadcn': {'caliper': {'ms': 458, 'rss_mib': 334}}}}
+        now = {'corpora': {'shadcn': {'caliper': {'ms': 607, 'rss_mib': 334}}}}
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), ['shadcn: time 458 -> 607'])
+
+    def test_a_rise_in_only_the_comparison_tools_is_not_in_the_issue_or_the_changes(self):
+        before, now = shape_of_nov_2(), shape_of_nov_2()
+        for r in (before, now):
+            r['corpora']['antd']['caliper']['rss_mib'] = 152
+        for tool in ('rdt', 'react_docgen'):
+            now['corpora']['antd'][tool].update(ms=60000, rss_mib=5000)
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), [])
+
+    def test_a_caliper_run_over_a_budget_opens_one_issue_line_per_metric(self):
+        now = shape_of_nov_2()
+        now['corpora']['shadcn']['caliper'].update(ms=2500, rss_mib=700)
+        now['corpora']['shadcn']['rdt']['rss_mib'] = 1394
+        with mock.patch.dict(headline.BUDGETS, {'shadcn': {'ms': 2000, 'rss_mib': 600}}):
+            out = weekly.findings(now, {'corpora': {}})
+        self.assertEqual(len(out), 2)
+        self.assertTrue(all(line.startswith('shadcn: a whole run') for line in out))
+
+    def test_one_peak_for_every_tool_is_not_read_as_caliper_s(self):
+        """The 11-02 shape: 1901 MiB for all three tools is the helper's process-wide maximum, so no budget or change is read
+        from it, though a time moving 11 to 33% on its own is still a change."""
+        before = shape_of_nov_2()
+        before['corpora']['shadcn']['caliper'].update(ms=300, rss_mib=1593)
+        before['corpora']['shadcn']['rdt']['rss_mib'] = 1593
+        before['corpora']['shadcn']['react_docgen']['rss_mib'] = 1593
+        self.assertEqual(weekly.findings(shape_of_nov_2(), before), [])
+        self.assertEqual(weekly.changes(shape_of_nov_2(), before), ['shadcn: time 300 -> 458'])
+
+    def test_a_missing_metric_does_not_crash_the_rule(self):
+        before = {'corpora': {'antd': {'caliper': {'ms': 100}}}}
+        now = {'corpora': {'antd': {'caliper': {'rss_mib': 100}}, 'mantine': {}}}
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), [])
+        self.assertEqual(weekly.changes({'corpora': {'antd': {}}}, {'corpora': {'antd': {'caliper': {'ms': 1}}}}), [])
 
 
 class MeasureHelperErrors(unittest.TestCase):
@@ -208,24 +327,30 @@ class MeasureHelperErrors(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, r'exited with 3: oops'):
             corpora.run_once([sys.executable, '-c', 'import sys; sys.stderr.write("oops"); sys.exit(3)'])
 
+    @staticmethod
+    def helper(returncode, stderr, on_start=None):
+        """A stand-in for the helper process `run_once` starts."""
+        def popen(command, **_):
+            if on_start:
+                on_start(command)
+            return mock.Mock(returncode=returncode, communicate=mock.Mock(return_value=(None, stderr)))
+        return mock.patch.object(corpora.subprocess, 'Popen', side_effect=popen)
+
     def test_helper_failure_is_a_runtime_error(self):
-        failed = subprocess.CompletedProcess([], 1, stderr='Traceback: boom\n')
-        with mock.patch.object(corpora.subprocess, 'run', return_value=failed):
+        with self.helper(1, 'Traceback: boom\n'):
             with self.assertRaisesRegex(RuntimeError, r'helper failed \(exit 1\) running x y: Traceback: boom'):
                 corpora.run_once(['x', 'y'])
 
     def test_missing_result_is_a_runtime_error(self):
-        wrote_nothing = subprocess.CompletedProcess([], 0, stderr='')
-        with mock.patch.object(corpora.subprocess, 'run', return_value=wrote_nothing):
+        with self.helper(0, ''):
             with self.assertRaisesRegex(RuntimeError, r'wrote no result for x'):
                 corpora.run_once(['x'])
 
     def test_result_is_parsed(self):
-        def write(command, **_):
+        def write(command):
             with open(command[command.index('measure') + 1], 'w') as f:
                 f.write('[1.5, 42.0, 0]')
-            return subprocess.CompletedProcess([], 0, stderr='')
-        with mock.patch.object(corpora.subprocess, 'run', side_effect=write):
+        with self.helper(0, '', write):
             self.assertEqual(corpora.run_once(['x']), (1.5, 42.0))
 
 

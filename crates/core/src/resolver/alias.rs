@@ -36,7 +36,27 @@ pub(super) fn resolve_type_alias_chain(
         }
 
         CollectedTypeAlias::Omit { base, keys, file_path } => {
+            // The base is read once, knowing the keys this `Omit` (and any around it) takes away, so each source in it
+            // collapses by the members that reach the component (`ResolutionContext::collapses`). The keys are read
+            // first in a detached state; their diagnostics come from the read after the base, as before.
+            let mut detached = state.detached();
+            let known = resolve_key_set(keys, file_path, mapping, ctx, &mut detached, depth);
+            let outer = state.omitted.clone();
+            let expand_all = state.expand_all;
+            match known {
+                Some(known) => {
+                    let mut all: FxHashSet<String> = outer.as_deref().cloned().unwrap_or_default();
+                    all.extend(known);
+                    state.omitted = Some(Arc::new(all));
+                }
+                // Keys that are not a finite union of string literals (`string`, `string & {}`, a template literal):
+                // what reaches is unknown, so no source of the base collapses (`ResolutionContext::collapses`). It is
+                // listed, and the checker, which knows the keys, answers what reaches.
+                None => state.expand_all = expand_all || ctx.can_collapse(),
+            }
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
+            state.omitted = outer;
+            state.expand_all = expand_all;
             let Some(omitted) = resolve_key_set_or_warn("Omit", keys, file_path, mapping, ctx, state, depth) else {
                 return chain;
             };
@@ -45,6 +65,13 @@ pub(super) fn resolve_type_alias_chain(
             chain.notable.retain(|p| !omitted_set.contains(p.name.as_str()));
             // Record omitted keys in the relevant inheritance layer.
             for layer in &mut chain.inheritance {
+                // A collapsed layer names the props it holds, so an omitted one is no longer held.
+                if !layer.members.is_empty() {
+                    let held = layer.members.len();
+                    layer.members.retain(|name| !omitted_set.contains(name.as_str()));
+                    layer.total_props =
+                        layer.total_props.saturating_sub(u32::try_from(held - layer.members.len()).unwrap_or(0));
+                }
                 for key in &omitted {
                     if !layer.omitted.contains(key) {
                         layer.omitted.push(key.clone());
@@ -91,8 +118,8 @@ pub(super) fn resolve_type_alias_chain(
 
         CollectedTypeAlias::Partial { base, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
-            // Make all props optional.
-            for prop in chain.props.iter_mut().filter(|prop| prop.required) {
+            // Make all props optional, a collapsed source's notable ones too.
+            for prop in chain.props.iter_mut().chain(chain.notable.iter_mut()).filter(|prop| prop.required) {
                 Arc::make_mut(prop).required = false;
             }
             chain
@@ -100,8 +127,8 @@ pub(super) fn resolve_type_alias_chain(
 
         CollectedTypeAlias::Required { base, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
-            // Make all props required.
-            for prop in chain.props.iter_mut().filter(|prop| !prop.required) {
+            // Make all props required, a collapsed source's notable ones too.
+            for prop in chain.props.iter_mut().chain(chain.notable.iter_mut()).filter(|prop| !prop.required) {
                 Arc::make_mut(prop).required = true;
             }
             chain
@@ -251,10 +278,9 @@ pub(super) fn resolve_base_as_chain(
         CollectedType::Named { name, args } => {
             if name.strip_prefix("React.").unwrap_or(name) == "PropsWithoutRef"
                 && super::may_be_react_builtin(name, file_path, ctx)
+                && let Some(alias) = react_props_without_ref_alias(args, file_path)
             {
-                if let Some(alias) = react_props_without_ref_alias(args, file_path) {
-                    return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
-                }
+                return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
             }
             // Omit/Pick/Partial/Readonly applied to a *structured* reference — e.g. a
             // member of `Omit<T, keyof U> & U` after `T`/`U` were substituted with real
@@ -262,10 +288,10 @@ pub(super) fn resolve_base_as_chain(
             // the string-based `resolve_props_chain` path below, so nested generics and
             // `keyof` operands survive structurally instead of being flattened to a
             // single opaque display string first.
-            if super::may_be_utility(name.as_str(), file_path, ctx) {
-                if let Some(alias) = super::substitute::synthesize_utility_alias(name.as_str(), args, file_path) {
-                    return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
-                }
+            if super::may_be_utility(name.as_str(), file_path, ctx)
+                && let Some(alias) = super::substitute::synthesize_utility_alias(name.as_str(), args, file_path)
+            {
+                return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
             }
 
             // A user-defined generic alias referenced with structured (possibly
@@ -274,14 +300,17 @@ pub(super) fn resolve_base_as_chain(
             // Substituted and resolved directly here so the nested generic survives,
             // rather than falling through to the string-based path below (which would
             // flatten it to a single opaque display string before substitution ever ran).
-            if let Some(alias) = super::substitute::generic_alias_with_structured_args(
+            let marked = super::substitute::mark_args(ctx, state, file_path, args);
+            if let Some((alias, alias_file, alias_key)) = super::substitute::generic_alias_with_structured_args(
                 name.as_str(),
-                args,
+                &marked,
                 file_path,
                 ctx,
                 &mut state.diagnostics,
             ) {
                 let mut attempt = state.branch();
+                // The alias's body is read where the alias is declared, not where it is referenced.
+                drop(super::precedence::enter_alias_site(ctx, &mut attempt, &alias_file, &alias_key));
                 let chain = resolve_type_alias_chain(&alias, file_path, mapping, ctx, &mut attempt, depth + 1);
                 return super::chain::known_fallback_for_alias(
                     chain,
@@ -328,7 +357,7 @@ pub(super) fn resolve_base_as_chain(
                     field.required,
                     default_value,
                     field.description.clone(),
-                    Default::default(),
+                    field.tags.clone(),
                     None,
                     vec![],
                 )));
@@ -423,6 +452,9 @@ pub(super) fn resolve_base_as_chain(
         | CollectedType::Void
         | CollectedType::BigInt
         | CollectedType::Symbol
+        | CollectedType::UniqueSymbol
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::Callable { .. }
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)
@@ -483,6 +515,8 @@ fn resolve_mapped_chain(
     depth: u8,
 ) -> ResolvedChain {
     let mut chain = ResolvedChain::empty();
+    let generated = copies_a_generated_key_set(keys);
+    // Only the keys an interface declares are its copies; a literal key beside them (`keyof Conditions | 'x'`) is not.
     for key in keys {
         // A `keyof` operand needs only the names (`ResolveState::keys_only`).
         let prop_type = if state.keys_only {
@@ -504,18 +538,46 @@ fn resolve_mapped_chain(
             .get("default")
             .or_else(|| key.tags.get("defaultValue"))
             .map(|value| DefaultValue { value: value.trim().to_owned(), computed: false });
-        chain.props.push(ctx.share(ParsedProp::new(
+        let mut prop = ParsedProp::new(
             key.name.clone(),
             prop_type,
             optional.map_or(key.required, |optional| !optional),
             default_value,
             key.description.clone(),
             key.tags.clone(),
-            None,
-            vec![],
-        )));
+            key.parent.clone(),
+            key.parent.iter().cloned().collect(),
+        );
+        prop.copied_from_large_keys = generated && key.parent.is_some();
+        chain.props.push(ctx.share(prop));
     }
     chain
+}
+
+/// Whether a mapped type over `keys` copies a generated set, by the nature of the key interface, never by its name: the
+/// keys of interfaces (`keyof Conditions`), past `COLLAPSE_THRESHOLD`, that are generated themselves (past
+/// `LARGE_API_SOURCE`, or React's own) or a table: every member required and of one declared type (Chakra's
+/// `Conditions`, 130 selectors each `string`). A props interface of the same size is the component's API: its members
+/// are optional or typed apart (a 40-member API copied with `{ [K in keyof Api]?: V }`), and a recipe's few variant
+/// keys (`keyof ButtonVariant`) are below the threshold.
+fn copies_a_generated_key_set(keys: &[super::evaluate::Key]) -> bool {
+    use crate::types::options::{COLLAPSE_THRESHOLD, LARGE_API_SOURCE};
+    let copied: Vec<&super::evaluate::Key> = keys.iter().filter(|key| key.parent.is_some()).collect();
+    let Some(first) = copied.first() else { return false };
+    if copied.len() <= COLLAPSE_THRESHOLD {
+        return false;
+    }
+    let react = copied
+        .iter()
+        .filter_map(|key| key.parent.as_ref())
+        .all(|parent| crate::origin::declaration_origin(&parent.file_name).is_ambient());
+    if copied.len() > LARGE_API_SOURCE || react {
+        return true;
+    }
+    // `CollectedType` has no equality; its derived `Debug` text is its exact structure.
+    let declared = |key: &super::evaluate::Key| key.value.as_ref().map(|value| format!("{value:?}"));
+    let one_type = declared(first);
+    one_type.is_some() && copied.iter().all(|key| key.required && declared(key) == one_type)
 }
 
 /// Resolve an intersection's members and merge them as TypeScript does (`ResolvedChain::intersect_member`). An HTML layer
@@ -792,7 +854,16 @@ impl InheritedUnion {
                     && kept.html_element == layer.html_element
             };
             match self.layers.iter_mut().find(|kept| same(kept)) {
-                Some(kept) => kept.omitted.retain(|name| layer.omitted.contains(name)),
+                Some(kept) => {
+                    kept.omitted.retain(|name| layer.omitted.contains(name));
+                    // A branch that omits a prop leaves it out of its own view only: another branch still has it.
+                    for name in &layer.members {
+                        if !kept.members.contains(name) {
+                            kept.members.push(name.clone());
+                            kept.total_props += 1;
+                        }
+                    }
+                }
                 None => self.layers.push(layer.clone()),
             }
         }
@@ -858,14 +929,33 @@ pub(super) fn resolve_type_alias_type(
         CollectedTypeAlias::Intersection { members, .. } => {
             super::primitives::resolve_intersection(members, file_path, ctx, state, depth)
         }
-        CollectedTypeAlias::Partial { base, .. } | CollectedTypeAlias::Required { base, .. } => {
-            resolve_collected_type(base, file_path, ctx, state, depth + 1)
+        // The utility the alias wraps, rebuilt as the reference the author wrote, so `type S = Partial<Record<K, V>>`
+        // reaches the output as `Partial<Record<K, V>>` exactly as the same text written in a prop does. Forwarding
+        // to the base dropped the wrapper: every key came out required, `Omit` kept the omitted key.
+        CollectedTypeAlias::Partial { base, .. } => utility_reference("Partial", [base], file_path, ctx, state, depth),
+        CollectedTypeAlias::Required { base, .. } => {
+            utility_reference("Required", [base], file_path, ctx, state, depth)
         }
-        CollectedTypeAlias::Omit { base, .. } | CollectedTypeAlias::Pick { base, .. } => {
-            // At the type level, just forward to the base type.
-            resolve_collected_type(base, file_path, ctx, state, depth + 1)
+        CollectedTypeAlias::Omit { base, keys, .. } => {
+            utility_reference("Omit", [base, keys], file_path, ctx, state, depth)
+        }
+        CollectedTypeAlias::Pick { base, keys, .. } => {
+            utility_reference("Pick", [base, keys], file_path, ctx, state, depth)
         }
     }
+}
+
+/// `name<args>` resolved as a type written in `file_path`, the way a prop's own `Partial<…>` is.
+fn utility_reference<'a>(
+    name: &str,
+    args: impl IntoIterator<Item = &'a CollectedType>,
+    file_path: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> PropType {
+    let reference = CollectedType::Named { name: name.into(), args: args.into_iter().cloned().collect() };
+    resolve_collected_type(&reference, file_path, ctx, state, depth + 1)
 }
 
 /// The key set a `Pick`/`Omit` key expression denotes, or a warning and `None` when it can't be known statically.
@@ -968,15 +1058,19 @@ fn resolve_key_set(
             let Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) = matched else {
                 return None;
             };
+            let marked = super::substitute::mark_args(ctx, state, file, args);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
-                args,
+                &marked,
                 file,
                 ctx,
                 &mut state.diagnostics,
             );
-            match &alias {
+            // The alias's body is read under no type parameters: the ones the arguments leave unfilled are marked in it.
+            let writer = state.enter_scope(TypeScope::default());
+            let site = super::precedence::enter_alias_site(ctx, state, &canonical_file, &matched_key);
+            let keys = match &alias {
                 CollectedTypeAlias::LiteralUnion { members, .. } => Some(members.clone()),
                 CollectedTypeAlias::Union { members, file_path } => {
                     let union = CollectedType::Union(members.clone());
@@ -986,7 +1080,10 @@ fn resolve_key_set(
                     resolve_key_set(target, file_path, mapping, ctx, state, depth + 1)
                 }
                 _ => None,
-            }
+            };
+            state.leave_declared_in(site);
+            state.leave_scope(writer);
+            keys
         }
         _ => None,
     }

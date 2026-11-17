@@ -1,0 +1,64 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "back\\slash",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "it's",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "say \"hi\"",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"\" | \"back\\\\slash\" | \"it's\" | \"say \\\"hi\\\"\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/30-string-with-quotes.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "say \"hi\"",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "it's",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "back\\slash",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "",
+        "of": "string"
+      }
+    ]
+  }
+}

@@ -10,9 +10,9 @@
 //! `const X = ["a", "b"] as const`. Radix declares `Align` and `Side` this way in its `.d.ts` files, and every shadcn
 //! popover, tooltip and hover card takes them as props.
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The `align` prop's type of the only component.
 fn align_of(files: &[(&str, &str)]) -> Value {

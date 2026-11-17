@@ -1,36 +1,28 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! The warm checker against `replay-tsc` (the recording of the real `7.1.0-beta`): one process answers requests for
-//! one component at a time, and a checker that cannot start says so and never fails a request.
+//! The warm checker: one session of the built-in checker answers requests for one component at a time.
 
 use std::time::Duration;
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions, WatchSession};
-use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
-use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput};
-use caliper_docgen_semantic::{targets_of, OnDemand, OnDemandConfig};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession, extract};
+use caliper_docgen_core::types::semantic::{
+    Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority,
+};
+use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput, PropType};
+use caliper_docgen_semantic::{OnDemand, OnDemandConfig, targets_of};
 use camino::Utf8PathBuf;
-
-const FAKE_VERSION: &str = "7.1.0-test";
 
 struct Project {
     _dir: tempfile::TempDir,
     root: Utf8PathBuf,
 }
 
-/// The fixture project in a scratch directory whose name has an upper-case letter (see `replay_tsc.rs`), with
-/// `replay-tsc` installed as `node_modules/typescript/bin/tsc` when `with_tsc`.
-fn project(with_tsc: bool) -> Project {
-    let dir = tempfile::Builder::new().prefix("Replay").tempdir().unwrap();
+/// The fixture project in a scratch directory.
+fn project() -> Project {
+    let dir = tempfile::Builder::new().prefix("OnDemand").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     for name in ["Button.tsx", "tsconfig.json"] {
         std::fs::copy(fixtures.join("project").join(name), root.join(name)).unwrap();
-    }
-    if with_tsc {
-        let package = root.join("node_modules/typescript");
-        std::fs::create_dir_all(package.join("bin")).unwrap();
-        std::fs::write(package.join("package.json"), format!(r#"{{"version": "{FAKE_VERSION}"}}"#)).unwrap();
-        std::fs::copy(env!("CARGO_BIN_EXE_replay-tsc"), package.join("bin/tsc")).unwrap();
     }
     Project { _dir: dir, root }
 }
@@ -39,13 +31,9 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-fn checker(project: &Project) -> OnDemand {
-    let mut config = OnDemandConfig::new(project.root.clone());
-    config.expected_versions = &[FAKE_VERSION];
-    config.request_timeout = Duration::from_secs(20);
-    config
-        .extra_env
-        .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/recording.json", env!("CARGO_MANIFEST_DIR"))));
+fn checker(root: &Utf8PathBuf) -> OnDemand {
+    let mut config = OnDemandConfig::new(root.clone());
+    config.request_timeout = Duration::from_secs(60);
     OnDemand::new(config)
 }
 
@@ -54,14 +42,24 @@ fn target(output: &ExtractionOutput, name: &str) -> SemanticTarget {
 }
 
 fn ask(checker: &OnDemand, target: SemanticTarget) -> SemanticOutcome {
-    checker.request(vec![target]).recv_timeout(Duration::from_secs(30)).expect("the checker answers")
+    checker.request(vec![target]).recv_timeout(Duration::from_secs(60)).expect("the checker answers")
 }
 
+fn ask_in_background(checker: &OnDemand, target: SemanticTarget) -> SemanticOutcome {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let delivery = Delivery::new(move |outcome| {
+        sender.send(outcome).ok();
+    });
+    checker.request_at(vec![target], SharedPriority::new(Priority::Background), delivery);
+    receiver.recv_timeout(Duration::from_secs(60)).expect("a delivery").expect("the checker answers")
+}
+
+/// The built-in checker answers in this process, for a project with no `typescript` of its own.
 #[test]
 fn one_warm_checker_answers_the_component_it_is_asked_about_and_then_the_next() {
-    let project = project(true);
+    let project = project();
     let output = structural(&project);
-    let checker = checker(&project);
+    let checker = checker(&project.root);
     checker.warm_up();
 
     let button = ask(&checker, target(&output, "Button"));
@@ -77,79 +75,126 @@ fn one_warm_checker_answers_the_component_it_is_asked_about_and_then_the_next() 
     assert_eq!(names, ["a"]);
 }
 
+/// The checker is never replaced: a fresh session would parse every file again while this process keeps most of what
+/// the old one held, so it would hold more, not less. One session keeps its snapshot through 66 requests, whatever
+/// priority each was asked at.
 #[test]
-fn a_project_without_typescript_answers_every_request_with_a_warning_and_no_components() {
-    let project = project(false);
+fn the_checker_is_not_replaced_however_many_programs_it_builds() {
+    let project = project();
     let output = structural(&project);
-    let checker = checker(&project);
+    let checker = checker(&project.root);
 
-    let first = ask(&checker, target(&output, "Button"));
-    let second = ask(&checker, target(&output, "Other"));
-
-    for outcome in [first, second] {
-        assert!(outcome.components.is_empty());
-        assert_eq!(outcome.diagnostics.len(), 1);
-        assert_eq!(outcome.diagnostics[0].severity, DiagnosticSeverity::Warning);
-        assert!(
-            outcome.diagnostics[0].message.contains("no node_modules/typescript/bin/tsc"),
-            "{:?}",
-            outcome.diagnostics
-        );
+    for round in 0..66 {
+        let answered = match round % 2 {
+            0 => ask(&checker, target(&output, "Button")),
+            _ => ask_in_background(&checker, target(&output, "Button")),
+        };
+        assert_eq!((answered.diagnostics.len(), answered.components.len()), (0, 1), "request {round}");
     }
+
+    assert_eq!(checker.snapshots().created, 1, "one session kept its snapshot throughout");
 }
 
+/// What the checker holds is bounded: past the bound, it stays down, and every later request keeps its structural
+/// answer with a warning that says why. Its arenas hold the TypeScript lib at least, so one program passes a bound of
+/// zero, and the first check is after the first program.
 #[test]
-fn dropping_the_checker_stops_its_process_and_thread() {
-    let project = project(true);
-    let output = structural(&project);
-    let checker = checker(&project);
-    let answered = ask(&checker, target(&output, "Button"));
-    assert_eq!(answered.components.len(), 1);
-
-    // Drop joins the worker, which shuts `tsc` down first; a hang here is the failure.
-    drop(checker);
-}
-
-/// The real `tsc` the tests below run against, or `None` to skip them. Skipping is for a machine without it: on CI
-/// (`CI` is set) a missing one fails the run.
-fn real_tsc() -> Option<std::ffi::OsString> {
-    let tsc = std::env::var_os("CALIPER_TEST_TSC");
-    if tsc.is_none() {
-        assert!(
-            std::env::var_os("CI").is_none(),
-            "CALIPER_TEST_TSC must name typescript@7.1's `bin/tsc` on CI, or the real checker is never tested"
-        );
-        eprintln!("skipped: CALIPER_TEST_TSC does not name a typescript@7.1 `tsc`");
-    }
-    tsc
-}
-
-/// Against the real `tsc` (`7.1.0-beta`): set `CALIPER_TEST_TSC` to its `bin/tsc`. Skipped, loudly, when it is not set.
-#[test]
-fn the_real_checker_answers_the_requested_component() {
-    let Some(tsc) = real_tsc() else { return };
-    let project = project(false);
+fn a_checker_past_its_memory_bound_stays_down_and_says_why() {
+    let project = project();
     let output = structural(&project);
     let mut config = OnDemandConfig::new(project.root.clone());
-    config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
     config.request_timeout = Duration::from_secs(60);
+    config.max_rss_mib = 0;
     let checker = OnDemand::new(config);
 
     let first = ask(&checker, target(&output, "Button"));
-    let second = ask(&checker, target(&output, "Button"));
+    let later: Vec<SemanticOutcome> = ["Button", "Other"].map(|name| ask(&checker, target(&output, name))).into();
 
-    assert_eq!(first.diagnostics, []);
-    let names: Vec<_> = first.components[0].props.iter().map(|prop| prop.name.as_str()).collect();
-    assert_eq!(names, ["label", "size", "disabled", "onClick", "tags", "pair", "box"]);
-    assert_eq!(second.components[0].props.len(), 7, "the same warm process answers again");
+    // The answer the bound was read after is the checker's: a correct answer, which cost more than the bound.
+    assert_eq!((first.diagnostics.len(), first.components.len()), (0, 1));
+    for outcome in later {
+        assert!(outcome.components.is_empty());
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let diagnostic = &outcome.diagnostics[0];
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+        let message = diagnostic.message.as_str();
+        let held = message.strip_prefix("TypeScript checker backend unavailable: the built-in checker held ").and_then(
+            |rest| {
+                rest.strip_suffix(
+                    " MiB, more than its 0 MiB bound (`max_rss_mib`), and this process keeps that memory, so \
+                     components keep their structural answer for the rest of the session",
+                )
+            },
+        );
+        assert!(held.is_some_and(|mib| mib.parse::<u64>().is_ok_and(|mib| mib > 0)), "{message}");
+    }
 }
 
-/// With the real checker and the real `@types/react` (the repository's own, via `node_modules/@types/react`), a
-/// component's prop names are the same with the checker as without it, in every `htmlAttributes` mode: the checker
-/// improves types and optionality, and `htmlAttributes` means one thing in both engines.
 #[test]
-fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_html_attributes_mode() {
-    let Some(tsc) = real_tsc() else { return };
+fn dropping_the_checker_stops_its_thread() {
+    let project = project();
+    let output = structural(&project);
+    let checker = checker(&project.root);
+    let answered = ask(&checker, target(&output, "Button"));
+    assert_eq!(answered.components.len(), 1);
+
+    // Drop joins the worker, which stops the checker first; a hang here is the failure.
+    drop(checker);
+}
+
+/// The checker escapes a name that starts with two underscores (`__size` is `___size` inside it); the answer carries
+/// the name the source writes.
+#[test]
+fn the_checker_names_props_as_the_source_writes() {
+    let dir = tempfile::Builder::new().prefix("Markers").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/markers");
+    for name in ["Markers.tsx", "tsconfig.json"] {
+        std::fs::copy(fixtures.join(name), root.join(name)).unwrap();
+    }
+    let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+    let checker = checker(&root);
+
+    let answer = ask(&checker, target(&output, "Markers"));
+
+    assert_eq!(answer.diagnostics, []);
+    let names: Vec<_> = answer.components[0].props.iter().map(|prop| prop.name.as_str()).collect();
+    assert_eq!(names, ["_single", "__size", "___triple", "plain"]);
+}
+
+/// The checker prints `(percent?: number, ...rest: string[])` and says which signatures have a rest parameter; the
+/// answer keeps both markers, and a parameter typed `string | undefined` is not optional.
+#[test]
+fn the_checker_keeps_optional_and_rest_parameters() {
+    let dir = tempfile::Builder::new().prefix("Markers").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/markers");
+    for name in ["Markers.tsx", "tsconfig.json"] {
+        std::fs::copy(fixtures.join(name), root.join(name)).unwrap();
+    }
+    let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+    let checker = checker(&root);
+
+    let answer = ask(&checker, target(&output, "Callbacks"));
+
+    assert_eq!(answer.diagnostics, []);
+    let markers =
+        |name: &str| match &answer.components[0].props.iter().find(|prop| prop.name == name).unwrap().prop_type {
+            PropType::Function { params, .. } => params.iter().map(|p| (p.optional, p.rest)).collect::<Vec<_>>(),
+            other => panic!("{name} is not a function: {other:?}"),
+        };
+    assert_eq!(markers("format"), [(true, false), (false, true)]);
+    assert_eq!(markers("close"), [(false, true)]);
+    assert_eq!(markers("onClick"), [(true, false)]);
+    assert_eq!(markers("plain"), [(false, false), (true, false)]);
+    assert_eq!(markers("explicit"), [(false, false), (false, false)]);
+}
+
+/// With the real `@types/react` (the repository's own, via `node_modules/@types/react`), a component's prop names are
+/// the same with the checker as without it, in every `htmlAttributes` mode: the checker improves types and
+/// optionality, and `htmlAttributes` means one thing in both engines.
+#[test]
+fn the_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_html_attributes_mode() {
     let react = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../node_modules/@types/react");
     if !react.exists() {
         eprintln!("skipped: {react} is not installed");
@@ -166,9 +211,18 @@ fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_ht
     )
     .unwrap();
     let sources = [
-        ("WithChildren.tsx", "import type { PropsWithChildren } from \"react\";\nexport function WithChildren(props: PropsWithChildren<{ label: string }>) { return null; }\n"),
-        ("OwnChildren.tsx", "import type { ReactNode } from \"react\";\nexport function OwnChildren(props: { label: string; children?: ReactNode }) { return null; }\n"),
-        ("Div.tsx", "import type { HTMLAttributes } from \"react\";\nexport interface DivProps extends HTMLAttributes<HTMLDivElement> { label: string }\nexport function Div(props: DivProps) { return null; }\n"),
+        (
+            "WithChildren.tsx",
+            "import type { PropsWithChildren } from \"react\";\nexport function WithChildren(props: PropsWithChildren<{ label: string }>) { return null; }\n",
+        ),
+        (
+            "OwnChildren.tsx",
+            "import type { ReactNode } from \"react\";\nexport function OwnChildren(props: { label: string; children?: ReactNode }) { return null; }\n",
+        ),
+        (
+            "Div.tsx",
+            "import type { HTMLAttributes } from \"react\";\nexport interface DivProps extends HTMLAttributes<HTMLDivElement> { label: string }\nexport function Div(props: DivProps) { return null; }\n",
+        ),
     ];
     for (name, source) in sources {
         std::fs::write(root.join(name), source).unwrap();
@@ -178,13 +232,10 @@ fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_ht
         let options =
             || PipelineOptions { src_dirs: vec![root.clone()], html_attributes: mode, ..PipelineOptions::default() };
         let structural = WatchSession::lazy(options());
-        let _ = structural.initialize();
-        let mut config = OnDemandConfig::new(root.clone());
-        config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
-        config.request_timeout = Duration::from_secs(60);
-        let checked = WatchSession::lazy(options())
-            .with_semantic(std::sync::Arc::new(OnDemand::new(config)), Duration::from_secs(60));
-        let _ = checked.initialize();
+        drop(structural.initialize());
+        let checked =
+            WatchSession::lazy(options()).with_semantic(std::sync::Arc::new(checker(&root)), Duration::from_secs(60));
+        drop(checked.initialize());
 
         for key in ["WithChildren", "OwnChildren", "Div"] {
             let before = structural.component(key).unwrap();
@@ -204,63 +255,27 @@ fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_ht
                 "{key} under {mode:?}: the curated attributes are the structural pass's"
             );
             if mode == HtmlAttributeMode::Full && key == "Div" {
-                assert!(names(&before).iter().any(|name| name == "className"), "Full lists the real attributes");
+                // Full makes the real attributes known; with no evidence for them they are names in the layer, not
+                // rows (ADR 0028, A2), in both lanes alike.
+                let known = |answer: &caliper_docgen_core::pipeline::ComponentAnswer| {
+                    answer.entry.inheritance.iter().any(|layer| layer.members.iter().any(|name| name == "className"))
+                };
+                assert!(known(&before) && known(&after), "Full knows the real attributes");
             }
         }
     }
 }
 
+/// Creating the checker and `warm_up` return at once: the checker starts on the worker thread.
 #[test]
-fn a_checker_past_its_memory_bound_is_replaced_between_requests_and_keeps_answering() {
-    let project = project(true);
-    let output = structural(&project);
-    let mut config = OnDemandConfig::new(project.root.clone());
-    config.expected_versions = &[FAKE_VERSION];
-    config.request_timeout = Duration::from_secs(20);
-    // Any running process is past a bound of zero, so every fourth request replaces `tsc`.
-    config.max_rss_mib = 0;
-    config
-        .extra_env
-        .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/recording.json", env!("CARGO_MANIFEST_DIR"))));
-    let checker = OnDemand::new(config);
-
-    for round in 0..9 {
-        let answered = ask(&checker, target(&output, "Button"));
-        assert_eq!(answered.diagnostics, [], "request {round}");
-        assert_eq!(answered.components.len(), 1, "request {round}");
-    }
-}
-
-#[test]
-fn dropping_a_checker_stuck_in_a_request_does_not_wait_for_it() {
-    let project = project(true);
-    let output = structural(&project);
-    let mut config = OnDemandConfig::new(project.root.clone());
-    config.expected_versions = &[FAKE_VERSION];
-    config.request_timeout = Duration::from_secs(60);
-    config.shutdown_wait = Duration::from_millis(300);
-    config.extra_env.push(("REPLAY_SCENARIO".to_string(), "hang".to_string()));
-    let checker = OnDemand::new(config);
-    // The process starts and never answers; the request is still in flight when the checker is dropped.
-    let _pending = checker.request(vec![target(&output, "Button")]);
-    std::thread::sleep(Duration::from_millis(300));
-
-    let started = std::time::Instant::now();
-    drop(checker);
-
-    assert!(started.elapsed() < Duration::from_secs(5), "dropping took {:?}", started.elapsed());
-}
-
-#[test]
-fn creating_a_checker_and_asking_for_a_missing_tsc_does_not_block() {
-    let project = project(false);
+fn creating_and_warming_a_checker_does_not_block() {
+    let project = project();
     let output = structural(&project);
     let started = std::time::Instant::now();
-    let checker = checker(&project);
+    let checker = checker(&project.root);
     checker.warm_up();
     assert!(started.elapsed() < Duration::from_millis(500), "creating and warming took {:?}", started.elapsed());
 
     let answered = ask(&checker, target(&output, "Button"));
-    assert!(answered.components.is_empty());
-    assert_eq!(answered.diagnostics.len(), 1);
+    assert_eq!((answered.diagnostics.len(), answered.components.len()), (0, 1));
 }

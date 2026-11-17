@@ -1,3 +1,5 @@
+//! The watch session: an eager or lazy view of the extraction output that follows the files as they change.
+
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -7,11 +9,11 @@ use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
-use crate::types::semantic::SemanticProvider;
+use crate::types::semantic::{Priority, SemanticProvider, SourceChange};
 use crate::types::*;
 
 use super::discover::{discover_dirs, discover_files};
-use super::revision::{empty_output, output_delta, ComponentAnswer, ComponentLocation, Revision};
+use super::revision::{ComponentAnswer, ComponentLocation, Revision, empty_output, free_in_background, output_delta};
 use super::{IncrementalUpdate, PipelineOptions};
 
 /// Canonicalize `path`, falling back to canonicalizing its parent directory
@@ -23,18 +25,14 @@ use super::{IncrementalUpdate, PipelineOptions};
 /// consistent identity across repeated `update_file` calls for the same file,
 /// not the file itself.
 fn canonicalize_best_effort(path: &Utf8Path) -> Utf8PathBuf {
-    if let Ok(p) = std::fs::canonicalize(path.as_std_path()) {
-        if let Ok(p) = Utf8PathBuf::from_path_buf(p) {
-            return p;
-        }
+    if let Ok(p) = crate::canonical_path::canonicalize(path) {
+        return p;
     }
-    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
-        if let Ok(p) = std::fs::canonicalize(parent.as_std_path()) {
-            if let Ok(mut p) = Utf8PathBuf::from_path_buf(p) {
-                p.push(file_name);
-                return p;
-            }
-        }
+    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name())
+        && let Ok(mut p) = crate::canonical_path::canonicalize(parent)
+    {
+        p.push(file_name);
+        return p;
     }
     path.to_owned()
 }
@@ -205,6 +203,7 @@ fn merge_lazy_updates(steps: Vec<IncrementalUpdate>, revision: u64, start: Insta
 /// A lazy session ([`WatchSession::lazy`], ADR 0016) parses and indexes every file and resolves a component only when
 /// [`WatchSession::component`] asks for it; the rest of this API behaves as for an eager one.
 pub struct WatchSession {
+    /// The options the session was created with.
     pub options: PipelineOptions,
     current: ArcSwapOption<Revision>,
     writer: Mutex<Freshness>,
@@ -212,10 +211,25 @@ pub struct WatchSession {
     semantic: Option<super::semantic_hook::SemanticHook>,
 }
 
+/// The options and mode of a session, not its revision: a revision holds every parsed file and resolved component, so
+/// printing it would bury the question a `{:?}` asks, which session this is.
+impl std::fmt::Debug for WatchSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WatchSession")
+            .field("options", &self.options)
+            .field("lazy", &self.lazy)
+            .field("revision", &self.revision())
+            .field("with_semantic", &self.semantic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 /// What a lazy session has indexed and answered so far.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LazyStats {
+    /// The number of the session's current revision.
     pub revision: u64,
+    /// Source files the session holds.
     pub files: usize,
     /// Components found by parsing.
     pub components: usize,
@@ -239,10 +253,23 @@ impl WatchSession {
 
     /// Attach a TypeScript checker that is asked for each component a request names (ADR 0022). [`Self::component`]
     /// then returns the checker's props when it answers within `wait`, the structural ones otherwise, and the checker's
-    /// late answer on the next request of the same, unedited component. Without a checker nothing changes.
+    /// late answer on the next request of the same, unedited component. A component the structural pass lists no props
+    /// for waits up to 2 s instead ([`Self::with_semantic_wait_empty`]). Without a checker nothing changes.
     #[must_use]
     pub fn with_semantic(mut self, provider: Arc<dyn SemanticProvider>, wait: Duration) -> Self {
         self.semantic = Some(super::semantic_hook::SemanticHook::new(provider, wait));
+        self
+    }
+
+    /// How long a request waits for the checker when the structural pass lists no props for the component, in place of
+    /// the default 2 s: with nothing to show, the checker's answer is worth a longer wait. A wait shorter than
+    /// [`Self::with_semantic`]'s gives such a component that one. Call it after [`Self::with_semantic`]; without a
+    /// checker it does nothing.
+    #[must_use]
+    pub fn with_semantic_wait_empty(mut self, wait: Duration) -> Self {
+        if let Some(hook) = &mut self.semantic {
+            hook.wait_empty(wait);
+        }
         self
     }
 
@@ -325,16 +352,24 @@ impl WatchSession {
             true => Revision::cold_lazy(&self.options, id),
             false => Revision::cold(&self.options, id),
         });
-        self.forget_checker_answers();
-        self.current.store(Some(revision.clone()));
+        self.forget_checker_answers(SourceChange::Everything);
+        free_in_background(self.current.swap(Some(revision.clone())));
         revision
     }
 
-    /// Drop what the checker said: a new revision may have changed a file the answers depend on. Called before the
-    /// revision is published, so no request sees the new files with an old answer.
-    fn forget_checker_answers(&self) {
+    /// Publish `next` and free what it replaces on another thread. A large project's revision takes tens of
+    /// milliseconds to drop, and the caller only wants the new one out. `replaced` is the caller's own reference to
+    /// the revision `next` was built from: whichever reference goes last pays for the free, so it must not be this
+    /// thread's.
+    fn publish(&self, next: Arc<Revision>, replaced: Arc<Revision>) {
+        free_in_background((self.current.swap(Some(next)), replaced));
+    }
+
+    /// Drop what the checker said and tell it what changed: a new revision may have changed a file the answers depend
+    /// on. Called before the revision is published, so no request sees the new files with an old answer.
+    fn forget_checker_answers(&self, change: SourceChange) {
         if let Some(hook) = &self.semantic {
-            hook.invalidate();
+            hook.invalidate(change);
         }
     }
 
@@ -370,13 +405,19 @@ impl WatchSession {
             }
             false => revision.published_component(key),
         };
-        self.refined(answer)
+        self.refined(answer, Priority::Interactive)
     }
 
-    /// `answer` with the attached checker's props, when there is a checker and it answers in time.
-    fn refined(&self, answer: Option<ComponentAnswer>) -> Option<ComponentAnswer> {
+    /// `answer` with the attached checker's props, when there is a checker and it answers within the wait `priority`
+    /// gives it.
+    fn refined(&self, answer: Option<ComponentAnswer>, priority: Priority) -> Option<ComponentAnswer> {
         match (&self.semantic, answer) {
-            (Some(hook), Some(answer)) => Some(hook.refine(answer, self.options.html_attributes)),
+            (Some(hook), Some(answer)) => Some(hook.refine(
+                answer,
+                self.options.html_attributes,
+                crate::types::options::CollapseContext::of(&self.options),
+                priority,
+            )),
             (_, answer) => answer,
         }
     }
@@ -417,15 +458,45 @@ impl WatchSession {
 
     /// [`Self::component`] for each of `keys`, resolved in parallel.
     pub fn components(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
+        self.components_at(keys, Priority::Interactive)
+    }
+
+    /// [`Self::components`] for work nobody waits for yet: a warm-up, a fill of the components stories name (a prefetch
+    /// of the stories next to the one shown is [`Self::components_as_neighbours`]). With a checker attached, each is
+    /// asked for at [`Priority::Background`] and not waited for, so the call returns the structural answers; the
+    /// checker answers them after every request someone waits for, and keeps its answers for the requests that follow.
+    /// A request for a component already being asked joins that request.
+    pub fn components_in_background(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
+        self.components_at(keys, Priority::Background)
+    }
+
+    /// [`Self::components_in_background`] for the components of the stories next to the one shown, which the client
+    /// may open next: with a checker attached, each is asked for at [`Priority::Neighbour`], after every request
+    /// someone waits for and before warm-up and fill work, and not waited for.
+    pub fn components_as_neighbours(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
+        self.components_at(keys, Priority::Neighbour)
+    }
+
+    /// Tells the checker that the client no longer shows the components under `keys` (it navigated away, and replaced
+    /// what it prefetched): a request for one of them that nobody waits for and that the checker has not started is
+    /// dropped before it is converted. A request someone waits for, and one already being converted, is answered and
+    /// kept. Does nothing without a checker.
+    pub fn cancel_components(&self, keys: &[String]) {
+        if let Some(hook) = &self.semantic {
+            hook.cancel(keys);
+        }
+    }
+
+    fn components_at(&self, keys: &[String], priority: Priority) -> Vec<Option<ComponentAnswer>> {
         use rayon::prelude::*;
         let Some(revision) = self.current.load_full() else { return vec![None; keys.len()] };
         match revision.is_lazy() {
             true => {
                 let answers = revision.lazy_components(&self.options, keys);
                 revision.load_whole_demand_in_background(&self.options);
-                answers.into_iter().map(|answer| self.refined(answer)).collect()
+                answers.into_iter().map(|answer| self.refined(answer, priority)).collect()
             }
-            false => keys.par_iter().map(|key| self.refined(revision.published_component(key))).collect(),
+            false => keys.par_iter().map(|key| self.refined(revision.published_component(key), priority)).collect(),
         }
     }
 
@@ -453,6 +524,7 @@ impl WatchSession {
                     key: key.clone(),
                     file_path: entry.file_path.clone(),
                     display_name: entry.display_name.clone(),
+                    exports: entry.exports.clone(),
                 })
                 .collect(),
         }
@@ -512,7 +584,7 @@ impl WatchSession {
             None => self.cold(&mut writer, 1),
         };
         if rebuild {
-            return self.rebuilt(&mut writer, &current);
+            return self.rebuilt(&mut writer, current);
         }
         // Stamped before it is read, so an edit made while it is applied still looks changed to `ensure_fresh`.
         let before = stamp(&changed);
@@ -520,13 +592,13 @@ impl WatchSession {
             Some((next, update)) => {
                 if let Some(stamps) = &mut writer.stamps {
                     if next.source_files().contains(&changed) {
-                        stamps.files.insert(changed, before);
+                        stamps.files.insert(changed.clone(), before);
                     } else {
                         stamps.files.remove(&changed);
                     }
                 }
-                self.forget_checker_answers();
-                self.current.store(Some(Arc::new(next)));
+                self.forget_checker_answers(SourceChange::Files(vec![changed]));
+                self.publish(Arc::new(next), current);
                 update
             }
             None => unchanged(current.id),
@@ -570,7 +642,7 @@ impl WatchSession {
         };
         let configs = self.config_stamps(&inner_configs, |path| stamp_like(path, recorded.configs.get(path)));
         if configs != recorded.configs {
-            return self.rebuilt(&mut writer, &current);
+            return self.rebuilt(&mut writer, current);
         }
 
         let mut files = recorded.files;
@@ -584,11 +656,13 @@ impl WatchSession {
             .collect();
         changed.sort_by(|a, b| a.0.cmp(&b.0));
         let mut next = current.clone();
-        let mut steps = Vec::new();
+        let (mut steps, mut applied) = (Vec::new(), Vec::new());
         for (path, now) in changed {
             if let Some((revision, update)) = next.next(&self.options, &path) {
-                next = Arc::new(revision);
+                let previous = std::mem::replace(&mut next, Arc::new(revision));
+                free_in_background(previous);
                 steps.push(update);
+                applied.push(path.clone());
             }
             if next.source_files().contains(&path) {
                 files.insert(path, now);
@@ -600,20 +674,21 @@ impl WatchSession {
         if next.id == current.id {
             return unchanged(current.id);
         }
-        self.forget_checker_answers();
-        self.current.store(Some(next.clone()));
-        match next.is_lazy() {
+        let update = match next.is_lazy() {
             true => merge_lazy_updates(steps, next.id, start),
             false => output_delta(&current.output, &next.output, next.id, start),
-        }
+        };
+        self.forget_checker_answers(SourceChange::Files(applied));
+        self.publish(next, current);
+        update
     }
 
     /// Rebuild from `current` after a resolution config changed. The caller holds the writer lock.
-    fn rebuilt(&self, writer: &mut Freshness, current: &Revision) -> IncrementalUpdate {
+    fn rebuilt(&self, writer: &mut Freshness, current: Arc<Revision>) -> IncrementalUpdate {
         *writer = Freshness::cold(SystemTime::now());
         let (next, update) = current.rebuilt(&self.options);
-        self.forget_checker_answers();
-        self.current.store(Some(Arc::new(next)));
+        self.forget_checker_answers(SourceChange::Everything);
+        self.publish(Arc::new(next), current);
         update
     }
 

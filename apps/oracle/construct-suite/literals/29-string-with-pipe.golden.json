@@ -1,0 +1,44 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "a | b",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "c",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"a | b\" | \"c\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/29-string-with-pipe.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "a | b",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "c",
+        "of": "string"
+      }
+    ]
+  }
+}

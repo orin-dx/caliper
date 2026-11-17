@@ -1,13 +1,9 @@
 {
   "enabledPlugins": {
-    "axiom@orin-dx-agent-plugins": true,
-    "canon@orin-dx-agent-plugins": true,
-    "delta@orin-dx-agent-plugins": true,
-    "graph@orin-dx-agent-plugins": true,
-    "lambda@orin-dx-agent-plugins": true,
-    "proof@orin-dx-agent-plugins": true,
-    "trace@orin-dx-agent-plugins": true,
-    "vector@orin-dx-agent-plugins": true
+    "courier@wisp-plugins": true,
+    "muse@wisp-plugins": true,
+    "wisp-packs@wisp-plugins": true,
+    "wisp@wisp-plugins": true
   },
   "hooks": {
     "PostToolUse": [

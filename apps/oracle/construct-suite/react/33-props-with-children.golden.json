@@ -1,0 +1,44 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "intersection",
+        "members": [
+          {
+            "k": "object",
+            "fields": [
+              "tone"
+            ],
+            "index": false
+          },
+          {
+            "k": "object",
+            "fields": [
+              "children"
+            ],
+            "index": false
+          }
+        ],
+        "alias": "PropsWithChildren"
+      }
+    ],
+    "alias": "PropsWithChildren"
+  },
+  "text": "PropsWithChildren<{ tone: \"info\" | \"warn\"; }> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/33-props-with-children.tsx"
+    },
+    "order": null
+  }
+}

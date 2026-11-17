@@ -1,14 +1,36 @@
 // The native binding inside `node:worker_threads`, where Storybook 11 runs docgen providers: each worker loads the
 // addon, extracts, and runs its own watch session, several at once and again after earlier workers have exited.
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { Worker } from 'node:worker_threads'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PROBE = path.join(__dirname, 'fixtures/worker-probe.mjs')
-const SRC = path.join(__dirname, 'fixtures/src')
+
+// The project lives in a directory of its own: plugin.integration.test.ts runs in a parallel process and rewrites the
+// shared `fixtures/src/Button.tsx` in place, and a worker that reads it between the truncate and the write sees no
+// components.
+const BUTTON = `export interface ButtonProps {
+  /** The button's visible label. */
+  label: string
+}
+
+export function Button({ label }: ButtonProps) {
+  return <button>{label}</button>
+}
+`
+let SRC = ''
+beforeAll(() => {
+  SRC = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'caliper-workers-')))
+  fs.writeFileSync(path.join(SRC, 'Button.tsx'), BUTTON)
+})
+afterAll(() => {
+  fs.rmSync(SRC, { recursive: true, force: true })
+})
 
 let napiAvailable = false
 try {

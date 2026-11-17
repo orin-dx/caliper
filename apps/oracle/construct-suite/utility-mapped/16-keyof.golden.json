@@ -1,0 +1,38 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "a",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "b",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "c",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "keyof Base | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/16-keyof.tsx"
+    },
+    "order": null
+  }
+}

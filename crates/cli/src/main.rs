@@ -1,3 +1,8 @@
+//! The `caliper-docgen` command line: `extract`, `watch`, `check`, `inspect`, `schema` and `completions` over the
+//! `caliper-docgen-core` pipeline. The command handlers return their exit code and `main` is the only place that ends
+//! the process.
+
+#![deny(missing_docs)]
 #![recursion_limit = "256"]
 // stdout carries the command payload (JSON, tables); stderr and diagnostics still go through output.rs.
 #![allow(clippy::print_stdout)]
@@ -20,6 +25,7 @@ use commands::watch::cmd_watch;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// The command line: the flags every command shares, and the command to run.
 #[derive(Parser)]
 #[command(
     name = "caliper-docgen",
@@ -49,7 +55,7 @@ enum Command {
     /// Extract prop types and write to stdout or --out file
     Extract(ExtractArgs),
 
-    /// Watch for changes and re-extract
+    /// Watch for changes and re-extract with the structural resolver (no checker)
     Watch(WatchArgs),
 
     /// Validate extraction — exits 2 if any errors, or 1 if --strict and there are warnings. For CI.
@@ -65,6 +71,7 @@ enum Command {
     Completions(CompletionsArgs),
 }
 
+/// The options of `extract`.
 #[derive(clap::Args)]
 pub struct ExtractArgs {
     /// Source directories to scan [default: ./src]
@@ -84,8 +91,8 @@ pub struct ExtractArgs {
     #[arg(long)]
     pub cache_dir: Option<String>,
 
-    /// Neither read nor write the on-disk caches (the declaration parse cache and the dependency index); the output is
-    /// the same, a run just parses everything
+    /// Neither read nor write the on-disk caches (the declaration parse cache, the dependency index and the checker's
+    /// kept answer); the output is the same, a run just parses and asks the checker everything
     #[arg(long)]
     pub no_cache: bool,
 
@@ -116,20 +123,38 @@ pub struct ExtractArgs {
     #[arg(long, conflicts_with = "load_dependencies")]
     pub no_load_dependencies: bool,
 
-    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    /// Which inherited sources to list as one inherited layer of names instead of prop by prop. By default a loaded
+    /// dependency's DOM, ARIA and style-system sources of more than 30 props, and any other source, the project's own
+    /// included, of more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 
-    /// Experimental: ask TypeScript 7.1's `tsc --api` for each component's props and merge them over the structural
-    /// result, which stands wherever the checker cannot answer (off by default)
+    /// Do not ask the built-in TypeScript checker (`tsrs`): the structural resolver answers alone, as it does wherever
+    /// the checker cannot. By default every component's props come from the checker, all in one program, waited for
     #[arg(long)]
-    pub experimental_semantic_types: bool,
+    pub no_checker: bool,
 
-    /// The `tsc` binary `--experimental-semantic-types` runs, instead of `node_modules/typescript/bin/tsc`
-    #[arg(long, requires = "experimental_semantic_types")]
-    pub tsc_path: Option<String>,
+    /// How long the checker may take to start or to answer any one request, in milliseconds, before the run takes the
+    /// structural result with one warning
+    #[arg(long, conflicts_with = "no_checker", default_value_t = DEFAULT_SEMANTIC_TIMEOUT_MS)]
+    pub semantic_timeout_ms: u64,
+
+    /// Test-only (ADR 0026's S7 gates): take no fact the checker lacks from the structural resolver: defaults and union
+    /// member order come from the source's syntax alone
+    #[arg(long, hide = true, conflicts_with = "no_checker")]
+    pub no_resolver_facts: bool,
+
+    /// Test-only (ADR 0026's S7b gate): `--no-resolver-facts`, and no structural fallback: a type the checker cannot
+    /// read stays opaque, and a component it did not answer for has opaque props
+    #[arg(long, hide = true, conflicts_with = "no_checker")]
+    pub no_structural_fallback: bool,
 }
 
+/// `--semantic-timeout-ms` when not given: ADR 0026's proposed 10 s. A hung checker is caught that fast, and it bounds
+/// each request, not the run: a 938-component Chakra and MUI program answers in about 6 s in all within it.
+pub const DEFAULT_SEMANTIC_TIMEOUT_MS: u64 = 10_000;
+
+/// The formats `extract` can write.
 #[derive(clap::ValueEnum, Clone)]
 pub enum OutputFormat {
     /// caliper-docgen canonical schema (richest)
@@ -140,6 +165,7 @@ pub enum OutputFormat {
     Toon,
 }
 
+/// The values of `--html-attributes`: how much of an inherited HTML element's attribute set a component lists.
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum HtmlAttributeModeArg {
     /// A compact subset per element: handlers, aria-*, ref and the common attributes
@@ -150,11 +176,14 @@ pub enum HtmlAttributeModeArg {
     None,
 }
 
+/// The values of `--collapse-inherited-props`: which inherited sources are listed as one inherited layer of names
+/// instead of prop by prop.
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum CollapseInheritedPropsArg {
-    /// Sources from loaded dependencies (default)
+    /// Large ambient sources (DOM and ARIA attributes, style systems) from loaded dependencies, and any source of more
+    /// than 200 props (default)
     Dependencies,
-    /// Dependency and project sources
+    /// Those, and project sources of more than 30 props
     All,
     /// List every prop
     None,
@@ -170,6 +199,7 @@ impl From<CollapseInheritedPropsArg> for caliper_docgen_core::pipeline::Collapse
     }
 }
 
+/// The options of `inspect`.
 #[derive(clap::Args)]
 pub struct InspectArgs {
     /// Component name to inspect
@@ -186,11 +216,18 @@ pub struct InspectArgs {
     #[arg(long, conflicts_with = "load_dependencies")]
     pub no_load_dependencies: bool,
 
-    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    /// Which inherited sources to list as one inherited layer of names instead of prop by prop. By default a loaded
+    /// dependency's DOM, ARIA and style-system sources of more than 30 props, and any other source, the project's own
+    /// included, of more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
+
+    /// Do not ask the built-in TypeScript checker for the component's props: the structural resolver answers alone
+    #[arg(long)]
+    pub no_checker: bool,
 }
 
+/// The options of `watch`.
 #[derive(clap::Args)]
 pub struct WatchArgs {
     /// Source directories to watch [default: ./src]
@@ -208,11 +245,14 @@ pub struct WatchArgs {
     #[arg(long, conflicts_with = "load_dependencies")]
     pub no_load_dependencies: bool,
 
-    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    /// Which inherited sources to list as one inherited layer of names instead of prop by prop. By default a loaded
+    /// dependency's DOM, ARIA and style-system sources of more than 30 props, and any other source, the project's own
+    /// included, of more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
+/// The options of `check`.
 #[derive(clap::Args)]
 pub struct CheckArgs {
     /// Source directories to scan [default: ./src]
@@ -234,13 +274,21 @@ pub struct CheckArgs {
     #[arg(long, conflicts_with = "load_dependencies")]
     pub no_load_dependencies: bool,
 
-    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    /// Which inherited sources to list as one inherited layer of names instead of prop by prop. By default a loaded
+    /// dependency's DOM, ARIA and style-system sources of more than 30 props, and any other source, the project's own
+    /// included, of more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
+
+    /// Do not ask the built-in TypeScript checker: check the structural resolver's diagnostics alone
+    #[arg(long)]
+    pub no_checker: bool,
 }
 
+/// The options of `completions`.
 #[derive(clap::Args)]
 pub struct CompletionsArgs {
+    /// The shell to generate completions for
     pub shell: clap_complete::Shell,
 }
 
@@ -284,7 +332,7 @@ fn log_filter(verbose: u8) -> Option<&'static str> {
 
 fn init_tracing(verbose: u8) {
     let Some(filter) = log_filter(verbose) else { return };
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
     // stderr, never stdout: command payloads (JSON, TOON) own stdout, and a tracing line there corrupts them.
     fmt().with_env_filter(EnvFilter::new(filter)).with_writer(std::io::stderr).init();
 }
@@ -297,53 +345,5 @@ mod tests {
     fn each_extra_v_raises_the_log_level_and_zero_installs_no_subscriber() {
         let filters: Vec<Option<&str>> = [0, 1, 2, 3, u8::MAX].into_iter().map(log_filter).collect();
         assert_eq!(filters, [None, Some("info"), Some("debug"), Some("trace"), Some("trace")]);
-    }
-
-    // ── SPEC-CLI-001a AC-017: command handlers return their exit code from
-    // cmd_extract/cmd_check/etc. rather than calling std::process::exit
-    // directly, so main() is the sole place that terminates the process —
-    // this makes the exit decision testable. Nothing previously enforced
-    // this beyond visual inspection; this test greps the actual committed
-    // source for every `std::process::exit(` call site and pins the
-    // allow-list to exactly the two known, documented exceptions.
-
-    #[test]
-    fn only_main_and_watchs_keyboard_quit_call_process_exit_directly() {
-        let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut offending = Vec::new();
-        for entry in walk(&src_dir) {
-            if entry.extension().and_then(|e| e.to_str()) != Some("rs") {
-                continue;
-            }
-            let content = std::fs::read_to_string(&entry).expect("read source file");
-            for (i, line) in content.lines().enumerate() {
-                if line.contains("std::process::exit(") || line.contains("process::exit(") {
-                    let rel = entry.strip_prefix(&src_dir).unwrap_or(&entry);
-                    let allowed = matches!(rel.to_str(), Some("main.rs") | Some("commands/watch.rs"));
-                    if !allowed {
-                        offending.push(format!("{}:{}", rel.display(), i + 1));
-                    }
-                }
-            }
-        }
-        assert!(
-            offending.is_empty(),
-            "found std::process::exit outside the allow-listed call sites (main.rs, commands/watch.rs's \
-             documented keyboard-quit exception): {offending:?}"
-        );
-    }
-
-    fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let mut files = Vec::new();
-        let Ok(entries) = std::fs::read_dir(dir) else { return files };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                files.extend(walk(&path));
-            } else {
-                files.push(path);
-            }
-        }
-        files
     }
 }

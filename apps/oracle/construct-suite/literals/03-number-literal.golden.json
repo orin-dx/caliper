@@ -1,0 +1,28 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "42",
+        "of": "number"
+      }
+    ]
+  },
+  "text": "42 | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/03-number-literal.tsx"
+    },
+    "order": null
+  }
+}

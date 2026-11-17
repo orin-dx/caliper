@@ -1,0 +1,160 @@
+[
+  {
+    "why": "a plain component",
+    "name": "Button",
+    "file": "/r/src/Button.tsx",
+    "props": { "size": { "parent": "/r/src/Button.tsx", "type": "'sm' | 'lg'" } },
+    "expected": null
+  },
+  {
+    "why": "most props are members of a lib type: the parameter is a string, not an object of props",
+    "name": "getMimeTypeLabel",
+    "file": "/r/src/PromptField.tsx",
+    "props": {
+      "charAt": { "parent": "/r/node_modules/typescript/lib/lib.es5.d.ts", "type": "(pos: number) => string" },
+      "length": { "parent": "/r/node_modules/typescript/lib/lib.es5.d.ts", "type": "number" },
+      "label": { "parent": "/r/src/PromptField.tsx", "type": "string" }
+    },
+    "expected": "lib_members"
+  },
+  {
+    "why": "the 7.1 checker's lib files are in its platform package, not in `typescript`",
+    "name": "pxToRem",
+    "file": "/r/src/progress-utils.tsx",
+    "props": {
+      "toFixed": {
+        "parent": "/r/node_modules/.pnpm/@typescript+typescript-darwin-arm64@7.1.0-beta/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es5.d.ts",
+        "type": "(fractionDigits?: number) => string"
+      },
+      "toString": {
+        "parent": "/r/node_modules/.pnpm/@typescript+typescript-linux-x64-gnu@7.1.0-beta/node_modules/@typescript/typescript-linux-x64-gnu/lib/lib.es5.d.ts",
+        "type": "() => string"
+      }
+    },
+    "expected": "lib_members"
+  },
+  {
+    "why": "a project file called lib.something.d.ts under a lib directory is the project's",
+    "name": "Meter",
+    "file": "/r/src/Meter.tsx",
+    "props": { "x": { "parent": "/r/src/lib/lib.meter.d.ts", "type": "number" } },
+    "expected": null
+  },
+  {
+    "why": "exactly half in a lib file is not more than half",
+    "name": "Widget",
+    "file": "/r/src/Widget.tsx",
+    "props": {
+      "length": { "parent": "/r/node_modules/typescript/lib/lib.es5.d.ts", "type": "number" },
+      "label": { "parent": "/r/src/Widget.tsx", "type": "string" }
+    },
+    "expected": null
+  },
+  {
+    "why": "a hook, even one that takes an object",
+    "name": "useButton",
+    "file": "/r/src/useButton.tsx",
+    "props": { "isDisabled": { "parent": "/r/src/useButton.tsx", "type": "boolean" } },
+    "expected": "hook"
+  },
+  {
+    "why": "a hook named with a digit after use",
+    "name": "use3D",
+    "file": "/r/src/use3D.tsx",
+    "props": { "depth": { "parent": "/r/src/use3D.tsx", "type": "number" } },
+    "expected": "hook"
+  },
+  {
+    "why": "use followed by a lowercase letter is a word, not a hook",
+    "name": "Used",
+    "file": "/r/src/Used.tsx",
+    "props": { "x": { "parent": "/r/src/Used.tsx", "type": "number" } },
+    "expected": null
+  },
+  {
+    "why": "only a value and children, both from @types/react: a context's Provider",
+    "name": "FormContext",
+    "file": "/r/src/FormContext.tsx",
+    "props": {
+      "value": { "parent": "/r/node_modules/@types/react/index.d.ts", "type": "unknown" },
+      "children": { "parent": "/r/node_modules/@types/react/index.d.ts", "type": "ReactNode" }
+    },
+    "expected": "context_value"
+  },
+  {
+    "why": "a value of the project's own is a prop",
+    "name": "Slider",
+    "file": "/r/src/Slider.tsx",
+    "props": { "value": { "parent": "/r/src/Slider.tsx", "type": "number" } },
+    "expected": null
+  },
+  {
+    "why": "a lowercase name that is neither the file's name nor takes a tag's attributes",
+    "name": "actionGroupStyle",
+    "file": "/r/src/ActionButtonGroup.tsx",
+    "props": { "size": { "parent": "/r/src/ActionButtonGroup.tsx", "type": "string" } },
+    "expected": "not_jsx"
+  },
+  {
+    "why": "a lowercase name that is the file's own name is what RDT calls a default export",
+    "name": "divider",
+    "file": "/r/src/Divider.tsx",
+    "props": { "size": { "parent": "/r/src/Divider.tsx", "type": "string" } },
+    "expected": null
+  },
+  {
+    "why": "a lowercase name that is the directory's name",
+    "name": "card",
+    "file": "/r/src/card/index.tsx",
+    "props": { "title": { "parent": "/r/src/card/index.tsx", "type": "string" } },
+    "expected": null
+  },
+  {
+    "why": "a file name with a dotted suffix is read by its last part, as the weekly's norm_name does",
+    "name": "story",
+    "file": "/r/src/Button.story.tsx",
+    "props": { "title": { "parent": "/r/src/Button.story.tsx", "type": "string" } },
+    "expected": null
+  },
+  {
+    "why": "a lowercase name that takes a prop of @types/react is a tag's own",
+    "name": "div",
+    "file": "/r/src/primitives.tsx",
+    "props": { "className": { "parent": "/r/node_modules/@types/react/index.d.ts", "type": "string" } },
+    "expected": null
+  },
+  {
+    "why": "every prop is a Promise: a router hands them over",
+    "name": "Page",
+    "file": "/r/app/page.tsx",
+    "props": {
+      "params": { "parent": "/r/app/page.tsx", "type": "Promise<{ id: string }>" },
+      "searchParams": { "parent": "/r/app/page.tsx", "type": "Promise<{}>" }
+    },
+    "expected": "promise_props"
+  },
+  {
+    "why": "one prop that is not a Promise keeps the component",
+    "name": "Panel",
+    "file": "/r/app/Panel.tsx",
+    "props": {
+      "params": { "parent": "/r/app/Panel.tsx", "type": "Promise<{ id: string }>" },
+      "title": { "parent": "/r/app/Panel.tsx", "type": "string" }
+    },
+    "expected": null
+  },
+  {
+    "why": "a prop without a declaration path counts as declared nowhere",
+    "name": "Ghost",
+    "file": "/r/src/Ghost.tsx",
+    "props": { "x": { "type": "number" } },
+    "expected": null
+  },
+  {
+    "why": "the rules are tried in order: lib members come before the hook's name",
+    "name": "useThing",
+    "file": "/r/src/thing.tsx",
+    "props": { "x": { "parent": "/r/node_modules/typescript/lib/lib.dom.d.ts", "type": "Element" } },
+    "expected": "lib_members"
+  }
+]

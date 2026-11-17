@@ -4,8 +4,8 @@ use camino::Utf8Path;
 
 use crate::types::*;
 
-use super::collected::resolve_collected_type;
 use super::ResolutionContext;
+use super::collected::resolve_collected_type;
 
 pub(super) fn resolve_union(
     members: &[CollectedType],
@@ -157,8 +157,29 @@ pub(super) fn resolve_indexed_access(
     // The member as its declaration reads, ancestors and type arguments included: React's `CSSProperties` reaches
     // csstype's `Property.ZIndex` when dependencies are loaded.
     if !key_str.is_empty() {
-        if let Some(found) = super::evaluate::member_shared(obj, key_str, consuming_file, ctx, 0) {
-            return resolve_collected_type(&found.0, &found.1, ctx, state, depth + 1);
+        // The evaluator reads names without a scope: an object named for a declaration local to the scope this is
+        // written in is handed over under the name that declaration is stored under.
+        let local;
+        let located = match (obj, state.declared_in.as_deref()) {
+            (CollectedType::Named { name, args }, Some(scope)) => {
+                match ctx.named_types.local_interface_key(consuming_file, name, scope) {
+                    Some(stored) => {
+                        local = CollectedType::Named { name: stored.into(), args: args.clone() };
+                        &local
+                    }
+                    None => obj,
+                }
+            }
+            _ => obj,
+        };
+        if let Some((found, scope)) = super::evaluate::member_declared(located, key_str, consuming_file, ctx, 0) {
+            // The member's type is read where its declaration is, not where the access is written.
+            let site = scope.as_ref().map(|scope| state.enter_declared_in(scope));
+            let resolved = resolve_collected_type(&found.0, &found.1, ctx, state, depth + 1);
+            if let Some(site) = site {
+                state.leave_declared_in(site);
+            }
+            return resolved;
         }
     }
 
@@ -178,6 +199,14 @@ pub(super) fn resolve_indexed_access(
             | "tabSize"
             | "animationIterationCount",
         ) => Some(PropType::Number),
+        // React instantiates csstype's lengths as `string | number`.
+        (
+            "CSSProperties" | "React.CSSProperties",
+            "zoom" | "width" | "height" | "minWidth" | "minHeight" | "maxWidth" | "maxHeight" | "top" | "right"
+            | "bottom" | "left" | "margin" | "marginTop" | "marginRight" | "marginBottom" | "marginLeft" | "padding"
+            | "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft" | "gap" | "rowGap" | "columnGap"
+            | "fontSize" | "borderRadius" | "borderWidth",
+        ) => Some(PropType::Union(vec![PropType::String, PropType::Number])),
         ("CSSProperties" | "React.CSSProperties", _) if !key_str.is_empty() => Some(PropType::String),
         (
             "HTMLAttributes" | "React.HTMLAttributes" | "DOMAttributes" | "React.DOMAttributes",
@@ -207,20 +236,20 @@ pub(super) fn resolve_indexed_access(
 
     // Try to resolve the object type and look for the key.
     let obj_resolved = resolve_collected_type(obj, consuming_file, ctx, state, depth + 1);
-    if let PropType::Object(fields) = &obj_resolved {
-        if let Some(field) = fields.iter().find(|f| f.is_member() && f.name == key_str) {
-            return field.prop_type.clone();
-        }
+    if let PropType::Object(fields) = &obj_resolved
+        && let Some(field) = fields.iter().find(|f| f.is_member() && f.name == key_str)
+    {
+        return field.prop_type.clone();
     }
 
     // TypeScript resolves the object type of an indexed access by the one path every reference to it takes, then reads
     // the property from the type that gave (`getIndexedAccessType`). The members of a named type are its props chain,
     // the one an `extends` of the same type would read: `ComponentPropsWithoutRef<typeof Tooltip>` is `Tooltip`'s props
     // there, so it is here.
-    if let (CollectedType::Named { name, args }, false) = (obj, key_str.is_empty()) {
-        if let Some(found) = read_from_props_chain(name, args, key_str, consuming_file, ctx, state) {
-            return found;
-        }
+    if let (CollectedType::Named { name, args }, false) = (obj, key_str.is_empty())
+        && let Some(found) = read_from_props_chain(name, args, key_str, consuming_file, ctx, state)
+    {
+        return found;
     }
 
     let expression = format!("{}[{}]", obj.to_raw_string(), key.to_raw_string());

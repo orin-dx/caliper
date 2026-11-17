@@ -7,10 +7,11 @@ use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::collected::{
-    CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, EnumEntry, EnumValue, FunctionResult,
-    ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
+    CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, DeclarationScope, EnumEntry, EnumValue,
+    FunctionResult, ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
 };
 use super::diagnostic::Diagnostic;
+use super::scope::{TypeScope, is_marked_placeholder};
 
 // ─── ResolveState ─────────────────────────────────────────────────────────────
 
@@ -59,18 +60,29 @@ pub(crate) struct ResolveState {
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// Diagnostics of replayed or recorded interface chains, shared with the recording instead of copied.
     pub(crate) shared_diagnostics: Vec<Arc<[Diagnostic]>>,
-    /// Declared generic type parameter names (`TData`, `T`, `U`, ...) seen so far
-    /// while resolving this component — accumulated as interfaces/aliases with
-    /// their own type parameters are entered, never removed. A bare reference to
-    /// one of these names is an expected, unexpandable generic placeholder, not
-    /// a broken/missing type — see `resolver::named::resolve_named`.
-    pub(crate) in_scope_type_params: FxHashSet<CompactString>,
+    /// The generic type parameters (`TData`, `T`, `U`, ...) that bind a name where resolution is now: the component's
+    /// own at the start, then replaced by a declaration's own while its body is read and by the writer's while a type
+    /// argument is (`enter_scope`). A bare reference to one of these names is an expected, unexpandable generic
+    /// placeholder, not a broken/missing type, and it shadows any declaration of the same name — see
+    /// `resolver::named::resolve_named`.
+    pub(crate) scope: TypeScope,
+    /// The type parameters of the function a factory call builds its component with, which stay in scope whatever
+    /// declaration is read: a declaration local to that function (`function make<T>() { interface Props { value: T } … }`)
+    /// names them, and `enter_scope` replaces `scope` only.
+    pub(crate) closure: TypeScope,
+    /// Where the declaration being read sits when it is local to a function body, block or `switch` case: a bare
+    /// reference finds the nearest declaration of its name from there outward. `None` at module level.
+    pub(crate) declared_in: Option<Arc<DeclarationScope>>,
     /// Set when an alias is shown by its name because its expansion holds a type the resolver can't evaluate, so an
     /// alias whose expansion contains that one is shown by name too — see `resolver::named::alias_display`.
     pub(crate) named_unevaluated: bool,
     /// Expand every source, collapsing none (collapse): set while resolving `Pick`'s base or a `keyof` operand, whose
     /// props are selected or counted by name. Interface chains are not shared while it is set.
     pub(crate) expand_all: bool,
+    /// The keys the `Omit`s around the type being read take away: a source collapses by the members that reach the
+    /// component (`CollapseInheritedProps::collapses`), so a source an `Omit` leaves small is listed and every other
+    /// source of the same base still collapses. `None` when no `Omit` is open.
+    pub(crate) omitted: Option<Arc<rustc_hash::FxHashSet<String>>>,
     /// Only prop names are wanted (a `keyof` operand): members' types are not resolved. Interface chains recorded with
     /// it set answer only states with it set.
     pub(crate) keys_only: bool,
@@ -87,14 +99,20 @@ pub(crate) struct StateReads {
     pub(crate) visited: Vec<(u32, bool)>,
     /// `named_in_progress` keys looked up, each with whether it was already there.
     pub(crate) named: Vec<(u32, bool)>,
-    /// In-scope type parameter names looked up, each with whether it was in scope.
+    /// Type parameter names looked up in the scope the recording started under, each with whether it was in scope.
     pub(crate) in_scope: Vec<(CompactString, bool)>,
+    /// A type argument was bound (`mark_args`) while the scope the recording started under was empty
+    /// and so left unmarked; only a state with an empty scope binds the same.
+    pub(crate) needs_empty_scope: bool,
+    /// How many scopes the recording itself entered and has not left. A lookup under one of them says nothing about the
+    /// state the recording started from, so it is not a read.
+    pub(crate) entered_scopes: u32,
     /// Prop names whose component default was looked up, with the default found.
     pub(crate) defaults: Vec<(CompactString, Option<(std::string::String, bool)>)>,
+    /// Prop names asked whether the component's body reads them, with the answer.
+    pub(crate) body_reads: Vec<(CompactString, bool)>,
     /// Cycle-set keys this state itself added (a branch's own additions are dropped with the branch).
     pub(crate) visited_added: Vec<u32>,
-    /// In-scope type parameters this state itself added.
-    pub(crate) in_scope_added: Vec<CompactString>,
 }
 
 impl StateReads {
@@ -106,11 +124,15 @@ impl StateReads {
             self.visited.extend(other.visited.iter().cloned());
             self.named.extend(other.named.iter().cloned());
         }
-        self.in_scope.extend(other.in_scope.iter().cloned());
+        // Under a scope this recording entered, the other's lookups are about that scope, not the starting state's.
+        if self.entered_scopes == 0 {
+            self.in_scope.extend(other.in_scope.iter().cloned());
+            self.needs_empty_scope |= other.needs_empty_scope;
+        }
         self.defaults.extend(other.defaults.iter().cloned());
+        self.body_reads.extend(other.body_reads.iter().cloned());
         if with_effects {
             self.visited_added.extend(other.visited_added.iter().cloned());
-            self.in_scope_added.extend(other.in_scope_added.iter().cloned());
         }
     }
 
@@ -121,11 +143,14 @@ impl StateReads {
             move_all(&mut self.visited, &mut other.visited);
             move_all(&mut self.named, &mut other.named);
         }
-        move_all(&mut self.in_scope, &mut other.in_scope);
+        if self.entered_scopes == 0 {
+            move_all(&mut self.in_scope, &mut other.in_scope);
+            self.needs_empty_scope |= other.needs_empty_scope;
+        }
         move_all(&mut self.defaults, &mut other.defaults);
+        move_all(&mut self.body_reads, &mut other.body_reads);
         if with_effects {
             move_all(&mut self.visited_added, &mut other.visited_added);
-            move_all(&mut self.in_scope_added, &mut other.in_scope_added);
         }
     }
 }
@@ -164,9 +189,12 @@ impl ResolveState {
             depth_high: 0,
             diagnostics: Vec::new(),
             shared_diagnostics: Vec::new(),
-            in_scope_type_params: self.in_scope_type_params.clone(),
+            scope: self.scope.clone(),
+            closure: self.closure.clone(),
+            declared_in: self.declared_in.clone(),
             named_unevaluated: false,
             expand_all: self.expand_all,
+            omitted: self.omitted.clone(),
             keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
         }
@@ -176,8 +204,11 @@ impl ResolveState {
     /// of a type, whose cycle sets must not be the caller's. Merge it back with `absorb_detached`.
     pub(crate) fn detached(&self) -> ResolveState {
         ResolveState {
-            in_scope_type_params: self.in_scope_type_params.clone(),
+            scope: self.scope.clone(),
+            closure: self.closure.clone(),
+            declared_in: self.declared_in.clone(),
             expand_all: self.expand_all,
+            omitted: self.omitted.clone(),
             keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
             ..Self::default()
@@ -240,24 +271,76 @@ impl ResolveState {
         self.named_in_progress.remove(&key_id(key));
     }
 
-    /// Whether `name` is a type parameter in scope.
+    /// Whether `name` is a type parameter in scope: the innermost binding of that name, shadowing any declaration.
     pub(crate) fn has_type_param(&mut self, name: &str) -> bool {
-        let found = self.in_scope_type_params.contains(name);
-        if let Some(reads) = self.reads.as_mut() {
+        // A marked name is a placeholder wherever it is read, whatever scope that is.
+        if is_marked_placeholder(name) {
+            return true;
+        }
+        let found = self.binds(name);
+        if let Some(reads) = self.reads.as_mut()
+            && reads.entered_scopes == 0
+        {
             reads.in_scope.push((CompactString::from(name), found));
         }
         found
     }
 
-    /// Bring type parameters into scope.
-    pub(crate) fn add_type_params<'p>(&mut self, names: impl IntoIterator<Item = &'p CompactString>) {
-        for name in names {
-            if self.in_scope_type_params.insert(name.clone()) {
-                if let Some(reads) = self.reads.as_mut() {
-                    reads.in_scope_added.push(name.clone());
-                }
-            }
+    /// Whether `name` is bound by the scope or the closure.
+    pub(crate) fn binds(&self, name: &str) -> bool {
+        self.scope.contains(name) || self.closure.contains(name)
+    }
+
+    /// Whether nothing is in scope.
+    pub(crate) fn binds_nothing(&self) -> bool {
+        self.scope.is_empty() && self.closure.is_empty()
+    }
+
+    /// Read what follows under `scope` instead of the current one; give the scope it replaces back to `leave_scope`.
+    /// A declaration's body is read under its own parameters only, and a type argument under those of the place that
+    /// wrote it, so the scopes replace each other instead of stacking.
+    #[must_use]
+    pub(crate) fn enter_scope(&mut self, scope: TypeScope) -> TypeScope {
+        if let Some(reads) = self.reads.as_mut() {
+            reads.entered_scopes += 1;
         }
+        std::mem::replace(&mut self.scope, scope)
+    }
+
+    /// `enter_scope` for a state nothing returns to the old scope of: a branch made for one resolution and dropped.
+    pub(crate) fn bind_scope(&mut self, scope: TypeScope) {
+        drop(self.enter_scope(scope));
+    }
+
+    /// Read under `previous` again, the scope `enter_scope` returned.
+    pub(crate) fn leave_scope(&mut self, previous: TypeScope) {
+        if let Some(reads) = self.reads.as_mut() {
+            reads.entered_scopes = reads.entered_scopes.saturating_sub(1);
+        }
+        self.scope = previous;
+    }
+
+    /// Read what follows as written in `scope`; give the scope it replaces back to `leave_declared_in`. A declaration is
+    /// read in the scope it sits in, whoever refers to it.
+    #[must_use]
+    pub(crate) fn enter_declared_in(&mut self, scope: &DeclarationScope) -> Option<Arc<DeclarationScope>> {
+        let scope = scope.local_key_suffix().map(|_| Arc::new(scope.clone()));
+        std::mem::replace(&mut self.declared_in, scope)
+    }
+
+    /// Read in `previous` again, the scope `enter_declared_in` returned.
+    pub(crate) fn leave_declared_in(&mut self, previous: Option<Arc<DeclarationScope>>) {
+        self.declared_in = previous;
+    }
+
+    /// Whether the component's body reads, destructures or passes `name` (`ComponentMapping::body`): a collapsed source
+    /// keeps such a member as a typed prop, so the row relevance puts forward for it has a type (ADR 0028, A2).
+    pub(crate) fn body_reads(&mut self, mapping: &ComponentMapping, name: &str) -> bool {
+        let read = body_reads(mapping, name);
+        if let Some(reads) = self.reads.as_mut() {
+            reads.body_reads.push((CompactString::from(name), read));
+        }
+        read
     }
 
     /// The component's default for prop `name`.
@@ -268,6 +351,11 @@ impl ResolveState {
         }
         found
     }
+}
+
+/// Whether `mapping`'s body names `name` ([`ResolveState::body_reads`]).
+pub(crate) fn body_reads(mapping: &ComponentMapping, name: &str) -> bool {
+    mapping.body.as_ref().is_some_and(|body| body.reads.iter().any(|read| read == name))
 }
 
 // ─── GlobalSourceData ─────────────────────────────────────────────────────────
@@ -297,6 +385,13 @@ pub struct GlobalSourceData {
     /// Key: "${absolute_file_path}:${name}"
     pub enums: FxHashMap<String, Vec<EnumEntry>>,
 
+    /// The keys in `enums` written by an `enum` declaration — see `SourceData::enum_declarations`.
+    pub enum_declarations: FxHashMap<String, DeclarationScope>,
+
+    /// The scope of each type alias declared in a function body, block or `switch` case, across all files — see
+    /// `SourceData::type_alias_scopes`; an alias anywhere else has no entry.
+    pub type_alias_scopes: FxHashMap<String, DeclarationScope>,
+
     /// All `const X = [...] as const` array literals across all files — see
     /// `SourceData::const_arrays`. Key: "${absolute_file_path}:${name}"
     pub const_arrays: FxHashMap<String, Vec<EnumValue>>,
@@ -317,6 +412,10 @@ pub struct GlobalSourceData {
     /// Type parameter defaults across all files — see `SourceData::type_param_defaults`.
     /// Key: "${absolute_file_path}:${name}"
     pub type_param_defaults: FxHashMap<String, Vec<Option<CollectedType>>>,
+
+    /// The JSX each file writes outside every component body (`SourceData::jsx_usages`), for call-site evidence
+    /// (ADR 0028). Files that write none have no entry.
+    pub(crate) jsx_usages: FxHashMap<Utf8PathBuf, Vec<crate::types::collected::JsxUsage>>,
 }
 
 impl GlobalSourceData {
@@ -339,12 +438,18 @@ impl GlobalSourceData {
         self.type_alias_params.extend(data.type_alias_params);
         self.interface_type_params.extend(data.interface_type_params);
         self.enums.extend(data.enums);
+        self.enum_declarations.extend(data.enum_declarations);
+        self.type_alias_scopes
+            .extend(data.type_alias_scopes.into_iter().filter(|(_, scope)| scope.local_key_suffix().is_some()));
         self.const_arrays.extend(data.const_arrays);
         self.function_results.extend(data.function_results);
         self.type_param_defaults.extend(data.type_param_defaults);
         self.import_map.insert(file_path.to_owned(), data.imports);
         self.re_export_map.insert(file_path.to_owned(), data.exports);
         self.component_mappings.extend(data.component_mappings);
+        if !data.jsx_usages.is_empty() {
+            self.jsx_usages.insert(file_path.to_owned(), data.jsx_usages);
+        }
     }
 
     /// Remove all entries contributed by `file_path`. Called before re-merging an updated file.
@@ -355,12 +460,15 @@ impl GlobalSourceData {
         self.type_alias_params.retain(|k, _| !k.starts_with(&prefix));
         self.interface_type_params.retain(|k, _| !k.starts_with(&prefix));
         self.enums.retain(|k, _| !k.starts_with(&prefix));
+        self.enum_declarations.retain(|k, _| !k.starts_with(&prefix));
+        self.type_alias_scopes.retain(|k, _| !k.starts_with(&prefix));
         self.const_arrays.retain(|k, _| !k.starts_with(&prefix));
         self.function_results.retain(|k, _| !k.starts_with(&prefix));
         self.type_param_defaults.retain(|k, _| !k.starts_with(&prefix));
         self.import_map.remove(file_path);
         self.re_export_map.remove(file_path);
         self.component_mappings.retain(|m| m.file_path != file_path);
+        self.jsx_usages.remove(file_path);
     }
 }
 
@@ -373,9 +481,11 @@ mod tests {
             visited: vec![(key_id(&format!("{tag}-visited")), true)],
             named: vec![(key_id(&format!("{tag}-named")), false)],
             in_scope: vec![(CompactString::from(format!("{tag}-param")), true)],
+            needs_empty_scope: tag == "theirs",
+            entered_scopes: 0,
             defaults: vec![(CompactString::from(format!("{tag}-prop")), Some(("1".to_owned(), false)))],
+            body_reads: vec![(CompactString::from(format!("{tag}-read")), true)],
             visited_added: vec![key_id(&format!("{tag}-added"))],
-            in_scope_added: vec![CompactString::from(format!("{tag}-param-added"))],
         }
     }
 
@@ -413,8 +523,8 @@ mod tests {
             reads.as_deref(),
             Some(
                 format!(
-                    "StateReads {{ visited: [({id}, false)], named: [], in_scope: [(\"T\", false)], defaults: [], \
-                     visited_added: [], in_scope_added: [] }}"
+                    "StateReads {{ visited: [({id}, false)], named: [], in_scope: [(\"T\", false)], \
+                     needs_empty_scope: false, entered_scopes: 0, defaults: [], body_reads: [], visited_added: [] }}"
                 )
                 .as_str()
             )

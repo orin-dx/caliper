@@ -86,6 +86,7 @@ fn format_component_renders_header_description_props_table_and_inherited_note() 
         )
     };
     let entry = ComponentEntry {
+        relevance: None,
         display_name: "Widget".into(),
         file_path: "src/Widget.tsx".into(),
         description: "A widget.".into(),
@@ -103,6 +104,7 @@ fn format_component_renders_header_description_props_table_and_inherited_note() 
             html_element: Some("button".into()),
             total_props: 0,
             members: vec![],
+            used: Vec::new(),
         }],
         notable_inherited: [(
             "onClick".to_owned(),
@@ -116,6 +118,7 @@ fn format_component_renders_header_description_props_table_and_inherited_note() 
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
         exported: true,
+        exports: Vec::new(),
     };
 
     let lines: Vec<String> = format_component(&entry).iter().map(|line| strip_ansi(line)).collect();

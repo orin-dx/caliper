@@ -16,6 +16,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::cache::DtsCache;
 use crate::dependency_types::{self, Demand, DependencyLayer};
 use crate::named_type_index::NamedTypeIndex;
+use crate::resolver::relevance_inputs::{self, ProjectSites};
 use crate::resolver::{Dependencies, ResolutionContext};
 use crate::types::output::severity_rank;
 use crate::types::*;
@@ -23,7 +24,7 @@ use crate::types::*;
 use super::discover::{discover_files, is_source_file, should_skip};
 
 mod lazy;
-use super::{collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded, IncrementalUpdate};
+use super::{IncrementalUpdate, collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded};
 use crate::types::options::canonicalize_first_src_dir;
 pub use lazy::{ComponentAnswer, ComponentLocation};
 
@@ -99,20 +100,44 @@ pub(crate) struct ComponentId {
     ordinal: u32,
 }
 
-/// A resolved component, the diagnostics its resolution produced, and what that resolution depended on.
+/// A resolved component, the diagnostics its resolution produced, what that resolution depended on, and the relevance
+/// evidence read with it.
 pub(crate) struct Resolved {
     entry: ComponentEntry,
     diagnostics: ResolvedDiagnostics,
     depends_on: Dependencies,
+    evidence: Option<Arc<crate::relevance::Inputs>>,
 }
 
 impl Resolved {
-    /// The entry and diagnostics, moved out when nothing else shares this resolution.
-    fn into_parts(shared: Arc<Resolved>) -> (ComponentEntry, ResolvedDiagnostics) {
+    /// The entry as output, with the `used` lists relevance decides from its evidence and `sites`, the call sites of
+    /// the revision it is published in. The one place an answer becomes output: a kept resolution is decided again
+    /// against each revision's call sites, so an edit to a consumer reaches it without resolving it again.
+    fn answer(&self, sites: &ProjectSites) -> ComponentEntry {
+        let mut entry = self.entry.clone();
+        decide(self.evidence.as_deref(), &mut entry, sites);
+        entry
+    }
+
+    /// [`Resolved::answer`] and the diagnostics, moved out when nothing else shares this resolution.
+    fn into_parts(shared: Arc<Resolved>, sites: &ProjectSites) -> (ComponentEntry, ResolvedDiagnostics) {
         match Arc::try_unwrap(shared) {
-            Ok(resolved) => (resolved.entry, resolved.diagnostics),
-            Err(shared) => (shared.entry.clone(), shared.diagnostics.clone()),
+            Ok(Resolved { mut entry, diagnostics, evidence, .. }) => {
+                decide(evidence.as_deref(), &mut entry, sites);
+                (entry, diagnostics)
+            }
+            Err(shared) => (shared.answer(sites), shared.diagnostics.clone()),
         }
+    }
+
+    /// Whether this kept resolution answers differently against the call sites `after` than against `before`: an edit
+    /// to a consumer re-decides its `used` lists without resolving it again. Decided by [`layers_differ`], the rule an
+    /// eager revision reports a kept component by.
+    fn redecided(&self, before: &ProjectSites, after: &ProjectSites) -> bool {
+        let Some(inputs) = self.evidence.as_deref() else { return false };
+        // The decision reads only the component's own call sites; the same sites decide the same lists.
+        before.get(&inputs.site) != after.get(&inputs.site)
+            && layers_differ(Some(&self.answer(before)), Some(&self.answer(after)))
     }
 
     /// Whether this resolution can differ after `change`.
@@ -121,6 +146,30 @@ impl Resolved {
             || (change.created && self.depends_on.resolves_modules)
             || (change.react_namespace && self.depends_on.reads_augmentations)
             || change.bare_names.iter().any(|name| self.depends_on.bare_names.contains(name.as_str()))
+    }
+}
+
+/// Whether `before` and `after` publish different layers or list different props. Relevance writes the layers'
+/// `used` lists and moves props between the listing and the layers, so this is how a kept resolution's answer can move
+/// between revisions: the one rule both kinds of revision report it by. The listing is compared too, since a prop can
+/// leave it for a layer that already holds its name, which leaves the layers unchanged.
+fn layers_differ(before: Option<&ComponentEntry>, after: Option<&ComponentEntry>) -> bool {
+    let published = |entry: &ComponentEntry| {
+        (
+            entry.inheritance.clone(),
+            entry.props.keys().cloned().collect::<Vec<_>>(),
+            entry.notable_inherited.keys().cloned().collect::<Vec<_>>(),
+        )
+    };
+    before.map(published) != after.map(published)
+}
+
+/// Writes the `used` lists relevance decides for `entry` from its `evidence` and the revision's `sites`; without
+/// evidence (a panic gathering it), none.
+fn decide(evidence: Option<&crate::relevance::Inputs>, entry: &mut ComponentEntry, sites: &ProjectSites) {
+    if let Some(inputs) = evidence {
+        let call_sites = sites.get(&inputs.site).unwrap_or(&crate::relevance::NO_CALL_SITES);
+        crate::relevance::apply(entry, inputs, call_sites);
     }
 }
 
@@ -159,6 +208,8 @@ pub(crate) struct Revision {
     /// The parse-cache save result.
     tail_diagnostics: Vec<Diagnostic>,
     resolved: FxHashMap<ComponentId, Arc<Resolved>>,
+    /// Every component's call sites in this revision, which its answers are decided against when they become output.
+    sites: Arc<ProjectSites>,
     /// The project's source files.
     files: Arc<FxHashSet<Utf8PathBuf>>,
     /// `.d.ts` files the cold run parsed or loaded from the parse cache, and how many the cache answered.
@@ -174,7 +225,7 @@ pub(crate) struct Revision {
 
 /// Frees `value` on another thread. Freeing a large project's parsed data or memos one allocation at a time takes tens
 /// of milliseconds, and the caller only wants what it already took out.
-fn free_in_background<T: Send + 'static>(value: T) {
+pub(super) fn free_in_background<T: Send + 'static>(value: T) {
     let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(value));
     // A failed spawn drops the closure, and the value with it, right here.
     drop(spawned);
@@ -188,6 +239,32 @@ fn component_ids<'g>(
     ordered_ids(global, options)
         .into_iter()
         .filter_map(|(id, index)| Some((id, global.component_mappings.get(index)?)))
+        .collect()
+}
+
+/// The files of the components that export something, in the order the finished output lists them (by key, a name's
+/// first component bare and the rest suffixed with their file as `assemble` does): the root files of the program the
+/// checker is asked in ([`ComponentEntry::exports`] is the mapping's). It is the list `assemble`'s output gives unless
+/// resolution drops a component (an alias or factory result with nothing to document); a caller that starts work on
+/// it must compare it with the output's before using that work.
+fn predicted_root_files(global: &GlobalSourceData, options: &PipelineOptions) -> Vec<Utf8PathBuf> {
+    let mut seen_names: FxHashMap<&str, u32> = FxHashMap::default();
+    let mut keyed: Vec<(String, &Utf8PathBuf, bool)> = Vec::new();
+    for (_, mapping) in component_ids(global, options) {
+        let count = seen_names.entry(mapping.component_name.as_str()).or_insert(0);
+        *count += 1;
+        let key = match *count {
+            1 => mapping.component_name.clone(),
+            _ => format!("{} ({})", mapping.component_name, mapping.file_path),
+        };
+        keyed.push((key, &mapping.file_path, !mapping.exports.is_empty()));
+    }
+    keyed.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut seen: rustc_hash::FxHashSet<&Utf8PathBuf> = rustc_hash::FxHashSet::default();
+    keyed
+        .into_iter()
+        .filter(|(_, file, exported)| *exported && seen.insert(file))
+        .map(|(_, file, _)| file.clone())
         .collect()
 }
 
@@ -219,8 +296,8 @@ fn resolve_all(
     resolve_guarded(&borrowed, ctx)
         .into_iter()
         .zip(mappings)
-        .map(|((entry, diagnostics, depends_on), (id, _))| {
-            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on }))
+        .map(|((entry, diagnostics, depends_on, evidence), (id, _))| {
+            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, evidence }))
         })
         .collect()
 }
@@ -288,7 +365,6 @@ impl Indexed {
             }
             let mut diags: Vec<Diagnostic> = io_diag.into_iter().collect();
             diags.append(&mut data.diagnostics);
-            diags.extend(options.plugins.run_on_file_extracted(&path, &mut data));
             if !diags.is_empty() {
                 file_diagnostics.insert(path.clone(), diags);
             }
@@ -381,7 +457,6 @@ impl Revision {
                 let mut data = crate::extractor::parse_file(changed, &source);
                 let mut diags: Vec<Diagnostic> = io_diag.into_iter().collect();
                 diags.append(&mut data.diagnostics);
-                diags.extend(options.plugins.run_on_file_extracted(changed, &mut data));
                 if !diags.is_empty() {
                     file_diagnostics.insert(changed.to_owned(), diags);
                 }
@@ -420,9 +495,10 @@ impl Revision {
 impl Revision {
     /// Discover, parse, merge, resolve and assemble every source file.
     pub(crate) fn cold(options: &PipelineOptions, id: u64) -> Revision {
-        let mut revision = Revision::resolve_cold(options, id);
-        let (output, keys) = revision
-            .assemble(options, |id| revision.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
+        let mut revision = Revision::resolve_cold(options, id, None);
+        let (output, keys) = revision.assemble(options, |id| {
+            revision.resolved.get(id).map(|r| (r.answer(&revision.sites), r.diagnostics.clone()))
+        });
         revision.output = Arc::new(output);
         revision.keys = keys;
         revision
@@ -430,15 +506,29 @@ impl Revision {
 
     /// The output of a cold run that is never updated, so each entry moves into it instead of being copied.
     pub(crate) fn cold_output(options: &PipelineOptions) -> ExtractionOutput {
-        let mut revision = Revision::resolve_cold(options, 0);
+        Revision::cold_output_early(options, None)
+    }
+
+    /// [`Revision::cold_output`], handing `on_roots` the checker program's root files as the parse has them, as soon as
+    /// the project is parsed and merged and before the rest of the pass ([`predicted_root_files`]).
+    pub(crate) fn cold_output_early(
+        options: &PipelineOptions,
+        on_roots: Option<Box<dyn FnOnce(Vec<Utf8PathBuf>) + '_>>,
+    ) -> ExtractionOutput {
+        let mut revision = Revision::resolve_cold(options, 0, on_roots);
         let mut resolved = std::mem::take(&mut revision.resolved);
-        let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(Resolved::into_parts));
+        let sites = revision.sites.clone();
+        let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(|r| Resolved::into_parts(r, &sites)));
         free_in_background(revision);
         output
     }
 
     /// Everything [`Revision::cold`] does except assembling the output.
-    fn resolve_cold(options: &PipelineOptions, id: u64) -> Revision {
+    fn resolve_cold(
+        options: &PipelineOptions,
+        id: u64,
+        on_roots: Option<Box<dyn FnOnce(Vec<Utf8PathBuf>) + '_>>,
+    ) -> Revision {
         let Indexed {
             start,
             cache,
@@ -450,6 +540,9 @@ impl Revision {
             react_types,
             file_demands,
         } = Indexed::build(options);
+        if let Some(on_roots) = on_roots {
+            on_roots(predicted_root_files(&global, options));
+        }
         let demands: Vec<Demand> = file_demands.into_iter().flat_map(|(_, demands)| demands).collect();
 
         let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
@@ -468,6 +561,7 @@ impl Revision {
         .with_react_types(react_types.clone());
         lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
+        let sites = relevance_inputs::project_sites(&ctx);
         // Every component is resolved, so the memos are garbage: free them beside output assembly. A failed spawn
         // drops the context on this thread instead.
         drop(std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(ctx)));
@@ -494,6 +588,7 @@ impl Revision {
             lib_diagnostics,
             tail_diagnostics,
             resolved,
+            sites,
             files,
             dts_files_parsed,
             dts_cache_hits,
@@ -510,7 +605,7 @@ impl Revision {
         if self.lazy.is_some() {
             return self.next_lazy(options, changed);
         }
-        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns) {
+        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns, self.source_files()) {
             return None;
         }
         let start = Instant::now();
@@ -534,6 +629,8 @@ impl Revision {
         .with_dependencies(dependencies.clone())
         .with_react_types(self.react_types.clone());
         let fresh = resolve_all(&stale, &ctx);
+        // Call sites are counted again for every revision: an edit to any consumer can change them.
+        let sites = relevance_inputs::project_sites(&ctx);
         let mut resolved: FxHashMap<ComponentId, Arc<Resolved>> =
             kept.into_iter().filter_map(|(id, _)| self.resolved.get(&id).map(|r| (id, r.clone()))).collect();
         let fresh_ids: Vec<ComponentId> = fresh.keys().cloned().collect();
@@ -551,6 +648,7 @@ impl Revision {
             lib_diagnostics: self.lib_diagnostics.clone(),
             tail_diagnostics: self.tail_diagnostics.clone(),
             resolved,
+            sites,
             files: Arc::new(files),
             dts_files_parsed: self.dts_files_parsed,
             dts_cache_hits: self.dts_cache_hits,
@@ -560,17 +658,22 @@ impl Revision {
             lazy: None,
         };
         let (output, keys) =
-            next.assemble(options, |id| next.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
+            next.assemble(options, |id| next.resolved.get(id).map(|r| (r.answer(&next.sites), r.diagnostics.clone())));
         next.output = Arc::new(output);
         next.keys = keys;
 
-        // Updated: every key whose component this revision re-resolved, plus every kept component whose key moved (a
-        // same-named component elsewhere appeared or disappeared, so the bare and disambiguated keys swapped).
+        // Updated: every key whose component this revision re-resolved, every kept component whose key moved (a
+        // same-named component elsewhere appeared or disappeared, so the bare and disambiguated keys swapped), and every
+        // kept component whose layers' `used` lists the revision's call sites changed.
         let fresh: FxHashSet<&ComponentId> = fresh_ids.iter().collect();
         let mut updated_keys: Vec<&String> = next
             .keys
             .iter()
-            .filter(|(id, key)| fresh.contains(id) || self.keys.get(*id) != Some(*key))
+            .filter(|(id, key)| {
+                fresh.contains(id)
+                    || self.keys.get(*id) != Some(*key)
+                    || layers_differ(self.output.components.get(*key), next.output.components.get(*key))
+            })
             .map(|(_, key)| key)
             .collect();
         updated_keys.sort();
@@ -635,12 +738,15 @@ impl Revision {
             diagnostics.extend(diags.iter().cloned(), None);
         }
         diagnostics.extend(self.lib_diagnostics.iter().cloned(), None);
+        if let Some(layer) = &self.dependencies {
+            diagnostics.extend(layer.panic_diagnostics(), None);
+        }
 
         let mut components = BTreeMap::new();
         let mut keys = FxHashMap::default();
         let mut seen_names: FxHashMap<String, u32> = FxHashMap::default();
         for (id, _) in component_ids(&self.global, options) {
-            let Some((mut entry, resolved_diagnostics)) = take(&id) else { continue };
+            let Some((entry, resolved_diagnostics)) = take(&id) else { continue };
             // An alias of an imported component whose package isn't loaded, or a call whose result is no component,
             // has nothing to document.
             if matches!(entry.detected_by, DetectionRule::ImportedMemberAlias | DetectionRule::FactoryResult)
@@ -654,7 +760,6 @@ impl Revision {
             *count += 1;
             // The first occurrence of a name keeps it bare; later ones take their file path, which is unique per file.
             let key = if *count == 1 { base_name } else { format!("{} ({})", base_name, entry.file_path) };
-            diagnostics.extend(options.plugins.run_on_component_resolved(&mut entry), Some(&key));
             let new_file_path = entry.file_path.clone();
             if let Some(previous) = components.insert(key.clone(), entry) {
                 diagnostics.add(
@@ -816,10 +921,8 @@ fn parse_source_file(path: &Utf8Path, cache: &DtsCache) -> (SourceData, Option<D
         Ok(s) => (s, None),
         Err(e) => (String::new(), Some(Diagnostic::io_read_error(path, &e))),
     };
-    if is_dts {
-        if let Some(cached) = cache.get(path, &source) {
-            return (cached, io_diag);
-        }
+    if is_dts && let Some(cached) = cache.get(path, &source) {
+        return (cached, io_diag);
     }
     let data = crate::extractor::parse_file(path, &source);
     if is_dts {
@@ -833,12 +936,14 @@ fn source_dir_diagnostics(options: &PipelineOptions) -> Vec<Diagnostic> {
     let missing: Vec<&Utf8PathBuf> = options.src_dirs.iter().filter(|dir| !dir.as_std_path().is_dir()).collect();
     let help = "Check --src (or docgen.config.ts srcDirs) for a typo'd or stale path.";
     if options.src_dirs.is_empty() {
-        return vec![Diagnostic::new(
-            DiagnosticSeverity::Error,
-            DiagnosticCode::IoError,
-            "No source directories configured — src_dirs is empty",
-        )
-        .with_help("Set --src (or docgen.config.ts srcDirs) to at least one directory to scan.")];
+        return vec![
+            Diagnostic::new(
+                DiagnosticSeverity::Error,
+                DiagnosticCode::IoError,
+                "No source directories configured — src_dirs is empty",
+            )
+            .with_help("Set --src (or docgen.config.ts srcDirs) to at least one directory to scan."),
+        ];
     }
     if missing.len() == options.src_dirs.len() {
         let mut diag = Diagnostic::new(

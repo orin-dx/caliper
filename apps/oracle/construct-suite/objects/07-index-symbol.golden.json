@@ -1,0 +1,32 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [],
+        "index": true,
+        "indexValue": {
+          "k": "prim",
+          "name": "number"
+        }
+      }
+    ]
+  },
+  "text": "{ [key: symbol]: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/07-index-symbol.tsx"
+    },
+    "order": null
+  }
+}

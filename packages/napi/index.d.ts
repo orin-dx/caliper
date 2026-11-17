@@ -15,6 +15,11 @@ export interface InheritedLayer {
   totalProps: number
   /** For a collapsed source, the names of the props it declares. Absent when the layer's props are expanded. */
   members?: string[]
+  /**
+   * The members of a collapsed layer relevance evidence puts forward (ADR 0028): ambient members consumers pass at the
+   * call-site floor or the body reads, in the order of `members`. Absent when none is.
+   */
+  used?: string[]
 }
 
 /** An inheritance layer in the canonical JSON: `omitted` is the id of a list in the output's `nameLists`. */
@@ -43,7 +48,7 @@ export type OpaqueReason =
   | { type: 'pandaCodegenMissing' }
   | { type: 'depthExceeded' }
   | { type: 'indexedAccess'; expression: string }
-  | { type: 'templateLiteral'; expression: string }
+  | { type: 'unsupportedExpression' }
 
 export interface FunctionParam {
   /** `null` for a destructured parameter. */
@@ -66,6 +71,26 @@ export interface ObjectField {
   indexKey?: PropType
 }
 
+/** One element of a tuple: `modifier` is absent for a required element. A `rest` element's `type` is the type of each
+ * element it collects (`number` in `...number[]`); a `variadic` one's is the spread type as written (`T` in `...T`). */
+export interface TupleElement {
+  type: PropType
+  /** The element's label, `head` in `[head: string]`. */
+  label?: string
+  modifier?: 'optional' | 'rest' | 'variadic'
+}
+
+/** One part of a template literal pattern: text as written, or the type in a `${…}` hole. */
+export type TemplatePart = { text: string } | { type: PropType }
+
+/** A call signature, or with `construct: true` a construct signature `new (…): T`. */
+export interface CallSignature {
+  construct?: true
+  typeParams: string[]
+  params: FunctionParam[]
+  returnType: PropType
+}
+
 export type PropType =
   | { kind: 'string' }
   | { kind: 'number' }
@@ -76,6 +101,7 @@ export type PropType =
   | { kind: 'never' }
   | { kind: 'unknown' }
   | { kind: 'void' }
+  | { kind: 'bigint' }
   | { kind: 'reactNode' }
   | { kind: 'cssProperties' }
   | { kind: 'elementType' }
@@ -83,13 +109,30 @@ export type PropType =
   | { kind: 'stringLiteral'; value: string }
   | { kind: 'numberLiteral'; value: number }
   | { kind: 'boolLiteral'; value: boolean }
+  /** `value` in base 10, with a leading `-` when negative and no `n`. */
+  | { kind: 'bigintLiteral'; value: string }
+  /** `typeof name` for a value declared `unique symbol`. */
+  | { kind: 'uniqueSymbol'; name: string }
+  | {
+      kind: 'enumMember'
+      enum: string
+      member: string
+      value: { kind: 'stringLiteral'; value: string } | { kind: 'numberLiteral'; value: number }
+    }
+  | { kind: 'templateLiteral'; parts: TemplatePart[] }
   | { kind: 'union'; members: PropType[] }
   | { kind: 'intersection'; members: PropType[] }
   | { kind: 'array'; element: PropType }
-  | { kind: 'tuple'; elements: PropType[] }
+  | { kind: 'tuple'; elements: TupleElement[] }
   | { kind: 'readonly'; element: PropType }
   | { kind: 'object'; fields: ObjectField[] }
+  /** An object type with call or construct signatures that is not one plain function. */
+  | { kind: 'callable'; signatures: CallSignature[]; fields: ObjectField[] }
   | { kind: 'named'; name: string; args: PropType[] }
+  /** A reference back to the type `name` whose expansion encloses it. */
+  | { kind: 'recursive'; name: string; args: PropType[] }
+  /** A type cut at a depth or member limit, kept as its text; listed in `degradedBy` as `truncated`. */
+  | { kind: 'truncated'; text: string; limit: { type: 'depth' } | { type: 'members'; total: number } }
   | { kind: 'function'; typeParams: string[]; params: FunctionParam[]; returnType: PropType }
   | { kind: 'ref'; name: string; element: string | null }
   | { kind: 'htmlAttributes'; element: string; omitted: string[] }
@@ -107,8 +150,8 @@ export interface ParsedProp {
   declarations: PropParent[]
   /**
    * Why part of this prop's type is `opaque`: the kinds of reason (`conditionalType`, `mappedType`, `indexedAccess`, …),
-   * each once, in the order the type holds them. Absent when the resolver evaluated the type in full. A name left as an
-   * unexpanded reference is not listed; its diagnostic says so.
+   * and `truncated` for a part cut at a limit, each once, in the order the type holds them. Absent when the resolver
+   * evaluated the type in full. A name left as an unexpanded reference is not listed; its diagnostic says so.
    */
   degradedBy?: string[]
 }
@@ -151,6 +194,19 @@ export interface ComponentEntry {
   detectedBy: DetectionRule
   /** Whether its module exports it, directly or as a sub-component attached to an exported component. */
   exported: boolean
+  /** How its module exports it, in source order; `exported` is whether there are any. */
+  exports: ComponentExport[]
+}
+
+/**
+ * One way a module exports a component: `Card` for `export function Card` and for `export { _Card as Card }`,
+ * `default` for `export default Menu`. A sub-component attached to an exported component names the export it hangs
+ * from and the properties that reach it: `Menu.Item = Item` beside `export default Menu` is
+ * `{ name: 'default', members: ['Item'] }`, not `Menu.Item`, since `Menu` is the file's own name for the component.
+ */
+export interface ComponentExport {
+  name: string
+  members: string[]
 }
 
 export type DetectionRule =
@@ -164,6 +220,10 @@ export type DetectionRule =
   | 'attachedSubComponent'
   | 'typedFunctionExpression'
   | 'wrapperTypeArgument'
+  | 'importedMemberAlias'
+  | 'memoExoticDecl'
+  | 'taggedFactory'
+  | 'factoryResult'
 
 export interface EnumEntry {
   name: string
@@ -191,10 +251,13 @@ export interface WireDiagnostic extends Omit<Diagnostic, 'affects'> {
   affects?: NameListId
 }
 
-/** What `initializeSessionIndex` resolves to: where each component lives and the run's diagnostics, without props. */
+/**
+ * What `initializeSessionIndex` resolves to: where each component lives, what it is called and how its module exports
+ * it, and the run's diagnostics, without props.
+ */
 export interface SessionIndex {
   schemaVersion: number
-  components: Record<string, { filePath: string; displayName: string }>
+  components: Record<string, Pick<ComponentEntry, 'filePath' | 'displayName' | 'exports'>>
   nameLists: Record<NameListId, string[]>
   diagnostics: WireDiagnostic[]
 }

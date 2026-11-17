@@ -31,24 +31,23 @@ Before answering, the provider compares every source file's mtime and size with 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `srcDirs` | `['src']` | Directories to extract from, relative to Storybook's working directory. |
-| `exclude` |  | Glob patterns to skip. |
+| `exclude` |  | Glob patterns to skip, gitignore-style and relative to each source directory: `**/*.fixture.tsx`, `legacy/`. A bare name such as `Button` matches only a file or folder named exactly that. |
 | `tsconfigPath` |  | tsconfig for path aliases. |
 | `skipHtmlProps` | `false` | Leave out the HTML attributes a component inherits from its element. |
 | `htmlAttributes` | `full` | `full` lists all of the HTML attributes, `curated` a compact subset (handlers, `aria-*`, `ref`, common attributes), `none` none. Wins over `skipHtmlProps`. |
 | `cache` | `true` | Read and write the on-disk caches under `node_modules/.cache`. `false` reads and writes nothing there and parses everything every run; the output is the same. |
 | `loadDependencies` | `true` | Read the type declarations your props reference from installed packages, so library-typed props resolve instead of degrading. `false` skips the work. |
-| `collapseInheritedProps` | `none` | `none` lists every inherited prop. `dependencies` or `all` list inherited sources of more than 30 props as one layer. |
+| `collapseInheritedProps` | `dependencies` | `dependencies` lists a large inherited source as one layer of names instead of prop by prop: a dependency's DOM and ARIA attributes or style system past 30 props, and any other source past 200, a style system in your own source included (Chakra's `Button` goes from 1,141 Controls rows to its own and notable props). `all` also does so for project sources of more than 30 props. `none` lists every inherited prop. |
 | `lazy` | `true` | Resolve a component when a story asks for it. `false` resolves every component at start; the answers are the same. |
-| `fillAfter` | `0` | With `lazy`, once this many distinct components were asked for, resolve the rest in the background in one parallel pass. It lowers the median story latency of a project read end to end (Spectrum's 50 stories: 19 ms to 5 ms) but not the total time, and raises peak memory by 170 to 420 MB, so it is off. `16` is a reasonable value to try. |
-| `warmUp` | `false` | With `lazy`, resolve a few components in the background after start. Off: it did not make the first story faster in measurement. |
-| `semanticTypes` | `'off'` | Experimental. `'on-demand'` keeps one TypeScript 7.1 `tsc` warm and asks it for the component a story shows, so props only the type checker can see appear (shadcn's components gain more than twice as many). A story waits up to `semanticWaitMs` for it and otherwise shows the usual props; the checker's answer is kept for the next request. Needs `typescript@beta` installed, or `tscPath`. |
-| `tscPath` | the nearest `node_modules/typescript/bin/tsc` | The `tsc` binary `semanticTypes: 'on-demand'` runs. |
+| `prefetchStories` | `1` | How many stories' components to document before the browser asks. When `storybook dev` starts, the opening story's component is documented through Storybook's docgen service: that starts the session (and the checker), and stores the answer where the browser reads it: with the checker on, Chakra's `Button` had the checker's props in the browser before it asked, where they arrived 0.7 to 2.9 s after its request without. Then, after it and after every story you open, the components of the next `prefetchStories - 1` stories in the sidebar are resolved in the background, nearest first, the checker's answers included and kept in the session's shared answer cache; the checker answers every story you open first, and a newer list replaces what is still queued. `1` (the default) prefetches only the opening story, since a wider prefetch is not measured free; `0` waits for the browser. |
+| `checker` | `true` | Keep the built-in TypeScript checker warm and ask it for the component a story shows, so its props are the type checker's (shadcn's components gain more than twice as many props). A story waits up to `semanticWaitMs` for it and otherwise shows caliper-docgen's own structural props, which the checker's answer replaces in the open story when it arrives, without a reload (Storybook's docgen service is asked again, and its Controls panel and docs read it live): once per component and change to the files, only for the story on screen (one you left is updated once when you come back), and equal to what a fresh checker session answers. The answer is also kept for the next request. The checker answers the stories you open before the background prefetch, and a story whose component it is already answering waits for that answer instead of asking again. Nothing to install: the checker is part of the addon's native binding. `false` never starts it. (It replaces `semanticTypes`, which the addon now refuses.) |
 | `semanticWaitMs` | `150` | How many milliseconds a story waits for the checker before it takes the usual props. |
-| `fallback` | `degraded` | `degraded`: a component whose extraction reported a warning or error goes to React's docgen. `never`: always answer. |
+| `semanticWaitEmptyMs` | `2000` | How many milliseconds a story waits for the checker when caliper-docgen's own pass lists no props for its component (for example `ComponentProps<typeof Button>` of a library it cannot read), since there is nothing to show before the checker answers. A value below `semanticWaitMs` gives such a story `semanticWaitMs`. |
+| `fallback` | `degraded` | `degraded`: a component whose extraction reported a warning or error goes to React's docgen; a prop it could only report as opaque (an `info` diagnostic) does not, and shows its type text with an `object` control. Once the checker answers for a component, a warning about what its answer replaces (a component caliper-docgen could not find, a type it could not resolve) no longer counts; one about what the checker could not read either still does. `never`: always answer. |
 
 A story whose component caliper-docgen can't find goes to React's docgen, which stays registered underneath. Each component handed on is logged once as a warning with the reason (the extraction diagnostics that affect it).
 
-The defaults favour completeness over Storybook's: caliper-docgen is fast enough to read dependency types and list inherited props that a checker-backed docgen leaves out.
+The defaults favour completeness over Storybook's: caliper-docgen reads dependency types and lists inherited props that a checker-backed docgen leaves out. A session that asked the checker for every component of a 938-component Chakra and MUI app peaked at about 1 GB, against 380 MB with `checker: false` (`docs/gate-measurements.md`).
 
 ## Differences from React's docgen
 
@@ -56,3 +55,12 @@ React's docgen in Storybook 11 asks the TypeScript checker for each component. O
 
 - A string default keeps caliper-docgen's quotes: `"md"` where React's docgen shows the source text, `'md'`.
 - Type text is printed as written: `MouseEvent<HTMLButtonElement>` where the checker prints `MouseEvent<HTMLButtonElement, MouseEvent>`, and `{ date?: string }` where it prints `{ date?: string | undefined; }`.
+
+## Known limits (alpha)
+
+- A prop inside a collapsed inheritance layer has no Controls row, and a story arg naming one shows as undocumented. Set `collapseInheritedProps: 'none'` to list every inherited prop.
+- A story shows caliper-docgen's structural props first and the checker's replace them when they arrive. Without the prefetch, Chakra's `Button` had the checker's props 0.7 to 2.9 s after its request.
+- The output schema (version 8) changes when its shape does, so it can change between alpha releases.
+- Wrapper calls with no type argument (`createIconLoader('x')`, `lazy(() => import(...))`) are not recognized, so a story for one goes to React's docgen.
+- Edits to dependency declarations outside the source directories, including a symlinked workspace package, are not noticed until Storybook restarts.
+- Symlinked directories under a source directory are not followed, and no diagnostic says so: their components are never documented.

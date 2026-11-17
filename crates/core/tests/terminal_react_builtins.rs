@@ -12,7 +12,9 @@
 //! a batch run does.
 use std::collections::BTreeSet;
 
-use caliper_docgen_core::pipeline::{extract, ComponentAnswer, HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{
+    CollapseInheritedProps, ComponentAnswer, HtmlAttributeMode, PipelineOptions, WatchSession, extract,
+};
 use caliper_docgen_core::types::{ComponentEntry, ExtractionOutput};
 use camino::Utf8PathBuf;
 use tempfile::TempDir;
@@ -78,6 +80,8 @@ fn options(dir: &TempDir, mode: HtmlAttributeMode) -> PipelineOptions {
         src_dirs: vec![root.clone()],
         cache_dir: Some(root.join(".cache")),
         html_attributes: mode,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     }
 }
@@ -181,9 +185,9 @@ fn html_props_are_the_elements_attributes_and_ref_in_full_mode() {
     let dir = project(&[("Components.tsx", SOURCE)]);
     let output = extract(&options(&dir, HtmlAttributeMode::Full));
     let boxed = props(&output, "DivBoxed");
-    assert!(["ref", "form", "target", "aria-label", "title", "onClick", "className"]
-        .iter()
-        .all(|n| boxed.contains(*n)));
+    assert!(
+        ["ref", "form", "target", "aria-label", "title", "onClick", "className"].iter().all(|n| boxed.contains(*n))
+    );
     assert!(!boxed.contains("key"));
     // The alias path reads the same attributes as `extends`, less what `Omit` removes.
     let mut expected = boxed;

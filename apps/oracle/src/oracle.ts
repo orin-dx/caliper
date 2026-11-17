@@ -1,5 +1,5 @@
-// TypeScript 7.1's checker as a test oracle for Caliper's prop types (docs/parity.md). Test-only: the opt-in semantic
-// backend is a separate, experimental feature.
+// TypeScript 7.1's checker as a test oracle for Caliper's prop types (docs/parity.md). Test-only: the checker Caliper
+// asks by default (ADR 0026) is a separate path, and the oracle keeps the Go `typescript` checker.
 //
 // For one corpus, finds components the way react-docgen-typescript does (an exported function whose only or `props`
 // parameter is the props type), reads each prop's type from the checker, and compares it structurally with the prop
@@ -11,23 +11,43 @@
 //                      left unexpanded, a lost optional or rest parameter, a missing field)
 //   wrong              Caliper's type describes something else
 //   checker any/error  the checker itself has no type (an unresolved import, `any`, or `unknown` where Caliper has one)
+//   not judged         the checker side stopped short of the type (cut at the depth limit, or a kind src/oracle-checker.ts
+//                      does not read): nothing was compared, so it counts toward neither agreement nor `wrong`
+//
+// The names are src/vocabulary.ts's.
 //
 // Checker types are normalized once per type id and verdicts made once per (Caliper prop, checker type), so Chakra's
 // ~470,000 props cost a few thousand distinct comparisons.
 //
+// With `--rdt` and `--rdg` (the dumps scripts/rdt.mjs and scripts/rdg.mjs write) the report also scores react-docgen-
+// typescript and react-docgen over every own prop the checker finds on a candidate component (`tools`;
+// src/tool-universe.ts), and over every function it takes for a component (`tools_all_functions`). A function is no
+// candidate when its shape says so (src/component-shape.ts: a hook, a lowercase helper, a lib-typed parameter), and
+// `universe_excluded` counts them.
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { API, SignatureKind, SymbolFlags } from 'typescript-beta/sync'
+import { API } from 'typescript-beta/sync'
+import { checkCaliperShape, flattenProps, requireComparison } from './caliper-input.ts'
+import { declaredExports, listedName, propsTypeOf, type DeclaredExport } from './checker-components.ts'
+import { exportedAs } from './component-join.ts'
+import { nonComponentReason, type ShapeProp } from './component-shape.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
-import { caliperNorm, compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
+import { caliperNorm } from './caliper-norm.ts'
+import { compare, type Norm } from './oracle-compare.ts'
+import { isReactTypes } from './path-class.ts'
+import { assertSchemaVersion } from './schema-version.ts'
+import { collapsedLayerFiles, loadTool, pathKey, universeRecorder } from './tool-universe.ts'
+import { VERDICTS, type Verdict } from './vocabulary.ts'
 
-const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump', 'rows', 'missing'] as const
+const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump', 'rows', 'missing', 'rdt', 'rdg'] as const
 const args: Partial<Record<(typeof KEYS)[number], string>> = {}
 for (let i = 2; i < process.argv.length; i += 2) {
   args[process.argv[i].replace(/^--/, '') as (typeof KEYS)[number]] = process.argv[i + 1]
 }
 if (!args.root || !args.src || !args.tsconfig || !args.caliper || !args.out) {
-  console.error('usage: tsx src/oracle.ts --root DIR --src DIR --tsconfig FILE --caliper FILE --out FILE')
+  console.error(
+    'usage: tsx src/oracle.ts --root DIR --src DIR --tsconfig FILE --caliper FILE --out FILE [--rdt F] [--rdg F]',
+  )
   process.exit(2)
 }
 const root = realpathSync(args.root)
@@ -62,55 +82,22 @@ const checkerNorm = checkerNormalizer(checker)
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
-const normComponent = (name: string) =>
-  (
-    name
-      .replace(/ \(.*\)$/, '')
-      .split('/')
-      .at(-1) ?? ''
-  )
-    .split('.')
-    .at(-1)!
-    .replaceAll(/[^A-Za-z0-9]/g, '')
 const rel = (path: string) => relative(root, realpathSync(path))
-const pathKey = (path: string) =>
-  process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
 
-const caliper = JSON.parse(readFileSync(args.caliper, 'utf8'))
-const caliperByFile = new Map<string, { name: string; key: string; component: any }[]>()
+const caliper = assertSchemaVersion(JSON.parse(readFileSync(args.caliper, 'utf8')), 'caliper JSON')
+checkCaliperShape(caliper)
+const caliperByFile = new Map<string, { key: string; component: any }[]>()
 for (const [componentKey, component] of Object.entries<any>(caliper.components)) {
   // Schema 2 lists a component's prop set ids, each a map of prop name to prop id; this reads one map of both.
-  if (Array.isArray(component.props)) {
-    component.props = Object.assign({}, ...component.props.map((id: string) => caliper.propSets[id]))
-  }
+  component.props = flattenProps(caliper, componentKey, component)
   const key = rel(component.filePath)
   const list = caliperByFile.get(key) ?? []
-  list.push({ name: normComponent(component.displayName), key: componentKey, component })
+  list.push({ key: componentKey, component })
   caliperByFile.set(key, list)
 }
-
-/** The props type of a component export, the way react-docgen-typescript finds it. */
-function propsTypeOf(exported: any): any | undefined {
-  const symbol = exported.flags & SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported
-  const type = checker.getTypeOfSymbol(symbol)
-  for (const sig of checker.getSignaturesOfType(type, SignatureKind.Call)) {
-    const params = sig.getParameters()
-    if (params.length === 1 || params[0]?.name === 'props') return checker.getTypeOfSymbol(params[0])
-  }
-  for (const sig of checker.getSignaturesOfType(type, SignatureKind.Construct)) {
-    if (sig.getParameters().length > 1) continue
-    const props = checker.getPropertyOfType(sig.getReturnType(), 'props')
-    if (props) return checker.getTypeOfSymbol(props)
-  }
-  return undefined
-}
-
-/** A default export is named by what it exports: the aliased declaration, or the function or class itself. */
-function exportName(exported: any): string {
-  if (exported.name !== 'default') return exported.name
-  if (exported.flags & SymbolFlags.Alias) return checker.getAliasedSymbol(exported).name
-  return checker.getTypeOfSymbol(exported).getSymbol()?.name ?? 'default'
-}
+const rdt = loadTool(args.rdt, rel)
+const rdg = loadTool(args.rdg, rel)
+const universe = universeRecorder({ root, caliper, checker, checkerNorm, rdt, rdg })
 
 interface Example {
   component: string
@@ -176,11 +163,12 @@ function judge({
   return verdict
 }
 
-/** Every prop of one exported component the checker finds, against Caliper's component of the same name. */
-function visitExport(exported: any, candidates: { name: string; key: string; component: any }[], file: string): void {
+/** Every prop of one exported component the checker finds, against Caliper's component the module exports under one of
+ * the same names. */
+function visitExport(declaration: DeclaredExport, candidates: { key: string; component: any }[], file: string): void {
   let propsType
   try {
-    propsType = propsTypeOf(exported)
+    propsType = propsTypeOf(checker, declaration.exported)
   } catch {
     totals.failedExports++
     return
@@ -189,16 +177,20 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   const props = checker.getPropertiesOfType(propsType)
   if (props.length === 0) return
   totals.componentsChecker++
-  const name = exportName(exported)
+  const name = listedName(declaration.exported.name, declaration.declared, file)
   // React's DOM attributes are one inherited layer; ref and key are deliberately absent from Caliper's output.
   const own = props.filter(
-    (p: any) =>
-      p.name !== 'ref' &&
-      p.name !== 'key' &&
-      !p.declarations?.some((d: any) => String(d.path).includes('/@types/react/')),
+    (p: any) => p.name !== 'ref' && p.name !== 'key' && !p.declarations?.some((d: any) => isReactTypes(String(d.path))),
   )
   totals.propsChecker += own.length
-  const matches = candidates.filter((c) => c.name === normComponent(name))
+  const matches = exportedAs(candidates, declaration.names)
+  const shape = new Map<string, ShapeProp>(
+    props.map((p: any) => [
+      p.name,
+      { path: p.declarations?.[0]?.path, type: () => checker.typeToString(checker.getTypeOfSymbol(p)) },
+    ]),
+  )
+  universe.record({ own, name, file, matches, nonComponent: nonComponentReason(name, file, shape) })
   if (matches.length > 1) {
     totals.ambiguousExports++
     return
@@ -206,13 +198,9 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   const [match] = matches
   if (!match) return
   totals.componentsMatched++
-  const shared = own.filter((p: any) => p.name in match.component.props)
-  const layerFiles = new Set(
-    (match.component.inheritance ?? [])
-      .filter((layer: any) => layer.totalProps > 30)
-      .map((layer: any) => pathKey(String(layer.fileName))),
-  )
-  const absent = own.filter((p: any) => !(p.name in match.component.props))
+  const shared = own.filter((p: any) => Object.hasOwn(match.component.props, p.name))
+  const layerFiles = collapsedLayerFiles(caliper, match.component)
+  const absent = own.filter((p: any) => !Object.hasOwn(match.component.props, p.name))
   const collapsed: any[] = []
   const missing: any[] = []
   for (const p of absent) {
@@ -266,9 +254,10 @@ for (const file of files) {
   const moduleSymbol = checker.getSymbolOfSourceFile(file)
   if (!moduleSymbol) continue
   const candidates = caliperByFile.get(rel(file)) ?? []
-  for (const exported of checker.getExportsOfModule(moduleSymbol)) visitExport(exported, candidates, file)
+  for (const declaration of declaredExports(checker, moduleSymbol)) visitExport(declaration, candidates, file)
 }
 const compareMs = performance.now() - start
+requireComparison(totals.propsShared, totals.componentsMatched)
 
 const report = {
   components_checker: totals.componentsChecker,
@@ -283,6 +272,9 @@ const report = {
   ambiguous_exports: totals.ambiguousExports,
   program_ms: Math.round(programMs),
   compare_ms: Math.round(compareMs),
+  tools: universe.score(counts),
+  tools_all_functions: universe.scoreAll(),
+  universe_excluded: universe.excluded(),
   examples,
 }
 writeFileSync(args.out, JSON.stringify(report, null, 2))

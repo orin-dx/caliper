@@ -1,6 +1,6 @@
 node = "~26"
 pnpm = "11.27.1"
-rust = "1.98.1"
+rust = "1.99.1"
 moon = "2.4.5"
 
 [plugins]

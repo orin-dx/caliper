@@ -1,0 +1,30 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [],
+        "index": false,
+        "alias": "Record"
+      }
+    ],
+    "alias": "Record"
+  },
+  "text": "Record<K, V> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/04-multiple-params.tsx"
+    },
+    "order": null
+  }
+}

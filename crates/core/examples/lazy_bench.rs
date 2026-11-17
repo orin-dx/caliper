@@ -2,15 +2,19 @@
 //! Session start and time-to-answer for an eager session and a lazy one (ADR 0016), one scenario per process so
 //! `/usr/bin/time -l` reports that scenario's peak RSS.
 //!
-//!   lazy_bench --src DIR --cache DIR [--eager] [--dependencies] [--full] [--count N] [--seed S] [--parallel]
+//!   lazy_bench --src DIR --cache DIR [--eager] [--dependencies] [--full] [--collapse MODE] [--count N] [--seed S]
+//!              [--parallel]
+//!
+//! `--collapse` is `dependencies` (the default), `all` or `none` (what the Storybook addon runs with).
 //!
 //! Prints one JSON line: `startMs` (construct + initialize), `keysMs` (listing keys, lazy only), `answerMs` (resolving
 //! `count` seeded-random components after start; 0 for an eager session, which has resolved them all), `eachMs` (the
-//! serial per-component times, sorted), and `digest` (a hash of the answers, to compare scenarios).
+//! serial per-component times, sorted), `collapse` (the mode it ran, so a caller can tell a build that ignored the
+//! flag), and `digest` (a hash of the answers, to compare scenarios).
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
-use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, WatchSession};
 use camino::Utf8PathBuf;
 
 fn arg(args: &[String], name: &str) -> Option<String> {
@@ -43,6 +47,9 @@ fn main() {
         cache_dir: Some(Utf8PathBuf::from(cache)),
         load_dependencies: flag("--dependencies"),
         html_attributes: if flag("--full") { HtmlAttributeMode::Full } else { HtmlAttributeMode::Curated },
+        collapse_inherited_props: arg(&args, "--collapse").map_or_else(CollapseInheritedProps::default, |mode| {
+            CollapseInheritedProps::parse(&mode).expect("--collapse")
+        }),
         ..Default::default()
     };
 
@@ -115,8 +122,9 @@ fn main() {
         std::fs::write(path, lines.join("\n")).expect("--digests");
     }
     let stats = session.lazy_stats();
+    let collapse = arg(&args, "--collapse").unwrap_or_else(|| "dependencies".to_owned());
     println!(
-        "{{\"lazy\":{lazy},\"components\":{},\"count\":{},\"startMs\":{start_ms:.1},\"keysMs\":{keys_ms:.1},\"answerMs\":{answer_ms:.1},\"eachMs\":{:?},\"resolved\":{},\"dependencyFiles\":{},\"digest\":\"{:016x}\"}}",
+        "{{\"lazy\":{lazy},\"components\":{},\"count\":{},\"startMs\":{start_ms:.1},\"keysMs\":{keys_ms:.1},\"answerMs\":{answer_ms:.1},\"eachMs\":{:?},\"resolved\":{},\"dependencyFiles\":{},\"collapse\":\"{collapse}\",\"digest\":\"{:016x}\"}}",
         keys.len(),
         picked.len(),
         each_ms.iter().map(|ms| (ms * 10.0).round() / 10.0).collect::<Vec<_>>(),

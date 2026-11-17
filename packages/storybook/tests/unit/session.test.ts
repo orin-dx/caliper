@@ -1,15 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 import { DocgenSession } from '../../src/session.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
 const src = join('/project', 'src')
-// Modules whose source the session reads to tell which component an export names.
-const real = mkdtempSync(join(tmpdir(), 'caliper-sb-session-'))
-afterAll(() => rmSync(real, { recursive: true, force: true }))
 
 describe('DocgenSession.find', () => {
   function sessionWith(components: Record<string, ReturnType<typeof entry>>): Promise<DocgenSession> {
@@ -26,9 +21,36 @@ describe('DocgenSession.find', () => {
     expect(session.keyOf(join(src, 'List.tsx'), 'default')).toBeUndefined()
   })
 
-  it("answers a default export with the file's only component", async () => {
-    const session = await sessionWith({ Card: entry('Card', join(src, 'Card.tsx')) })
+  it('answers a default export with the component the module exports as default', async () => {
+    const session = await sessionWith({ Card: entry('Card', join(src, 'Card.tsx'), ['default']) })
     expect(session.keyOf(join(src, 'Card.tsx'), 'default')).toBe('Card')
+  })
+
+  it('does not answer a default export with the only component of a file that exports none as default', async () => {
+    const session = await sessionWith({ Card: entry('Card', join(src, 'Card.tsx')) })
+    expect(session.keyOf(join(src, 'Card.tsx'), 'default')).toBeUndefined()
+  })
+
+  it('answers an export under another name with the component the module exports under it, not by display name', async () => {
+    const session = await sessionWith({
+      Inner: entry('Inner', join(src, 'Tag.tsx'), ['Tag']),
+      Tag: entry('Tag', join(src, 'Tag.tsx'), []),
+    })
+    expect(session.keyOf(join(src, 'Tag.tsx'), 'Tag')).toBe('Inner')
+    expect(session.keyOfExport(join(src, 'Tag.tsx'), 'Tag')).toBe('Inner')
+    expect(session.keyOf(join(src, 'Tag.tsx'), 'Inner')).toBeUndefined()
+  })
+
+  it('tells a sub-component attached to an export from the export and from a component of its name', async () => {
+    const session = await sessionWith({
+      Menu: entry('Menu', join(src, 'Menu.tsx'), ['default']),
+      Item: entry('Item', join(src, 'Menu.tsx'), ['default.Item']),
+      'Item (own)': entry('Item', join(src, 'Menu.tsx'), ['Item']),
+    })
+    expect(session.keyOfExport(join(src, 'Menu.tsx'), 'default')).toBe('Menu')
+    expect(session.keyOfExport(join(src, 'Menu.tsx'), 'default', ['Item'])).toBe('Item')
+    expect(session.keyOfExport(join(src, 'Menu.tsx'), 'Item')).toBe('Item (own)')
+    expect(session.keyOfExport(join(src, 'Menu.tsx'), 'Missing')).toBeUndefined()
   })
 
   it('follows a barrel to the one component with the exported name, and gives up when two share it', async () => {
@@ -41,56 +63,91 @@ describe('DocgenSession.find', () => {
     expect(session.keyOf(join(src, 'index.ts'), 'Tab')).toBeUndefined()
   })
 
-  it("answers a default export with the component the module's source exports, among several in the file", async () => {
-    writeFileSync(join(real, 'Card.tsx'), 'const ActionNode = () => null\nfunction Card() {}\nexport default Card')
+  it('answers a default export among several components in the file', async () => {
+    const path = join(src, 'Missing.tsx')
     const session = await sessionWith({
-      ActionNode: entry('ActionNode', join(real, 'Card.tsx')),
-      Card: entry('Card', join(real, 'Card.tsx')),
+      ActionNode: entry('ActionNode', path, []),
+      Card: entry('Card', path, ['default']),
     })
-    expect(await session.resolveExport(join(real, 'Card.tsx'), 'default')).toBe('Card')
+    expect(session.resolveExport(path, 'default')).toBe('Card')
   })
 
-  it('answers an export under another name with the component the module renames', async () => {
-    writeFileSync(join(real, 'Tag.tsx'), 'function Inner() {}\nfunction Other() {}\nexport { Inner as Tag, Other }')
+  it('answers an export under another name', async () => {
+    const path = join(src, 'Gone.tsx')
     const session = await sessionWith({
-      Inner: entry('Inner', join(real, 'Tag.tsx')),
-      Other: entry('Other', join(real, 'Tag.tsx')),
+      Inner: entry('Inner', path, ['Tag']),
+      Other: entry('Other', path, ['Other']),
     })
-    expect(await session.resolveExport(join(real, 'Tag.tsx'), 'Tag')).toBe('Inner')
-    expect(await session.resolveExport(join(real, 'Tag.tsx'), 'Other')).toBe('Other')
+    expect(session.resolveExport(path, 'Tag')).toBe('Inner')
+    expect(session.resolveExport(path, 'Other')).toBe('Other')
+    expect(session.resolveExport(path, 'Inner')).toBeUndefined()
   })
 
-  it('answers a default import by the name the story gave it only when the source does not say', async () => {
-    writeFileSync(join(real, 'Panel.tsx'), 'export default makePanel()')
+  it('answers a declared export whose display name differs from it', async () => {
     const session = await sessionWith({
-      Header: entry('Header', join(real, 'Panel.tsx')),
-      Panel: entry('Panel', join(real, 'Panel.tsx')),
+      '@mantine/core/ColorPickerThumb': entry('@mantine/core/ColorPickerThumb', join(src, 'Thumb.tsx'), ['Thumb']),
     })
-    expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default', 'Panel')).toBe('Panel')
-    expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default', 'Footer')).toBeUndefined()
-    expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default')).toBeUndefined()
+    expect(session.resolveExport(join(src, 'Thumb.tsx'), 'Thumb')).toBe('@mantine/core/ColorPickerThumb')
+    expect(session.resolveExport(join(src, 'Thumb.tsx'), 'Hidden')).toBeUndefined()
   })
 
-  it("answers a declared export with the file's only component whose display name differs", async () => {
-    writeFileSync(
-      join(real, 'Thumb.tsx'),
-      "export function Thumb() {}\nThumb.displayName = '@mantine/core/ColorPickerThumb'\nexport function helper() {}\nconst Hidden = 1",
-    )
+  it('does not guess among several components when the export names none of them', async () => {
     const session = await sessionWith({
-      '@mantine/core/ColorPickerThumb': entry('@mantine/core/ColorPickerThumb', join(real, 'Thumb.tsx')),
+      'ui/Left': entry('ui/Left', join(src, 'Pair.tsx'), ['Left']),
+      'ui/Right': entry('ui/Right', join(src, 'Pair.tsx'), ['Right']),
     })
-    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Thumb')).toBe('@mantine/core/ColorPickerThumb')
-    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Hidden')).toBeUndefined()
-    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Missing')).toBeUndefined()
+    expect(session.resolveExport(join(src, 'Pair.tsx'), 'Middle')).toBeUndefined()
   })
 
-  it('does not guess among several components when the export names none of their display names', async () => {
-    writeFileSync(join(real, 'Pair.tsx'), 'export function Left() {}\nexport function Right() {}')
+  it('answers a default export a call wraps as the component the extractor records it for', async () => {
+    const path = join(src, 'Table.tsx')
     const session = await sessionWith({
-      'ui/Left': entry('ui/Left', join(real, 'Pair.tsx')),
-      'ui/Right': entry('ui/Right', join(real, 'Pair.tsx')),
+      InternalTable: entry('InternalTable', path, ['default']),
+      Other: entry('Other', path, []),
     })
-    expect(await session.resolveExport(join(real, 'Pair.tsx'), 'Left')).toBeUndefined()
+    expect(session.resolveExport(path, 'default')).toBe('InternalTable')
+  })
+
+  it('answers the story’s default import of `Object.assign(Root, { Item })` with Root, not with a component of its name', async () => {
+    const path = join(src, 'Menu.tsx')
+    const session = await sessionWith({
+      Root: entry('Root', path, ['default']),
+      Item: entry('Item', path, ['default.Item']),
+    })
+    expect(session.resolveExport(path, 'default', 'Menu')).toBe('Root')
+    expect(session.keyOfExport(path, 'default', ['Item'])).toBe('Item')
+  })
+
+  it('tells an anonymous default export from a named export of its file name', async () => {
+    const path = join(src, 'E.tsx')
+    const session = await sessionWith({
+      E: entry('E', path, ['E']),
+      'E (default)': entry('E (default)', path, ['default']),
+    })
+    expect(session.keyOfExport(path, 'E')).toBe('E')
+    expect(session.keyOfExport(path, 'default')).toBe('E (default)')
+    expect(session.resolveExport(path, 'E')).toBe('E')
+    expect(session.resolveExport(path, 'default')).toBe('E (default)')
+  })
+
+  it('answers a default import by the name the story gave it only when the module records no default export', async () => {
+    const path = join(src, 'Panel.tsx')
+    const session = await sessionWith({
+      Header: entry('Header', path, []),
+      Panel: entry('Panel', path, []),
+    })
+    expect(session.resolveExport(path, 'default', 'Panel')).toBe('Panel')
+    expect(session.resolveExport(path, 'default', 'Footer')).toBeUndefined()
+    expect(session.resolveExport(path, 'default')).toBeUndefined()
+  })
+
+  it('does not take the story’s name for the default export when the module exports another component as default', async () => {
+    const path = join(src, 'Panel.tsx')
+    const session = await sessionWith({
+      Header: entry('Header', path, ['default']),
+      Panel: entry('Panel', path, []),
+    })
+    expect(session.resolveExport(path, 'default', 'Panel')).toBe('Header')
   })
 
   it('lists the components of a file, to say what a failed lookup chose from', async () => {
@@ -117,36 +174,56 @@ describe('DocgenSession.keyOfMember', () => {
       }),
     )
     await session.fresh()
-    expect(session.keyOfMember(['Input'], 'Password', join(src, 'input', 'index.tsx'))).toBe('Input.Password')
-    expect(session.keyOfMember(['default', 'Select'], 'Option', join(src, 'select', 'index.tsx'))).toBe(
-      'Select.Option (select)',
+    const member = (exportName: string, localName: string, property: string, near: string) =>
+      session.keyOfMember({ exportName, localName }, property, join(src, near))
+    expect(member('Input', 'Input', 'Password', 'input/index.tsx')).toBe('Input.Password')
+    expect(member('Select', 'default', 'Option', 'select/index.tsx')).toBe('Select.Option (select)')
+    expect(member('Select', 'Select', 'Option', 'index.tsx')).toBeUndefined()
+    expect(member('Select', 'Select', 'Group', 'select/index.tsx')).toBeUndefined()
+  })
+
+  it('finds the sub-component attached to the export the namespace names, whatever it is called', async () => {
+    const session = new DocgenSession(
+      { srcDirs: [src] },
+      new FakeBinding({
+        components: {
+          Menu: entry('Menu', join(src, 'Menu.tsx'), ['default']),
+          Item: entry('Item', join(src, 'Menu.tsx'), ['default.Item']),
+          'Item (other)': entry('Item', join(src, 'Other.tsx'), ['Item']),
+        },
+      }),
     )
-    expect(session.keyOfMember(['Select'], 'Option', join(src, 'index.tsx'))).toBeUndefined()
-    expect(session.keyOfMember(['Select'], 'Group', join(src, 'select', 'index.tsx'))).toBeUndefined()
+    await session.fresh()
+    const menu = { exportName: 'default', localName: 'Menu' }
+    expect(session.keyOfMember(menu, 'Item', join(src, 'Menu.tsx'))).toBe('Item')
+    expect(session.keyOfMember(menu, 'Gone', join(src, 'Menu.tsx'))).toBeUndefined()
   })
 })
 
-describe('DocgenSession.degraded', () => {
-  it('counts warnings and errors that affect the key, not info, and forgets removed ones', async () => {
-    const binding = new FakeBinding({
-      components: { Button: entry('Button', join(src, 'Button.tsx')) },
-      diagnostics: [warning(['Button']), warning(['Card'], 'info')],
-    })
-    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
-    await session.fresh()
-    expect(session.degraded('Button')).toBe(true)
-    expect(session.degraded('Card')).toBe(false)
-
-    binding.updates.push({ removedDiagnostics: [warning(['Button'])] })
-    await session.fresh()
-    expect(session.degraded('Button')).toBe(false)
+describe('DocgenSession.documentation: the binding decides', () => {
+  it("takes an eager or lazy answer's diagnostics as the binding gives them, never the session index's", async () => {
+    for (const lazy of [false, true]) {
+      // The index still has the structural warning the checker's answer superseded; the answer has the checker's own.
+      const binding = new FakeBinding({
+        components: { Button: entry('Button', join(src, 'Button.tsx')) },
+        diagnostics: [warning(['Button'])],
+      })
+      binding.docs = { Button: rdtDoc('Button', ['label']) }
+      binding.answerDiagnostics.Button = [{ ...warning(['Button']), message: 'the checker could not read a prop' }]
+      const session = new DocgenSession({ srcDirs: [src], lazy }, binding)
+      await session.fresh()
+      expect(session.documentation('Button').degradedBy).toEqual(['the checker could not read a prop'])
+      binding.answerDiagnostics.Button = [warning(['Button'], 'info')]
+      expect(session.documentation('Button').degradedBy).toEqual([])
+    }
   })
 
   it('lists each message once, however many diagnostics carry it', async () => {
     const binding = new FakeBinding({ diagnostics: [warning(['Button']), { ...warning(['Button']), line: 3 }] })
+    binding.docs = { Button: rdtDoc('Button') }
     const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
     await session.fresh()
-    expect(session.degradedBy('Button')).toEqual(['Cannot resolve type'])
+    expect(session.documentation('Button').degradedBy).toEqual(['Cannot resolve type'])
   })
 })
 
@@ -234,18 +311,25 @@ describe('DocgenSession.fresh', () => {
     expect(seen[1]).toMatchObject({ htmlAttributes: 'full' })
   })
 
-  it('asks the binding for an on-demand checker only when told to, with the binary and the wait', async () => {
+  it('leaves the checker to the binding, which starts it by default, and passes its waits', async () => {
     const fake = new FakeBinding({})
     const seen: unknown[] = []
     fake.createSession = ((options: unknown) => (seen.push(options), 7)) as never
     await new DocgenSession({ srcDirs: [src] }, fake).fresh()
-    await new DocgenSession(
-      { srcDirs: [src], semanticTypes: 'on-demand', tscPath: '/opt/ts/bin/tsc', semanticWaitMs: 80 },
-      fake,
-    ).fresh()
-    expect(seen).toMatchObject([
-      { semanticTypes: undefined, tscPath: undefined, semanticWaitMs: undefined },
-      { semanticTypes: 'on-demand', tscPath: '/opt/ts/bin/tsc', semanticWaitMs: 80 },
+    await new DocgenSession({ srcDirs: [src], semanticWaitMs: 80, semanticWaitEmptyMs: 900 }, fake).fresh()
+    await new DocgenSession({ srcDirs: [src], checker: false }, fake).fresh()
+    expect(seen).toEqual([
+      expect.objectContaining({
+        checker: undefined,
+        semanticWaitMs: undefined,
+        semanticWaitEmptyMs: undefined,
+      }),
+      expect.objectContaining({
+        checker: undefined,
+        semanticWaitMs: 80,
+        semanticWaitEmptyMs: 900,
+      }),
+      expect.objectContaining({ checker: false }),
     ])
   })
 
@@ -279,47 +363,18 @@ describe('DocgenSession, lazy', () => {
     await session.fresh()
     expect(binding.resolved).toEqual([])
 
+    const answered = { awaitsChecker: false, revision: 1 }
     expect(await session.documentation('Button')).toEqual({
       doc: rdtDoc('Button', ['label']),
       degradedBy: ['Cannot resolve type'],
+      ...answered,
     })
-    expect(await session.documentation('Card')).toEqual({ doc: rdtDoc('Card', ['title']), degradedBy: [] })
-    expect(await session.documentation('Missing')).toEqual({ doc: undefined, degradedBy: [] })
+    expect(await session.documentation('Card')).toEqual({ doc: rdtDoc('Card', ['title']), degradedBy: [], ...answered })
+    expect(await session.documentation('Missing')).toEqual({ doc: undefined, degradedBy: [], ...answered })
     expect(binding.resolved).toEqual(['Button', 'Card', 'Missing'])
   })
 
-  it('warms a lazy session up in the background, unless told not to or eager', async () => {
-    const warmed = async (options: Partial<ConstructorParameters<typeof DocgenSession>[0]>) => {
-      const binding = new FakeBinding({})
-      await new DocgenSession({ srcDirs: [src], ...options }, binding).fresh()
-      return binding.warmUps
-    }
-    expect(await warmed({ warmUp: true })).toEqual([8])
-    expect(await warmed({})).toEqual([])
-    expect(await warmed({ warmUp: true, lazy: false })).toEqual([])
-  })
-
-  it('resolves the rest in one pass once enough distinct components were asked for, and only once', async () => {
-    const names = ['A', 'B', 'C', 'D', 'E']
-    const binding = new FakeBinding({
-      components: Object.fromEntries(names.map((name) => [name, entry(name, join(src, `${name}.tsx`))])),
-    })
-    binding.docs = Object.fromEntries(names.map((name) => [name, rdtDoc(name)]))
-    const session = new DocgenSession({ srcDirs: [src], fillAfter: 3 }, binding)
-    await session.fresh()
-    for (const name of ['A', 'A', 'B']) await session.documentation(name)
-    expect(binding.warmUps).toEqual([])
-    await session.documentation('C')
-    await session.documentation('D')
-    expect(binding.warmUps).toEqual([2 ** 32 - 1])
-
-    const never = new DocgenSession({ srcDirs: [src], fillAfter: 0 }, binding)
-    await never.fresh()
-    for (const name of names) await never.documentation(name)
-    expect(binding.warmUps).toEqual([2 ** 32 - 1])
-  })
-
-  it('never resolves the rest in one pass by default, however many components were asked for', async () => {
+  it('resolves nothing in the background unless asked, and only in a lazy session', async () => {
     const names = Array.from({ length: 40 }, (_, i) => `C${i}`)
     const binding = new FakeBinding({
       components: Object.fromEntries(names.map((name) => [name, entry(name, join(src, `${name}.tsx`))])),
@@ -328,7 +383,37 @@ describe('DocgenSession, lazy', () => {
     const session = new DocgenSession({ srcDirs: [src] }, binding)
     await session.fresh()
     for (const name of names) await session.documentation(name)
-    expect(binding.warmUps).toEqual([])
+    expect(binding.prefetched).toEqual([])
+
+    await session.prefetch(['C3', 'C1'])
+    await session.prefetch([])
+    expect(binding.prefetched).toEqual([['C3', 'C1']])
+
+    const eager = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
+    await eager.fresh()
+    await eager.prefetch(['C2'])
+    expect(binding.prefetched).toEqual([['C3', 'C1']])
+  })
+
+  it('takes whether the checker is still answering from the binding, for a lazy and an eager session alike', async () => {
+    const binding = new FakeBinding({
+      components: { Button: entry('Button', join(src, 'Button.tsx')), Card: entry('Card', join(src, 'Card.tsx')) },
+    })
+    binding.docs = { Button: rdtDoc('Button', ['label']), Card: rdtDoc('Card', ['title']) }
+    binding.pending.add('Button')
+    for (const lazy of [true, false]) {
+      const session = new DocgenSession({ srcDirs: [src], lazy }, binding)
+      await session.fresh()
+      expect(session.documentation('Button')).toEqual({
+        doc: rdtDoc('Button', ['label']),
+        degradedBy: [],
+        awaitsChecker: true,
+        revision: 1,
+      })
+      expect(session.documentation('Card').awaitsChecker).toBe(false)
+      expect(await session.checkerSettled(['Button'], 5)).toBe(true)
+    }
+    expect(binding.settles).toEqual([['Button'], ['Button']])
   })
 
   it('forgets a listed key that has no component, so a lookup names what the file really has', async () => {
@@ -367,7 +452,7 @@ describe('DocgenSession, lazy', () => {
     expect(binding.initializations).toBe(2)
   })
 
-  it('answers an eager session from the index it holds, resolving nothing per request', async () => {
+  it('answers an eager session from its published answer through the same call as a lazy one', async () => {
     const binding = new FakeBinding({
       components: { Button: entry('Button', join(src, 'Button.tsx')) },
       diagnostics: [warning(['Button'])],
@@ -378,7 +463,43 @@ describe('DocgenSession, lazy', () => {
     expect(await session.documentation('Button')).toEqual({
       doc: rdtDoc('Button', ['label']),
       degradedBy: ['Cannot resolve type'],
+      awaitsChecker: false,
+      revision: 1,
     })
-    expect(binding.resolved).toEqual([])
+    // The native eager session answers from what it published (`published_component`), the checker's props merged.
+    expect(binding.resolved).toEqual(['Button'])
+  })
+})
+
+describe('DocgenSession start failures', () => {
+  it('starts again on the next request after the native session could not be created', async () => {
+    const binding = new FakeBinding({ components: { Card: entry('Card', join(src, 'Card.tsx'), ['default']) } })
+    const create = binding.createSession
+    binding.createSession = () => {
+      throw new Error('no binding for this platform')
+    }
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+
+    await expect(session.fresh()).rejects.toThrow('no binding for this platform')
+    binding.createSession = create
+    await session.fresh()
+
+    expect(session.keyOf(join(src, 'Card.tsx'), 'default')).toBe('Card')
+  })
+
+  it('closes the native session of a start that failed after creating it, and starts a new one next time', async () => {
+    const binding = new FakeBinding({ components: { Card: entry('Card', join(src, 'Card.tsx'), ['default']) } })
+    const index = binding.initializeSessionIndex
+    binding.initializeSessionIndex = async () => {
+      throw new Error('index failed')
+    }
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+
+    await expect(session.fresh()).rejects.toThrow('index failed')
+    expect(binding.closed).toBe(true)
+    binding.initializeSessionIndex = index
+    await session.fresh()
+
+    expect(session.keyOf(join(src, 'Card.tsx'), 'default')).toBe('Card')
   })
 })

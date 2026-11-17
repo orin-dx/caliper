@@ -3,15 +3,14 @@ members = [
     "crates/core",
     "crates/binding",
     "crates/cli",
-    "crates/tsc-client",
     "crates/semantic",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.97"
+edition = "2024"
+rust-version = "1.99"
 authors = ["caliper-docgen contributors"]
 license = "FSL-1.1-MIT"
 repository = "https://github.com/orin-dx/caliper"
@@ -20,9 +19,10 @@ keywords = ["react", "docgen", "typescript", "oxc", "storybook"]
 categories = ["development-tools", "command-line-utilities"]
 
 # "deny" rather than "forbid": a member crate could locally #[allow(unsafe_code)]
-# on a real FFI boundary if one ever needs it — none currently do (verified:
-# zero `unsafe` usage across crates/core, crates/cli, crates/binding; napi-rs's
-# #[napi] macros generate the FFI glue without user-visible unsafe).
+# on a real FFI boundary if one ever needs it. One does: crates/semantic/src/heap.rs reads
+# mimalloc's committed bytes and the machine's memory (two calls). Otherwise zero `unsafe`
+# across crates/core, crates/cli, crates/binding; napi-rs's #[napi] macros generate the FFI
+# glue without user-visible unsafe.
 [workspace.lints.rust]
 unsafe_code = "deny"
 unused_must_use = "deny"
@@ -33,6 +33,8 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 dbg_macro = "deny"
+# Only `main` ends the process, so a command's exit decision stays testable; the one other exit is allowed in place.
+exit = "deny"
 print_stdout = "deny"
 print_stderr = "deny"
 map_err_ignore = "deny"
@@ -40,14 +42,21 @@ let_underscore_must_use = "deny"
 
 [workspace.dependencies]
 # OXC — all main crates move in lockstep; resolver has separate versioning
-oxc_allocator     = "0.155"
-oxc_parser        = "0.155"
-oxc_ast           = "0.155"
-oxc_ast_visit     = "0.155"
-oxc_span          = "0.155"
-oxc_str           = "0.155"
-oxc_syntax        = "0.155"
+oxc_allocator     = "0.157"
+oxc_parser        = "0.157"
+oxc_semantic      = "0.157"
+oxc_ast           = "0.157"
+oxc_ast_visit     = "0.157"
+oxc_span          = "0.157"
+oxc_str           = "0.157"
+oxc_syntax        = "0.157"
 oxc_resolver      = "11"
+
+# The TypeScript checker the semantic backend links (ADR 0026). Exact pins: a bump is a parity check against the Go
+# checker, never a lockfile refresh.
+tsrs_api          = "=0.24.0"
+tsrs_vfs          = "=0.24.0"
+tsrs_core         = "=0.24.0"
 
 # Core data
 compact_str       = { version = "0.10", features = ["serde"] }
@@ -61,6 +70,7 @@ serde             = { version = "1.0", features = ["derive", "rc"] }
 serde_json        = "1.0"
 json-strip-comments = "3.1"
 rmp-serde         = "1.3"
+xxhash-rust       = { version = "0.8", features = ["xxh3"] }
 
 # Error handling
 miette            = "7.6"
@@ -68,7 +78,10 @@ miette            = "7.6"
 # Parallelism
 rayon             = "1.12"
 mimalloc          = "0.1"
-tokio             = { version = "1.52", features = ["rt-multi-thread", "process", "io-util", "sync", "macros"] }
+# mimalloc's statistics (`mi_process_info`), for the semantic backend's heap budget.
+libmimalloc-sys   = { version = "0.1", default-features = false, features = ["extended"] }
+libc              = "0.2"
+tokio             = { version = "1.52", features = ["rt-multi-thread", "sync", "macros"] }
 
 # File system
 ignore            = "0.4"
@@ -97,6 +110,7 @@ trycmd            = "1.2"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+strip = "symbols"
 
 [profile.bench]
 inherits = "release"

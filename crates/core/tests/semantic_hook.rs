@@ -3,17 +3,18 @@
 //! answers in time, the structural ones when it does not, its late answer on the next request, and one warning when it
 //! is unavailable. The checker here is a fake, so the contract is tested without `tsc`.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession};
-use caliper_docgen_core::types::semantic::{
-    SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
-};
-use caliper_docgen_core::types::{DiagnosticCode, DiagnosticSeverity, PropType};
+use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget, SourceChange};
+use caliper_docgen_core::types::{ComponentExport, DiagnosticCode, DiagnosticSeverity, PropType};
 use camino::Utf8PathBuf;
+
+mod support;
+use support::{semantic_component, semantic_prop};
 
 const BUTTON: &str = "export function Button(props: { label: string }) { return null; }";
 const CARD: &str = "export function Card(props: { title: string }) { return null; }";
@@ -49,27 +50,18 @@ impl SemanticProvider for Fake {
 
 /// The checker finds a prop the structural pass cannot see: `size`, typed as a union of two literals.
 fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
-    let prop = |name: &str, prop_type: PropType| {
-        Arc::new(SemanticProp {
-            name: name.to_string(),
-            prop_type,
-            required: false,
-            description: String::new(),
-            react_declared: false,
-        })
-    };
+    let prop = |name: &str, prop_type: PropType| semantic_prop(name, prop_type, false, false);
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
-            props: vec![
+        components: vec![semantic_component(
+            &target.key,
+            vec![
                 prop("label", PropType::String),
                 prop(
                     "size",
                     PropType::Union(vec![PropType::StringLiteral("sm".into()), PropType::StringLiteral("lg".into())]),
                 ),
             ],
-        }],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -77,20 +69,12 @@ fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
 /// The checker reports the component's `label` and, as `tsc` does without a filter, everything `@types/react` declares:
 /// `children` as a string (so the checker's type is visible), `className`, `id`, and the `key` and `ref` React adds.
 fn reports_react_props(target: &SemanticTarget) -> SemanticOutcome {
-    let prop = |name: &str, prop_type: PropType, react_declared: bool| {
-        Arc::new(SemanticProp {
-            name: name.to_string(),
-            prop_type,
-            required: false,
-            description: String::new(),
-            react_declared,
-        })
-    };
+    let prop =
+        |name: &str, prop_type: PropType, react_declared: bool| semantic_prop(name, prop_type, false, react_declared);
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
-            props: vec![
+        components: vec![semantic_component(
+            &target.key,
+            vec![
                 prop("label", PropType::String, false),
                 prop("children", PropType::String, true),
                 prop("className", PropType::String, true),
@@ -98,7 +82,7 @@ fn reports_react_props(target: &SemanticTarget) -> SemanticOutcome {
                 prop("key", PropType::String, true),
                 prop("ref", PropType::String, true),
             ],
-        }],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -124,7 +108,7 @@ fn project(files: &[(&str, &str)]) -> Project {
 fn session(project: &Project, checker: Arc<Fake>, wait: Duration) -> WatchSession {
     let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
         .with_semantic(checker, wait);
-    let _ = session.initialize();
+    drop(session.initialize());
     session
 }
 
@@ -135,14 +119,14 @@ fn session_in(
 ) -> WatchSession {
     let options = PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
     let session = WatchSession::lazy(options).with_semantic(Fake::new(Duration::ZERO, reply), Duration::from_secs(5));
-    let _ = session.initialize();
+    drop(session.initialize());
     session
 }
 
 fn structural_session(project: &Project, mode: HtmlAttributeMode) -> WatchSession {
     let options = PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
     let session = WatchSession::lazy(options);
-    let _ = session.initialize();
+    drop(session.initialize());
     session
 }
 
@@ -164,6 +148,31 @@ fn a_checker_that_answers_in_time_replaces_the_structural_props_and_says_so() {
     assert_eq!(provenance.len(), 1);
     assert_eq!(provenance[0].severity, DiagnosticSeverity::Info);
     assert_eq!(provenance[0].affects, ["Button"]);
+}
+
+/// The checker could not read `label` (an import it did not resolve): its answer there is a placeholder.
+fn cannot_read_label(target: &SemanticTarget) -> SemanticOutcome {
+    SemanticOutcome {
+        components: vec![semantic_component(
+            &target.key,
+            vec![semantic_prop("label", caliper_docgen_core::types::semantic::unresolved_type("Label"), true, false)],
+        )],
+        ..SemanticOutcome::default()
+    }
+}
+
+#[test]
+fn a_prop_the_checker_could_not_read_keeps_its_structural_type_marked_in_a_session() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = session(&project, Fake::new(Duration::ZERO, cannot_read_label), Duration::from_secs(5));
+
+    let answer = session.component("Button").unwrap();
+
+    assert_eq!(answer.entry.props["label"].prop_type, PropType::String);
+    assert_eq!(answer.entry.props["label"].degraded_by, ["unresolvableImport"]);
+    let unread: Vec<_> = answer.diagnostics.iter().filter(|d| d.message.contains("could not read")).collect();
+    assert_eq!(unread.len(), 1, "{:?}", answer.diagnostics);
+    assert_eq!(unread[0].affects, ["Button"]);
 }
 
 #[test]
@@ -246,7 +255,7 @@ fn a_structural_prop_the_checker_does_not_return_stays_with_its_structural_type(
 fn a_session_without_a_checker_answers_as_before() {
     let project = project(&[("Button.tsx", BUTTON)]);
     let plain = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() });
-    let _ = plain.initialize();
+    drop(plain.initialize());
 
     let answer = plain.component("Button").unwrap();
 
@@ -278,9 +287,11 @@ fn names(session: &WatchSession, key: &str) -> Vec<String> {
 }
 
 #[test]
-fn curated_and_none_take_the_checkers_react_props_only_where_the_structural_pass_lists_them() {
+fn every_mode_takes_the_checkers_react_props_only_where_the_structural_pass_lists_them() {
+    // Which `@types/react` props are rows is relevance's decision on the structural answer (ADR 0028), in every mode:
+    // `full` makes every attribute known, not every attribute a row, so the checker adds no name of its own.
     let project = project(&REACT_PROP_COMPONENTS);
-    for mode in [HtmlAttributeMode::Curated, HtmlAttributeMode::None] {
+    for mode in [HtmlAttributeMode::Full, HtmlAttributeMode::Curated, HtmlAttributeMode::None] {
         let structural = structural_session(&project, mode);
         let checked = session_in(&project, mode, reports_react_props);
         for key in ["WithChildren", "OwnChildren", "Div"] {
@@ -296,21 +307,47 @@ fn curated_and_none_take_the_checkers_react_props_only_where_the_structural_pass
     }
 }
 
+/// As the checker answers: [`reports_react_props`], less the React props the request does not ask for.
+fn reports_wanted_react_props(target: &SemanticTarget) -> SemanticOutcome {
+    let mut outcome = reports_react_props(target);
+    for component in &mut outcome.components {
+        component.props.retain(|prop| {
+            !prop.react_declared || target.react_wanted.as_ref().is_none_or(|wanted| wanted.contains(&prop.name))
+        });
+    }
+    outcome
+}
+
 #[test]
-fn full_takes_everything_the_checker_reports_except_key() {
-    let project = project(&REACT_PROP_COMPONENTS);
-    let checked = session_in(&project, HtmlAttributeMode::Full, reports_react_props);
-    for key in ["WithChildren", "OwnChildren", "Div"] {
-        let got = names(&checked, key);
-        for wanted in ["label", "children", "className", "id", "ref"] {
-            assert!(got.iter().any(|name| name == wanted), "{key} lacks {wanted}: {got:?}");
-        }
-        assert!(!got.iter().any(|name| name == "key"), "{key} lists key: {got:?}");
+fn the_expanded_view_keeps_the_react_props_only_the_checker_finds() {
+    // Entire finding on change 288: props written `ReturnType<typeof makeProps>` give the structural pass no props, so
+    // a request for only the React props it lists asks for none. `collapseInheritedProps: none` (the expanded view)
+    // under `full` takes every React prop the checker finds; a collapsing mode leaves them to relevance's decision.
+    let project = project(&[(
+        "Made.tsx",
+        "import type { HTMLAttributes } from 'react';\n\
+         function makeProps() { return {} as HTMLAttributes<HTMLDivElement> & { label: string }; }\n\
+         export function Made(props: ReturnType<typeof makeProps>) { return null; }",
+    )]);
+    for (collapse, want) in [
+        (CollapseInheritedProps::None, vec!["children", "className", "id", "label", "ref"]),
+        (CollapseInheritedProps::Dependencies, vec!["label"]),
+    ] {
+        let options = PipelineOptions {
+            src_dirs: vec![project.root.clone()],
+            html_attributes: HtmlAttributeMode::Full,
+            collapse_inherited_props: collapse,
+            ..Default::default()
+        };
+        let checked = WatchSession::lazy(options)
+            .with_semantic(Fake::new(Duration::ZERO, reports_wanted_react_props), Duration::from_secs(5));
+        drop(checked.initialize());
+        assert_eq!(names(&checked, "Made"), want, "{collapse:?}");
     }
 }
 
 #[test]
-fn the_request_asks_only_for_the_react_props_the_mode_can_use() {
+fn the_request_asks_only_for_the_react_props_the_structural_answer_lists() {
     let wanted = |mode| {
         let seen = Arc::new(std::sync::Mutex::new(None));
         struct Spy(Arc<std::sync::Mutex<Option<SemanticTarget>>>);
@@ -324,16 +361,18 @@ fn the_request_asks_only_for_the_react_props_the_mode_can_use() {
         let options =
             PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
         let session = WatchSession::lazy(options).with_semantic(Arc::new(Spy(seen.clone())), Duration::from_millis(1));
-        let _ = session.initialize();
+        drop(session.initialize());
         let _ = session.component("WithChildren");
         let target = seen.lock().unwrap().take().unwrap();
         target.react_wanted
     };
 
-    assert_eq!(wanted(HtmlAttributeMode::Full), None);
-    let curated = wanted(HtmlAttributeMode::Curated).unwrap();
-    assert!(curated.contains("children") && curated.contains("label"), "{curated:?}");
-    assert!(!curated.contains("className"));
+    // The attributes relevance leaves to a layer are never converted, whatever the mode.
+    for mode in [HtmlAttributeMode::Full, HtmlAttributeMode::Curated] {
+        let asked = wanted(mode).unwrap();
+        assert!(asked.contains("children") && asked.contains("label"), "{mode:?}: {asked:?}");
+        assert!(!asked.contains("className"), "{mode:?}: {asked:?}");
+    }
 }
 
 const BUTTON_FROM_TYPES: &str =
@@ -355,22 +394,13 @@ fn types_file_outcome(target: &SemanticTarget, text: &str) -> SemanticOutcome {
         .collect();
     let version = format!("v{}", names.len());
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
-            props: names
+        components: vec![semantic_component(
+            &target.key,
+            names
                 .into_iter()
-                .map(|name| {
-                    Arc::new(SemanticProp {
-                        name,
-                        prop_type: PropType::StringLiteral(version.clone()),
-                        required: false,
-                        description: String::new(),
-                        react_declared: false,
-                    })
-                })
+                .map(|name| semantic_prop(&name, PropType::StringLiteral(version.clone()), false, false))
                 .collect(),
-        }],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -444,11 +474,13 @@ fn an_answer_that_arrives_after_an_edit_is_not_kept_for_the_edited_project() {
     session.update_file(&types);
     // The answer to the question asked before the edit: it describes `types.ts` as it was.
     let target = SemanticTarget {
+        key: "Button".to_string(),
         file_path: project.root.join("Button.tsx"),
         display_name: "Button".to_string(),
-        exported: true,
+        exports: vec![ComponentExport::named("Button")],
         described: Default::default(),
         react_wanted: None,
+        layering: None,
     };
     let stale = types_file_outcome(&target, TYPES_ONE_PROP);
     gated.held.lock().unwrap().pop().unwrap().send(stale).unwrap();
@@ -467,21 +499,12 @@ fn opaque_type_diagnostics(answer: &caliper_docgen_core::pipeline::ComponentAnsw
 
 /// The checker answers for `label` and `item`: nothing the structural pass left opaque is left over.
 fn answers_every_prop(target: &SemanticTarget) -> SemanticOutcome {
-    let prop = |name: &str, prop_type: PropType| {
-        Arc::new(SemanticProp {
-            name: name.to_string(),
-            prop_type,
-            required: true,
-            description: String::new(),
-            react_declared: false,
-        })
-    };
+    let prop = |name: &str, prop_type: PropType| semantic_prop(name, prop_type, true, false);
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
-            props: vec![prop("label", PropType::String), prop("item", PropType::StringLiteral("a".into()))],
-        }],
+        components: vec![semantic_component(
+            &target.key,
+            vec![prop("label", PropType::String), prop("item", PropType::StringLiteral("a".into()))],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -515,25 +538,17 @@ const DEFAULTED: &str =
 /// The checker returns `label` (a different type from the source's `string`), a prop of its own (`size`), and one of
 /// `@types/react`'s (`className`).
 fn label_size_and_class_name(target: &SemanticTarget) -> SemanticOutcome {
-    let prop = |name: &str, prop_type: PropType, react_declared: bool| {
-        Arc::new(SemanticProp {
-            name: name.to_string(),
-            prop_type,
-            required: false,
-            description: String::new(),
-            react_declared,
-        })
-    };
+    let prop =
+        |name: &str, prop_type: PropType, react_declared: bool| semantic_prop(name, prop_type, false, react_declared);
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
-            props: vec![
+        components: vec![semantic_component(
+            &target.key,
+            vec![
                 prop("label", PropType::StringLiteral("ok".into()), false),
                 prop("size", PropType::Number, false),
                 prop("className", PropType::String, true),
             ],
-        }],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -547,11 +562,13 @@ fn the_whole_project_merge_and_the_session_merge_agree_on_every_prop_the_checker
 
     let mut batch = caliper_docgen_core::extract(&options);
     let target = SemanticTarget {
+        key: "Button".to_string(),
         file_path: batch.components["Button"].file_path.clone(),
         display_name: "Button".to_string(),
-        exported: true,
+        exports: batch.components["Button"].exports.clone(),
         described: Default::default(),
         react_wanted: None,
+        layering: None,
     };
     caliper_docgen_core::types::semantic::merge_semantic(&mut batch, label_size_and_class_name(&target));
     let batch = &batch.components["Button"];
@@ -566,9 +583,481 @@ fn the_whole_project_merge_and_the_session_merge_agree_on_every_prop_the_checker
     assert_eq!(batch.props["label"].prop_type, PropType::StringLiteral("ok".into()));
     assert!(batch.props["label"].default_value.is_some(), "the structural default stays");
 
-    // Where they differ, on purpose: the whole-project merge lets the checker decide which props exist and leaves
-    // `@types/react`'s to the inheritance layers; the session keeps a structural prop the checker did not return and
-    // takes the `@types/react` prop its `htmlAttributes` mode lists.
+    // Both take a `@types/react` prop only where the structural answer lists it (relevance's decision, ADR 0028),
+    // whatever the mode. Where they differ, on purpose: the whole-project merge lets the checker decide which props
+    // exist; the session keeps a structural prop the checker did not return.
     assert_eq!(batch.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
-    assert_eq!(on_demand.props.keys().cloned().collect::<Vec<_>>(), ["className", "label", "legacy", "size"]);
+    assert_eq!(on_demand.props.keys().cloned().collect::<Vec<_>>(), ["label", "legacy", "size"]);
+}
+
+/// A provider that drops its sender without answering, as a checker whose worker died does.
+struct Hangup;
+
+impl SemanticProvider for Hangup {
+    fn request(&self, _targets: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+        channel().1
+    }
+}
+
+#[test]
+fn a_checker_that_disconnects_without_answering_leaves_the_structural_props_and_says_so() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(Arc::new(Hangup), Duration::from_secs(5));
+    drop(session.initialize());
+
+    let answer = session.component("Button").unwrap();
+
+    assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label"]);
+    let notes: Vec<_> = answer.diagnostics.iter().filter(|d| d.code == DiagnosticCode::SemanticBackend).collect();
+    assert_eq!(notes.len(), 1, "{:?}", answer.diagnostics);
+    assert_eq!(notes[0].severity, DiagnosticSeverity::Warning);
+    assert_eq!(notes[0].message, "the TypeScript checker stopped without answering; the structural props are used");
+    assert_eq!(notes[0].affects, ["Button"]);
+}
+
+/// Records what the session tells it changed, and answers every request with `finds_size`.
+#[derive(Default)]
+struct Told(std::sync::Mutex<Vec<SourceChange>>);
+
+impl SemanticProvider for Told {
+    fn request(&self, targets: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+        let (sender, receiver) = channel();
+        sender.send(finds_size(&targets[0])).ok();
+        receiver
+    }
+
+    fn changed(&self, change: SourceChange) {
+        self.0.lock().unwrap().push(change);
+    }
+}
+
+/// A warm checker answers from what it read before, so every change the session applies reaches it (ADR 0026 S6).
+#[test]
+fn every_change_the_session_applies_is_told_to_the_checker() {
+    let project = project(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
+    let checker = Arc::new(Told::default());
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(checker.clone(), Duration::from_secs(5));
+    drop(session.initialize());
+    assert_eq!(*checker.0.lock().unwrap(), [SourceChange::Everything]);
+    drop(session.component("Button"));
+    // The first look applies again what was written just before the session started; what it tells is not the point.
+    session.ensure_fresh();
+    checker.0.lock().unwrap().clear();
+    let (button, card) = (project.root.join("Button.tsx"), project.root.join("Card.tsx"));
+
+    std::fs::write(&button, "export function Button(props: { label: string; tone: string }) { return null; }").unwrap();
+    session.update_file(&button);
+    std::fs::write(&card, "export function Card(props: { title: string; tone: string }) { return null; }").unwrap();
+    session.ensure_fresh();
+    drop(session.rebuild());
+
+    assert_eq!(
+        *checker.0.lock().unwrap(),
+        [SourceChange::Files(vec![button]), SourceChange::Files(vec![card]), SourceChange::Everything,]
+    );
+}
+
+/// A warning that comes with an answer is about that answer, and shows every time; only "unavailable" is said once.
+#[test]
+fn a_warning_that_comes_with_an_answer_is_shown_on_every_answer() {
+    fn warns(target: &SemanticTarget) -> SemanticOutcome {
+        let mut outcome = finds_size(target);
+        outcome.diagnostics.push(caliper_docgen_core::types::Diagnostic::new(
+            DiagnosticSeverity::Warning,
+            DiagnosticCode::SemanticBackend,
+            "the TypeScript checker was not told that types.ts changed",
+        ));
+        outcome
+    }
+    let project = project(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
+    let session = session(&project, Fake::new(Duration::ZERO, warns), Duration::from_secs(5));
+
+    for key in ["Button", "Card"] {
+        let answer = session.component(key).unwrap();
+        let warnings = answer.diagnostics.iter().filter(|d| d.severity == DiagnosticSeverity::Warning).count();
+        assert_eq!(warnings, 1, "{key}: {:?}", answer.diagnostics);
+    }
+}
+
+const NOT_TOLD: &str = "the TypeScript checker was not told that types.ts changed";
+
+fn warns_of_an_unannounced_edit(target: &SemanticTarget) -> SemanticOutcome {
+    let mut outcome = finds_size(target);
+    outcome.diagnostics.push(caliper_docgen_core::types::Diagnostic::new(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::SemanticBackend,
+        NOT_TOLD,
+    ));
+    outcome
+}
+
+fn keeps_structural_props_for_a_generic_component(target: &SemanticTarget) -> SemanticOutcome {
+    SemanticOutcome {
+        fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
+            key: target.key.clone(),
+            reason: "the instantiation Button<\"a\"> could not be formed: Cannot find name 'Settings'.".to_string(),
+        }],
+        ..SemanticOutcome::default()
+    }
+}
+
+fn messages(session: &WatchSession, key: &str) -> Vec<String> {
+    session.component(key).unwrap().diagnostics.iter().map(|d| d.message.clone()).collect()
+}
+
+/// What an answer says about the request that made it belongs to the answer: a late answer, and every request it then
+/// serves, carries it.
+#[test]
+fn a_late_answer_reports_the_warning_that_came_with_it_on_every_request_it_serves() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = session(
+        &project,
+        Fake::new(Duration::from_millis(300), warns_of_an_unannounced_edit),
+        Duration::from_millis(10),
+    );
+
+    let early = messages(&session, "Button");
+    assert!(!early.iter().any(|message| message == NOT_TOLD), "{early:?}");
+    std::thread::sleep(Duration::from_millis(900));
+
+    for request in ["first", "second"] {
+        let served = messages(&session, "Button");
+        assert_eq!(served.iter().filter(|message| *message == NOT_TOLD).count(), 1, "{request}: {served:?}");
+    }
+}
+
+#[test]
+fn an_answer_served_from_the_cache_reports_the_warning_that_came_with_it() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Fake::new(Duration::ZERO, warns_of_an_unannounced_edit);
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
+
+    let first = messages(&session, "Button");
+    let cached = messages(&session, "Button");
+
+    assert_eq!(checker.requests(), 1);
+    assert_eq!(cached, first);
+    assert!(cached.iter().any(|message| message == NOT_TOLD), "{cached:?}");
+}
+
+#[test]
+fn a_fallback_reason_is_reported_again_when_the_cache_serves_the_component() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Fake::new(Duration::ZERO, keeps_structural_props_for_a_generic_component);
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
+
+    let first = messages(&session, "Button");
+    let cached = messages(&session, "Button");
+
+    assert_eq!(checker.requests(), 1);
+    assert!(first.iter().any(|message| message.contains("could not be formed")), "{first:?}");
+    assert_eq!(cached, first);
+}
+
+#[test]
+fn a_late_fallback_reason_is_reported_by_the_request_that_finds_it() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = session(
+        &project,
+        Fake::new(Duration::from_millis(300), keeps_structural_props_for_a_generic_component),
+        Duration::from_millis(10),
+    );
+
+    drop(messages(&session, "Button"));
+    std::thread::sleep(Duration::from_millis(900));
+
+    let served = messages(&session, "Button");
+    assert!(served.iter().any(|message| message.contains("could not be formed")), "{served:?}");
+}
+
+/// The structural pass cannot find `Thing`, so it lists no props for `Empty` (as for `ComponentProps<typeof Button>`
+/// of a package it does not model): the checker is the only answer worth showing.
+const EMPTY: &str = "import type { ComponentProps } from \"react\";\nimport { Thing } from \"./missing\";\n\
+                     export function Empty(props: ComponentProps<typeof Thing>) { return null; }";
+
+fn structural_answer(project: &Project, key: &str) -> caliper_docgen_core::pipeline::ComponentAnswer {
+    structural_session(project, PipelineOptions::default().html_attributes).component(key).unwrap()
+}
+
+#[test]
+fn a_component_with_no_structural_props_waits_for_the_checker_past_the_short_wait() {
+    let project = project(&[("Empty.tsx", EMPTY)]);
+    assert_eq!(structural_answer(&project, "Empty").entry.props.len(), 0, "the structural pass lists nothing");
+    let checker = Fake::new(Duration::from_millis(300), finds_size);
+    let session = session(&project, checker.clone(), Duration::from_millis(10));
+
+    let answer = session.component("Empty").unwrap();
+
+    assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    let notes: Vec<&str> = answer
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SemanticBackend)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(notes, ["1 component(s) resolved by the TypeScript checker"]);
+    assert_eq!(checker.requests(), 1);
+}
+
+#[test]
+fn a_component_with_structural_props_answers_at_the_short_wait_exactly_as_before() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let structural = structural_answer(&project, "Button");
+    let checker = Fake::new(Duration::from_millis(300), finds_size);
+    let session = session(&project, checker.clone(), Duration::from_millis(10));
+
+    let answer = session.component("Button").unwrap();
+
+    assert_eq!(answer.entry, structural.entry);
+    let mut expected = structural.diagnostics.clone();
+    let mut pending = caliper_docgen_core::types::Diagnostic::new(
+        DiagnosticSeverity::Info,
+        DiagnosticCode::SemanticBackend,
+        "the TypeScript checker has not answered yet; the structural props are used, and the checker's replace them \
+         on the next request",
+    );
+    pending.affects = vec!["Button".to_string()];
+    expected.push(pending);
+    assert_eq!(answer.diagnostics, expected);
+}
+
+#[test]
+fn an_answer_slower_than_the_longer_wait_is_kept_with_what_the_checker_said_for_the_next_request() {
+    let project = project(&[("Empty.tsx", EMPTY)]);
+    let checker = Fake::new(Duration::from_millis(300), warns_of_an_unannounced_edit);
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(checker.clone(), Duration::from_millis(5))
+        .with_semantic_wait_empty(Duration::from_millis(20));
+    drop(session.initialize());
+
+    let early = session.component("Empty").unwrap();
+    assert_eq!(early.entry.props.len(), 0);
+    assert!(early.diagnostics.iter().any(|d| d.message.contains("has not answered yet")), "{:?}", early.diagnostics);
+    std::thread::sleep(Duration::from_millis(900));
+
+    let late = session.component("Empty").unwrap();
+    assert_eq!(late.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    assert_eq!(late.diagnostics.iter().filter(|d| d.message == NOT_TOLD).count(), 1, "{:?}", late.diagnostics);
+    assert_eq!(checker.requests(), 1);
+}
+
+#[test]
+fn the_longer_wait_never_shortens_the_wait_every_component_gets() {
+    let project = project(&[("Empty.tsx", EMPTY)]);
+    let checker = Fake::new(Duration::from_millis(300), finds_size);
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(checker, Duration::from_secs(5))
+        .with_semantic_wait_empty(Duration::ZERO);
+    drop(session.initialize());
+
+    assert_eq!(prop_names(&session, "Empty"), ["label", "size"]);
+}
+
+const MENU: &str = "export interface MenuProps { open: boolean; label: string }
+export interface ItemProps { value: number }
+function Item(props: ItemProps) { return null; }
+function Menu(props: MenuProps) { return null; }
+Menu.Item = Item;
+export default Menu;";
+
+/// Records every target it is asked about and never answers.
+struct Recorder(std::sync::Mutex<Vec<SemanticTarget>>);
+
+impl SemanticProvider for Recorder {
+    fn request(&self, targets: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+        self.0.lock().unwrap().extend(targets);
+        channel().1
+    }
+}
+
+/// A session asks the checker for a component by its key and by how its module exports it, never by its name alone:
+/// `Item` is reached through `Menu`, the module's default export, and nothing exports it as `Item`.
+#[test]
+fn a_session_asks_for_a_component_by_its_key_and_its_exports_eager_or_lazy() {
+    let project = project(&[("Menu.tsx", MENU)]);
+    for lazy in [false, true] {
+        let options = PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() };
+        let recorder = Arc::new(Recorder(std::sync::Mutex::new(Vec::new())));
+        let session = if lazy { WatchSession::lazy(options) } else { WatchSession::new(options) }
+            .with_semantic(recorder.clone(), Duration::from_millis(1));
+        drop(session.initialize());
+        drop(session.component("Item"));
+        drop(session.component("Menu"));
+
+        let asked: Vec<(String, String, Vec<String>)> = recorder
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|t| (t.key.clone(), t.display_name.clone(), t.exports.iter().map(ToString::to_string).collect()))
+            .collect();
+        assert_eq!(
+            asked,
+            [
+                ("Item".to_string(), "Item".to_string(), vec!["default.Item".to_string()]),
+                ("Menu".to_string(), "Menu".to_string(), vec!["default".to_string()]),
+            ],
+            "lazy: {lazy}"
+        );
+    }
+}
+
+const E_WITH_DEFAULT: &str = "export interface NamedProps { named: string }
+export interface DefaultProps { fallback: string }
+export const E = (props: NamedProps) => null;
+export default function (props: DefaultProps) { return null; }";
+
+/// An anonymous default export is named after its file, which a named export can be too: each is asked for by its own
+/// key, the named one as `E` and the default as `default`, so neither is given the other's props.
+#[test]
+fn a_default_export_beside_a_named_export_of_its_file_name_is_asked_for_by_its_own_key() {
+    let project = project(&[("E.tsx", E_WITH_DEFAULT)]);
+    for lazy in [false, true] {
+        let options = PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() };
+        let recorder = Arc::new(Recorder(std::sync::Mutex::new(Vec::new())));
+        let session = if lazy { WatchSession::lazy(options) } else { WatchSession::new(options) }
+            .with_semantic(recorder.clone(), Duration::from_millis(1));
+        drop(session.initialize());
+        drop(session.component("E"));
+        drop(session.component("E (default)"));
+
+        let asked: Vec<(String, Vec<String>)> = recorder
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|t| (t.key.clone(), t.exports.iter().map(ToString::to_string).collect()))
+            .collect();
+        assert_eq!(
+            asked,
+            [("E".to_string(), vec!["E".to_string()]), ("E (default)".to_string(), vec!["default".to_string()])],
+            "lazy: {lazy}"
+        );
+    }
+}
+
+/// An outcome that answers for `Menu`, and gives `Menu` a fallback reason, whatever was asked.
+fn answers_for_menu(_: &SemanticTarget) -> SemanticOutcome {
+    SemanticOutcome {
+        components: vec![semantic_component("Menu", vec![semantic_prop("label", PropType::String, true, false)])],
+        fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
+            key: "Menu".to_string(),
+            reason: "about Menu".to_string(),
+        }],
+        diagnostics: vec![],
+    }
+}
+
+/// `Item` and `Menu` share a file; what the checker says about `Menu` is not `Item`'s, whether it comes in time, late,
+/// or from the cache.
+#[test]
+fn an_answer_for_another_component_of_the_same_file_is_not_merged() {
+    let project = project(&[("Menu.tsx", MENU)]);
+    let structural = structural_session(&project, HtmlAttributeMode::Full).component("Item").unwrap().entry;
+    let in_time = session(&project, Fake::new(Duration::ZERO, answers_for_menu), Duration::from_secs(5));
+    let late = session(&project, Fake::new(Duration::from_millis(200), answers_for_menu), Duration::from_millis(10));
+    drop(late.component("Item"));
+    std::thread::sleep(Duration::from_millis(700));
+
+    for (path, session) in [("in time", &in_time), ("late", &late), ("cached", &in_time)] {
+        let item = session.component("Item").unwrap();
+        assert_eq!(item.entry, structural, "{path}");
+        let checker: Vec<&String> =
+            item.diagnostics.iter().filter(|d| d.code == DiagnosticCode::SemanticBackend).map(|d| &d.message).collect();
+        assert_eq!(checker, Vec::<&String>::new(), "{path}");
+    }
+}
+
+/// A story asked while the checker is still answering the same question (its prefetch, or another story of the same
+/// component) waits for that answer instead of queueing the question again behind it.
+#[test]
+fn a_request_for_a_component_the_checker_is_already_answering_joins_that_request() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Fake::new(Duration::from_millis(500), warns_of_an_unannounced_edit);
+    let session = Arc::new(session(&project, checker.clone(), Duration::from_secs(5)));
+    let first = {
+        let session = session.clone();
+        std::thread::spawn(move || session.component("Button").unwrap())
+    };
+    while checker.requests() == 0 {
+        std::thread::yield_now();
+    }
+
+    let joined = session.component("Button").unwrap();
+
+    assert_eq!(checker.requests(), 1, "the second caller asked again");
+    let first = first.join().unwrap();
+    for (caller, answer) in [("first", &first), ("joined", &joined)] {
+        assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"], "{caller}");
+        assert_eq!(answer.diagnostics.iter().filter(|d| d.message == NOT_TOLD).count(), 1, "{caller}");
+    }
+    assert_eq!(joined, first);
+}
+
+/// The structural pass resolves `./thing` but finds no component `Thing` in it, as for Chakra's `Button`, which a
+/// factory it does not model makes: it warns that it cannot find the component and lists no props.
+const FROM_A_FACTORY: &str = "import type { ComponentProps } from \"react\";\nimport { Thing } from \"./thing\";\n\
+                              export function Wrapper(props: ComponentProps<typeof Thing>) { return null; }";
+const THING: &str = "declare function make(): unknown;\nexport const Thing = make();";
+
+fn unresolvable(answer: &caliper_docgen_core::pipeline::ComponentAnswer) -> Vec<(DiagnosticSeverity, String)> {
+    answer
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::UnresolvableImport)
+        .map(|d| (d.severity.clone(), d.message.clone()))
+        .collect()
+}
+
+#[test]
+fn the_structural_cannot_find_the_component_warning_goes_once_the_checker_answers_the_component() {
+    let project = project(&[("Wrapper.tsx", FROM_A_FACTORY), ("thing.ts", THING)]);
+    let structural = structural_answer(&project, "Wrapper");
+    let cannot_find = format!(
+        "Cannot find the component 'Thing' whose props are referenced from '{}'",
+        project.root.join("Wrapper.tsx")
+    );
+    assert_eq!(unresolvable(&structural), [(DiagnosticSeverity::Warning, cannot_find)]);
+
+    let in_time = session(&project, Fake::new(Duration::ZERO, finds_size), Duration::from_secs(5));
+    let late = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(Fake::new(Duration::from_millis(300), finds_size), Duration::from_millis(5))
+        .with_semantic_wait_empty(Duration::from_millis(10));
+    drop(late.initialize());
+    let early = late.component("Wrapper").unwrap();
+    assert_eq!(unresolvable(&early), unresolvable(&structural), "the checker has not answered: the structural answer");
+    std::thread::sleep(Duration::from_millis(900));
+
+    for (path, session) in [("in time", &in_time), ("cached", &in_time), ("late", &late)] {
+        let answer = session.component("Wrapper").unwrap();
+        assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"], "{path}");
+        assert_eq!(unresolvable(&answer), [], "{path}");
+        let warnings: Vec<&str> = answer
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity != DiagnosticSeverity::Info)
+            .map(|d| d.message.as_str())
+            .collect();
+        assert_eq!(warnings, Vec::<&str>::new(), "{path}");
+    }
+}
+
+/// `Label` comes from a module that does not exist, so neither pass can resolve it.
+const UNRESOLVED_LABEL: &str =
+    "import type { Label } from \"./missing\";\nexport function Button(props: { label: Label }) { return null; }";
+
+#[test]
+fn an_unresolvable_import_the_checker_cannot_resolve_either_keeps_its_warning_and_the_props_marker() {
+    let project = project(&[("Button.tsx", UNRESOLVED_LABEL)]);
+    let structural = structural_answer(&project, "Button");
+    assert!(!unresolvable(&structural).is_empty(), "{:?}", structural.diagnostics);
+
+    let checked =
+        session(&project, Fake::new(Duration::ZERO, cannot_read_label), Duration::from_secs(5)).component("Button");
+    let checked = checked.unwrap();
+
+    assert_eq!(checked.entry.props["label"].degraded_by, ["unresolvableImport"]);
+    assert_eq!(unresolvable(&checked), unresolvable(&structural));
 }

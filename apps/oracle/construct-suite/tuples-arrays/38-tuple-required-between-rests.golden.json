@@ -1,0 +1,51 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "union",
+          "members": [
+            {
+              "k": "prim",
+              "name": "string"
+            },
+            {
+              "k": "prim",
+              "name": "number"
+            },
+            {
+              "k": "lit",
+              "value": "false",
+              "of": "boolean"
+            },
+            {
+              "k": "lit",
+              "value": "true",
+              "of": "boolean"
+            }
+          ]
+        },
+        "alias": "Array"
+      }
+    ],
+    "alias": "Array"
+  },
+  "text": "(string | number | boolean)[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/38-tuple-required-between-rests.tsx"
+    },
+    "order": null
+  }
+}

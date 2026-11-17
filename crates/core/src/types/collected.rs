@@ -8,20 +8,40 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::diagnostic::Diagnostic;
+use super::output::SignatureKind;
 
 // ─── Type Aliases ─────────────────────────────────────────────────────────────
 
 /// Compact string used for names, type strings — avoids heap alloc under 24 bytes.
 pub type TypeName = CompactString;
 
+/// The name the extractor gives the alias it synthesizes for an inline props type (`function Card(props: { title: string })`),
+/// the `index`th alias of its file. Both ends of the convention are here: `is_synthesized_alias` is how the resolver
+/// tells such an alias, the component's own, from a declared one.
+pub fn synthesized_alias_name(index: usize) -> String {
+    format!("__anon_{index}")
+}
+
+/// Whether `name` is the name of an alias the extractor synthesized for an inline props type.
+pub fn is_synthesized_alias(name: &str) -> bool {
+    name.starts_with("__anon_")
+}
+
+/// The key variable the resolver makes up for the mapped type a `Record` stands for. It is not an identifier, so no
+/// user type can be named it, and the printer shows it as a variable that its value does not use.
+pub const MADE_UP_KEY_VARIABLE: &str = "Record key";
+
 // ─── ParamKind ────────────────────────────────────────────────────────────────
 
-/// How a function parameter is declared: `a`, `a?` or `...a`.
+/// How a function parameter or a tuple element is declared: `a`, `a?` or `...a`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ParamKind {
+    /// `a`: the caller must pass it.
     #[default]
     Required,
+    /// `a?`: the caller may leave it out.
     Optional,
+    /// `...a`: it collects the remaining arguments, so its type is an array.
     Rest,
 }
 
@@ -37,20 +57,12 @@ impl ParamKind {
 
     /// Source text before the name: `...` for a rest parameter.
     pub(crate) fn prefix(self) -> &'static str {
-        if self == Self::Rest {
-            "..."
-        } else {
-            ""
-        }
+        if self == Self::Rest { "..." } else { "" }
     }
 
     /// Source text after the name: `?` for an optional parameter.
     pub(crate) fn marker(self) -> &'static str {
-        if self == Self::Optional {
-            "?"
-        } else {
-            ""
-        }
+        if self == Self::Optional { "?" } else { "" }
     }
 
     pub(crate) fn code(self) -> u8 {
@@ -78,39 +90,75 @@ impl ParamKind {
 #[derive(Debug, Clone)]
 pub enum CollectedType {
     // ── Primitives
+    /// `string`.
     String,
+    /// `number`.
     Number,
+    /// `boolean`.
     Boolean,
+    /// `null`.
     Null,
+    /// `undefined`.
     Undefined,
+    /// `any`.
     Any,
+    /// `never`.
     Never,
+    /// `unknown`.
     Unknown,
+    /// `void`.
     Void,
+    /// `bigint`.
     BigInt,
+    /// `symbol`.
     Symbol,
 
     // ── Literals
+    /// A string literal type such as `"primary"`.
     StringLiteral(CompactString),
+    /// A number literal type such as `3`.
     NumberLiteral(f64),
+    /// `true` or `false` as a type.
     BoolLiteral(bool),
+    /// A bigint literal type: its value in base 10 with an optional leading `-`, without the `n` (`10n` is `10`).
+    BigIntLiteral(CompactString),
+    /// `unique symbol`, the declared type of a `declare const brand: unique symbol`.
+    UniqueSymbol,
 
     // ── Structural
+    /// `A | B`: the members in declaration order.
     Union(Vec<CollectedType>),
+    /// `A & B`: the members in declaration order.
     Intersection(Vec<CollectedType>),
+    /// `T[]` or `Array<T>`: the element type.
     Array(Box<CollectedType>),
-    Tuple(Vec<CollectedType>),
+    /// `[A, B?, ...C]`: the elements in order, as written.
+    Tuple(Vec<CollectedTupleElement>),
     /// `readonly T[]` or `readonly [A, B]`: the operand under the `readonly` operator.
     Readonly(Box<CollectedType>),
+    /// An object type `{ a: string }`: its members and index signatures.
     Object(Vec<CollectedObjectField>),
+    /// An object type with call or construct signatures that is not one call signature alone (that is a
+    /// [`Function`](CollectedType::Function)): overloads, a construct signature, or a signature beside properties.
+    Callable {
+        /// The call and construct signatures, in declaration order.
+        signatures: Vec<CollectedSignature>,
+        /// The properties and index signatures beside them.
+        fields: Vec<CollectedObjectField>,
+    },
 
     // ── Named type reference (possibly generic, possibly not yet resolved)
+    /// A reference to a type by name, with its type arguments. The resolver looks the name up; until then it is only
+    /// a name.
     Named {
+        /// The referenced type's name as written, possibly dotted (`React.ReactNode`).
         name: CompactString,
+        /// The type arguments in order, empty for a name with none.
         args: Vec<CollectedType>,
     },
 
     // ── `typeof X` — reference to the type of a value
+    /// `typeof X`: the type of the value `X`. `X` is a name, possibly dotted.
     TypeOf(CompactString),
 
     // ── `keyof X` — the union of X's own key names. Fully resolved when
@@ -119,6 +167,7 @@ pub enum CollectedType {
     // when X is `typeof` a `const` object literal; any other standalone use
     // degrades to `PropType::Opaque` since we don't (yet) have a general
     // type-to-key-names resolver outside the chain machinery.
+    /// `keyof X`: the union of `X`'s own key names.
     KeyOf(Box<CollectedType>),
 
     // ── Resolver-internal only (the extractor never produces this): pins `inner`
@@ -130,24 +179,35 @@ pub enum CollectedType {
     // lives in a different file. Every `CollectedType` the resolver's generic-alias
     // substitution (resolver/substitute.rs) splices into a callee's body gets
     // wrapped in this so later name lookups switch back to the correct file.
+    /// Resolver-internal; the extractor never produces it. A type argument pinned to the file it was written in, so a
+    /// name inside it resolves relative to that file after a generic alias substitutes it into another file's body.
     AtFile {
+        /// The file the wrapped type was written in.
         file: Utf8PathBuf,
+        /// The wrapped type.
         inner: Box<CollectedType>,
     },
 
     // ── Indexed access: Type["key"] or Type[K]
+    /// An indexed access type: `Type["key"]` or `Type[K]`.
     IndexedAccess {
+        /// The type being indexed (`Type`).
         obj: Box<CollectedType>,
+        /// The index (`"key"` or `K`).
         key: Box<CollectedType>,
     },
 
     // ── Template literal: `compact-${Size}` → parts = [Str("compact-"), Named("Size", [])]
+    /// A template literal type: the parts in order, string pieces as [`CollectedType::StringLiteral`] and the
+    /// `${...}` holes as the types they hold.
     TemplateLiteral(Vec<CollectedType>),
 
     // ── Function type: (props: P) => ReactNode
+    /// A function type: `(props: P) => ReactNode`.
     Function {
         /// The function's own type parameters (`<T>(item: T) => ReactNode`), in scope in its parameters and return type.
         type_params: Vec<CompactString>,
+        /// The parameter types in order.
         params: Vec<CollectedType>,
         /// Source parameter names, parallel to `params` (same length). `None` for
         /// a given index when that parameter has no simple identifier binding
@@ -156,28 +216,38 @@ pub enum CollectedType {
         /// Whether each parameter is required, optional (`a?`) or the rest parameter (`...a`), parallel to `params`.
         /// Shorter than `params` (or empty, as an old cache entry or a hand-built type is) means required.
         param_kinds: Vec<ParamKind>,
+        /// What the function returns.
         return_type: Box<CollectedType>,
     },
 
     // ── Conditional: T extends U ? X : Y — cannot resolve statically
+    /// A conditional type `T extends U ? X : Y`.
     Conditional {
+        /// The checked type (`T`).
         check: Box<CollectedType>,
+        /// The type it is tested against (`U`).
         extends_type: Box<CollectedType>,
+        /// The result when the test holds (`X`).
         true_type: Box<CollectedType>,
+        /// The result when it does not (`Y`).
         false_type: Box<CollectedType>,
     },
 
     // ── Mapped: { [K in Keys]: Value } — expanded as a props base when its keys are known (`resolver::evaluate`)
+    /// A mapped type `{ [K in Keys]: Value }`.
     Mapped {
         /// The key variable (`K`), which `value_type` refers to.
         param: CompactString,
+        /// The keys the variable ranges over (`Keys`).
         key_type: Box<CollectedType>,
+        /// The type each key maps to (`Value`).
         value_type: Box<CollectedType>,
         /// `?` or `+?` (`Some(true)`), `-?` (`Some(false)`), or no modifier, which keeps each key's own optionality.
         optional: Option<bool>,
     },
 
     // ── Fallback for syntax we don't recognise
+    /// A type the extractor has no structural form for, kept as its source text.
     Raw(std::string::String),
 }
 
@@ -202,28 +272,39 @@ impl CollectedType {
             | CollectedType::Unknown
             | CollectedType::Void
             | CollectedType::BigInt
-            | CollectedType::Symbol => {}
-            CollectedType::StringLiteral(s) | CollectedType::TypeOf(s) => s.hash(hasher),
+            | CollectedType::Symbol
+            | CollectedType::UniqueSymbol => {}
+            CollectedType::StringLiteral(s) | CollectedType::TypeOf(s) | CollectedType::BigIntLiteral(s) => {
+                s.hash(hasher)
+            }
             CollectedType::NumberLiteral(n) => n.to_bits().hash(hasher),
             CollectedType::BoolLiteral(b) => b.hash(hasher),
             CollectedType::Union(members)
             | CollectedType::Intersection(members)
-            | CollectedType::Tuple(members)
             | CollectedType::TemplateLiteral(members) => all(hasher, members),
+            CollectedType::Tuple(elements) => {
+                elements.len().hash(hasher);
+                for element in elements {
+                    element.kind.hash(hasher);
+                    element.label.hash(hasher);
+                    element.element_type.structural_hash(hasher);
+                }
+            }
             CollectedType::Array(inner) | CollectedType::Readonly(inner) | CollectedType::KeyOf(inner) => {
                 inner.structural_hash(hasher)
             }
-            CollectedType::Object(fields) => {
-                fields.len().hash(hasher);
-                for field in fields {
-                    field.name.hash(hasher);
-                    field.required.hash(hasher);
-                    field.readonly.hash(hasher);
-                    if let Some(key) = &field.index_key {
-                        key.structural_hash(hasher);
-                    }
-                    field.collected_type.structural_hash(hasher);
+            CollectedType::Object(fields) => hash_fields(fields, hasher),
+            CollectedType::Callable { signatures, fields } => {
+                signatures.len().hash(hasher);
+                for signature in signatures {
+                    signature.kind.hash(hasher);
+                    signature.type_params.hash(hasher);
+                    all(hasher, &signature.params);
+                    signature.param_names.hash(hasher);
+                    signature.param_kinds.hash(hasher);
+                    signature.return_type.structural_hash(hasher);
                 }
+                hash_fields(fields, hasher);
             }
             CollectedType::Named { name, args } => {
                 name.hash(hasher);
@@ -259,24 +340,6 @@ impl CollectedType {
         }
     }
 
-    /// True if this type requires the TypeScript type checker to resolve.
-    pub fn needs_type_checker(&self) -> bool {
-        matches!(self, CollectedType::Conditional { .. } | CollectedType::Mapped { .. })
-    }
-
-    /// Extract literal string keys from a type shaped like `'a' | 'b'` or a bare
-    /// `'a'`. Used for `Pick`/`Omit`'s key argument. Returns an empty vec for
-    /// anything else — notably `keyof T`, which can't be read as a string list
-    /// (see `CollectedTypeAlias::Omit::keys`, which resolves the
-    /// operand as a props chain instead).
-    pub fn as_string_union_keys(&self) -> Vec<std::string::String> {
-        match self {
-            CollectedType::StringLiteral(s) => vec![s.to_string()],
-            CollectedType::Union(members) => members.iter().flat_map(CollectedType::as_string_union_keys).collect(),
-            _ => vec![],
-        }
-    }
-
     /// Produce a raw string representation for diagnostics and fallback display.
     pub fn to_raw_string(&self) -> std::string::String {
         match self {
@@ -294,15 +357,21 @@ impl CollectedType {
             CollectedType::StringLiteral(s) => format!("\"{}\"", s),
             CollectedType::NumberLiteral(n) => n.to_string(),
             CollectedType::BoolLiteral(b) => b.to_string(),
+            CollectedType::BigIntLiteral(value) => format!("{value}n"),
+            CollectedType::UniqueSymbol => "unique symbol".into(),
             CollectedType::Union(members) => members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(" | "),
             CollectedType::Intersection(members) => {
                 members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(" & ")
             }
             CollectedType::Array(inner) => format!("{}[]", inner.to_raw_string()),
             CollectedType::Readonly(inner) => format!("readonly {}", inner.to_raw_string()),
-            CollectedType::Named { name, args } if args.is_empty() => name.to_string(),
+            CollectedType::Named { name, args } if args.is_empty() => super::scope::unmarked(name).to_string(),
             CollectedType::Named { name, args } => {
-                format!("{}<{}>", name, args.iter().map(|a| a.to_raw_string()).collect::<Vec<_>>().join(", "))
+                format!(
+                    "{}<{}>",
+                    super::scope::unmarked(name),
+                    args.iter().map(|a| a.to_raw_string()).collect::<Vec<_>>().join(", ")
+                )
             }
             CollectedType::TypeOf(name) => format!("typeof {}", name),
             CollectedType::KeyOf(inner) => format!("keyof {}", inner.to_raw_string()),
@@ -322,22 +391,22 @@ impl CollectedType {
                     .join("")
             ),
             CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => format!(
-                "{}({}) => {}",
-                if type_params.is_empty() { String::new() } else { format!("<{}>", type_params.join(", ")) },
-                params
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| {
-                        let kind = param_kinds.get(i).copied().unwrap_or_default();
-                        match param_names.get(i).and_then(|n| n.as_ref()) {
-                            Some(name) => format!("{}{name}{}: {}", kind.prefix(), kind.marker(), p.to_raw_string()),
-                            None => p.to_raw_string(),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                "{} => {}",
+                signature_raw(type_params, params, param_names, param_kinds),
                 return_type.to_raw_string()
             ),
+            CollectedType::Callable { signatures, fields } => {
+                let signatures = signatures.iter().map(|s| {
+                    let new = match s.kind {
+                        SignatureKind::Call => "",
+                        SignatureKind::Construct => "new ",
+                    };
+                    let head = signature_raw(&s.type_params, &s.params, &s.param_names, &s.param_kinds);
+                    format!("{new}{head}: {}", s.return_type.to_raw_string())
+                });
+                let fields = fields.iter().map(|f| format!("{}: {}", f.name, f.collected_type.to_raw_string()));
+                format!("{{ {} }}", signatures.chain(fields).collect::<Vec<_>>().join("; "))
+            }
             CollectedType::Conditional { check, extends_type, true_type, false_type } => format!(
                 "{} extends {} ? {} : {}",
                 check.to_raw_string(),
@@ -351,11 +420,29 @@ impl CollectedType {
                     Some(false) => "-?",
                     None => "",
                 };
+                // A key variable the resolver made up for `Record` is not an identifier; TypeScript prints it as `P`,
+                // unless the value names a `P` of its own, which the printed variable would then capture.
+                let param = if param == MADE_UP_KEY_VARIABLE {
+                    ["P", "K", "Key"].into_iter().find(|candidate| !value_type.mentions(candidate)).unwrap_or("P")
+                } else {
+                    param.as_str()
+                };
                 format!("{{ [{param} in {}]{modifier}: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
             }
-            CollectedType::Tuple(members) => {
-                format!("[{}]", members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(", "))
-            }
+            CollectedType::Tuple(elements) => format!(
+                "[{}]",
+                elements
+                    .iter()
+                    .map(|e| {
+                        let ty = e.element_type.to_raw_string();
+                        match &e.label {
+                            Some(label) => format!("{}{label}{}: {ty}", e.kind.prefix(), e.kind.marker()),
+                            None => format!("{}{ty}{}", e.kind.prefix(), e.kind.marker()),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             CollectedType::Object(_) => "{ ... }".into(),
             CollectedType::Raw(s) => s.clone(),
         }
@@ -375,6 +462,8 @@ impl CollectedType {
             CollectedType::Void => serde_json::json!("void"),
             CollectedType::BigInt => serde_json::json!("bigint"),
             CollectedType::Symbol => serde_json::json!("symbol"),
+            CollectedType::UniqueSymbol => serde_json::json!("usym"),
+            CollectedType::BigIntLiteral(value) => serde_json::json!({"bil": value.as_str()}),
             // Literals
             CollectedType::StringLiteral(s) => serde_json::json!({"sl": s.as_str()}),
             CollectedType::NumberLiteral(n) => {
@@ -412,29 +501,42 @@ impl CollectedType {
             CollectedType::Array(inner) => serde_json::json!({"arr": inner.to_json_value()}),
             // Readonly: {"ro": inner}
             CollectedType::Readonly(inner) => serde_json::json!({"ro": inner.to_json_value()}),
-            // Tuple: {"tup": [members...]}
-            CollectedType::Tuple(members) => serde_json::json!({
-                "tup": members.iter().map(|m| m.to_json_value()).collect::<Vec<_>>()
+            // Tuple: {"tup": [{t, k?, l?}...]}, `k` the element's `ParamKind` code when not required.
+            CollectedType::Tuple(elements) => serde_json::json!({
+                "tup": elements.iter().map(|e| {
+                    let mut element = serde_json::Map::new();
+                    element.insert("t".into(), e.element_type.to_json_value());
+                    if e.kind != ParamKind::Required {
+                        element.insert("k".into(), serde_json::json!(e.kind.code()));
+                    }
+                    if let Some(label) = &e.label {
+                        element.insert("l".into(), serde_json::json!(label.as_str()));
+                    }
+                    serde_json::Value::Object(element)
+                }).collect::<Vec<_>>()
             }),
             // Object: {"obj": [{name, t, req, desc, ro?, ik?}...]}
-            CollectedType::Object(fields) => serde_json::json!({
-                "obj": fields.iter().map(|f| {
-                    let mut field = serde_json::json!({
-                        "name": f.name,
-                        "t": f.collected_type.to_json_value(),
-                        "req": f.required,
-                        "desc": f.description,
-                    });
-                    if let Some(map) = field.as_object_mut() {
-                        if f.readonly {
-                            map.insert("ro".into(), serde_json::Value::Bool(true));
+            CollectedType::Object(fields) => serde_json::json!({"obj": fields_to_json(fields)}),
+            // Callable: {"call": {s: [{c?, tp, p, names, kinds, r}...], f: [fields...]}}
+            CollectedType::Callable { signatures, fields } => serde_json::json!({
+                "call": {
+                    "s": signatures.iter().map(|s| {
+                        let mut signature = serde_json::json!({
+                            "tp": s.type_params.iter().map(CompactString::as_str).collect::<Vec<_>>(),
+                            "p": s.params.iter().map(|p| p.to_json_value()).collect::<Vec<_>>(),
+                            "names": s.param_names.iter().map(|n| n.as_ref().map(|s| s.as_str())).collect::<Vec<_>>(),
+                            "kinds": s.param_kinds.iter().map(|k| k.code()).collect::<Vec<_>>(),
+                            "r": s.return_type.to_json_value(),
+                        });
+                        if s.kind == SignatureKind::Construct
+                            && let Some(map) = signature.as_object_mut()
+                        {
+                            map.insert("c".into(), serde_json::Value::Bool(true));
                         }
-                        if let Some(key) = &f.index_key {
-                            map.insert("ik".into(), key.to_json_value());
-                        }
-                    }
-                    field
-                }).collect::<Vec<_>>()
+                        signature
+                    }).collect::<Vec<_>>(),
+                    "f": fields_to_json(fields),
+                }
             }),
             // TypeOf: {"to": name}
             CollectedType::TypeOf(name) => serde_json::json!({"to": name.as_str()}),
@@ -504,11 +606,15 @@ impl CollectedType {
                 "void" => CollectedType::Void,
                 "bigint" => CollectedType::BigInt,
                 "symbol" => CollectedType::Symbol,
+                "usym" => CollectedType::UniqueSymbol,
                 other => CollectedType::Raw(other.to_string()),
             }),
             serde_json::Value::Object(map) => {
                 if let Some(s) = map.get("sl").and_then(|v| v.as_str()) {
                     return Ok(CollectedType::StringLiteral(s.into()));
+                }
+                if let Some(s) = map.get("bil").and_then(|v| v.as_str()) {
+                    return Ok(CollectedType::BigIntLiteral(s.into()));
                 }
                 if let Some(val) = map.get("nl") {
                     if let Some(s) = val.as_str() {
@@ -550,41 +656,52 @@ impl CollectedType {
                     return Ok(CollectedType::Readonly(Box::new(Self::from_json_value(inner)?)));
                 }
                 if let Some(arr) = map.get("tup").and_then(|v| v.as_array()) {
-                    return Ok(CollectedType::Tuple(arr.iter().map(Self::from_json_value).collect::<Result<_, _>>()?));
-                }
-                if let Some(arr) = map.get("obj").and_then(|v| v.as_array()) {
-                    let fields: Vec<CollectedObjectField> = arr
+                    let elements = arr
                         .iter()
-                        .map(|f| {
-                            let o = f.as_object().ok_or_else(|| "expected object for field".to_string())?;
-                            // A missing/wrong-type "name" would otherwise silently
-                            // default to "" — indistinguishable from a real (if
-                            // unusual) empty-string prop name, unlike every other
-                            // field in this struct, which either has a visible
-                            // Raw("null") escape hatch (`t`, via the recursive
-                            // from_json_value call) or a low-stakes default
-                            // (`req`/`desc`). Erroring here surfaces malformed
-                            // cache data as a deserialize failure — cache.rs's
-                            // `rmp_serde::from_slice(&bytes).ok()?` already treats
-                            // any such error as a full cache miss, falling back to
-                            // re-parsing from source, rather than serving a
-                            // corrupted-but-plausible-looking prop.
-                            let name = o
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .ok_or_else(|| "object field missing a 'name' string".to_string())?
-                                .to_owned();
-                            Ok(CollectedObjectField {
-                                name,
-                                collected_type: Self::from_json_value(o.get("t").unwrap_or(&serde_json::Value::Null))?,
-                                required: o.get("req").and_then(|v| v.as_bool()).unwrap_or(false),
-                                description: o.get("desc").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
-                                readonly: o.get("ro").and_then(|v| v.as_bool()).unwrap_or(false),
-                                index_key: o.get("ik").map(Self::from_json_value).transpose()?.map(Box::new),
+                        .map(|e| {
+                            let o = e.as_object().ok_or_else(|| "expected object for tuple element".to_string())?;
+                            Ok(CollectedTupleElement {
+                                element_type: Self::from_json_value(o.get("t").unwrap_or(&serde_json::Value::Null))?,
+                                kind: ParamKind::from_code(o.get("k").and_then(|k| k.as_u64()).unwrap_or(0)),
+                                label: o.get("l").and_then(|l| l.as_str()).map(CompactString::from),
                             })
                         })
                         .collect::<Result<_, std::string::String>>()?;
-                    return Ok(CollectedType::Object(fields));
+                    return Ok(CollectedType::Tuple(elements));
+                }
+                if let Some(arr) = map.get("obj").and_then(|v| v.as_array()) {
+                    return Ok(CollectedType::Object(fields_from_json(arr)?));
+                }
+                if let Some(inner) = map.get("call") {
+                    let signatures = inner
+                        .get("s")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .map(|s| {
+                                    let (type_params, params, param_names, param_kinds, return_type) =
+                                        Self::signature_from_json(s)?;
+                                    Ok(CollectedSignature {
+                                        kind: if s.get("c").and_then(|c| c.as_bool()).unwrap_or(false) {
+                                            SignatureKind::Construct
+                                        } else {
+                                            SignatureKind::Call
+                                        },
+                                        type_params,
+                                        params,
+                                        param_names,
+                                        param_kinds,
+                                        return_type,
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, std::string::String>>()
+                        })
+                        .unwrap_or(Ok(vec![]))?;
+                    let fields = match inner.get("f").and_then(|v| v.as_array()) {
+                        Some(arr) => fields_from_json(arr)?,
+                        None => vec![],
+                    };
+                    return Ok(CollectedType::Callable { signatures, fields });
                 }
                 if let Some(name) = map.get("to").and_then(|v| v.as_str()) {
                     return Ok(CollectedType::TypeOf(name.into()));
@@ -603,33 +720,14 @@ impl CollectedType {
                     ));
                 }
                 if let Some(inner) = map.get("fn") {
-                    let params = inner
-                        .get("p")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().map(Self::from_json_value).collect::<Result<Vec<_>, _>>())
-                        .unwrap_or(Ok(vec![]))?;
-                    let param_names = inner
-                        .get("names")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().map(|v| v.as_str().map(CompactString::from)).collect::<Vec<_>>())
-                        .unwrap_or_default();
-                    let param_kinds = inner
-                        .get("kinds")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().map(|v| ParamKind::from_code(v.as_u64().unwrap_or(0))).collect())
-                        .unwrap_or_default();
-                    let type_params = inner
-                        .get("tp")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(CompactString::from)).collect())
-                        .unwrap_or_default();
-                    let rt = Self::from_json_value(inner.get("r").unwrap_or(&serde_json::Value::Null))?;
+                    let (type_params, params, param_names, param_kinds, return_type) =
+                        Self::signature_from_json(inner)?;
                     return Ok(CollectedType::Function {
                         type_params,
                         params,
                         param_names,
                         param_kinds,
-                        return_type: Box::new(rt),
+                        return_type: Box::new(return_type),
                     });
                 }
                 if let Some(inner) = map.get("cond") {
@@ -663,6 +761,173 @@ impl CollectedType {
             _ => Ok(CollectedType::Raw(v.to_string())),
         }
     }
+
+    /// A function type's or a signature's `{tp, p, names, kinds, r}`.
+    #[allow(clippy::type_complexity)]
+    fn signature_from_json(
+        v: &serde_json::Value,
+    ) -> Result<
+        (Vec<CompactString>, Vec<CollectedType>, Vec<Option<CompactString>>, Vec<ParamKind>, CollectedType),
+        std::string::String,
+    > {
+        let params = v
+            .get("p")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().map(Self::from_json_value).collect::<Result<Vec<_>, _>>())
+            .unwrap_or(Ok(vec![]))?;
+        let param_names = v
+            .get("names")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().map(|v| v.as_str().map(CompactString::from)).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let param_kinds = v
+            .get("kinds")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().map(|v| ParamKind::from_code(v.as_u64().unwrap_or(0))).collect())
+            .unwrap_or_default();
+        let type_params = v
+            .get("tp")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(CompactString::from)).collect())
+            .unwrap_or_default();
+        let return_type = Self::from_json_value(v.get("r").unwrap_or(&serde_json::Value::Null))?;
+        Ok((type_params, params, param_names, param_kinds, return_type))
+    }
+}
+
+/// A source signature's `<T>(a: A, b?: B)`, with the names it has.
+fn signature_raw(
+    type_params: &[CompactString],
+    params: &[CollectedType],
+    param_names: &[Option<CompactString>],
+    param_kinds: &[ParamKind],
+) -> std::string::String {
+    let type_params = if type_params.is_empty() { String::new() } else { format!("<{}>", type_params.join(", ")) };
+    let params = params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let kind = param_kinds.get(i).copied().unwrap_or_default();
+            match param_names.get(i).and_then(|n| n.as_ref()) {
+                Some(name) => format!("{}{name}{}: {}", kind.prefix(), kind.marker(), p.to_raw_string()),
+                None => p.to_raw_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{type_params}({params})")
+}
+
+/// Feed `hasher` an object type's fields.
+fn hash_fields<H: std::hash::Hasher>(fields: &[CollectedObjectField], hasher: &mut H) {
+    use std::hash::Hash;
+    fields.len().hash(hasher);
+    for field in fields {
+        field.name.hash(hasher);
+        field.required.hash(hasher);
+        field.readonly.hash(hasher);
+        if let Some(key) = &field.index_key {
+            key.structural_hash(hasher);
+        }
+        field.collected_type.structural_hash(hasher);
+    }
+}
+
+/// An object type's fields as `[{name, t, req, desc, ro?, ik?, tags?}...]`.
+fn fields_to_json(fields: &[CollectedObjectField]) -> Vec<serde_json::Value> {
+    fields
+        .iter()
+        .map(|f| {
+            let mut field = serde_json::json!({
+                "name": f.name,
+                "t": f.collected_type.to_json_value(),
+                "req": f.required,
+                "desc": f.description,
+            });
+            if let Some(map) = field.as_object_mut() {
+                if f.readonly {
+                    map.insert("ro".into(), serde_json::Value::Bool(true));
+                }
+                if let Some(key) = &f.index_key {
+                    map.insert("ik".into(), key.to_json_value());
+                }
+                if !f.tags.is_empty() {
+                    map.insert("tags".into(), serde_json::json!(f.tags));
+                }
+            }
+            field
+        })
+        .collect()
+}
+
+/// The fields `fields_to_json` writes.
+fn fields_from_json(arr: &[serde_json::Value]) -> Result<Vec<CollectedObjectField>, std::string::String> {
+    arr.iter()
+        .map(|f| {
+            let o = f.as_object().ok_or_else(|| "expected object for field".to_string())?;
+            // A missing/wrong-type "name" would otherwise silently default to "" — indistinguishable from a real (if
+            // unusual) empty-string prop name, unlike every other field in this struct, which either has a visible
+            // Raw("null") escape hatch (`t`, via the recursive from_json_value call) or a low-stakes default
+            // (`req`/`desc`). Erroring here surfaces malformed cache data as a deserialize failure — cache.rs's
+            // `rmp_serde::from_slice(&bytes).ok()?` already treats any such error as a full cache miss, falling back to
+            // re-parsing from source, rather than serving a corrupted-but-plausible-looking prop.
+            let name = o
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "object field missing a 'name' string".to_string())?
+                .to_owned();
+            Ok(CollectedObjectField {
+                name,
+                collected_type: CollectedType::from_json_value(o.get("t").unwrap_or(&serde_json::Value::Null))?,
+                required: o.get("req").and_then(|v| v.as_bool()).unwrap_or(false),
+                description: o.get("desc").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
+                readonly: o.get("ro").and_then(|v| v.as_bool()).unwrap_or(false),
+                index_key: o.get("ik").map(CollectedType::from_json_value).transpose()?.map(Box::new),
+                tags: o
+                    .get("tags")
+                    .and_then(|v| v.as_object())
+                    .map(|tags| tags.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect())
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// One element of a [`CollectedType::Tuple`], as written.
+#[derive(Debug, Clone)]
+pub struct CollectedTupleElement {
+    /// The type as written: for a rest element `...T`, `T` itself (`number[]` in `...number[]`, `Tail` in
+    /// `...Tail`), which the resolver reads to tell a rest element from a spread it flattens.
+    pub element_type: CollectedType,
+    /// `T`, `T?` or `...T`, the same three forms a parameter takes.
+    pub kind: ParamKind,
+    /// The element's label, `head` in `[head: string]`.
+    pub label: Option<CompactString>,
+}
+
+impl CollectedTupleElement {
+    /// A required, unlabeled element.
+    pub fn required(element_type: CollectedType) -> Self {
+        Self { element_type, kind: ParamKind::Required, label: None }
+    }
+}
+
+/// One call or construct signature of a [`CollectedType::Callable`], with its parameters as a
+/// [`CollectedType::Function`] holds them.
+#[derive(Debug, Clone)]
+pub struct CollectedSignature {
+    /// A call `(a: A): R` or a construct `new (a: A): R` signature.
+    pub kind: SignatureKind,
+    /// The signature's own type parameters.
+    pub type_params: Vec<CompactString>,
+    /// The parameter types in order.
+    pub params: Vec<CollectedType>,
+    /// Source parameter names, parallel to `params`.
+    pub param_names: Vec<Option<CompactString>>,
+    /// Each parameter's kind, parallel to `params`.
+    pub param_kinds: Vec<ParamKind>,
+    /// What a call returns, or what `new` creates.
+    pub return_type: CollectedType,
 }
 
 impl serde::Serialize for CollectedType {
@@ -688,9 +953,13 @@ impl<'de> serde::Deserialize<'de> for CollectedType {
 /// directly, outside a `CollectedType::Object`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectedObjectField {
+    /// The field's name; for an index signature, the key parameter's (`key` in `[key: string]: T`).
     pub name: std::string::String,
+    /// The field's type; for an index signature, the value type.
     pub collected_type: CollectedType,
+    /// The field is not written `name?: T`.
     pub required: bool,
+    /// The field's JSDoc description, empty when it has none.
     pub description: std::string::String,
     /// The field is written `readonly name: T`.
     #[serde(default)]
@@ -698,6 +967,9 @@ pub struct CollectedObjectField {
     /// Set for an index signature `[name: K]: T`: the key type `K`, with `collected_type` the value type `T`.
     #[serde(default)]
     pub index_key: Option<Box<CollectedType>>,
+    /// The field's JSDoc tags (`deprecated`, `example`, …), empty when it has none.
+    #[serde(default)]
+    pub tags: BTreeMap<std::string::String, std::string::String>,
 }
 
 impl CollectedObjectField {
@@ -713,8 +985,13 @@ impl CollectedObjectField {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnumEntry {
+    /// For a TypeScript `enum`, the member's name (`Primary` in `enum Tone { Primary = "primary" }`); for an `as const`
+    /// object, its key; for a variant bag whose values are class strings, the variant group's name, with one entry
+    /// per value in it.
     pub name: std::string::String,
+    /// The member's value; for a variant bag, the name of one value in the group.
     pub value: EnumValue,
+    /// The member's JSDoc description, empty when it has none.
     pub description: std::string::String,
 }
 
@@ -724,12 +1001,16 @@ pub struct EnumEntry {
 /// serde's `untagged` cannot read a struct variant back from the cache's positional MessagePack.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnumValue {
+    /// A string value.
     String(std::string::String),
+    /// A number value.
     Number(f64),
+    /// A boolean value.
     Bool(bool),
     /// `...NAME` in a `const X = [...] as const` array: the elements of the array `NAME`, which the resolver looks up
     /// when `(typeof X)[number]` is read. Only `SourceData::const_arrays` holds one; an enum's values never do.
     Spread {
+        /// The name of the spread array (`NAME`).
         spread: std::string::String,
     },
 }
@@ -811,6 +1092,90 @@ impl EnumValue {
     }
 }
 
+// ─── Declaration scope ────────────────────────────────────────────────────────
+
+/// The kind of region that encloses a declaration below module level.
+///
+/// The cache encodes variants by their serialized name, so renaming one changes the cache's bytes and needs a
+/// `CACHE_SCHEMA_VERSION` bump.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScopeKind {
+    /// `namespace X { ... }`, or `declare module "x" { ... }`.
+    Namespace,
+    /// A function, method or arrow function body.
+    FunctionBody,
+    /// A `{ ... }` block statement or a class `static { ... }` block.
+    Block,
+    /// One `case` or `default` clause of a `switch` statement.
+    SwitchCase,
+}
+
+/// One enclosing region: its kind, and its position among the regions the parent region opens, counting from 0 in
+/// source order. The ordinal tells two sibling blocks apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ScopeStep {
+    /// The kind of region.
+    pub kind: ScopeKind,
+    /// Which of the parent's child regions this is.
+    pub ordinal: u32,
+}
+
+/// Where a declaration sits: the regions that enclose it, outermost first. The empty path is the module.
+///
+/// Two declarations are in the same scope exactly when their paths are equal.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DeclarationScope(Vec<ScopeStep>);
+
+impl DeclarationScope {
+    /// The scope that has the given enclosing regions, outermost first.
+    pub fn new(steps: Vec<ScopeStep>) -> Self {
+        Self(steps)
+    }
+
+    /// The enclosing regions, outermost first; empty at module level.
+    pub fn steps(&self) -> &[ScopeStep] {
+        &self.0
+    }
+
+    /// Whether the declaration sits directly in the module.
+    pub fn is_module(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether `inner` is this scope or lies within it: the declarations of this scope are visible from `inner`.
+    pub fn encloses(&self, inner: &DeclarationScope) -> bool {
+        inner.0.starts_with(&self.0)
+    }
+
+    /// What a declaration's key carries after its name when a function body, block or `switch` case encloses it, so
+    /// that same-named declarations of different scopes have different keys and same-scope ones share one. A
+    /// namespace is already part of the key as `N.`, and a module-level declaration has no suffix.
+    pub fn local_key_suffix(&self) -> Option<std::string::String> {
+        if self.0.iter().all(|step| step.kind == ScopeKind::Namespace) {
+            return None;
+        }
+        let steps: Vec<std::string::String> =
+            self.0.iter().map(|step| format!("{}{}", step.kind.tag(), step.ordinal)).collect();
+        Some(format!("{LOCAL_KEY_MARK}{}", steps.join(".")))
+    }
+}
+
+/// Starts the scope suffix of a key (`Props@f0.b1`); no identifier or file path contains it.
+pub const LOCAL_KEY_MARK: char = '@';
+
+impl ScopeKind {
+    fn tag(self) -> char {
+        match self {
+            ScopeKind::Namespace => 'n',
+            ScopeKind::FunctionBody => 'f',
+            ScopeKind::Block => 'b',
+            ScopeKind::SwitchCase => 's',
+        }
+    }
+}
+
 // ─── Source Data (collected during Phase 0-2) ─────────────────────────────────
 
 /// Raw data collected from parsing a single file.
@@ -877,49 +1242,87 @@ pub struct SourceData {
     /// for the generic aliases and interfaces that declare at least one. Keyed as `type_alias_params` and
     /// `interface_type_params`; a reference that omits trailing arguments takes these, as TypeScript does.
     pub type_param_defaults: FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
+
+    /// The keys in `enums` that a TypeScript `enum` declaration wrote, as against an `as const` object or a variant
+    /// bag, each with the scope the declaration sits in. An enum is a type of its own, not the union of its values.
+    pub enum_declarations: FxHashMap<std::string::String, DeclarationScope>,
+
+    /// The scope each type alias declaration in this file sits in. Keyed as `type_aliases`; the last declaration of a
+    /// key wins, as it does there. Aliases the extractor synthesizes have no entry.
+    pub type_alias_scopes: FxHashMap<std::string::String, DeclarationScope>,
+
+    /// The scope each named class in this file sits in. Keyed as the interface a class is recorded as when the file
+    /// declares no interface or alias of its name; the first class of a key wins. Nothing reads it yet.
+    pub class_scopes: FxHashMap<std::string::String, DeclarationScope>,
+
+    /// The JSX elements of this file outside every component body the extractor reads facts from (pages, stories,
+    /// helpers, module-level JSX), in source order (trail 405). Names only, nothing resolved. Internal evidence for the
+    /// resolver: never emitted.
+    pub(crate) jsx_usages: Vec<JsxUsage>,
 }
 
 /// What a generic function returns: its declared or asserted type, or a generic call stored in a returned local const.
 /// The wrapper call's type arguments bind to `type_params` before its result is resolved.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionResult {
+    /// The function's type parameters, which the call's type arguments bind in order.
     pub type_params: Vec<TypeName>,
+    /// The declared or asserted result type, in terms of `type_params`.
     pub result: CollectedType,
     /// A generic call assigned to a local const and returned by name, when there is no explicit result type.
     pub returned_call: Option<WrapperCallee>,
+    /// Where the names in `result` and `returned_call` are written: the function's body, or the scope around the
+    /// function for a declared result type. A declaration local to the function is found from there.
+    pub scope: DeclarationScope,
 }
 
 /// The generic function a wrapper call invokes, as the call names it, and the type arguments it passes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WrapperCallee {
+    /// The called function's name as the call writes it.
     pub name: TypeName,
+    /// The type arguments the call passes, in order.
     pub type_args: Vec<CollectedType>,
 }
 
 /// A collected interface declaration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectedInterface {
-    /// Scoped key: "${file_path}:${name}"
+    /// Scoped key: "${file_path}:${name}". An interface in a function body, block or `switch` case has
+    /// `DeclarationScope::local_key_suffix` after the name, so it is an entry of its own beside a module-level one.
     pub scoped_key: std::string::String,
+    /// The interface's name.
     pub name: TypeName,
+    /// Where it is declared.
+    pub scope: DeclarationScope,
+    /// The file that declares it.
     pub file_path: Utf8PathBuf,
+    /// The props it declares itself, in declaration order; the ones it inherits come through `extends`.
     pub props: Vec<RawProp>,
+    /// The interfaces and types it extends, in order.
     pub extends: Vec<ExtendsRef>,
+    /// Its JSDoc description, empty when it has none.
     pub description: std::string::String,
+    /// Its JSDoc tags: tag name (without the `@`) to the text after it; a `@param name` is keyed `param:name`.
     pub tags: BTreeMap<std::string::String, std::string::String>,
 }
 
 /// A raw prop — types not yet resolved to PropType.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawProp {
+    /// The prop's name.
     pub name: std::string::String,
     /// Structured type collected from the AST — replaces raw string for reliable resolver access.
     pub collected_type: CollectedType,
+    /// The prop is not written `name?: T`.
     pub required: bool,
+    /// Its JSDoc description, empty when it has none.
     pub description: std::string::String,
+    /// Its JSDoc tags: tag name (without the `@`) to the text after it; a `@param name` is keyed `param:name`.
     pub tags: BTreeMap<std::string::String, std::string::String>,
     /// Byte span in source file — used for miette diagnostics
     pub span_start: u32,
+    /// The end of the span that starts at `span_start`, in bytes.
     pub span_end: u32,
 }
 
@@ -927,10 +1330,17 @@ pub struct RawProp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExtendsRef {
     /// interface Foo extends Bar — Bar defined in SAME file
-    SameFile { name: TypeName, type_args: Vec<CollectedType> },
+    SameFile {
+        /// The extended type's name.
+        name: TypeName,
+        /// The type arguments it is given, in order.
+        type_args: Vec<CollectedType>,
+    },
     /// interface Foo extends Bar — Bar came from an import
     Imported {
+        /// The name the extended type has in this file (after any `as` rename).
         local_name: TypeName,
+        /// The type arguments it is given, in order.
         type_args: Vec<CollectedType>,
         /// The import specifier this name came from, if determinable
         source_specifier: Option<std::string::String>,
@@ -938,14 +1348,31 @@ pub enum ExtendsRef {
     /// `interface Foo extends ButtonHTMLAttributes<HTMLButtonElement>`
     /// Recognized as baked-in React/DOM type — no file lookup needed
     Builtin {
+        /// The built-in type's name: `ButtonHTMLAttributes`.
         name: TypeName,
         /// Resolved HTML element: "button", "input", etc.
         element: Option<std::string::String>,
+        /// The type arguments it is given, in order.
         type_args: Vec<CollectedType>,
     },
 }
 
 impl CollectedType {
+    /// The names of the type references in this type, in the order met and with repeats.
+    pub(crate) fn referenced_names(&self) -> Vec<TypeName> {
+        let names = std::cell::RefCell::new(Vec::new());
+        drop(self.rename_named(&|name| {
+            names.borrow_mut().push(TypeName::from(name));
+            None
+        }));
+        names.into_inner()
+    }
+
+    /// Whether a type reference named `name` appears anywhere in this type.
+    fn mentions(&self, name: &str) -> bool {
+        self.referenced_names().iter().any(|referenced| referenced == name)
+    }
+
     /// This type with each reference `rename` maps (a name with no type arguments of its own, or with them) replaced by
     /// the name it returns. A type parameter or mapped key variable that shadows a name is left alone inside its scope.
     #[must_use]
@@ -957,7 +1384,12 @@ impl CollectedType {
             }
             CollectedType::Union(members) => CollectedType::Union(all(members)),
             CollectedType::Intersection(members) => CollectedType::Intersection(all(members)),
-            CollectedType::Tuple(members) => CollectedType::Tuple(all(members)),
+            CollectedType::Tuple(elements) => CollectedType::Tuple(
+                elements
+                    .iter()
+                    .map(|e| CollectedTupleElement { element_type: e.element_type.rename_named(rename), ..e.clone() })
+                    .collect(),
+            ),
             CollectedType::TemplateLiteral(parts) => CollectedType::TemplateLiteral(all(parts)),
             CollectedType::Array(inner) => CollectedType::Array(Box::new(inner.rename_named(rename))),
             CollectedType::Readonly(inner) => CollectedType::Readonly(Box::new(inner.rename_named(rename))),
@@ -965,19 +1397,22 @@ impl CollectedType {
             CollectedType::AtFile { file, inner } => {
                 CollectedType::AtFile { file: file.clone(), inner: Box::new(inner.rename_named(rename)) }
             }
-            CollectedType::Object(fields) => CollectedType::Object(
-                fields
+            CollectedType::Object(fields) => CollectedType::Object(rename_fields(fields, rename)),
+            CollectedType::Callable { signatures, fields } => CollectedType::Callable {
+                signatures: signatures
                     .iter()
-                    .map(|f| CollectedObjectField {
-                        name: f.name.clone(),
-                        collected_type: f.collected_type.rename_named(rename),
-                        required: f.required,
-                        description: f.description.clone(),
-                        readonly: f.readonly,
-                        index_key: f.index_key.as_ref().map(|key| Box::new(key.rename_named(rename))),
+                    .map(|s| {
+                        let scoped =
+                            |name: &str| if s.type_params.iter().any(|p| p == name) { None } else { rename(name) };
+                        CollectedSignature {
+                            params: s.params.iter().map(|p| p.rename_named(&scoped)).collect(),
+                            return_type: s.return_type.rename_named(&scoped),
+                            ..s.clone()
+                        }
                     })
                     .collect(),
-            ),
+                fields: rename_fields(fields, rename),
+            },
             CollectedType::IndexedAccess { obj, key } => CollectedType::IndexedAccess {
                 obj: Box::new(obj.rename_named(rename)),
                 key: Box::new(key.rename_named(rename)),
@@ -1018,13 +1453,34 @@ impl CollectedType {
             | CollectedType::Void
             | CollectedType::BigInt
             | CollectedType::Symbol
+            | CollectedType::UniqueSymbol
             | CollectedType::StringLiteral(_)
             | CollectedType::NumberLiteral(_)
             | CollectedType::BoolLiteral(_)
+            | CollectedType::BigIntLiteral(_)
             | CollectedType::TypeOf(_)
             | CollectedType::Raw(_) => self.clone(),
         }
     }
+}
+
+/// An object type's fields with [`CollectedType::rename_named`] applied to each type.
+fn rename_fields(
+    fields: &[CollectedObjectField],
+    rename: &dyn Fn(&str) -> Option<TypeName>,
+) -> Vec<CollectedObjectField> {
+    fields
+        .iter()
+        .map(|f| CollectedObjectField {
+            name: f.name.clone(),
+            collected_type: f.collected_type.rename_named(rename),
+            required: f.required,
+            description: f.description.clone(),
+            readonly: f.readonly,
+            index_key: f.index_key.as_ref().map(|key| Box::new(key.rename_named(rename))),
+            tags: f.tags.clone(),
+        })
+        .collect()
 }
 
 impl CollectedTypeAlias {
@@ -1090,39 +1546,62 @@ pub enum CollectedTypeAlias {
     /// `Omit<Base, Keys>`. `keys` is the key expression as written (`"a" | "b"`, `keyof Other`, a `Keys` alias,
     /// `Exclude<…>`); the resolver turns it into a key set, so an alias or a substituted parameter works too.
     Omit {
+        /// The type the keys are removed from.
         base: CollectedType,
+        /// The keys to remove, as written.
         keys: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
     /// `Pick<Base, Keys>`, with `keys` resolved the same way as `Omit`'s.
     Pick {
+        /// The type the keys are kept from.
         base: CollectedType,
+        /// The keys to keep, as written.
         keys: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `Partial<Base>`: every prop of `base` made optional.
     Partial {
+        /// The type made partial.
         base: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `Required<Base>`: every prop of `base` made required.
     Required {
+        /// The type made required.
         base: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `type X = A | B` over types that are not all string literals.
     Union {
+        /// The members in declaration order.
         members: Vec<CollectedType>,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `type X = A & B`.
     Intersection {
+        /// The members in declaration order.
         members: Vec<CollectedType>,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `type X = 'a' | 'b'`: a union of string literals only.
     LiteralUnion {
+        /// The string literal values in declaration order.
         members: Vec<std::string::String>,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
     /// e.g. type Size = SomeOtherType — transparent alias
     Passthrough {
+        /// The type the alias stands for.
         target: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
 }
@@ -1152,8 +1631,6 @@ pub enum DefaultSource {
     Destructuring,
     /// Extracted from `Component.defaultProps = { size: 'md' }` assignment.
     DefaultProps,
-    /// Extracted from `/** @default 'md' */` JSDoc/TSDoc annotation.
-    JsDoc,
 }
 
 /// A default value as collected by the extractor (before resolver processing).
@@ -1210,31 +1687,212 @@ pub enum DetectionRule {
     FactoryResult,
 }
 
+impl DetectionRule {
+    /// Every rule, so a consumer such as the `schema` command can list them without a copy of its own.
+    pub const ALL: [DetectionRule; 14] = [
+        Self::FcAnnotation,
+        Self::ForwardRef,
+        Self::ForwardRefExoticDecl,
+        Self::HocWrapper,
+        Self::ClassComponent,
+        Self::FunctionDeclaration,
+        Self::AnonymousDefaultExport,
+        Self::AttachedSubComponent,
+        Self::TypedFunctionExpression,
+        Self::WrapperTypeArgument,
+        Self::ImportedMemberAlias,
+        Self::MemoExoticDecl,
+        Self::TaggedFactory,
+        Self::FactoryResult,
+    ];
+
+    /// The name this rule has in serialized output (`detectedBy`).
+    pub fn name(self) -> std::string::String {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(name)) => name,
+            _ => unreachable!("a unit variant serializes as a string"),
+        }
+    }
+}
+
+/// One way a module exports a component (ADR 0027): under an export name, or, for a sub-component attached to an
+/// exported component, through properties of that export.
+///
+/// `export function Card` is `Card`, `export { _Card as Card }` is `Card`, `export default Menu` is `default`, and
+/// `Menu.Item = Item` beside it is `default.Item`: the path starts at the name the module exports the parent under, not
+/// at the parent's local name, so a reader can follow it from the module.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ComponentExport {
+    /// The export name: `default` for the default export.
+    pub name: std::string::String,
+    /// The properties, outermost first, through which an attached sub-component is reached from the export; empty for
+    /// the export itself.
+    pub members: Vec<std::string::String>,
+}
+
+impl ComponentExport {
+    /// The export `name` itself.
+    pub fn named(name: impl Into<std::string::String>) -> Self {
+        Self { name: name.into(), members: Vec::new() }
+    }
+
+    /// The property `member` of this export: where a sub-component attached under that name is reached.
+    #[must_use]
+    pub fn member(&self, member: impl Into<std::string::String>) -> Self {
+        let mut members = self.members.clone();
+        members.push(member.into());
+        Self { name: self.name.clone(), members }
+    }
+}
+
+impl std::fmt::Display for ComponentExport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)?;
+        for member in &self.members {
+            write!(f, ".{member}")?;
+        }
+        Ok(())
+    }
+}
+
 /// A component → prop type mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentMapping {
+    /// The component's name as the extractor found it.
     pub component_name: std::string::String,
+    /// The name of the type that holds its props, which the resolver looks up.
     pub props_type_name: TypeName,
+    /// The type arguments given to the props type, in order.
     pub props_type_args: Vec<CollectedType>,
+    /// The file that declares the component.
     pub file_path: Utf8PathBuf,
+    /// The component's JSDoc description, empty when it has none.
     pub description: std::string::String,
+    /// The component's JSDoc tags: tag name (without the `@`) to the text after it; a `@param name` is keyed
+    /// `param:name`.
     pub tags: BTreeMap<std::string::String, std::string::String>,
     /// Byte span for diagnostics
     pub span_start: u32,
+    /// The end of the span that starts at `span_start`, in bytes.
     pub span_end: u32,
     /// Default values extracted from parameter destructuring or defaultProps.
     /// Key = prop name. Populated only for implementation files (.tsx/.ts), not .d.ts.
     pub param_defaults: FxHashMap<std::string::String, RawDefault>,
     /// Which extractor rule matched.
     pub rule: DetectionRule,
-    /// Whether its module exports it, directly or as a sub-component attached to an exported component.
-    pub exported: bool,
+    /// How its module exports it, in source order: each export name, or for a sub-component attached to an exported
+    /// component the path through that export. Empty when the module does not export it.
+    pub exports: Vec<ComponentExport>,
     /// For a component built by a generic call (`WrapperTypeArgument`, or a `HocWrapper` call with type arguments),
     /// that call: its result type can add props the selected props type lacks.
     pub wrapper_callee: Option<WrapperCallee>,
     /// The type parameters of the functions the declaration contains (`function ActionBar<T extends object>(props:
     /// ActionBarProps<T>)`): placeholders in the props type, not unresolvable names.
     pub type_params: Vec<TypeName>,
+    /// Whether the module has a binding named `component_name` that this declares. An inline sub-component
+    /// (`Parent.Sub = (props: P) => …`) and an anonymous default export (named after its file) have no binding: nothing
+    /// finds them by name, and another component of the file can have the name.
+    pub bound: bool,
+    /// The module's binding for the component when it is not `component_name`: the extractor names a component its
+    /// module exports under one other name by that export, and the binding is what the module's own code, and a
+    /// `typeof` in another module reached through the export, find it by. Read it with [`Self::binding_name`].
+    pub local_name: Option<std::string::String>,
+    /// What the component's own function body does with its props (trail 405); `None` when the declaration holds no
+    /// function of its own. Internal evidence for the resolver: never emitted.
+    pub(crate) body: Option<BodyFacts>,
+    /// For a component a factory call builds, the props the call's own arguments give it (`extractor::factory_props`):
+    /// the annotated props type of the render function it is given, or the variant keys of the style recipe it is
+    /// given. The resolver adds those its props type lacks.
+    pub(crate) factory_props: Option<CollectedType>,
+    /// The type parameters of that render function (`<T,>(props: { v: T }) => ...`). They are in scope for
+    /// `factory_props` only, never for the callee's result type, where the same name may be a module-level declaration.
+    pub(crate) factory_type_params: Vec<TypeName>,
+}
+
+/// What a component's function body does with its props, read from the syntax alone (`extractor::body_facts`). Facts
+/// only: no judgement of relevance or forwarding is made where they are collected.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct BodyFacts {
+    /// The props the function reads, in first-read order: the keys destructured from the props object (in the
+    /// parameter or the body), and the keys of member reads on it or a rest binding (`props.x`, `props?.['x']`,
+    /// `rest.x`). Complete only when `handed_on` is false: a handed-on object can be read anywhere.
+    pub(crate) reads: Vec<std::string::String>,
+    /// Every rest binding destructured from the props object or from another rest binding (`...rest`), in the order
+    /// they are reached.
+    pub(crate) rests: Vec<std::string::String>,
+    /// Every JSX element the body writes, in source order, nested components' excepted.
+    pub(crate) elements: Vec<JsxElementFact>,
+    /// Whether the props object or a rest binding is used in any way other than a member read with a literal key, a
+    /// destructuring, or a JSX spread: passed to a call, stored, returned and so on (`extractor::body_facts`). When it
+    /// is, `reads` is a lower bound. A JSX spread of either is an element's attribute, not an escape.
+    pub(crate) handed_on: bool,
+}
+
+/// One JSX element a component body writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct JsxElementFact {
+    /// The element's tag.
+    pub(crate) tag: JsxTag,
+    /// Its attributes in source order, so a named attribute's place before or after a spread is kept.
+    pub(crate) attributes: Vec<JsxAttributeFact>,
+}
+
+/// A JSX tag, by the JSX rule: a lowercase first letter, a dash or a namespace makes it intrinsic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum JsxTag {
+    /// A host element: `div`, `my-element`, `svg:path`.
+    Intrinsic(std::string::String),
+    /// A component named by an identifier: `Button`.
+    Identifier(std::string::String),
+    /// A component reached through a member path: `chakra.button`.
+    Member(std::string::String),
+    /// A component tag, or member path, whose first name a binding of an inner scope binds (a parameter, `const Item =
+    /// props.as`, an inner function or class): it is not the module's binding of that name.
+    Scoped(std::string::String),
+}
+
+/// One attribute of a JSX element.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum JsxAttributeFact {
+    /// `name={value}`, with the prop the value is when it is exactly one of the component's own: a destructured name,
+    /// `props.x` or `rest.x`.
+    Named {
+        /// The attribute's name.
+        name: std::string::String,
+        /// The component's prop the value is, if it is exactly one.
+        prop: Option<std::string::String>,
+    },
+    /// `{...value}`.
+    Spread(SpreadOf),
+}
+
+/// A JSX element outside every component body: its tag and its attributes' names in source order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct JsxUsage {
+    /// The element's tag.
+    pub(crate) tag: JsxTag,
+    /// Its attributes in source order.
+    pub(crate) attributes: Vec<JsxUsageAttribute>,
+}
+
+/// One attribute of a [`JsxUsage`], by name only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum JsxUsageAttribute {
+    /// `name=…`.
+    Named(std::string::String),
+    /// `{...value}`.
+    Spread,
+}
+
+/// What a JSX spread attribute spreads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum SpreadOf {
+    /// The first parameter, whole.
+    Props,
+    /// The rest binding of the destructured first parameter.
+    Rest,
+    /// Any other expression.
+    Other,
 }
 
 impl ComponentMapping {
@@ -1258,10 +1916,39 @@ impl ComponentMapping {
             span_end,
             param_defaults: FxHashMap::default(),
             rule,
-            exported: false,
+            exports: Vec::new(),
             wrapper_callee: None,
             type_params: Vec::new(),
+            bound: rule != DetectionRule::AttachedSubComponent,
+            local_name: None,
+            body: None,
+            factory_props: None,
+            factory_type_params: Vec::new(),
         }
+    }
+
+    /// The name the module's code gives the component: what a lookup of the declaration by name asks for.
+    pub fn binding_name(&self) -> &str {
+        self.local_name.as_deref().unwrap_or(&self.component_name)
+    }
+
+    /// Whether this is the component the module's binding `name` declares. An inline sub-component
+    /// (`Parent.Name = (props: P) => …`) or an anonymous default export has the name but no binding, and another
+    /// component can have the binding.
+    pub fn is_binding_named(&self, name: &str) -> bool {
+        self.bound && self.component_name == name
+    }
+
+    /// Marks the component as no binding of the module: it is told apart by where it starts, not by its name.
+    #[must_use]
+    pub fn without_binding(mut self) -> Self {
+        self.bound = false;
+        self
+    }
+
+    /// Whether its module exports it, directly or as a sub-component attached to an exported component.
+    pub fn exported(&self) -> bool {
+        !self.exports.is_empty()
     }
 
     /// The mapping of no component, for a question about a type asked mid-walk (what a named type's props are, for a
@@ -1277,18 +1964,21 @@ impl ComponentMapping {
         )
     }
 
+    /// Records the generic call that built the component.
     #[must_use]
     pub fn with_wrapper_callee(mut self, callee: WrapperCallee) -> Self {
         self.wrapper_callee = Some(callee);
         self
     }
 
+    /// Sets the type arguments given to the props type.
     #[must_use]
     pub fn with_props_type_args(mut self, props_type_args: Vec<CollectedType>) -> Self {
         self.props_type_args = props_type_args;
         self
     }
 
+    /// Sets the component's JSDoc description and tags.
     #[must_use]
     pub fn with_doc(
         mut self,
@@ -1300,6 +1990,7 @@ impl ComponentMapping {
         self
     }
 
+    /// Sets the default values read from the component's parameter destructuring or `defaultProps`.
     #[must_use]
     pub fn with_param_defaults(mut self, param_defaults: FxHashMap<std::string::String, RawDefault>) -> Self {
         self.param_defaults = param_defaults;
@@ -1327,18 +2018,34 @@ pub struct ImportBinding {
 pub enum LexedExport {
     /// `export { Foo }` or `export { Foo as Bar }` from "./types"
     ReExportNamed {
+        /// The name this file exports it under (`Bar` in `export { Foo as Bar }`).
         local_name: std::string::String,
+        /// The name the source module exports it under (`Foo`).
         source_name: std::string::String,
+        /// The module it comes from: `"./types"`.
         source_specifier: std::string::String,
+        /// The export is `export type { ... }`.
         is_type_only: bool,
     },
     /// `export * from "./types"`
-    ReExportAll { source_specifier: std::string::String, is_type_only: bool },
+    ReExportAll {
+        /// The module whose exports are re-exported.
+        source_specifier: std::string::String,
+        /// The export is `export type * from ...`.
+        is_type_only: bool,
+    },
     /// `export * as Ns from "./types"`
-    ReExportNamespace { namespace: std::string::String, source_specifier: std::string::String },
+    ReExportNamespace {
+        /// The namespace name the module is exported as (`Ns`).
+        namespace: std::string::String,
+        /// The module re-exported as the namespace.
+        source_specifier: std::string::String,
+    },
     /// `export interface Foo { }` / `export type Bar = ...` / `export const X` / `export { Base as Foo }`
     LocalDeclaration {
+        /// The exported name.
         name: std::string::String,
+        /// The export is type-only: it names a type and has no runtime value.
         is_type_only: bool,
         /// The declaration's own name when it is exported under another (`Base` in `export { Base as Foo }`).
         declared_as: Option<std::string::String>,
@@ -1348,6 +2055,32 @@ pub enum LexedExport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The exhaustive match stops compiling when a variant is added, which points at `ALL`.
+    #[test]
+    fn detection_rule_all_lists_every_variant_once() {
+        fn index(rule: DetectionRule) -> usize {
+            match rule {
+                DetectionRule::FcAnnotation => 0,
+                DetectionRule::ForwardRef => 1,
+                DetectionRule::ForwardRefExoticDecl => 2,
+                DetectionRule::HocWrapper => 3,
+                DetectionRule::ClassComponent => 4,
+                DetectionRule::FunctionDeclaration => 5,
+                DetectionRule::AnonymousDefaultExport => 6,
+                DetectionRule::AttachedSubComponent => 7,
+                DetectionRule::TypedFunctionExpression => 8,
+                DetectionRule::WrapperTypeArgument => 9,
+                DetectionRule::ImportedMemberAlias => 10,
+                DetectionRule::MemoExoticDecl => 11,
+                DetectionRule::TaggedFactory => 12,
+                DetectionRule::FactoryResult => 13,
+            }
+        }
+        let indexes: Vec<usize> = DetectionRule::ALL.iter().map(|rule| index(*rule)).collect();
+        assert_eq!(indexes, (0..14).collect::<Vec<_>>());
+        assert_eq!(DetectionRule::FactoryResult.name(), "factoryResult");
+    }
 
     // CollectedType's own Serialize/Deserialize never actually calls into
     // CollectedObjectField's impl (to_json_value/from_json_value build fields
@@ -1365,6 +2098,7 @@ mod tests {
             description: "the label".to_owned(),
             readonly: false,
             index_key: None,
+            tags: Default::default(),
         };
 
         let bytes = rmp_serde::to_vec(&field).expect("serialization should succeed");
@@ -1393,6 +2127,7 @@ mod tests {
                 description: String::new(),
                 readonly: false,
                 index_key: None,
+                tags: Default::default(),
             }]),
         ]);
         let json = original.to_json_value();
@@ -1579,5 +2314,29 @@ mod tests {
             CollectedType::NumberLiteral(n) => assert_eq!(n, 42.5),
             other => panic!("expected NumberLiteral, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_records_made_up_key_variable_prints_as_a_valid_identifier() {
+        let mapped = |param: &str| CollectedType::Mapped {
+            param: param.into(),
+            key_type: Box::new(CollectedType::Named { name: "Keys".into(), args: vec![] }),
+            value_type: Box::new(CollectedType::String),
+            optional: None,
+        };
+        assert_eq!(mapped(MADE_UP_KEY_VARIABLE).to_raw_string(), "{ [P in Keys]: string }");
+        assert_eq!(mapped("K").to_raw_string(), "{ [K in Keys]: string }");
+    }
+
+    #[test]
+    fn a_made_up_key_variable_avoids_the_names_its_value_uses() {
+        let mapped = |value: &str| CollectedType::Mapped {
+            param: MADE_UP_KEY_VARIABLE.into(),
+            key_type: Box::new(CollectedType::Named { name: "Keys".into(), args: vec![] }),
+            value_type: Box::new(CollectedType::Named { name: value.into(), args: vec![] }),
+            optional: None,
+        };
+        assert_eq!(mapped("P").to_raw_string(), "{ [K in Keys]: P }");
+        assert_eq!(mapped("K").to_raw_string(), "{ [P in Keys]: K }");
     }
 }

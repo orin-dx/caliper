@@ -4,15 +4,24 @@
 For each corpus it records, per tool, the wall time and peak RSS of one whole run (process start included), and for
 Caliper the canonical JSON's size. Recall is measured against RDT: of the components RDT reports with props, how many
 the tool also reports (same file, same name), and of their props, how many it lists, split into the props `@types/react`
-declares and the rest. react-docgen reads each file alone, so it lists none of React's. With --oracle it also records
-how often TypeScript 7.1's checker contradicts Caliper's prop types. That is information, never a gate.
+declares and the rest. react-docgen follows imports to the file that declares a type but infers nothing, and lists none
+of React's props. With --oracle it also records how often TypeScript 7.1's checker contradicts each tool's prop types,
+over every prop the checker finds, and the headline of scripts/headline.py: how many of the props of the components Caliper
+reports are right. With --agent-eval it also asks a fixed list of questions about real components and scores what a
+reader of Caliper's output answers against the checker (scripts/agent_eval.py).
 
---previous FILE compares with an earlier record (the last green run's artifact) and, when Caliper is more than 10%
-slower or uses more than 10% more memory, or its recall falls by more than 2 points, writes --issue FILE for the
-workflow to open or update one issue with. Nothing here fails a pull request.
+--previous FILE compares with an earlier record (the last green run's artifact) and writes --issue FILE for the workflow
+to open or update one issue with, when a wrong type is above the gate or rises, a reader's question is answered
+silent-wrong, or a whole run is over a budget (scripts/headline.py). Drift in time, memory and recall against RDT is
+listed in the summary, not alarmed on.
 
-Usage: scripts/weekly.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR] [--runs N] [--oracle]
-                         [--previous FILE] [--out FILE] [--markdown FILE] [--issue FILE]
+Every measured command's exit status and wall time go to stderr, and --out is written after each corpus. A corpus whose
+command exits non-zero, dies of a signal or runs past STEP_TIMEOUT is recorded under `failed` (step, exit status, last
+20 lines of stderr) and the next corpus still runs; the exit status is 1 at the end if any failed. --enforce-budgets
+also exits 1 when a whole run is over its corpus's budget: the `corpora-budget` job of the release pull request.
+
+Usage: scripts/weekly.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR] [--runs N] [--oracle] [--agent-eval]
+                         [--previous FILE] [--baseline-failed] [--enforce-budgets] [--out FILE] [--markdown FILE] [--issue FILE]
 """
 import argparse
 import json
@@ -22,15 +31,79 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 
+import agent_eval
 import corpora
+import headline
+import oracle_data
+import schema_version
 from corpora import ROOT, run_once, selected
 
+BASELINE_FAILED = "The baseline download failed, so this run was not compared with last week's record."
 SLOWER = 1.10
 RECALL_DROP = 0.02
 # The rules that decide what the reference is: the exclusions and the pairing. Raise it when a change to them moves recall,
 # so that a record is never compared on recall with one made under other rules (a record without it is version 1).
-REFERENCE_VERSION = 2
+REFERENCE_VERSION = 3
+# The universe of the oracle's scores (`oracle.tools`): version 2 counts candidate components only, naming a default export
+# by its declaration; a record without it is version 1, which counted every function the checker takes for a component
+# and named a default export `default`. Version 3 pairs a checker component with Caliper's by file and export name
+# (ADR 0027) where version 2 paired by a normalised display name. Version 4 scores a prop whose checker type the oracle did
+# not evaluate as `not judged` where version 3 scored it identical, and classes a declaration's path by one rule
+# (apps/oracle/src/path-classes.json). Version 5 extracts with the checker, the default, where version 4 and earlier ran
+# `--no-checker`, so the oracle's props and verdicts are not the same measurement. Raise it when a change moves what the
+# oracle counts.
+UNIVERSE_VERSION = 5
+# No single measured command runs longer than this (seconds): a hung one is killed and its corpus recorded as failed.
+STEP_TIMEOUT = 2400
+
+
+class StepFailed(Exception):
+    """A command of one corpus's measurement that did not finish well: `step` names it, `code` is its exit status
+    (negative for a signal, None for a timeout) and `tail` the last 20 lines of its stderr."""
+
+    def __init__(self, step, message, code=None, tail=''):
+        super().__init__(message)
+        self.step = step
+        self.code = code
+        self.tail = tail
+
+
+def log(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+def step(label, command, stdout=subprocess.DEVNULL, timeout=None):
+    """`run_once` of one measured command, logging its exit status and wall time to stderr; a command that fails is a
+    StepFailed naming `label`."""
+    start = time.monotonic()
+    try:
+        result = run_once(command, stdout=stdout, timeout=STEP_TIMEOUT if timeout is None else timeout)
+    except corpora.RunFailed as error:
+        log(f'{label}: exit {error.code if error.code is not None else "none"} after {time.monotonic() - start:.1f} s: {error}')
+        raise StepFailed(label, str(error), error.code, error.tail) from error
+    log(f'{label}: exit 0 after {time.monotonic() - start:.1f} s')
+    return result
+
+
+def capture(label, command, timeout=None):
+    """The stdout of a command that must succeed, logged like `step`."""
+    start = time.monotonic()
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, errors='replace',
+                              timeout=STEP_TIMEOUT if timeout is None else timeout)
+    except subprocess.TimeoutExpired as error:
+        log(f'{label}: timed out after {time.monotonic() - start:.1f} s')
+        raise StepFailed(label, f'{label} ran past its {error.timeout} s timeout and was killed') from error
+    except OSError as error:
+        log(f'{label}: cannot run: {error}')
+        raise StepFailed(label, f'{label}: cannot run: {error}', 127) from error
+    log(f'{label}: exit {done.returncode} after {time.monotonic() - start:.1f} s')
+    if done.returncode != 0:
+        raise StepFailed(label, f'{label} exited with {done.returncode}', done.returncode,
+                         '\n'.join(done.stderr.strip().splitlines()[-20:]))
+    return done.stdout
 
 
 def norm_name(name):
@@ -63,40 +136,51 @@ def program_inputs(name, src, out_dir):
     return list_file, tsconfig
 
 
-def tool_run(command, out):
+def tool_run(command, out, label='tool'):
     """One whole run of a Node tool that writes its components to `out`: wall ms, peak RSS MiB and the components."""
-    seconds, rss = run_once(command)
+    seconds, rss = step(label, command)
     with open(out) as f:
         return {'ms': round(seconds * 1000), 'rss_mib': round(rss)}, json.load(f)['components']
 
 
-def caliper_run(binary, src, runs):
-    """Median wall ms and peak RSS MiB of `extract --json` with dependency loading on, and the JSON's size."""
-    command = [binary, 'extract', '--src', src, '--json', '--load-dependencies']
-    with tempfile.TemporaryFile() as out:
-        run_once(command, stdout=out)
+def caliper_run(binary, src, runs, label='Caliper'):
+    """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
+    loaded, `--collapse-inherited-props dependencies` pinned: the addon's default), and the JSON's size. The checker answers, as
+    it does by default (docs/measurement.md). The parse caches are warm (a warm-up run fills them), but each timed run
+    asks the checker everything: the answer `extract` keeps is removed first, since react-docgen-typescript keeps none.
+    `rerun_ms` is the median of as many runs that find it, what a rerun over unchanged files costs."""
+    with tempfile.TemporaryDirectory() as cache, tempfile.TemporaryFile() as out:
+        command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'dependencies',
+                   '--cache-dir', cache]
+        step(f'{label} warm-up', command, stdout=out)
         size = out.tell()
-    samples = [run_once(command) for _ in range(runs)]
+        kept = os.path.join(cache, 'checker-answers.msgpack')
+        samples = []
+        for _ in range(runs):
+            if os.path.exists(kept):
+                os.remove(kept)
+            samples.append(step(f'{label} run {len(samples) + 1}', command))
+        reruns = [step(f'{label} rerun {i + 1}', command) for i in range(runs)]
     return {'ms': round(statistics.median(s for s, _ in samples) * 1000), 'rss_mib': round(max(r for _, r in samples)),
-            'json_mb': round(size / 2**20, 2)}
+            'json_mb': round(size / 2**20, 2), 'rerun_ms': round(statistics.median(s for s, _ in reruns) * 1000)}
 
 
-def caliper_components(binary, src, root):
+def caliper_components(binary, src, root, label='Caliper components'):
     """Caliper's components in RDT's format, as (file, name) -> prop names."""
     command = [binary, 'extract', '--src', src, '--format', 'rdt', '--html-attributes', 'full', '--include-unexported',
-               '--quiet', '--load-dependencies']
-    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
+               '--quiet', '--load-dependencies', '--collapse-inherited-props', 'none']
+    out = capture(label, command)
     return {(relative(c['filePath'], root), norm_name(c['displayName'])): set(c['props'])
             for c in json.loads(out[out.index('{'):]).values()}
 
 
-def caliper_layer_members(binary, src, root):
+def caliper_layer_members(binary, src, root, label='Caliper layers'):
     """The props Caliper's collapsed inheritance layers hold, as (file, name) -> prop names: the output names them in a
-    layer instead of listing them as props (ADR 0012), and the canonical JSON is the one that carries the layers."""
+    layer instead of listing them as props, and the canonical JSON is the one that carries the layers."""
     command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
-               '--load-dependencies']
-    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
-    document = json.loads(out[out.index('{'):])
+               '--load-dependencies', '--collapse-inherited-props', 'none']
+    out = capture(label, command)
+    document = schema_version.check(json.loads(out[out.index('{'):]), 'weekly')
     lists = document.get('nameLists', {})
     members = {}
     for c in document['components'].values():
@@ -108,8 +192,10 @@ def caliper_layer_members(binary, src, root):
     return members
 
 
-LIB_FILE = re.compile(r'/typescript/lib/lib\.[^/]*\.d\.ts$')
-REACT_DIR = 'node_modules/@types/react/'
+# The shape rules of `exclusion`, shared with the oracle's universe (apps/oracle/src/component-shape.ts): the patterns are in
+# one file both read (scripts/oracle_data.py), and both run the cases of apps/oracle/tests/fixtures/component-shape-cases.json.
+HOOK = re.compile(oracle_data.SHAPE['hook'])
+PROMISE_TYPE = re.compile(oracle_data.SHAPE['promiseType'])
 EXTENSIONS = ('', '.tsx', '.ts', '/index.tsx', '/index.ts')
 # An identifier inside any number of calls (`memo(forwardRef(Foo))`, `React.memo(Foo)`, `Object.assign(Foo, {...})`),
 # followed by what ends an argument or an expression: `, ) ; !`, a type assertion or the end of the line.
@@ -117,7 +203,7 @@ WRAPPED = r'(?:[\w.]+\s*(?:<[^>]*>)?\s*\(\s*)*(\w+)(?=\s*[,);!]|\s+as\b|\s+satis
 
 
 def declared_in_react(info):
-    return REACT_DIR in (info.get('parent') or '')
+    return oracle_data.is_react_types(info.get('parent') or '')
 
 
 def exclusion(comp):
@@ -127,19 +213,20 @@ def exclusion(comp):
     object of props; a hook is named `use` and a capital; a `value` declared by `@types/react` and nothing else is a
     context's Provider; a lowercase name cannot be a JSX tag unless it takes the attributes of one (a `@types/react`
     prop) or is the file's or directory's own name, which RDT gives a default export; and props that are all promises
-    are handed over by a router, not by a parent."""
+    are handed over by a router, not by a parent. The oracle's universe applies the same rules to the checker's functions
+    (apps/oracle/src/component-shape.ts)."""
     props = comp['props']
-    in_lib = sum(bool(LIB_FILE.search(i.get('parent') or '')) for i in props.values())
+    in_lib = sum(oracle_data.is_lib_file(i.get('parent') or '') for i in props.values())
     if in_lib * 2 > len(props):
         return 'lib_members'
     name = comp['name']
-    if re.match(r'use[A-Z0-9]', name):
+    if HOOK.search(name):
         return 'hook'
-    if 'value' in props and set(props) <= {'value', 'children'} and all(map(declared_in_react, props.values())):
+    if 'value' in props and set(props) <= set(oracle_data.SHAPE['contextValueProps']) and all(map(declared_in_react, props.values())):
         return 'context_value'
     if name[:1].islower() and norm_name(name) not in own_names(comp['file']) and not any(map(declared_in_react, props.values())):
         return 'not_jsx'
-    if all(i.get('type', '').startswith('Promise<') for i in props.values()):
+    if all(PROMISE_TYPE.search(i.get('type', '')) for i in props.values()):
         return 'promise_props'
     return None
 
@@ -186,6 +273,14 @@ def export_source(text, name):
             if (alias or original) == name:
                 return ('from', match.group(2), original) if match.group(2) else ('local', original)
     return None
+
+
+def export_aliases(text, local):
+    """The names `text` exports the local binding `local` under, other than its own (`export { _Card as Card }`)."""
+    names = []
+    for match in re.finditer(r"^export\s*\{([^}]*)\}\s*(?!from)", text or '', re.M):
+        names += [alias for original, alias in re.findall(r'(\w+)\s+as\s+(\w+)', match.group(1)) if original == local]
+    return names
 
 
 def resolve_module(file, module, exists):
@@ -278,10 +373,15 @@ def pair(comp, root, found_by_file, read, exists, claimed=()):
     found = counterpart(file, local, found_by_file, read, claimed) if local else None
     if found:
         return found, 'display_name'
+    # Caliper names a component exported under another name (`export { _Card as Card }`) by the export name, RDT by the declaration.
+    for alias in export_aliases(read(file), comp['name']):
+        found = counterpart(file, alias, found_by_file, read, claimed)
+        if found:
+            return found, 'export_alias'
     name = norm_name(comp['name'])
     for info in comp['props'].values():
         parent = info.get('parent') or ''
-        declared = relative(parent, root) if parent and REACT_DIR not in parent else None
+        declared = relative(parent, root) if parent and not oracle_data.is_react_types(parent) else None
         if declared and declared != file and name in found_by_file.get(declared, {}):
             return (declared, name), 'declaration'
     return None
@@ -432,55 +532,80 @@ def rate(pair):
     return pair[0] / pair[1] if pair[1] else 0.0
 
 
-def oracle(binary, name, src, root, work):
-    """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/oracle/src/oracle.ts)."""
+def oracle_tools(tools):
+    """The oracle's score for each tool, without the examples that are there to review the adapters by."""
+    return {tool: {key: value for key, value in score.items() if key != 'examples'} for tool, score in tools.items()}
+
+
+def oracle(binary, name, src, root, work, rdt_out, rdg_out):
+    """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/oracle/src/oracle.ts), and how RDT and
+    react-docgen fare against it over the same props. `shared_props`, `agree` and `wrong` are Caliper's, over the props
+    both list, and keep their meaning from week to week (a prop the checker side did not evaluate is in `shared_props`
+    and counts toward neither `agree` nor `wrong`, as `verdicts['not judged']`); `tools` holds all three over every prop of the candidate
+    components the checker finds (the functions `exclusion`'s shape rules take out are left out: `universe_excluded`), and
+    `tools_all_functions` the same scores over every function the checker takes for a component, as `tools` was before
+    `universe_version` 2."""
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
-                        '--load-dependencies', '--quiet'], stdout=f, check=True)
+                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet'],
+                       stdout=f, check=True)
     list_file, tsconfig = program_inputs(name, src, work)
     verdicts = os.path.join(work, f'{name}.oracle.json')
     subprocess.run(['pnpm', '--dir', os.path.join(ROOT, 'apps', 'oracle'), 'exec', 'tsx', 'src/oracle.ts', '--root', root,
                     '--src', src, '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files',
-                    list_file], check=True, timeout=3600)
+                    list_file, '--rdt', rdt_out, '--rdg', rdg_out], check=True, timeout=3600)
     with open(verdicts) as f:
         e = json.load(f)
     shared = e['props_shared']
-    return {'shared_props': shared, 'agree': rate((e['verdicts']['identical'] + e['verdicts']['spelled'], shared)),
-            'wrong': rate((e['verdicts']['wrong'], shared))}
+    return {'shared_props': shared, 'agree': rate((sum(e['verdicts'][v] for v in oracle_data.AGREE), shared)),
+            'wrong': rate((e['verdicts']['wrong'], shared)), 'universe_version': UNIVERSE_VERSION,
+            'tools': oracle_tools(e['tools']), 'tools_all_functions': oracle_tools(e['tools_all_functions']),
+            'universe_excluded': e['universe_excluded']}
 
 
 def measure(args, corpus, work):
     root = os.path.join(os.path.abspath(args.corpora), corpus['clone'])
     src = corpora.ready(corpus, os.path.abspath(args.corpora), sparse=False)
     if not src:
-        sys.exit(f"{corpus['name']}: not installed; run `scripts/corpora.py setup` first")
+        raise StepFailed('setup', f"{corpus['name']}: not installed; run `scripts/corpora.py setup` first")
     list_file, tsconfig = program_inputs(corpus['name'], src, work)
     print(f"{corpus['name']}: RDT", file=sys.stderr, flush=True)
     rdt_out = os.path.join(work, f"{corpus['name']}.rdt.json")
     rdt, rdt_components = tool_run(['node', '--max-old-space-size=8192', os.path.join(ROOT, 'scripts', 'rdt.mjs'),
-                                    list_file, tsconfig, rdt_out], rdt_out)
+                                    list_file, tsconfig, rdt_out], rdt_out,
+                                   f"{corpus['name']} RDT")
     print(f"{corpus['name']}: react-docgen", file=sys.stderr, flush=True)
     rdg_out = os.path.join(work, f"{corpus['name']}.rdg.json")
-    rdg, rdg_components = tool_run(['node', os.path.join(ROOT, 'scripts', 'rdg.mjs'), list_file, rdg_out], rdg_out)
+    rdg, rdg_components = tool_run(['node', os.path.join(ROOT, 'scripts', 'rdg.mjs'), list_file, rdg_out], rdg_out,
+                                   f"{corpus['name']} react-docgen")
     print(f"{corpus['name']}: Caliper", file=sys.stderr, flush=True)
     found = {(relative(c['file'], root), norm_name(c['name'])): set(c['props']) for c in rdg_components}
-    caliper_found = caliper_components(args.bin, src, root)
+    caliper_found = caliper_components(args.bin, src, root, f"{corpus['name']} Caliper components")
     items, counts = reference(rdt_components, caliper_found, root)
     entry = {
         'commit': corpus['commit'],
-        'caliper': caliper_run(args.bin, src, args.runs),
+        'caliper': caliper_run(args.bin, src, args.runs, f"{corpus['name']} Caliper"),
         'rdt': rdt,
         'react_docgen': rdg,
         'reference': counts,
-        'recall': {'caliper': recall(items, caliper_found, caliper_layer_members(args.bin, src, root)),
+        'recall': {'caliper': recall(items, caliper_found, caliper_layer_members(args.bin, src, root, f"{corpus['name']} Caliper layers")),
                    'react_docgen': recall(items, found)},
     }
     if args.oracle:
         try:
-            entry['oracle'] = oracle(args.bin, corpus['name'], src, root, work)
+            entry['oracle'] = oracle(args.bin, corpus['name'], src, root, work, rdt_out, rdg_out)
+            if h := headline.compute(entry['oracle']):
+                entry['headline'] = h
         except (subprocess.SubprocessError, OSError, KeyError) as error:
             entry['oracle'] = {'error': str(error)}
+    if args.agent_eval:
+        try:
+            result = agent_eval.evaluate(args.bin, corpus['name'], src, root, tsconfig, work)
+            if result:
+                entry['agent_eval'] = result
+        except (subprocess.SubprocessError, OSError, KeyError, ValueError) as error:
+            entry['agent_eval'] = {'error': str(error)}
     return entry
 
 
@@ -489,33 +614,102 @@ def same_reference(record, previous):
     return record.get('reference_version', 1) == previous.get('reference_version', 1)
 
 
+def same_universe(entry, old):
+    """Whether two corpus entries counted the same props: the oracle's universe has had its rules changed (`UNIVERSE_VERSION`)
+    when their `universe_version` differs. An entry without an oracle has no universe to differ."""
+    now, before = entry.get('oracle') or {}, old.get('oracle') or {}
+    if 'tools' not in now or 'tools' not in before:
+        return True
+    return now.get('universe_version', 1) == before.get('universe_version', 1)
+
+
 def findings(record, previous):
-    """What got worse since `previous`: Caliper's time and memory by more than 10%, its recall by more than 2 points,
-    which is not compared across references built by different rules."""
+    """What opens the issue: a wrong type above the gate or higher than last week, a silent-wrong answer to a reader's
+    question, a whole run over a budget (scripts/headline.py). Drift against `previous` is `changes`, not a finding. A rise
+    in wrong types is not read against a record whose universe was another (`same_universe`): the props counted differ."""
+    out = []
+    for name, entry in record['corpora'].items():
+        old = previous.get('corpora', {}).get(name)
+        if old and not same_universe(entry, old):
+            old = {key: value for key, value in old.items() if key != 'headline'}
+        out += headline.findings(name, entry, old) + agent_eval.findings(name, entry)
+    return out
+
+
+def changes(record, previous):
+    """What moved since `previous`, for the summary and not for an issue: Caliper's time and memory by more than 10%,
+    its recall against RDT by more than 2 points, which is not compared across references built by different rules, and the
+    agent correct rate by more than 5 points."""
     out = []
     for name, entry in record['corpora'].items():
         old = previous.get('corpora', {}).get(name)
         if not old:
             continue
+        if not same_universe(entry, old):
+            out.append(f"{name}: the oracle's universe is version {entry['oracle'].get('universe_version', 1)} now and was version "
+                       f"{old['oracle'].get('universe_version', 1)} last week, so its props, agreement and wrong types are "
+                       "not compared with last week's")
         for key, label in (('ms', 'time'), ('rss_mib', 'peak memory')):
-            if entry['caliper'][key] > SLOWER * old['caliper'][key]:
-                out.append(f"{name}: {label} {old['caliper'][key]} -> {entry['caliper'][key]}")
+            now, before = headline.own_metric(entry, key), headline.own_metric(old, key)
+            if now is not None and before is not None and now > SLOWER * before:
+                out.append(f"{name}: {label} {before} -> {now}")
         for kind in ('components', 'own', 'react', 'own_layers', 'react_layers') if same_reference(record, previous) else ():
-            if kind not in old['recall']['caliper']:
+            if kind not in (old.get('recall') or {}).get('caliper', {}) or kind not in (entry.get('recall') or {}).get('caliper', {}):
                 continue  # a record from before layers were counted
             now, before = rate(entry['recall']['caliper'][kind]), rate(old['recall']['caliper'][kind])
             if now < before - RECALL_DROP:
                 out.append(f'{name}: recall of {kind} {100 * before:.1f}% -> {100 * now:.1f}%')
+        out += agent_eval.changes(name, entry, old)
     return out
 
 
-def markdown(record, notes, reference_changed=None):
-    lines = [f"Caliper {record['caliper']}, median of {record['runs']} runs; RDT and react-docgen one run each. Whole "
-             'process, Node start included.', '', '### Time and memory', '',
-             '| Corpus | Caliper | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: |']
+TOOL_LABELS = {'caliper': 'Caliper', 'rdt': 'RDT', 'react_docgen': 'react-docgen'}
+
+
+def tool_line(corpus, tool, score):
+    """One tool against the checker, in words: agreement of the whole universe first, then of what the tool lists, then
+    what it omits by where the checker says the prop is declared."""
+    s = score['missing_by_stratum']
+    parts = [f"agrees on {100 * score['agree_universe']:.1f}% of the {score['universe']:,} props the checker finds "
+             f"({100 * score['agree_listed']:.1f}% of the {score['listed']:,} it lists, "
+             f"{100 * score['wrong_listed']:.2f}% of those wrong)",
+             f"omits {sum(s.values()):,} ({s['same_file']:,} declared in the component's file, {s['other_project_file']:,} in "
+             f"other project files, {s['dependency']:,} in dependencies, {s['unknown']:,} unknown)"]
+    if score['missing_by_reason']['collapsed']:
+        parts.append(f"{score['missing_by_reason']['collapsed']:,} more sit in collapsed layers")
+    if score.get('failed_files'):
+        parts.append(f"threw on {score['failed_files']:,} files, {score['missing_by_reason']['failed_file']:,} of the omitted props")
+    return f"- {corpus}, {TOOL_LABELS[tool]}: " + '; '.join(parts)
+
+
+SHAPE_LABELS = {'lib_members': 'a lib type', 'hook': 'a hook', 'context_value': "a context's value", 'not_jsx': 'lowercase',
+                'promise_props': 'promises'}
+
+
+def excluded_line(corpus, oracle_entry):
+    """What the oracle's universe left out as not components, and what each tool's whole-universe agreement reads without
+    that rule (`tools_all_functions`), so the figure before `universe_version` 2 stays in sight."""
+    left = oracle_entry['universe_excluded']
+    why = ', '.join(f"{v['props']:,} {SHAPE_LABELS[k]}" for k, v in left['by_reason'].items())
+    before = oracle_entry.get('tools_all_functions') or {}
+    reads = ', '.join(f"{TOOL_LABELS[t]} {100 * before[t]['agree_universe']:.1f}%"
+                      for t in ('caliper', 'rdt', 'react_docgen') if t in before)
+    return (f"- {corpus}: {left['components']:,} functions with {left['props']:,} props left out"
+            + (f' ({why})' if why else '') + (f'; over every function: {reads}' if reads else ''))
+
+
+def markdown(record, notes, reference_changed=None, moved=(), baseline=True, baseline_failed=False):
+    lines = headline.markdown(record)
+    lines += [f"Caliper {record['caliper']}, time the median of {record['runs']} runs (after one warm-up run) and memory the largest peak of them; RDT "
+              'and react-docgen one cold run each, so the comparison favours Caliper. Whole process, Node start included. Each '
+              "Caliper run asks the checker everything; Rerun is a run over unchanged files, which reuses the checker's kept answer.",
+              '', '### Time and memory', '',
+              '| Corpus | Caliper | Rerun | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
         cell = lambda t: f"{t['ms'] / 1000:.2f} s, {t['rss_mib']:,} MiB"
-        lines.append(f"| {name} | {cell(e['caliper'])} | {e['caliper']['json_mb']} MB | {cell(e['rdt'])} | "
+        rerun = e['caliper'].get('rerun_ms')
+        rerun = f'{rerun / 1000:.2f} s' if rerun is not None else '-'
+        lines.append(f"| {name} | {cell(e['caliper'])} | {rerun} | {e['caliper']['json_mb']} MB | {cell(e['rdt'])} | "
                      f"{cell(e['react_docgen'])} |")
     lines += ['', '### Reference (RDT, cleaned)', '',
               '| Corpus | RDT entries with props | Not components | Repeats merged | Reference | Same file | Paired | Unpaired |',
@@ -529,6 +723,8 @@ def markdown(record, notes, reference_changed=None):
         for cause, count in sorted(e['reference'].get('unmatched', {}).get('by_cause', {}).items(), key=lambda c: -c[1]):
             lines.append(f'| {name} | {cause} | {count} |')
     lines += ['', '### Recall against the reference', '',
+              "Recall is the share of RDT's reference components and props that Caliper also reports. It is not a measure of "
+              "correctness: what RDT lists beyond Caliper is not necessarily right.", '',
               '| Corpus | Tool | Components | Own props | Own, with layers | `@types/react` props | `@types/react`, with layers |',
               '| --- | --- | --: | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
@@ -545,12 +741,90 @@ def markdown(record, notes, reference_changed=None):
         for name, o in oracle_rows:
             lines.append(f'| {name} | unavailable: {o["error"][:80]} | | |' if 'error' in o else
                          f"| {name} | {o['shared_props']:,} | {100 * o['agree']:.1f}% | {100 * o['wrong']:.2f}% |")
+        tool_rows = [(n, o['tools']) for n, o in oracle_rows if 'tools' in o]
+        if tool_rows:
+            lines += ['', "Each tool against the checker, over every own prop the checker finds on an exported candidate "
+                          'component (a prop a tool omits counts against it). Hooks, lowercase helpers and functions whose '
+                          "parameter is a lib type, a context's value or a router's promises are no candidates and are left "
+                          'out, by the rules of the reference above:', '']
+            lines += [tool_line(name, tool, tools[tool]) for name, tools in tool_rows
+                      for tool in ('caliper', 'rdt', 'react_docgen') if tool in tools]
+            lines += ['', 'Left out of that universe as not components, with the whole-universe agreement over every function '
+                          'the checker takes for a component (the universe before these rules):', '']
+            lines += [excluded_line(name, o) for name, o in oracle_rows if 'tools' in o and 'universe_excluded' in o]
+    lines += agent_eval.markdown(record)
+    if baseline_failed:
+        lines += ['', BASELINE_FAILED + ' Nothing here was checked for getting worse.']
+    elif not baseline:
+        lines += ['', 'No baseline: there was no earlier record to compare with, so nothing here was checked for getting worse.']
     if reference_changed is not None:
         lines += ['', f"Recall was not compared with last week's: its reference was built by version {reference_changed} of "
                       f"the rules, this one by version {record['reference_version']}."]
     if notes:
-        lines += ['', '### Worse than last week', ''] + [f'- {n}' for n in notes]
+        lines += ['', '### Needs attention (opens the issue)', ''] + [f'- {n}' for n in notes]
+    if moved:
+        lines += ['', '### Changes since last week (information)', ''] + [f'- {n}' for n in moved]
     return '\n'.join(lines) + '\n'
+
+
+def load_previous(path):
+    """The earlier record at `path`, `{}` when there is none to compare with. A file that is there but unreadable stops the
+    run before anything is measured: a corrupt baseline is a broken artifact, not an absent one."""
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as f:
+            previous = json.load(f)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f'--previous {path} is not a readable record: {error}')
+    if not isinstance(previous, dict) or not isinstance(previous.get('corpora'), dict):
+        raise SystemExit(f'--previous {path} is not a weekly record: it has no "corpora" object')
+    return previous
+
+
+def errors(record):
+    """What a corpus could not measure (the oracle or the agent evaluation threw), as issue lines."""
+    return [f'{name}, {part.replace("_", " ")}: {entry[part]["error"][:200]}'
+            for name, entry in record['corpora'].items() for part in ('oracle', 'agent_eval')
+            if isinstance(entry.get(part), dict) and 'error' in entry[part]]
+
+
+def failures(record):
+    """What a corpus that did not finish left behind (`record['failed']`), as issue lines."""
+    return [f"{name}: failed at {f['step']}" + (f", exit {f['exit']}" if f['exit'] is not None else '') + f": {f['error'][:200]}"
+            for name, f in record.get('failed', {}).items()]
+
+
+def budget_breaches(record, budgets=None):
+    """The budgets (scripts/headline.py) a whole run of a measured corpus is over, one line each."""
+    return [line for name, entry in record['corpora'].items() for line in headline.over_budget(name, entry, budgets)]
+
+
+def save(record, path):
+    """Write the record so far, whole or not at all: a run that is killed later leaves this one behind."""
+    if path:
+        with open(path + '.tmp', 'w') as f:
+            f.write(json.dumps(record, indent=2) + '\n')
+        os.replace(path + '.tmp', path)
+
+
+def measure_all(args, work, version):
+    """Every selected corpus, in order. The record (`--out`) is written after each one, and a corpus whose command fails,
+    is killed or runs past its timeout is recorded under `failed` with the step, the exit status and the end of its
+    stderr, while the next corpus still runs."""
+    record = {'caliper': version, 'runs': args.runs, 'reference_version': REFERENCE_VERSION, 'corpora': {}, 'failed': {}}
+    for corpus in selected(args.corpus):
+        name = corpus['name']
+        try:
+            record['corpora'][name] = measure(args, corpus, work)
+        except (StepFailed, OSError, ValueError, KeyError) as error:
+            # A tool that exits 0 and writes no or broken output fails its corpus too, not the run.
+            failure = error if isinstance(error, StepFailed) else StepFailed('measure', f'{type(error).__name__}: {error}')
+            log(f'{name}: FAILED at {failure.step}: {failure}')
+            record['failed'][name] = {'step': failure.step, 'exit': failure.code, 'error': str(failure)[:500],
+                                      'stderr_tail': failure.tail.splitlines()}
+        save(record, args.out)
+    return record
 
 
 def main():
@@ -561,32 +835,41 @@ def main():
     parser.add_argument('--work', default=os.path.join(ROOT, '.corpora', 'work'))
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--oracle', action='store_true')
+    parser.add_argument('--agent-eval', action='store_true')
     parser.add_argument('--previous')
+    parser.add_argument('--baseline-failed', action='store_true', help='the download of --previous failed: say so and open the issue')
     parser.add_argument('--out')
+    parser.add_argument('--enforce-budgets', action='store_true',
+                        help='exit 1 when a whole run is over its corpus budget (the release gate; the weekly opens an issue)')
     parser.add_argument('--markdown')
     parser.add_argument('--issue')
     args = parser.parse_args()
+    previous = load_previous(args.previous)
     work = os.path.abspath(args.work)
     os.makedirs(work, exist_ok=True)
     version = subprocess.run([args.bin, '--version'], capture_output=True, text=True).stdout.strip()
-    record = {'caliper': version, 'runs': args.runs, 'reference_version': REFERENCE_VERSION,
-              'corpora': {c['name']: measure(args, c, work) for c in selected(args.corpus)}}
-    notes = []
+    record = measure_all(args, work, version)
     reference_changed = None
-    if args.previous and os.path.exists(args.previous):
-        with open(args.previous) as f:
-            previous = json.load(f)
-        notes = findings(record, previous)
-        if not same_reference(record, previous):
-            reference_changed = previous.get('reference_version', 1)
-    table = markdown(record, notes, reference_changed)
+    if previous and not same_reference(record, previous):
+        reference_changed = previous.get('reference_version', 1)
+    notes = findings(record, previous) + errors(record) + failures(record)
+    table = markdown(record, notes, reference_changed, changes(record, previous), baseline=bool(previous),
+                     baseline_failed=args.baseline_failed)
+    issue_notes = notes + ([BASELINE_FAILED] if args.baseline_failed else [])
     print(table)
     for path, content in ((args.out, json.dumps(record, indent=2) + '\n'), (args.markdown, table),
-                          (args.issue, 'The weekly record got worse:\n\n' + '\n'.join(f'- {n}' for n in notes) + '\n'
-                           if notes else None)):
+                          (args.issue, 'The weekly record needs attention:\n\n' + '\n'.join(f'- {n}' for n in issue_notes) + '\n'
+                           if issue_notes else None)):
         if path and content:
             with open(path, 'w') as f:
                 f.write(content)
+    breaches = budget_breaches(record) if args.enforce_budgets else []
+    for line in breaches:
+        print(f'::error::over budget: {line}', file=sys.stderr)
+    for line in failures(record):
+        print(f'::error::{line}', file=sys.stderr)
+    if breaches or record['failed']:
+        sys.exit(1)
 
 
 if __name__ == '__main__':

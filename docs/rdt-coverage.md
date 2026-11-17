@@ -1,6 +1,6 @@
 # RDT spec coverage matrix
 
-Maps each react-docgen-typescript (RDT) output field and component pattern to the fixtures that exercise it. Run `cargo test -p caliper-docgen-core --test snapshots` to validate the original 8 snapshot fixtures. The 8 real-world library fixtures added since (fluentui, base-ui, antd, ark-ui, zendesk-garden, day-picker, headlessui, blueprint) aren't snapshot-tested — validate them via `pnpm --filter caliper-docgen-validate compare:all`.
+Maps each react-docgen-typescript (RDT) output field and component pattern to the fixtures that exercise it. Run `cargo test -p caliper-docgen-core --test snapshots` to validate the original 8 snapshot fixtures. The 13 real-world library fixtures added since (fluentui, base-ui, antd, ark-ui, zendesk-garden, day-picker, headlessui, blueprint, ariakit, tanstack-table, react-final-form, react-resizable-panels, storybook-emotion) aren't snapshot-tested. The one-off harness that compared them with RDT is not in the repository; `scripts/weekly.py` compares Caliper, RDT and react-docgen with each other and with the TypeScript checker on five pinned corpora (`docs/measurement.md`), and `docs/rdt-differences.md` lists where Caliper's types differ from RDT's and the checker's.
 
 ---
 
@@ -150,7 +150,7 @@ Each `PropType` variant the resolver can emit; whether any fixture produces it.
 `PipelineOptions.html_attributes` (CLI: `--html-attributes <curated|full|none>`; NAPI: `htmlAttributes: 'curated' | 'full' | 'none'`; config file: `htmlAttributes` in `docgen.config.ts`) controls how much of an inherited HTML element's attribute surface gets exposed:
 
 - **Curated** — opt-in compact mode: a subset per element (`ref`, `aria-*`, every handler but the `*Capture` twins, the global attributes, the element's notable ones) in `notableInherited`, which `--format rdt` and `docgenInfo` list beside `props`.
-- **Full (default since 2026-10-26)** — actually resolves `@types/react`'s real `HTMLAttributes`/`AriaAttributes`/`DOMAttributes`/`<Element>HTMLAttributes` interface chain (merged into `GlobalSourceData` by the pipeline, looked up by the resolver like any other interface) and merges the real fields directly into `props` — matching how RDT flattens everything into one props map. Verified against a real button: 238 of ~250 real attributes resolve (the remainder is a narrower, separate gap — see below). Costs ~16ms once per `@types/react` version (cached the same way any other `.d.ts` is), not per extraction run.
+- **Full (default since 2026-10-26)** — actually resolves `@types/react`'s real `HTMLAttributes`/`AriaAttributes`/`DOMAttributes`/`<Element>HTMLAttributes` interface chain (merged into `GlobalSourceData` by the pipeline, looked up by the resolver like any other interface) and merges the real fields directly into `props` — matching how RDT flattens everything into one props map. An early check against a real button resolved 238 of ~250 attributes (not re-measured; `React.ComponentProps<'button'>` now lists 290 props, the same count as RDT). Costs ~16ms once per `@types/react` version (cached the same way any other `.d.ts` is), not per extraction run.
 - **None** — no inherited HTML attributes synthesized at all; own props only.
 
 **Why `full` is the default.** `curated` was meant to keep the props table short, but it left props React declares out of the answer: `--format rdt` and the addon's `docgenInfo` never emitted `notableInherited`, so no handler of a curated component reached Storybook, and a props type that reached an element through `Omit<HTMLAttributes<…>>`, `ComponentProps<"div">` or `PropsWithoutRef<…>` had no element layer in `full` either (antd's `PurePanel`, `Dragger`'s `capture`, `ref` on `forwardRef` components). The addon's `collapseInheritedProps` already hides props inherited from dependencies, so a long list does not make the UI long. `skipHtmlProps` still means `none`; `key` is omitted in every mode; `ref` is listed for `ComponentProps<"div">` props and `forwardRef` components. Without `@types/react`, `full` lists no inherited attributes and reports one info diagnostic per component that needed them. Cost against the old default and Storybook parity numbers: `docs/performance.md`, "Default changes".
@@ -385,7 +385,7 @@ No fixture ships a real static `defaultProps` assignment today — `fixtures/blu
 
 ### Fixed: `typeof` a literal const, `keyof typeof` an object const, `true | false`, and a props type asserted on the export (2026-11-02)
 
-**Found by:** the Storybook parity report on antd (`packages/storybook/scripts/storybook-parity.mjs`, `docs/storybook-parity.md`), against Storybook's docgen.
+**Found by:** the Storybook parity report on antd (`docs/storybook-parity.md`), against Storybook's docgen.
 
 Previously: antd Cascader's `showCheckedStrategy?: typeof SHOW_PARENT | typeof SHOW_CHILD` (constants declared `const SHOW_PARENT = 'SHOW_PARENT'` or `declare const SHOW_PARENT: "SHOW_PARENT"`) stayed the named references `typeof SHOW_PARENT`; Result's `status?: keyof typeof IconMap` was opaque; a union of `true` and `false` read `false | true` where TypeScript prints `boolean`; and Masonry, declared with `forwardRef<Ref, MasonryProps>` and exported as `Masonry as (<T>(props: PropsWithChildren<MasonryProps<T>> & RefAttributes<Ref>) => ReactElement)`, lacked `children`.
 
@@ -397,7 +397,7 @@ Fixed: a top-level `const` initialised with a literal (or an object literal with
 
 ## Note: React 19 `ref`-as-prop — investigated, not a real gap
 
-A `ReactVersion` option (since removed, because nothing in `crates/core` ever read it) was plumbed from the CLI down to `PipelineOptions`. That looked like a real gap — the original spec's worry was that `function Button({ ref, ...props }: ButtonProps)` (React 19's plain-prop `ref`, no `forwardRef`) wouldn't be recognized.
+The worry is that `function Button({ ref, ...props }: ButtonProps)` (React 19's plain-prop `ref`, no `forwardRef`) would not be recognized, since extraction has no React-version option to tell it that `ref` is a prop.
 
 Tested directly against both real shapes:
 
@@ -411,15 +411,15 @@ type ButtonProps = BaseProps & { ref?: Ref<HTMLButtonElement> };
 export function Button({ ref, ...props }: ButtonProps) { ... }
 ```
 
-Both already extract `ref` correctly as `{ kind: 'ref', element: 'HTMLButtonElement' }`, no special-casing involved — the extractor doesn't care that the member happens to be named `ref`; it walks whatever the props type structurally contains, same as any other member, regardless of React version. The one case this doesn't cover — `ref` implicitly present via `ComponentProps<'button'>`'s real React 19 typing rather than an explicit member — falls under the existing, already-accepted "curated mode doesn't expand full HTML attributes" limit, not a version-specific gap.
+Both already extract `ref` correctly as `{ kind: 'ref', element: 'HTMLButtonElement' }`, no special-casing involved — the extractor doesn't care that the member happens to be named `ref`; it walks whatever the props type structurally contains, same as any other member, regardless of React version. The one case this doesn't cover — `ref` implicitly present via `ComponentProps<'button'>`'s real React 19 typing rather than an explicit member — is listed in the default `full` mode (`React.ComponentProps<'button'>` lists `ref`; `curated` puts it in `notableInherited`), so it is not a version-specific gap.
 
-Left the `ReactVersion` fields and CLI flag in place (real, tested, user-facing surface) rather than ripping them out — but didn't invent speculative behavior for a bug that isn't reproducible. If a concrete React-version-dependent extraction difference ever surfaces, this is where it'd get wired in.
+There is no React-version option, and none is needed for these shapes. If a concrete React-version-dependent extraction difference appears, it needs a reproduction first.
 
 ### Fixed: bare passthrough identifier alias not renaming the component
 
 **Fixture:** `fixtures/antd/Button.tsx`
 
-Found by a full-fixture validation sweep (`apps/validate`'s comparison across all 20 libraries at once, not a per-fixture check) — `antd/Button/Button` showed `ours found nothing` despite the component clearly being extracted correctly under a different name. antd's real `Button` export:
+Found by a full-fixture validation sweep (a comparison across all 20 libraries at once, not a per-fixture check) — `antd/Button/Button` showed `ours found nothing` despite the component clearly being extracted correctly under a different name. antd's real `Button` export:
 
 ```ts
 const InternalCompoundedButton = React.forwardRef<...>((props, ref) => { ... });

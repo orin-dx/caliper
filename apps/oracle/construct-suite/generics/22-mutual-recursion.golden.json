@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "files",
+          "name"
+        ],
+        "index": false,
+        "alias": "Folder"
+      }
+    ],
+    "alias": "Folder"
+  },
+  "text": "Folder | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/22-mutual-recursion.tsx"
+    },
+    "order": null
+  }
+}

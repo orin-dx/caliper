@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a",
+          "c"
+        ],
+        "index": false,
+        "alias": "OnlyStrings"
+      }
+    ],
+    "alias": "OnlyStrings"
+  },
+  "text": "OnlyStrings<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/28-mapped-as-filter.tsx"
+    },
+    "order": null
+  }
+}

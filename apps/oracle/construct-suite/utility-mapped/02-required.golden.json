@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a",
+          "b"
+        ],
+        "index": false,
+        "alias": "Required"
+      }
+    ],
+    "alias": "Required"
+  },
+  "text": "Required<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/02-required.tsx"
+    },
+    "order": null
+  }
+}

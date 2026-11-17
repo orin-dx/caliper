@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "children",
+          "label"
+        ],
+        "index": false,
+        "alias": "TreeNode"
+      }
+    ],
+    "alias": "TreeNode"
+  },
+  "text": "TreeNode | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/20-recursive-tree.tsx"
+    },
+    "order": null
+  }
+}

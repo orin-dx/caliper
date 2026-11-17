@@ -1,0 +1,19 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "default",
+    "of": "string"
+  },
+  "text": "\"default\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "DefaultProps",
+      "file": "exports/08-anonymous-default-beside-named.tsx"
+    },
+    "order": null
+  }
+}

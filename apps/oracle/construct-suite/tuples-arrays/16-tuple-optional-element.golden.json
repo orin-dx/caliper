@@ -1,0 +1,45 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "prim",
+            "name": "string"
+          },
+          {
+            "k": "union",
+            "members": [
+              {
+                "k": "prim",
+                "name": "undefined"
+              },
+              {
+                "k": "prim",
+                "name": "number"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "text": "[string, (number | undefined)?] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/16-tuple-optional-element.tsx"
+    },
+    "order": null
+  }
+}

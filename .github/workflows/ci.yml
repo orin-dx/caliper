@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
   merge_group:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
         with:
           toolchain: ${{ steps.rust.outputs.version }}
           components: clippy,rustfmt
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just,cargo-machete,typos
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
@@ -55,7 +56,7 @@ jobs:
       - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
         with:
           toolchain: ${{ steps.rust.outputs.version }}
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just,cargo-nextest
       # The cli config tests spawn `node --import=tsx/esm`, and tsx is a devDependency of apps/oracle.
@@ -64,11 +65,61 @@ jobs:
           auto-install: true
       - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
       - run: pnpm install --frozen-lockfile
-      # The two tests that run the real TypeScript 7.1 checker use apps/oracle's `typescript-beta`; without this they
-      # skip, and in CI a skip is a failure.
       - run: just test-rust
-        env:
-          CALIPER_TEST_TSC: ${{ github.workspace }}/apps/oracle/node_modules/typescript-beta/bin/tsc
+
+  # ADR 0026's gates for the checker path: the golden check, tsrs against the Go checker, and the construct suite through
+  # the checker held to apps/oracle/construct-suite/checker-expectations.json. It builds its own release binary, a second
+  # build beside the other jobs (setup-rust caches cargo); nothing may skip.
+  test-checker-lane:
+    name: Test / Checker lane
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+      - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+      - run: pnpm install --frozen-lockfile
+      - run: just test-checker-lane
+
+  test-napi:
+    name: Test / Native binding crate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just,cargo-nextest
+      - run: just test-napi
+
+  test-py:
+    name: Test / Python scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just
+      - run: just test-py
 
   test-ts:
     name: Test / TypeScript / Node ${{ matrix.node }}
@@ -83,7 +134,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
@@ -105,7 +156,7 @@ jobs:
       - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
         with:
           toolchain: ${{ steps.rust.outputs.version }}
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
@@ -114,6 +165,28 @@ jobs:
       - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
       - run: pnpm install --frozen-lockfile
       - run: just test-integration
+
+  test-construct:
+    name: Test / Construct suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: just
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+      - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+      - run: pnpm install --frozen-lockfile
+      - run: just test-construct
 
   coverage:
     name: Coverage
@@ -128,7 +201,7 @@ jobs:
         with:
           toolchain: ${{ steps.rust.outputs.version }}
           components: llvm-tools-preview
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just,cargo-nextest,cargo-llvm-cov
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
@@ -136,10 +209,7 @@ jobs:
           auto-install: true
       - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
       - run: pnpm install --frozen-lockfile
-      # Same as `test-rust`: the real-checker tests fail without it on CI, and they count towards coverage.
       - run: just coverage 90
-        env:
-          CALIPER_TEST_TSC: ${{ github.workspace }}/apps/oracle/node_modules/typescript-beta/bin/tsc
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -164,7 +234,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
@@ -186,7 +256,7 @@ jobs:
       - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
         with:
           toolchain: ${{ steps.rust.outputs.version }}
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just,cargo-semver-checks
       - run: just semver
@@ -212,7 +282,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: just,cargo-deny,zizmor@1.29.0
       - run: just deny zizmor
@@ -228,11 +298,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
         with:
-          version: callisto@0.16.0
+          version: callisto@0.20.0
           verification: require
-      - run: callisto status --check
+      - run: callisto status --check --strict
       - name: Preview the versioned release plan
         shell: bash
         env:
@@ -247,10 +317,68 @@ jobs:
           callisto version
           callisto release --dry-run --format text
 
+  # The guard the 0.11.0 release lacked: the checker on the five real corpora, against their budgets (BUDGETS in
+  # scripts/headline.py, docs/measurement.md "The budgets"). It runs only on the Callisto release pull request, and by
+  # hand, because it installs about 10 GB of node_modules; it costs no money (no `--oracle`, no `--agent-eval`). The
+  # steps are weekly.yml's. A budget breach or a corpus that failed (killed, over its timeout) fails the job.
+  corpora-budget:
+    name: Corpora budget
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'callisto/version-packages') &&github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    # Longer than two hung commands (weekly.py's STEP_TIMEOUT, 40 min each), so that it records the failure itself.
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      # The corpora's own package managers run under Node 24 (see weekly.yml): Yarn 4.18 crashes under Node 26. This step
+      # comes before the toolchain's so that the toolchain's Node stays first on PATH; only the installs use this one.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - id: corpus-node
+        run: echo "dir=$(dirname "$(command -v node)")" >> "$GITHUB_OUTPUT"
+      # RDT and react-docgen, which the record also measures, run from apps/oracle's dependencies.
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+      - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+      - run: pnpm install --frozen-lockfile
+      - run: cargo build --release --locked -p caliper-docgen
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .corpora/caches
+          key: weekly-${{ hashFiles('scripts/corpora.py', 'pnpm-lock.yaml') }}
+      - name: Fetch and install the corpora
+        env:
+          INSTALL_NODE_DIR: ${{ steps.corpus-node.outputs.dir }}
+        run: python3 scripts/corpora.py setup --install-node-dir "$INSTALL_NODE_DIR"
+      - name: Measure against the budgets
+        run: >-
+          python3 scripts/weekly.py --bin target/release/caliper-docgen --runs 1 --enforce-budgets
+          --out weekly.json --markdown weekly.md
+      - if: always()
+        run: cat weekly.md >> "$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: corpora-budget
+          path: |
+            weekly.json
+            weekly.md
+            .corpora/logs
+          if-no-files-found: ignore
+
   # The one check to require in branch protection.
   ci:
     name: CI
-    needs: [lint, test-rust, test-ts, test-integration, coverage, install, semver, msrv, audit, changesets]
+    needs: [lint, test-rust, test-checker-lane, test-napi, test-py, test-ts, test-integration, test-construct, coverage, install, semver, msrv, audit, changesets, corpora-budget]
     if: always()
     runs-on: ubuntu-latest
     steps:

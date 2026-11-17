@@ -79,7 +79,9 @@ mod off_pool_tests {
 /// to that key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ComponentAnswer {
+    /// The component's output key: its bare name, or `Name (file)` when two components share the name.
     pub key: String,
+    /// The component's entry, the same one a batch run publishes under `key`.
     pub entry: ComponentEntry,
     /// This component's diagnostics only, each with `affects` set to `[key]`.
     pub diagnostics: Vec<Diagnostic>,
@@ -88,9 +90,15 @@ pub struct ComponentAnswer {
 /// Where a component is declared, for a host that finds one by file and name before it asks for the props.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentLocation {
+    /// The component's output key.
     pub key: String,
+    /// The file that declares the component.
     pub file_path: Utf8PathBuf,
+    /// The component's name as the extractor found it.
     pub display_name: String,
+    /// How its module exports it ([`ComponentEntry::exports`]): what a host that finds a component by file and export
+    /// reads.
+    pub exports: Vec<ComponentExport>,
 }
 
 /// The dependency layer a context was built over, and the context. Replaced whole when the layer grows: the context's
@@ -226,6 +234,7 @@ impl Revision {
             lib_diagnostics,
             tail_diagnostics,
             resolved: FxHashMap::default(),
+            sites: Arc::default(),
             files: Arc::new(src_files.into_iter().collect()),
             dts_files_parsed,
             dts_cache_hits,
@@ -269,7 +278,7 @@ impl Revision {
         changed: &Utf8Path,
     ) -> Option<(Revision, IncrementalUpdate)> {
         let previous = self.lazy.as_ref()?;
-        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns) {
+        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns, self.source_files()) {
             return None;
         }
         let start = Instant::now();
@@ -312,6 +321,15 @@ impl Revision {
 
         let layer = previous.engine.load().layer.clone();
         let engine = Engine::new(&global, options, &self.ambient_global_files, &named_types, layer, &self.react_types);
+        // A kept answer is decided again against the new call sites, so an edit to a consumer can change its `used`
+        // lists without touching its resolution. The new sites are the ones the next answer reads.
+        if memo.iter().any(|entry| entry.value().evidence.is_some()) {
+            let before = relevance_inputs::project_sites(&previous.engine.load().ctx);
+            let after = relevance_inputs::project_sites(&engine.ctx);
+            for entry in memo.iter().filter(|entry| entry.value().redecided(&before, &after)) {
+                touched.insert(entry.key().name.clone());
+            }
+        }
         let next = Revision {
             id: self.id + 1,
             global,
@@ -324,6 +342,7 @@ impl Revision {
             lib_diagnostics: self.lib_diagnostics.clone(),
             tail_diagnostics: self.tail_diagnostics.clone(),
             resolved: FxHashMap::default(),
+            sites: Arc::default(),
             files: Arc::new(files),
             dts_files_parsed: self.dts_files_parsed,
             dts_cache_hits: self.dts_cache_hits,
@@ -403,9 +422,11 @@ impl Revision {
         if let Some(seed) = lazy.demands.get(mapping.file_path.as_str()) {
             self.grow(options, lazy, seed);
         }
+        let mut asked_for: Vec<dependency_types::Demand> = Vec::new();
         loop {
             let engine = lazy.engine.load_full();
-            let (entry, diagnostics, depends_on) = resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
+            let (entry, diagnostics, depends_on, evidence) =
+                resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
             let missing = match &engine.layer {
                 Some(layer) => {
                     let mut missing = Vec::new();
@@ -419,11 +440,14 @@ impl Revision {
                 None => Vec::new(),
             };
             // A resolution against a layer that lacked a name it reached is discarded, and so is its context's memo.
-            if missing.is_empty() {
-                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on });
+            // A load that left the same names missing answered none of them (a demand whose load panicked stays
+            // unanswered), so asking again would never end.
+            if missing.is_empty() || missing == asked_for {
+                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence });
                 return Some(lazy.memo.entry(id.clone()).or_insert(resolved).clone());
             }
             self.grow(options, lazy, &missing);
+            asked_for = missing;
         }
     }
 
@@ -567,8 +591,9 @@ impl Revision {
             .iter()
             .flat_map(|(name, group)| {
                 self.group_positions(options, name, true).into_iter().filter_map(|(key, position)| {
-                    let (id, _) = group.get(position)?;
-                    Some(ComponentLocation { key, file_path: id.file.clone(), display_name: id.name.clone() })
+                    let (id, index) = group.get(position)?;
+                    let exports = self.global.component_mappings.get(*index)?.exports.clone();
+                    Some(ComponentLocation { key, file_path: id.file.clone(), display_name: id.name.clone(), exports })
                 })
             })
             .collect();
@@ -635,12 +660,17 @@ impl Revision {
     pub(crate) fn lazy_component(&self, options: &PipelineOptions, key: &str) -> Option<ComponentAnswer> {
         let (id, index) = self.lazy_target(options, key)?;
         let resolved = self.lazy_resolved(options, id, index)?;
-        let mut entry = resolved.entry.clone();
+        // A lazy revision counts call sites with its context, on the first answer that needs them.
+        let sites = self.lazy.as_ref().map(|lazy| relevance_inputs::project_sites(&lazy.engine.load_full().ctx));
+        let entry = resolved.answer(&sites.unwrap_or_default());
         let mut diagnostics = DiagnosticSet::default();
-        diagnostics.extend(options.plugins.run_on_component_resolved(&mut entry), Some(key));
         diagnostics.extend(resolved.diagnostics.own.iter().cloned(), Some(key));
         for chunk in &resolved.diagnostics.shared {
             diagnostics.extend_shared(chunk, key);
+        }
+        // A panic in the dependency loader may have left any component's types unexpanded, so every answer carries it.
+        if let Some(layer) = self.lazy.as_ref().and_then(|lazy| lazy.engine.load_full().layer.clone()) {
+            diagnostics.extend(layer.panic_diagnostics(), None);
         }
         Some(ComponentAnswer { key: key.to_owned(), entry, diagnostics: diagnostics.finish() })
     }

@@ -25,6 +25,197 @@ pub fn html_element_for(type_name: &str) -> Option<&'static str> {
     }
 }
 
+/// The tag names of `JSX.IntrinsicElements` in `@types/react` 19.3, sorted: what `React.ElementType` lists as string
+/// literals ahead of its component types. A union that lists only these, with `ComponentClass` and `FunctionComponent`,
+/// is `ElementType` flattened; a string literal that is not one of them is the author's own alternative, which the
+/// terminal does not stand for. A tag a project adds to `JSX.IntrinsicElements` is not here: it is kept beside the
+/// terminal, which says the same thing again and never less.
+const INTRINSIC_TAGS: &[&str] = &[
+    "a",
+    "abbr",
+    "address",
+    "animate",
+    "animateMotion",
+    "animateTransform",
+    "area",
+    "article",
+    "aside",
+    "audio",
+    "b",
+    "base",
+    "bdi",
+    "bdo",
+    "big",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "canvas",
+    "caption",
+    "center",
+    "circle",
+    "cite",
+    "clipPath",
+    "code",
+    "col",
+    "colgroup",
+    "data",
+    "datalist",
+    "dd",
+    "defs",
+    "del",
+    "desc",
+    "details",
+    "dfn",
+    "dialog",
+    "div",
+    "dl",
+    "dt",
+    "ellipse",
+    "em",
+    "embed",
+    "feBlend",
+    "feColorMatrix",
+    "feComponentTransfer",
+    "feComposite",
+    "feConvolveMatrix",
+    "feDiffuseLighting",
+    "feDisplacementMap",
+    "feDistantLight",
+    "feDropShadow",
+    "feFlood",
+    "feFuncA",
+    "feFuncB",
+    "feFuncG",
+    "feFuncR",
+    "feGaussianBlur",
+    "feImage",
+    "feMerge",
+    "feMergeNode",
+    "feMorphology",
+    "feOffset",
+    "fePointLight",
+    "feSpecularLighting",
+    "feSpotLight",
+    "feTile",
+    "feTurbulence",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "filter",
+    "footer",
+    "foreignObject",
+    "form",
+    "g",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "i",
+    "iframe",
+    "image",
+    "img",
+    "input",
+    "ins",
+    "kbd",
+    "keygen",
+    "label",
+    "legend",
+    "li",
+    "line",
+    "linearGradient",
+    "link",
+    "main",
+    "map",
+    "mark",
+    "marker",
+    "mask",
+    "menu",
+    "menuitem",
+    "meta",
+    "metadata",
+    "meter",
+    "mpath",
+    "nav",
+    "noindex",
+    "noscript",
+    "object",
+    "ol",
+    "optgroup",
+    "option",
+    "output",
+    "p",
+    "param",
+    "path",
+    "pattern",
+    "picture",
+    "polygon",
+    "polyline",
+    "pre",
+    "progress",
+    "q",
+    "radialGradient",
+    "rect",
+    "rp",
+    "rt",
+    "ruby",
+    "s",
+    "samp",
+    "script",
+    "search",
+    "section",
+    "select",
+    "set",
+    "slot",
+    "small",
+    "source",
+    "span",
+    "stop",
+    "strong",
+    "style",
+    "sub",
+    "summary",
+    "sup",
+    "svg",
+    "switch",
+    "symbol",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "text",
+    "textPath",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "time",
+    "title",
+    "tr",
+    "track",
+    "tspan",
+    "u",
+    "ul",
+    "use",
+    "var",
+    "video",
+    "view",
+    "wbr",
+    "webview",
+];
+
+/// Whether `name` is a tag of React's `JSX.IntrinsicElements`, by the table of `@types/react` 19.3 this holds.
+pub fn is_intrinsic_tag(name: &str) -> bool {
+    INTRINSIC_TAGS.binary_search(&name).is_ok()
+}
+
 /// `SVGAttributes<T>`/`SVGProps<T>`/`HTMLProps<T>` carry no element in their own
 /// name (unlike `ButtonHTMLAttributes`, where the element is baked into the
 /// name) — but a real call site always supplies a concrete DOM element type as
@@ -64,6 +255,8 @@ pub fn html_element_from_args(args: &[crate::types::CollectedType]) -> Option<&'
     })
 }
 
+/// The HTML tag name a DOM element type argument stands for: `HTMLButtonElement` is `button`, as in
+/// `ButtonHTMLAttributes<HTMLButtonElement>`. `None` for a type this table does not know.
 pub fn html_element_from_type_arg(type_arg: &str) -> Option<&'static str> {
     match type_arg {
         "HTMLAnchorElement" => Some("a"),
@@ -99,6 +292,10 @@ pub fn is_attribute_builtin(bare_name: &str) -> bool {
     matches!(bare_name, "AriaAttributes" | "RefAttributes")
 }
 
+/// The `@types/react` function-component types, whose first type argument is the props. The one list the extractor
+/// and the resolver both read, so a name added here is recognised by both.
+pub const FC_FAMILY_TYPE_NAMES: &[&str] = &["FC", "FunctionComponent", "VFC", "VoidFunctionComponent", "ComponentType"];
+
 /// Types that are terminal — never need further resolution.
 ///
 /// These are React-specific type names that we recognize as builtins and don't
@@ -108,6 +305,7 @@ pub fn is_attribute_builtin(bare_name: &str) -> bool {
 /// from `PipelineOptions.extra_builtins` without needing to change this file.
 pub fn is_react_builtin(name: &str, extra: &rustc_hash::FxHashSet<compact_str::CompactString>) -> bool {
     extra.contains(name)
+        || FC_FAMILY_TYPE_NAMES.contains(&name)
         || matches!(
             name,
             "ReactNode"
@@ -145,11 +343,6 @@ pub fn is_react_builtin(name: &str, extra: &rustc_hash::FxHashSet<compact_str::C
                 | "SubmitEventHandler"
                 | "InputEventHandler"
                 | "ToggleEventHandler"
-                | "FC"
-                | "FunctionComponent"
-                | "VFC"
-                | "VoidFunctionComponent"
-                | "ComponentType"
                 | "PropsWithChildren"
                 | "PropsWithRef"
                 | "RefObject"
@@ -225,41 +418,65 @@ pub fn is_curated_html_attr(element: &str, name: &str) -> bool {
         || notable_html_attrs(element).contains(&name)
 }
 
-/// Whether the checker's answer for a prop is used, under `mode`. The structural pass keeps the props the checker does
-/// not return either way, so this decides only what the checker adds: its own props always, and the props
-/// `@types/react` declares (`children`, `aria-*`, handlers, `className`) as `mode` defines them. `Full` takes all of
-/// them; `Curated` and `None` take those the structural pass lists among the component's props (`children` through
-/// `PropsWithChildren`), because the curated attributes and the none-mode absence are the structural pass's to give.
-pub fn checker_prop_used(
+/// The `htmlAttributes` mode the checker's React props are taken by, from the run's `mode` and whether the structural
+/// answer is the `expanded` view (`collapseInheritedProps: none`, which lists every resolved prop). Expanded, the
+/// run's own mode: `Full` takes every React prop the checker finds, also where the structural pass found none (props
+/// written `ReturnType<typeof makeProps>`). Otherwise `Curated`: which React props are rows is relevance's decision
+/// (ADR 0028), made once on the structural answer.
+pub fn react_attribute_mode(
+    mode: crate::pipeline::HtmlAttributeMode,
+    expanded: bool,
+) -> crate::pipeline::HtmlAttributeMode {
+    if expanded { mode } else { crate::pipeline::HtmlAttributeMode::Curated }
+}
+
+/// The names `entry`, a structural answer, shows as typed rows: its `props` and its `notableInherited` (a curated
+/// attribute, a member the body reads). A name relevance puts forward that the answer holds only in a layer's `used`
+/// list stays a name in both lanes, so the lanes list the same rows. The one answer of which names are visible that
+/// both checker merges and the checker's request read.
+pub fn visible_rows(entry: &crate::types::ComponentEntry) -> std::collections::BTreeSet<String> {
+    entry.props.keys().chain(entry.notable_inherited.keys()).cloned().collect()
+}
+
+/// Whether a checker merge takes the checker's prop `name` under `mode` ([`react_attribute_mode`]): its own props
+/// always; a `@types/react` prop under `Full`, else only where it is one of the `visible` rows ([`visible_rows`]).
+pub(crate) fn checker_prop_kept(
     mode: crate::pipeline::HtmlAttributeMode,
     name: &str,
     react_declared: bool,
-    structural_props: &std::collections::BTreeMap<String, std::sync::Arc<crate::types::ParsedProp>>,
+    visible: &std::collections::BTreeSet<String>,
 ) -> bool {
-    use crate::pipeline::HtmlAttributeMode;
-    if !react_declared {
-        return true;
-    }
-    if REACT_SPECIAL_PROPS.contains(&name) {
-        return false;
-    }
+    let react_row = !REACT_SPECIAL_PROPS.contains(&name);
     match mode {
-        HtmlAttributeMode::Full => true,
-        HtmlAttributeMode::Curated | HtmlAttributeMode::None => structural_props.contains_key(name),
+        crate::pipeline::HtmlAttributeMode::Full => !react_declared || react_row,
+        crate::pipeline::HtmlAttributeMode::Curated | crate::pipeline::HtmlAttributeMode::None => {
+            !react_declared || (react_row && visible.contains(name))
+        }
     }
 }
 
-/// The `@types/react` props the checker is asked to report under `mode`: `None` for all of them, else only these
-/// names. Asking for fewer is the same answer as [`checker_prop_used`] gives, without converting the types of
-/// hundreds of DOM attributes per component.
-pub fn react_props_wanted(
+/// The `@types/react` props the checker is asked to report for `entry` under `mode`: all under `Full`, else its
+/// [`visible_rows`], the only ones the checker merges take.
+pub fn react_props_wanted_for(
     mode: crate::pipeline::HtmlAttributeMode,
-    structural_props: &std::collections::BTreeMap<String, std::sync::Arc<crate::types::ParsedProp>>,
+    entry: &crate::types::ComponentEntry,
 ) -> Option<rustc_hash::FxHashSet<String>> {
     match mode {
         crate::pipeline::HtmlAttributeMode::Full => None,
-        _ => Some(structural_props.keys().cloned().collect()),
+        crate::pipeline::HtmlAttributeMode::Curated | crate::pipeline::HtmlAttributeMode::None => {
+            Some(visible_rows(entry).into_iter().collect())
+        }
     }
+}
+
+/// Whether `entry` lists every resolved prop ([`react_attribute_mode`]): its placement says so, or, with no placement
+/// (no evidence gathered), the run's `collapse` is the expanded view. The one answer both checker merges and the
+/// checker's request read.
+pub fn expanded(entry: &crate::types::ComponentEntry, collapse: crate::types::options::CollapseInheritedProps) -> bool {
+    entry
+        .relevance
+        .as_ref()
+        .map_or(collapse == crate::types::options::CollapseInheritedProps::None, |placement| placement.expanded())
 }
 
 /// Returns the curated list of notable HTML attribute prop names for a given element.
@@ -325,10 +542,61 @@ pub fn notable_html_attrs(element: &str) -> &'static [&'static str] {
     }
 }
 
+/// Whether an import specifier is React itself: `react`, a subpath of it, its `@types` package, or Preact's
+/// compatibility layer. The extractor and the resolver both ask this, so they agree on which imports are React's.
+pub(crate) fn is_react_module(specifier: &str) -> bool {
+    specifier == "react"
+        || specifier.starts_with("react/")
+        || specifier == "@types/react"
+        || specifier == "preact/compat"
+}
+
+/// Whether an import specifier is Preact: `preact` or a subpath of it, where its `h` lives.
+pub(crate) fn is_preact_module(specifier: &str) -> bool {
+    specifier == "preact" || specifier.starts_with("preact/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    #[rstest]
+    #[case("react", true)]
+    #[case("react/jsx-runtime", true)]
+    #[case("@types/react", true)]
+    #[case("preact/compat", true)]
+    #[case("preact", false)]
+    #[case("react-dom", false)]
+    fn is_react_module_names_the_modules_that_declare_react_types(#[case] specifier: &str, #[case] expected: bool) {
+        assert_eq!(is_react_module(specifier), expected);
+    }
+
+    #[test]
+    fn intrinsic_tags_are_sorted_and_unique_so_the_search_is_sound() {
+        assert!(INTRINSIC_TAGS.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[rstest]
+    #[case("div", true)]
+    #[case("a", true)]
+    #[case("clipPath", true)]
+    #[case("webview", true)]
+    #[case("custom-widget", false)]
+    #[case("Div", false)]
+    #[case("", false)]
+    fn is_intrinsic_tag_names_the_tags_react_declares_and_no_other_literal(#[case] name: &str, #[case] expected: bool) {
+        assert_eq!(is_intrinsic_tag(name), expected);
+    }
+
+    #[rstest]
+    #[case("preact", true)]
+    #[case("preact/hooks", true)]
+    #[case("preact-render-to-string", false)]
+    #[case("react", false)]
+    fn is_preact_module_names_preact_and_its_subpaths(#[case] specifier: &str, #[case] expected: bool) {
+        assert_eq!(is_preact_module(specifier), expected);
+    }
 
     // Every match arm in html_element_for, not a sample — including both
     // members of the `SVGAttributes | SVGProps` or-pattern as distinct cases
@@ -596,5 +864,47 @@ mod tests {
         assert_eq!(notable_html_attrs("div"), generic);
         assert_eq!(notable_html_attrs("span"), generic);
         assert_eq!(notable_html_attrs(""), generic, "an empty element name should also hit the generic default");
+    }
+
+    #[test]
+    fn a_notable_inherited_row_is_visible_and_wanted_from_the_checker() {
+        // A member the body reads from a collapsed source is kept typed in `notableInherited`: both checker merges keep
+        // it and the checker's request names it, as for a row in `props`.
+        let prop = |name: &str| {
+            let prop = crate::types::output::ParsedProp::new(
+                name.to_owned(),
+                crate::types::output::PropType::Any,
+                false,
+                None,
+                String::new(),
+                std::collections::BTreeMap::new(),
+                None,
+                vec![],
+            );
+            (name.to_owned(), std::sync::Arc::new(prop))
+        };
+        let entry = crate::types::ComponentEntry {
+            relevance: None,
+            display_name: "Button".to_owned(),
+            file_path: "/p/button.tsx".into(),
+            description: String::new(),
+            props: [prop("variant")].into_iter().collect(),
+            inheritance: vec![],
+            notable_inherited: [prop("title")].into_iter().collect(),
+            discriminant_prop: None,
+            composes: vec![],
+            tags: std::collections::BTreeMap::new(),
+            methods: vec![],
+            detected_by: crate::types::DetectionRule::FunctionDeclaration,
+            exported: true,
+            exports: vec![crate::types::ComponentExport::named("Button")],
+        };
+        let visible = visible_rows(&entry);
+        assert_eq!(visible.iter().map(String::as_str).collect::<Vec<_>>(), ["title", "variant"]);
+        let curated = crate::pipeline::HtmlAttributeMode::Curated;
+        assert!(checker_prop_kept(curated, "title", true, &visible));
+        assert!(!checker_prop_kept(curated, "onClick", true, &visible));
+        let wanted = react_props_wanted_for(curated, &entry).expect("curated names what it wants");
+        assert!(wanted.contains("title") && wanted.contains("variant") && !wanted.contains("onClick"));
     }
 }

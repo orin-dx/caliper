@@ -1,0 +1,44 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "small",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "large",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "Size.Small | Size.Large | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/23-enum-member-union.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "small",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "large",
+        "of": "string"
+      }
+    ]
+  }
+}

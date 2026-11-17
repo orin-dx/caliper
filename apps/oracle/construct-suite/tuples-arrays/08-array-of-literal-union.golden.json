@@ -1,0 +1,48 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "union",
+          "members": [
+            {
+              "k": "lit",
+              "value": "a",
+              "of": "string"
+            },
+            {
+              "k": "lit",
+              "value": "b",
+              "of": "string"
+            },
+            {
+              "k": "lit",
+              "value": "c",
+              "of": "string"
+            }
+          ]
+        },
+        "alias": "Array"
+      }
+    ],
+    "alias": "Array"
+  },
+  "text": "(\"a\" | \"b\" | \"c\")[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/08-array-of-literal-union.tsx"
+    },
+    "order": null
+  }
+}

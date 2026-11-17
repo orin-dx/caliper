@@ -12,9 +12,9 @@
 
 use std::collections::BTreeMap;
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Prop name to `(required, type)` of the only component in `source`.
 fn props_of(source: &str) -> BTreeMap<String, (bool, Value)> {
@@ -74,8 +74,8 @@ fn one_named_member_and_one_inline_member_are_merged_too() {
         export function C(props: P) { return <b />; }
         "#,
     );
-    assert_eq!(props["open"].0, false, "optional in the first branch");
-    assert_eq!(props["onOpenChange"].0, false, "absent from the first branch");
+    assert!(!props["open"].0, "optional in the first branch");
+    assert!(!props["onOpenChange"].0, "absent from the first branch");
 }
 
 #[test]

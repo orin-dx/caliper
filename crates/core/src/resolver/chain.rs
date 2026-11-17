@@ -6,7 +6,7 @@ use camino::Utf8Path;
 use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::known::{push_known_opaque_diagnostic, KnownPatternResult};
+use crate::known::{KnownPatternResult, push_known_opaque_diagnostic};
 use crate::react_types;
 use crate::types::*;
 
@@ -95,6 +95,7 @@ fn known_chain(
                 html_element: Some(element),
                 total_props: 0,
                 members: vec![],
+                used: Vec::new(),
             };
             ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
         }
@@ -115,6 +116,7 @@ fn known_chain(
                     html_element: Some(element),
                     total_props: 0,
                     members: vec![],
+                    used: Vec::new(),
                 });
             }
             ResolvedChain { inheritance, ..ResolvedChain::empty() }
@@ -149,8 +151,8 @@ pub(super) fn resolve_props_chain(
         return ResolvedChain::give_up(type_name.to_owned(), Some(diag), state);
     }
 
-    if state.in_scope_type_params.iter().any(|param| param == type_name) && type_args.is_empty() {
-        return ResolvedChain::empty_with_compose(type_name.to_owned());
+    if type_args.is_empty() && state.has_type_param(type_name) {
+        return ResolvedChain::empty_with_compose(unmarked(type_name).to_owned());
     }
 
     // Cycle detection — scoped by file so same type name in different files is OK.
@@ -158,7 +160,10 @@ pub(super) fn resolve_props_chain(
     // (e.g. `Partial<RowHeights>` vs `Partial<ColumnWidths>` in the same interface's
     // extends list) are not the same visit and must not collide on the bare name alone. The arguments are keyed by
     // structure: their display form abbreviates object types to `{ ... }`, so distinct instantiations collided.
-    let visit_key: CompactString = format!("{}:{}<{:?}>", consuming_file, type_name, type_args).into();
+    // A name read in a function body, block or `switch` case may mean a declaration of that scope and, from another
+    // scope, a module-level one (`interface Props extends Outer` over `type Outer = Props`): they are not one visit.
+    let site = state.declared_in.as_deref().and_then(DeclarationScope::local_key_suffix).unwrap_or_default();
+    let visit_key: CompactString = format!("{}:{}<{:?}>{site}", consuming_file, type_name, type_args).into();
     if !state.visit(visit_key) {
         return ResolvedChain::give_up(
             type_name.to_owned(),
@@ -181,10 +186,11 @@ pub(super) fn resolve_props_chain(
 
     // Strip "React." namespace prefix before all builtin/utility checks.
     let type_name_bare = type_name.strip_prefix("React.").unwrap_or(type_name);
-    if type_name_bare == "PropsWithoutRef" && super::may_be_react_builtin(type_name, consuming_file, ctx) {
-        if let Some(alias) = super::alias::react_props_without_ref_alias(type_args, consuming_file) {
-            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
-        }
+    if type_name_bare == "PropsWithoutRef"
+        && super::may_be_react_builtin(type_name, consuming_file, ctx)
+        && let Some(alias) = super::alias::react_props_without_ref_alias(type_args, consuming_file)
+    {
+        return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
     }
 
     // ── Step 0.5: Inline utility type in extends position ─────────────────────
@@ -223,10 +229,10 @@ pub(super) fn resolve_props_chain(
             });
         }
     }
-    if super::may_be_utility(type_name, consuming_file, ctx) {
-        if let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file) {
-            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
-        }
+    if super::may_be_utility(type_name, consuming_file, ctx)
+        && let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file)
+    {
+        return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
     }
 
     // ── Step 0.6: React's `ComponentProps<typeof Button>` is `Button`'s props ─
@@ -262,35 +268,48 @@ pub(super) fn resolve_props_chain(
         Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) => {
             // As for interfaces and for aliases in a prop position: parameters left unfilled by the call site are
             // placeholders in the body, not unresolvable types.
-            if let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) {
-                state.add_type_params(params.iter().skip(type_args.len()));
-            }
+            let marked = super::substitute::mark_args(ctx, state, consuming_file, type_args);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
-                type_args,
+                &marked,
                 consuming_file,
                 ctx,
                 &mut state.diagnostics,
             );
-            if let CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), file_path } = &alias {
-                if ctx.collapses(file_path, fields.len(), depth, state) {
-                    let notable = fields
-                        .iter()
-                        .filter(|field| field.is_member() && is_notable(&field.name))
-                        .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()));
-                    return collapsed_source(
-                        &canonical_name,
-                        file_path,
-                        fields.iter().map(|field| field.name.clone()).collect(),
-                        notable.collect(),
-                        ctx,
-                        state,
-                        depth,
-                    );
-                }
+            if let CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), file_path } = &alias
+                && ctx.collapses(
+                    file_path,
+                    &canonical_name,
+                    fields.iter().map(|field| field.name.as_str()),
+                    depth,
+                    state,
+                )
+            {
+                let notable: Vec<_> = fields
+                    .iter()
+                    .filter(|field| {
+                        field.is_member() && (is_notable(&field.name) || state.body_reads(mapping, &field.name))
+                    })
+                    .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()))
+                    .collect();
+                return collapsed_source(
+                    &canonical_name,
+                    file_path,
+                    fields.iter().map(|field| field.name.clone()).collect(),
+                    notable,
+                    ctx,
+                    state,
+                    depth,
+                );
             }
             let mut attempt = state.branch();
+            drop(super::precedence::enter_alias_site(ctx, &mut attempt, &canonical_file, &matched_key));
+            // A declared alias is read under no type parameters; the alias the extractor synthesizes for an inline props
+            // type is the component's own, and keeps the component's.
+            if !is_synthesized_alias(type_name) {
+                attempt.bind_scope(TypeScope::default());
+            }
             let chain = resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, &mut attempt, depth);
             return known_fallback(
                 chain,
@@ -384,6 +403,7 @@ pub(super) fn resolve_props_chain(
                 html_element: Some(element.to_owned()),
                 total_props: u32::try_from(all_props.len()).unwrap_or(u32::MAX),
                 members: vec![],
+                used: Vec::new(),
             });
         }
         chain.props = all_props;
@@ -413,7 +433,8 @@ pub(super) fn resolve_props_chain(
     ResolvedChain::empty_with_compose(type_name.to_owned())
 }
 
-/// Whether a collapsed source keeps `name` as a notable prop: the element-independent curated attributes.
+/// Whether a collapsed source keeps `name` as a notable prop: the element-independent curated attributes. A member
+/// the component's body reads is kept too (`ResolveState::body_reads`).
 fn is_notable(name: &str) -> bool {
     react_types::notable_html_attrs("").contains(&name)
 }
@@ -456,6 +477,7 @@ fn collapsed_source(
         html_element: None,
         total_props: u32::try_from(members.len()).unwrap_or(u32::MAX),
         members,
+        used: Vec::new(),
     };
     ResolvedChain { inheritance: vec![layer], notable, ..ResolvedChain::empty() }
 }
@@ -496,21 +518,37 @@ fn resolve_interface_chain_uncached(
     state: &mut ResolveState,
     depth: u8,
 ) -> ResolvedChain {
+    // The arguments mean what they meant where they were written (`mark_args`); the members are read under the interface's
+    // own parameters that no argument or default replaces (`interface Foo<TData>`): expected, unexpandable
+    // placeholders wherever the body names them, not unresolvable types, and they shadow the module's names.
+    let marked = super::substitute::mark_args(ctx, state, consuming_file, type_args);
+    let caller = state.enter_scope(TypeScope::default());
+    let caller_site = state.enter_declared_in(&iface.scope);
+    let chain = resolve_interface_members(iface, &marked, consuming_file, mapping, ctx, state, depth);
+    state.leave_declared_in(caller_site);
+    state.leave_scope(caller);
+    chain
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_interface_members(
+    iface: &CollectedInterface,
+    type_args: &[CollectedType],
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
     let mut chain = ResolvedChain::empty();
 
-    // A generic interface's own declared type parameters (`interface Foo<TData>`)
-    // are expected, unexpandable placeholders wherever referenced in its body —
-    // not unresolvable types. Register them so `resolve_named` doesn't warn.
-    let declared_params = ctx.named_types.lookup_interface_type_params_for(iface);
-    if let Some(params) = declared_params {
-        state.add_type_params(params.iter());
-    }
     // Supplied arguments replace the parameters, and an omitted one takes its default; a parameter with neither stays
     // a placeholder.
+    let declared_params = ctx.named_types.lookup_interface_type_params_for(iface);
     let defaults = ctx.named_types.lookup_interface_param_defaults_for(iface);
     let substitution = match declared_params {
         Some(params) if !params.is_empty() && (!type_args.is_empty() || defaults.is_some()) => {
-            Some(super::substitute::bind_args(
+            Some(super::substitute::bind_declared(
                 params,
                 defaults,
                 type_args,
@@ -519,6 +557,7 @@ fn resolve_interface_chain_uncached(
                 &mut state.diagnostics,
             ))
         }
+        Some(params) if !params.is_empty() => Some(super::substitute::unfilled_substitution(params)),
         _ => None,
     };
 
@@ -554,8 +593,10 @@ fn resolve_interface_chain_uncached(
     }
 
     // Its parents are sources of their own, resolved above; only this interface's members collapse.
-    if ctx.collapses(&iface.file_path, iface.props.len(), depth, state) {
-        let notable = iface.props.iter().filter(|prop| is_notable(&prop.name)).map(|prop| {
+    if ctx.collapses(&iface.file_path, &iface.name, iface.props.iter().map(|prop| prop.name.as_str()), depth, state) {
+        let kept: Vec<bool> =
+            iface.props.iter().map(|prop| is_notable(&prop.name) || state.body_reads(mapping, &prop.name)).collect();
+        let notable = iface.props.iter().zip(kept).filter(|(_, kept)| *kept).map(|(prop, _)| {
             let ty = match &substitution {
                 Some(subst) => super::substitute::substitute_type(&prop.collected_type, subst),
                 None => prop.collected_type.clone(),

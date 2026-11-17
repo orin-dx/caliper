@@ -1,12 +1,18 @@
-import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
-import { declaresExport, localNameOf } from './exports.js'
-import { Fill } from './fill.js'
 import { toNapiOptions, type SessionOptions } from './options.js'
-import { buildLookups, diagnosticId, incompleteMessages, type ComponentRef, type Lookups } from './lookups.js'
-import { assertSchemaVersion, expandDiagnostics } from './schema.js'
+import {
+  buildLookups,
+  exportKey,
+  incompleteMessages,
+  only,
+  type ImportName,
+  refOf,
+  type ComponentRef,
+  type Lookups,
+} from './lookups.js'
+import { assertSchemaVersion } from './schema.js'
 
 export type { SessionOptions } from './options.js'
 
@@ -16,50 +22,65 @@ export type SessionBinding = Pick<
   | 'createSession'
   | 'initializeSessionIndex'
   | 'ensureFresh'
-  | 'sessionDocgenInfo'
   | 'sessionComponentAnswers'
-  | 'sessionWarmUp'
+  | 'sessionPrefetch'
+  | 'sessionCancel'
+  | 'sessionCheckerSettled'
   | 'closeSession'
 >
 
-/** How many components the background warm-up resolves, spread over the project. */
-const WARM_UP_COMPONENTS = 8
-const FILL_AFTER = 0
-/** The most components `sessionWarmUp` takes: all of them. */
-const ALL_COMPONENTS = 2 ** 32 - 1
-
-/** What the session says about one component: its documentation and why its props may be incomplete. */
+/**
+ * What the session says about one component, as the binding decided it (`sessionComponentAnswers`): nothing here is
+ * derived from the session index, for a lazy and an eager session alike.
+ */
 export interface Documentation {
   doc: RdtComponentDoc | undefined
-  /** The messages of the warnings and errors that say the props may be incomplete; empty when none does. */
+  /** The messages of the answer's warnings and errors, which say the props may be incomplete; empty when none does. */
   degradedBy: string[]
+  /**
+   * The props are the structural ones because the checker had not answered within `semanticWaitMs`: once
+   * `checkerSettled` says it has, asking again gets the checker's.
+   */
+  awaitsChecker: boolean
+  /** The binding's revision of the files the answer was made at. */
+  revision: number
+}
+
+/** One component's answer as the binding returns it. */
+interface Answer {
+  docgenInfo: RdtComponentDoc
+  diagnostics: Diagnostic[]
+  awaitsChecker: boolean
+  revision: number
 }
 
 /**
  * One watch session over the source directories, created on first use. Storybook gives no file events to a docgen
  * worker, so `fresh()` has the native session compare every source file's mtime and size with the last look and apply
- * the changed ones before a request is answered: an answer never trails a saved edit. The session holds the props;
- * this class holds only where each component lives and, for an eager session, which ones a diagnostic says are
- * incomplete. A lazy session (the default) resolves a component when `documentation` asks, and holds no answers.
+ * the changed ones before a request is answered: an answer never trails a saved edit. The session holds the props and
+ * decides each answer; this class holds only where each component lives. A lazy session (the default) resolves a
+ * component when `documentation` asks, and holds no answers.
  */
 export class DocgenSession {
   private readonly components = new Map<string, ComponentRef>()
-  private readonly diagnostics = new Map<string, Diagnostic>()
-  /** Rebuilt from `components` and `diagnostics` on the first lookup after either changes. */
+  /** Rebuilt from `components` on the first lookup after it changes. */
   private index: Lookups | undefined
   private sessionId: number | undefined
   private ready: Promise<void> | undefined
   private checking: Promise<void> | undefined
   private queued: Promise<void> | undefined
   private latestRevision = 0
-  private readonly fill: Fill
   private readonly options: SessionOptions
   private readonly napi: SessionBinding
 
   constructor(options: SessionOptions, napi: SessionBinding) {
     this.options = options
     this.napi = napi
-    this.fill = new Fill(options.fillAfter ?? FILL_AFTER)
+  }
+
+  /** The revision of the files the session last looked at; it rises with every look that found a change. */
+  get revision(): number {
+    return this.latestRevision
   }
 
   private napiOptions(): Napi.JsExtractOptions {
@@ -73,29 +94,15 @@ export class DocgenSession {
   private async initialize(): Promise<void> {
     this.sessionId = this.napi.createSession(this.napiOptions())
     await this.reindex()
-    // Not awaited: the first story answers as soon as it can, and shares what the warm-up has loaded by then.
-    if (this.lazy && this.options.warmUp === true) void this.warmUp(this.sessionId, WARM_UP_COMPONENTS)
   }
 
-  /** Best effort: a background resolution that fails costs the stories the time it would have saved. */
-  private async warmUp(sessionId: number, count: number): Promise<void> {
-    try {
-      await this.napi.sessionWarmUp(sessionId, count)
-    } catch {
-      // The stories resolve what they need themselves.
-    }
-  }
-
-  /** Reads where every component is declared (and, for an eager session, which diagnostics affect them). */
+  /** Reads where every component is declared. */
   private async reindex(): Promise<void> {
     const json = await this.napi.initializeSessionIndex(this.sessionId!, this.napiOptions())
     const output = assertSchemaVersion(JSON.parse(json) as SessionIndex, 'session index')
     this.components.clear()
     for (const [key, entry] of Object.entries(output.components)) {
-      this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
-    }
-    for (const diagnostic of expandDiagnostics(output.diagnostics, output.nameLists)) {
-      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+      this.components.set(key, refOf(entry))
     }
     this.index = undefined
   }
@@ -107,14 +114,8 @@ export class DocgenSession {
     for (const key of update.removedKeys) this.components.delete(key)
     update.updatedKeys.forEach((key, i) => {
       const entry = update.updatedComponents[i]
-      if (entry) this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
+      if (entry) this.components.set(key, refOf(entry))
     })
-    for (const diagnostic of expandDiagnostics(update.removedDiagnostics, update.nameLists)) {
-      this.diagnostics.delete(diagnosticId(diagnostic))
-    }
-    for (const diagnostic of expandDiagnostics(update.diagnostics, update.nameLists)) {
-      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
-    }
   }
 
   private async check(): Promise<void> {
@@ -139,10 +140,32 @@ export class DocgenSession {
    */
   async fresh(): Promise<void> {
     this.ready ??= this.initialize()
-    await this.ready
+    const attempt = this.ready
+    try {
+      await attempt
+    } catch (error) {
+      // A failed start is not kept: the next request starts again, with nothing left over from this attempt. Of
+      // several callers that shared it, the first to see it fail clears it.
+      if (this.ready === attempt) {
+        this.ready = undefined
+        this.discard()
+      }
+      throw error
+    }
     if (!this.checking) return this.look()
     this.queued ??= this.lookAfter(this.checking)
     return this.queued
+  }
+
+  /** Releases the native session a failed start created, if it got that far. */
+  private discard(): void {
+    if (this.sessionId === undefined) return
+    try {
+      this.napi.closeSession(this.sessionId)
+    } catch {
+      // The attempt already failed; the next one makes its own session.
+    }
+    this.sessionId = undefined
   }
 
   private async lookAfter(earlier: Promise<void>): Promise<void> {
@@ -167,49 +190,46 @@ export class DocgenSession {
   }
 
   private lookups(): Lookups {
-    return (this.index ??= buildLookups(this.components, this.diagnostics.values()))
+    return (this.index ??= buildLookups(this.components))
   }
 
   /**
-   * The key of the component `exportName` names in `path`. A file's only component answers for its default export;
-   * a path with no components (a barrel that re-exports them) falls back to the one component with that name.
+   * The key of the component `path` exports as `exportName` (`default` for the default export), or, with `members`, of
+   * the sub-component reached through them (`Menu.Item` beside `export default Menu` is `default`, `['Item']`).
+   */
+  keyOfExport(path: string, exportName: string, members: readonly string[] = []): string | undefined {
+    const at = exportKey(resolve(path), exportName, members)
+    return only(this.lookups().byExport.get(at))
+  }
+
+  /**
+   * The key of the component `exportName` names in `path`. A path with no components is a barrel that re-exports them,
+   * which `exports` does not record, so it falls back to the one component with that display name.
    */
   keyOf(path: string, exportName: string): string | undefined {
     const { byFile, byName } = this.lookups()
-    const inFile = byFile.get(resolve(path))
-    if (inFile) {
-      const named = inFile.find((key) => this.components.get(key)?.displayName === exportName)
-      if (named) return named
-      return inFile.length === 1 && exportName === 'default' ? inFile[0] : undefined
-    }
-    if (exportName === 'default') return undefined
-    const sameName = byName.get(exportName)
-    return sameName?.length === 1 ? sameName[0] : undefined
+    if (byFile.has(resolve(path))) return this.keyOfExport(path, exportName)
+    return exportName === 'default' ? undefined : only(byName.get(exportName))
   }
 
   /**
-   * `keyOf`, else what the module's source exports under the name (`export default Card`, `export { Inner as Card }`),
-   * else for a default import the component named as the story named it (`importedAs`), else the file's only
-   * component when its source declares that export (the display name may differ).
+   * `keyOf`, else for a default export no component has, the component named as the story named its default import
+   * (`importedAs`).
    */
-  async resolveExport(path: string, exportName: string, importedAs?: string): Promise<string | undefined> {
+  resolveExport(path: string, exportName: string, importedAs?: string): string | undefined {
     const key = this.keyOf(path, exportName)
-    if (key) return key
+    if (key || exportName !== 'default' || importedAs === undefined) return key
     const inFile = this.lookups().byFile.get(resolve(path))
-    if (!inFile) return undefined
-    const named = (name: string | undefined) => inFile.find((each) => this.components.get(each)?.displayName === name)
-    const source = await readFile(resolve(path), 'utf8').catch(() => '')
-    const sole = inFile.length === 1 && declaresExport(source, exportName) ? inFile[0] : undefined
-    return named(localNameOf(source, exportName)) ?? (exportName === 'default' ? named(importedAs) : sole)
+    return only(inFile?.filter((each) => this.components.get(each)?.displayName === importedAs))
   }
 
-  /**
-   * The key of the sub-component `property` of `namespace` (`Select.Option`): the component with that display name,
-   * the one beside `near` if several share it.
-   */
-  keyOfMember(namespaces: string[], property: string, near: string): string | undefined {
+  /** The key of `namespace.property` (`Select.Option`): attached to the export in `near`, else by display name beside it. */
+  keyOfMember(namespace: ImportName, property: string, near: string): string | undefined {
+    const attached = this.keyOfExport(near, namespace.exportName, [property])
+    if (attached) return attached
     const { byName } = this.lookups()
-    const matches = [...new Set(namespaces.flatMap((namespace) => byName.get(`${namespace}.${property}`) ?? []))]
+    const names = [namespace.localName, namespace.exportName]
+    const matches = [...new Set(names.flatMap((name) => byName.get(`${name}.${property}`) ?? []))]
     if (matches.length <= 1) return matches[0]
     const dir = dirname(resolve(near))
     const beside = matches.filter((key) => dirname(this.components.get(key)?.filePath ?? '') === dir)
@@ -222,41 +242,44 @@ export class DocgenSession {
     return keys.flatMap((key) => this.components.get(key)?.displayName ?? [])
   }
 
-  /** Whether a warning or error says `key`'s props may be incomplete. An eager session only: see `documentation`. */
-  degraded(key: string): boolean {
-    return this.degradedBy(key).length > 0
-  }
-
-  /** The messages of the warnings and errors that say `key`'s props may be incomplete. */
-  degradedBy(key: string): string[] {
-    return [...(this.lookups().degradedBy.get(key) ?? [])]
-  }
-
   /**
-   * The documentation of `key` and why its props may be incomplete. A lazy session resolves the component now, or
+   * The documentation of `key`, why its props may be incomplete and whether the checker is still answering, as the
+   * binding decided them: one call for a lazy and an eager session. A lazy session resolves the component now, or
    * answers from what an earlier story resolved; nothing is kept here, so an edit cannot leave a stale answer behind.
    */
   documentation(key: string): Documentation {
-    if (!this.lazy) return { doc: this.docgenInfo(key), degradedBy: this.degradedBy(key) }
-    if (this.sessionId === undefined) return { doc: undefined, degradedBy: [] }
-    const answers = JSON.parse(this.napi.sessionComponentAnswers(this.sessionId, [key])) as Record<
-      string,
-      { docgenInfo: RdtComponentDoc; diagnostics: Diagnostic[] }
-    >
+    const none = { doc: undefined, degradedBy: [], awaitsChecker: false, revision: this.latestRevision }
+    if (this.sessionId === undefined) return none
+    const answers = JSON.parse(this.napi.sessionComponentAnswers(this.sessionId, [key])) as Record<string, Answer>
     const answer = answers[key]
     if (!answer) {
       // The listing includes a re-export of a package component that has nothing to show; it is no component.
       if (this.components.delete(key)) this.index = undefined
-      return { doc: undefined, degradedBy: [] }
+      return none
     }
-    if (this.fill.asked(key)) void this.warmUp(this.sessionId, ALL_COMPONENTS)
-    return { doc: answer.docgenInfo, degradedBy: incompleteMessages(answer.diagnostics) }
+    const { docgenInfo: doc, diagnostics, awaitsChecker, revision } = answer
+    return { doc, degradedBy: incompleteMessages(diagnostics), awaitsChecker, revision }
   }
 
-  docgenInfo(key: string): RdtComponentDoc | undefined {
-    if (this.sessionId === undefined) return undefined
-    const docs = JSON.parse(this.napi.sessionDocgenInfo(this.sessionId, [key])) as Record<string, RdtComponentDoc>
-    return docs[key]
+  /**
+   * Resolves `keys` in the background, in order, the checker's answers included (kept), asked at the neighbour class:
+   * after the component a story shows. Lazy only; waits for nobody.
+   */
+  async prefetch(keys: string[]): Promise<void> {
+    if (!this.lazy || this.sessionId === undefined || keys.length === 0) return
+    await this.napi.sessionPrefetch(this.sessionId, keys)
+  }
+
+  /** Drops the checker's queued requests for `keys` that nobody waits for: the client no longer shows them. */
+  cancel(keys: string[]): void {
+    if (!this.lazy || this.sessionId === undefined || keys.length === 0) return
+    this.napi.sessionCancel(this.sessionId, keys)
+  }
+
+  /** Waits up to `waitMs` until the checker has answered `keys`: true when asking again gets its props (no edit since). */
+  checkerSettled(keys: string[], waitMs: number): Promise<boolean> {
+    if (this.sessionId === undefined) return Promise.resolve(false)
+    return this.napi.sessionCheckerSettled(this.sessionId, keys, waitMs)
   }
 
   close(): void {

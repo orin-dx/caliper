@@ -1,0 +1,280 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
+//! What the conversion memo costs and what it may not change. Fixture projects, each asked of the built-in checker
+//! forward and last to first:
+//!
+//! - `memo`: one big type under many different enclosing types. The number of round trips to the checker is held to a
+//!   bound, so a memo keyed by the whole enclosing context (which converts the type again under each) fails, and a
+//!   type converted again at another depth does not ask for its members or type arguments again;
+//! - `cycles`: a type reached both inside a cycle and outside it, in either order, is a back-reference only where the
+//!   type it points to encloses it, so a memo that reused a conversion across contexts it depends on fails;
+//! - `maps`: condition maps over one constraint, asked for their properties once when none is the project's and each
+//!   for its own when the project declares them or they fit the budget.
+
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+use caliper_docgen_core::types::ExtractionOutput;
+use caliper_docgen_core::types::semantic::SemanticOutcome;
+use caliper_docgen_semantic::{SemanticRequest, resolve, targets_of};
+use camino::Utf8PathBuf;
+use serde_json::{Value, json};
+
+mod support;
+use support::copy_fixture;
+
+struct Project {
+    _dir: tempfile::TempDir,
+    root: Utf8PathBuf,
+}
+
+/// `tests/fixtures/<fixture>` in a scratch directory.
+fn project(fixture: &str) -> Project {
+    let dir = tempfile::Builder::new().prefix("Memo").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    copy_fixture(&Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture), &root);
+    Project { _dir: dir, root }
+}
+
+fn structural(project: &Project) -> ExtractionOutput {
+    extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
+}
+
+/// The outcome of one run, and the calls the backend made to the checker.
+struct Run {
+    outcome: SemanticOutcome,
+    round_trips: usize,
+    /// Each call as `{method, params, result}`, in the order sent.
+    calls: Vec<Value>,
+}
+
+/// Asks the checker about every component of `fixture`, last to first when `reverse`.
+fn run(fixture: &str, reverse: bool) -> Run {
+    let project = project(fixture);
+    let output = structural(&project);
+    let calls = project.root.join("calls.json");
+    let mut request = SemanticRequest::new(project.root.clone(), targets_of(&output));
+    request.request_timeout = Duration::from_secs(60);
+    request.record_to = Some(calls.clone());
+    request.reverse_queries = reverse;
+    let outcome = resolve(request);
+    assert_eq!(outcome.diagnostics, []);
+    assert_eq!(outcome.fallbacks, []);
+    let recorded: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(calls).unwrap()).unwrap();
+    Run { outcome, round_trips: recorded.len(), calls: recorded }
+}
+
+/// Every way to ask: first to last and last to first.
+fn each_way(fixture: &str, check: impl Fn(&Run, &str)) {
+    for reverse in [false, true] {
+        check(&run(fixture, reverse), if reverse { "last to first" } else { "first to last" });
+    }
+}
+
+fn prop_type(outcome: &SemanticOutcome, component: &str, prop: &str) -> Value {
+    let component = outcome
+        .components
+        .iter()
+        .find(|candidate| candidate.key == component)
+        .unwrap_or_else(|| panic!("{component} is in the answer"));
+    let prop = component.props.iter().find(|candidate| candidate.name == prop).unwrap();
+    serde_json::to_value(&prop.prop_type).unwrap()
+}
+
+/// The most round trips the `memo` fixture takes with the memo shared across contexts: it takes 244, where keyed by the
+/// whole enclosing context it took 1,211.
+const ROUND_TRIPS: usize = 300;
+
+/// A type that many different types enclose is converted once, not once under each: sixteen interfaces and twelve
+/// aliases of a union all hold the same big object, and so do `Box<T>` instantiated under one another.
+#[test]
+fn a_type_many_types_enclose_is_converted_once() {
+    each_way("memo", |run, how| {
+        assert!(run.round_trips <= ROUND_TRIPS, "{how}: {} round trips, at most {ROUND_TRIPS}", run.round_trips);
+
+        // What was shared is still what each place holds.
+        let shared = |component: &str, prop: &str, pointer: &str| {
+            let ty = prop_type(&run.outcome, component, prop);
+            ty.pointer(pointer).unwrap_or_else(|| panic!("{pointer} is in {ty}")).clone()
+        };
+        let first = shared("Many", "w1", "/fields/0/propType");
+        assert_eq!(first["kind"], "object", "{how}");
+        for index in 2..=16 {
+            assert_eq!(shared("Many", &format!("w{index}"), "/fields/0/propType"), first, "{how}: w{index}");
+        }
+        // At the same depth, whichever instantiation of `Box` it is in.
+        assert_eq!(shared("Many", "box1", "/fields/1/propType"), first, "{how}");
+        assert_eq!(shared("Many", "box3", "/fields/0/propType/fields/1/propType")["kind"], "object", "{how}");
+        // A union's members all hold it, one level further down.
+        let member = shared("Unions", "wide", "/members/0/fields/1/propType");
+        assert_eq!(member["kind"], "object", "{how}");
+        for index in 1..12 {
+            assert_eq!(shared("Unions", "wide", &format!("/members/{index}/fields/1/propType")), member, "{how}");
+        }
+    });
+}
+
+/// What a type's parts are does not change inside a snapshot, so a type converted again (the memo is keyed by depth too)
+/// does not ask the checker for its members or type arguments a second time. Each repeat is a round trip, and on
+/// Chakra's `Button`, whose style props hold the same unions again one level down, they were one request in eight.
+#[test]
+fn the_parts_of_a_type_are_asked_for_once() {
+    each_way("memo", |run, how| {
+        let mut seen = std::collections::BTreeMap::new();
+        for call in &run.calls {
+            let method = call["method"].as_str().unwrap_or_default();
+            if matches!(method, "getTypesOfType" | "getTypeArguments") {
+                *seen.entry((method.to_string(), call["params"].to_string())).or_insert(0) += 1;
+            }
+        }
+        let repeated: Vec<String> = seen
+            .iter()
+            .filter(|(_, count)| **count > 1)
+            .map(|((method, params), count)| format!("{method} {params} x{count}"))
+            .collect();
+        assert!(!seen.is_empty(), "{how}: no parts were asked for");
+        assert_eq!(repeated, Vec::<String>::new(), "{how}");
+    });
+}
+
+fn field(name: &str, prop_type: Value) -> Value {
+    json!({ "name": name, "propType": prop_type, "required": true, "description": "" })
+}
+
+fn object(fields: Vec<Value>) -> Value {
+    json!({ "kind": "object", "fields": fields })
+}
+
+fn recursive(name: &str) -> Value {
+    json!({ "kind": "recursive", "name": name, "args": [] })
+}
+
+/// `Node1` and `Node2` contain each other. Each is a back-reference only inside the other, and a type that was
+/// converted outside the cycle (`Holder`, whose `Node2` is not inside `Node1`) is not reused inside it, nor the other
+/// way round, whichever of the two the memo saw first.
+#[test]
+fn a_type_inside_and_outside_a_cycle_is_a_back_reference_only_inside() {
+    let number = json!({ "kind": "number" });
+    let string = json!({ "kind": "string" });
+    // `Node1` as a prop: its `Node2` sits inside it, so that one's `back` points back.
+    let node1 = object(vec![
+        field("next", object(vec![field("back", recursive("Node1")), field("tag", string.clone())])),
+        field("id", number.clone()),
+    ]);
+    // `Node2` as a prop: the mirror image.
+    let node2 = object(vec![
+        field("back", object(vec![field("next", recursive("Node2")), field("id", number)])),
+        field("tag", string),
+    ]);
+    // `Holder` encloses neither: its `Node2` is the same as the prop's, expanded all the way to the lap.
+    let expected = [
+        ("holder", object(vec![field("held", node2.clone())])),
+        ("first", node1.clone()),
+        ("second", node2.clone()),
+        ("wrapped", object(vec![field("inner", node1.clone())])),
+        ("both", object(vec![field("a", node1), field("b", node2)])),
+    ];
+    each_way("cycles", |run, how| {
+        for component in ["OutsideFirst", "InsideFirst"] {
+            for (prop, want) in &expected {
+                assert_eq!(&prop_type(&run.outcome, component, prop), want, "{how}: {component}.{prop}");
+            }
+        }
+    });
+}
+
+/// How many times the checker was asked for the property list of a type, by the name of the first property it answered.
+fn property_lists(calls: &[Value]) -> BTreeMap<String, usize> {
+    let mut lists = BTreeMap::new();
+    let mut count = |answer: &Value| {
+        if let Some(first) = answer.get(0).and_then(|property| property["name"].as_str()) {
+            *lists.entry(first.to_string()).or_insert(0) += 1;
+        }
+    };
+    for call in calls {
+        match call["method"].as_str() {
+            Some("getPropertiesOfType") => count(&call["result"]),
+            Some("batchRequests") => {
+                let asked = call["params"]["requests"].as_array().into_iter().flatten();
+                let answered = call["result"]["responses"].as_array().into_iter().flatten();
+                for (request, response) in asked.zip(answered) {
+                    if request["method"] == "getPropertiesOfType" {
+                        count(&response["result"]);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    lists
+}
+
+/// The second member of a prop's union: the condition map written beside the value type.
+fn condition_map(outcome: &SemanticOutcome, component: &str, prop: &str) -> Value {
+    let ty = prop_type(outcome, component, prop);
+    ty.pointer("/members/1").unwrap_or_else(|| panic!("{component}.{prop} has a map: {ty}")).clone()
+}
+
+/// A dependency's condition maps share one constraint (Chakra's `ConditionalValue<V>` is `{ [K in keyof Conditions]?: V
+/// }` for every `V`: 538 of them in `ButtonProps`, 31 MB of property lists). A map the converter cuts as too wide needs
+/// the number of properties and that the project declares none, which the first one's list already said: the others
+/// do not ask for theirs, and each is still cut with its own printed type.
+#[test]
+fn a_second_condition_map_over_the_same_constraint_does_not_ask_for_its_properties() {
+    each_way("maps", |run, how| {
+        let lists = property_lists(&run.calls);
+        assert_eq!(lists.get("c01"), Some(&1), "{how}: three maps over `keyof Conditions`, one list: {lists:?}");
+
+        for (prop, value) in [("a", "string"), ("b", "number"), ("c", "boolean")] {
+            let map = condition_map(&run.outcome, "Shared", prop);
+            assert_eq!(map["kind"], "truncated", "{how}: {prop}");
+            assert_eq!(map["limit"], json!({ "type": "members", "total": 45 }), "{how}: {prop}");
+            let text = map["text"].as_str().unwrap();
+            assert!(
+                text.starts_with(&format!("{{ c01?: {value} | undefined;")),
+                "{how}: {prop} is printed as it is: {text}"
+            );
+        }
+    });
+}
+
+/// What the reuse may not do. A map whose properties the project declares is listed whole whatever another map over
+/// the same keys was; a map within the budget is converted from its own properties, whose types are its own. Neither
+/// shares a list.
+#[test]
+fn the_properties_of_a_map_the_project_declares_or_that_fits_the_budget_are_not_shared() {
+    each_way("maps", |run, how| {
+        let lists = property_lists(&run.calls);
+        assert_eq!(lists.get("m01"), Some(&2), "{how}: the project's own properties, one list each: {lists:?}");
+        assert_eq!(lists.get("l1"), Some(&2), "{how}: three properties fit the budget, one list each: {lists:?}");
+
+        for (prop, value) in [("a", json!({ "kind": "string" })), ("b", json!({ "kind": "number" }))] {
+            let owned = condition_map(&run.outcome, "Owned", prop);
+            let fields = owned["fields"].as_array().unwrap_or_else(|| panic!("{how}: Owned.{prop} is listed: {owned}"));
+            assert_eq!(fields.len(), 45, "{how}: Owned.{prop}");
+            assert!(fields.iter().all(|field| field["propType"] == value), "{how}: Owned.{prop}");
+
+            let small = condition_map(&run.outcome, "Small", prop);
+            let fields = small["fields"].as_array().unwrap_or_else(|| panic!("{how}: Small.{prop} is listed: {small}"));
+            let names: Vec<&str> = fields.iter().filter_map(|field| field["name"].as_str()).collect();
+            assert_eq!(names, ["l1", "l2", "l3"], "{how}: Small.{prop}");
+            assert!(fields.iter().all(|field| field["propType"] == value), "{how}: Small.{prop}");
+        }
+    });
+}
+
+/// What the reuse may not do either: a map's keys and symbol do not say who declares its properties. `Wrapped<T>` maps
+/// over the keys of whatever `T` it is given, so `Wrapped<Theirs>` (a dependency's) and `Wrapped<Ours>` (the project's,
+/// the same 45 keys) are one key. The count of the first stands for neither the second's declarations nor its fields:
+/// what the project declared is never cut.
+#[test]
+fn a_map_over_a_type_parameter_is_listed_when_the_project_may_declare_its_properties() {
+    each_way("maps", |run, how| {
+        let theirs = condition_map(&run.outcome, "Generic", "a");
+        assert_eq!(theirs["kind"], "truncated", "{how}: a dependency's keys are cut: {theirs}");
+
+        let ours = condition_map(&run.outcome, "Generic", "b");
+        let fields = ours["fields"].as_array().unwrap_or_else(|| panic!("{how}: the project's are listed: {ours}"));
+        assert_eq!(fields.len(), 45, "{how}");
+    });
+}

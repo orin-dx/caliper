@@ -10,10 +10,10 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use serde::ser::SerializeStruct;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Serialize, Serializer};
 
-use super::{ComponentEntry, ExtractionOutput, ExtractionStats, InheritedLayer, ParsedProp};
-use crate::types::{Diagnostic, EnumEntry};
+use super::{ComponentEntry, ExtractionOutput, InheritedLayer, ParsedProp};
+use crate::types::Diagnostic;
 
 /// A prop's id in the table: the 64-bit FNV-1a hash of its compact JSON, written as 16 hex digits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -106,7 +106,15 @@ pub(crate) type NameLists<'a> = BTreeMap<ListId, &'a [String]>;
 
 /// Add `names` to `lists` and return its id. Fails if a different list already holds the id.
 fn add_list<'a, E: serde::ser::Error>(lists: &mut NameLists<'a>, names: &'a [String]) -> Result<ListId, E> {
-    let id = PropId::of_list(names);
+    insert_list(lists, PropId::of_list(names), names)
+}
+
+/// Add `names` under `id`, which is `PropId::of_list(names)`. Fails if a different list already holds the id.
+fn insert_list<'a, E: serde::ser::Error>(
+    lists: &mut NameLists<'a>,
+    id: ListId,
+    names: &'a [String],
+) -> Result<ListId, E> {
     match lists.get(&id) {
         Some(existing) if *existing != names => {
             Err(E::custom(format!("two different name lists have the same id {id}: {existing:?} and {names:?}")))
@@ -132,17 +140,18 @@ impl<'a> InternedDiagnostics<'a> {
         lists: &mut NameLists<'a>,
         diagnostics: &'a [Diagnostic],
     ) -> Result<Self, E> {
-        let affects =
-            diagnostics
-                .iter()
-                .map(|diagnostic| {
-                    if diagnostic.affects.is_empty() {
-                        Ok(None)
-                    } else {
-                        add_list(lists, &diagnostic.affects).map(Some)
-                    }
-                })
-                .collect::<Result<_, E>>()?;
+        // Hashing every name of every list is most of the work and is pure, so the ids come from all threads; the
+        // table is filled, and a collision looked for, in diagnostic order as before.
+        let ids: Vec<Option<ListId>> = diagnostics
+            .par_iter()
+            .with_min_len(16)
+            .map(|diagnostic| (!diagnostic.affects.is_empty()).then(|| PropId::of_list(&diagnostic.affects)))
+            .collect();
+        let affects = diagnostics
+            .iter()
+            .zip(ids)
+            .map(|(diagnostic, id)| id.map(|id| insert_list(lists, id, &diagnostic.affects)).transpose())
+            .collect::<Result<_, E>>()?;
         Ok(InternedDiagnostics { diagnostics, affects })
     }
 }
@@ -349,8 +358,10 @@ struct InternedLayer<'a> {
 impl Serialize for InternedLayer<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Destructured so a new field fails to compile here instead of going missing from the JSON.
-        let InheritedLayer { type_name, file_name, omitted: _, html_element, total_props, members: _ } = self.layer;
-        let mut out = serializer.serialize_struct("InheritedLayer", 5 + usize::from(self.members.is_some()))?;
+        let InheritedLayer { type_name, file_name, omitted: _, html_element, total_props, members: _, used } =
+            self.layer;
+        let fields = 5 + usize::from(self.members.is_some()) + usize::from(!used.is_empty());
+        let mut out = serializer.serialize_struct("InheritedLayer", fields)?;
         out.serialize_field("typeName", type_name)?;
         out.serialize_field("fileName", file_name)?;
         out.serialize_field("omitted", &self.omitted)?;
@@ -358,6 +369,10 @@ impl Serialize for InternedLayer<'_> {
         out.serialize_field("totalProps", total_props)?;
         if let Some(members) = &self.members {
             out.serialize_field("members", members)?;
+        }
+        // A component's own few names: written as they are, not interned.
+        if !used.is_empty() {
+            out.serialize_field("used", used)?;
         }
         out.end()
     }
@@ -385,6 +400,7 @@ impl Serialize for InternedComponent<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Destructured so a new field fails to compile here instead of going missing from the JSON.
         let ComponentEntry {
+            relevance: _,
             display_name,
             file_path,
             description,
@@ -397,8 +413,9 @@ impl Serialize for InternedComponent<'_> {
             methods,
             detected_by,
             exported,
+            exports,
         } = self.entry;
-        let mut out = serializer.serialize_struct("ComponentEntry", 12)?;
+        let mut out = serializer.serialize_struct("ComponentEntry", 14)?;
         out.serialize_field("displayName", display_name)?;
         out.serialize_field("filePath", file_path)?;
         out.serialize_field("description", description)?;
@@ -414,6 +431,7 @@ impl Serialize for InternedComponent<'_> {
         out.serialize_field("methods", methods)?;
         out.serialize_field("detectedBy", detected_by)?;
         out.serialize_field("exported", exported)?;
+        out.serialize_field("exports", exports)?;
         out.end()
     }
 }
@@ -447,124 +465,6 @@ impl Serialize for ExtractionOutput {
         out.serialize_field("stats", stats)?;
         out.end()
     }
-}
-
-impl<'de> Deserialize<'de> for ExtractionOutput {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Wire {
-            // Output written before the version existed has the shape of version 1.
-            #[serde(default = "first_version")]
-            schema_version: u32,
-            components: BTreeMap<String, serde_json::Value>,
-            props: BTreeMap<String, serde_json::Value>,
-            prop_sets: BTreeMap<String, BTreeMap<String, String>>,
-            name_lists: BTreeMap<String, Vec<String>>,
-            enums: BTreeMap<String, Vec<EnumEntry>>,
-            diagnostics: Vec<serde_json::Value>,
-            stats: ExtractionStats,
-        }
-        fn first_version() -> u32 {
-            1
-        }
-        let Wire { schema_version, components, props, prop_sets, name_lists, enums, diagnostics, stats } =
-            Wire::deserialize(deserializer)?;
-        let tables = ReadTables { props: &props, prop_sets: &prop_sets, name_lists: &name_lists };
-        if schema_version != super::SCHEMA_VERSION {
-            return Err(D::Error::custom(format!(
-                "output schema version {schema_version} is not the version {} this build reads",
-                super::SCHEMA_VERSION
-            )));
-        }
-        let diagnostics = diagnostics
-            .into_iter()
-            .map(|diagnostic| expand_diagnostic(diagnostic, &name_lists).map_err(D::Error::custom))
-            .collect::<Result<_, D::Error>>()?;
-        let components = components
-            .into_iter()
-            .map(|(key, component)| Ok((key, expand(component, &tables).map_err(D::Error::custom)?)))
-            .collect::<Result<_, D::Error>>()?;
-        Ok(ExtractionOutput { components, enums, diagnostics, stats })
-    }
-}
-
-/// Replace a diagnostic's `affects` list id with the names it stands for.
-pub(crate) fn expand_diagnostic(
-    mut diagnostic: serde_json::Value,
-    name_lists: &BTreeMap<String, Vec<String>>,
-) -> Result<Diagnostic, String> {
-    if let Some(affects) = diagnostic.get_mut("affects") {
-        let id = affects.as_str().ok_or_else(|| format!("`affects` holds {affects} where a name list id belongs"))?;
-        let names = name_lists.get(id).ok_or_else(|| format!("name list id {id} is not in the `nameLists` table"))?;
-        *affects = serde_json::json!(names);
-    }
-    serde_json::from_value(diagnostic).map_err(|e| e.to_string())
-}
-
-/// The tables a component's ids point into, as read.
-struct ReadTables<'a> {
-    props: &'a BTreeMap<String, serde_json::Value>,
-    prop_sets: &'a BTreeMap<String, BTreeMap<String, String>>,
-    name_lists: &'a BTreeMap<String, Vec<String>>,
-}
-
-/// Replace a component's prop set ids and omitted-list ids with the props and names they stand for.
-fn expand(mut component: serde_json::Value, tables: &ReadTables<'_>) -> Result<ComponentEntry, String> {
-    let prop =
-        |id: &str| tables.props.get(id).cloned().ok_or_else(|| format!("prop id {id} is not in the `props` table"));
-
-    let Some(serde_json::Value::Array(set_ids)) = component.get("props") else {
-        return Err("`props` holds something other than a list of prop set ids".to_owned());
-    };
-    let mut props = serde_json::Map::new();
-    for set_id in set_ids {
-        let set_id = set_id.as_str().ok_or_else(|| format!("`props` holds {set_id} where a prop set id belongs"))?;
-        let set = tables
-            .prop_sets
-            .get(set_id)
-            .ok_or_else(|| format!("prop set id {set_id} is not in the `propSets` table"))?;
-        for (name, id) in set {
-            if props.insert(name.clone(), prop(id)?).is_some() {
-                return Err(format!("prop `{name}` is in two of the component's prop sets"));
-            }
-        }
-    }
-    component["props"] = serde_json::Value::Object(props);
-
-    if let Some(serde_json::Value::Object(notable)) = component.get_mut("notableInherited") {
-        for value in notable.values_mut() {
-            let id =
-                value.as_str().ok_or_else(|| format!("`notableInherited` holds {value} where a prop id belongs"))?;
-            *value = prop(id)?;
-        }
-    }
-
-    if let Some(serde_json::Value::Array(layers)) = component.get_mut("inheritance") {
-        for layer in layers {
-            let Some(omitted) = layer.get_mut("omitted") else { continue };
-            let id =
-                omitted.as_str().ok_or_else(|| format!("`omitted` holds {omitted} where a name list id belongs"))?;
-            let names = tables
-                .name_lists
-                .get(id)
-                .ok_or_else(|| format!("name list id {id} is not in the `nameLists` table"))?;
-            *omitted = serde_json::json!(names);
-            if let Some(members) = layer.get_mut("members") {
-                let id = members
-                    .as_str()
-                    .ok_or_else(|| format!("`members` holds {members} where a name list id belongs"))?;
-                let names = tables
-                    .name_lists
-                    .get(id)
-                    .ok_or_else(|| format!("name list id {id} is not in the `nameLists` table"))?;
-                *members = serde_json::json!(names);
-            }
-        }
-    }
-    serde_json::from_value(component).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

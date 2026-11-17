@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url'
 import type { DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { logger } from 'storybook/internal/node-logger'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { CaliperStorybookOptions } from '../../src/index.js'
+import { initialState, step } from '../../src/lifecycle.js'
+import type { Link, ToDevServer, ToProvider } from '../../src/live.js'
 import { createDocgenProvider } from '../../src/provider.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
@@ -79,6 +82,27 @@ describe('createDocgenProvider', () => {
     })
   })
 
+  it('gives a prop inside a collapsed inheritance layer no Controls row (by design until relevance from stories)', async () => {
+    // By default a large inherited source is one layer of names: its props are not in the docgen props, so Controls
+    // has no row for them and a story's `args` naming one shows it as undocumented. A later slice adds the props
+    // stories and call sites use; `collapseInheritedProps: 'none'` lists every one today.
+    const layer = {
+      typeName: 'GlobalDOMEvents',
+      fileName: '/p/node_modules/@react-types/shared/src/dom.d.ts',
+      omitted: [],
+      htmlElement: null,
+      totalProps: 60,
+      members: ['onPointerMove'],
+    }
+    const fake = new FakeBinding({
+      components: { Button: { ...entry('Button', join(components, 'Button.tsx')), inheritance: [layer] } },
+    })
+    fake.docs = { Button: rdtDoc('Button', ['label']) }
+    const { payload } = await request(fake, story('Button'))
+    expect(payload).toMatchObject({ argTypes: { label: labelArgType } })
+    expect(Object.keys((payload as { argTypes: object }).argTypes)).toEqual(['label'])
+  })
+
   it("documents a default import as its file's component", async () => {
     const { payload } = await request(binding(), story('Card'))
     expect(payload?.name).toBe('Card')
@@ -118,6 +142,32 @@ describe('createDocgenProvider', () => {
     expect(Object.keys(payload?.argTypes ?? {})).toEqual(['value'])
   })
 
+  it('documents a subcomponent that is a member of a named import', async () => {
+    const fake = binding()
+    fake.output.components!.Select = entry('Select', join(components, 'Select.tsx'))
+    fake.docs.Select = rdtDoc('Select', ['children'])
+    fake.output.components!['Select.Option'] = entry('Select.Option', join(components, 'Select.tsx'))
+    fake.docs['Select.Option'] = rdtDoc('Select.Option', ['value'])
+    const { payload, nextCalls } = await request(fake, story('Picker'))
+    expect(nextCalls).toBe(0)
+    expect(Object.keys(payload?.subcomponents?.Option?.argTypes ?? {})).toEqual(['value'])
+    expect(payload?.subcomponents?.Option?.error).toBeUndefined()
+  })
+
+  it('documents a subcomponent read through a local binding of the story file', async () => {
+    const { payload, nextCalls } = await request(binding(), story('Parts'))
+    expect(nextCalls).toBe(0)
+    expect(payload?.subcomponents?.ListItem?.error).toBeUndefined()
+    expect(Object.keys(payload?.subcomponents?.ListItem?.argTypes ?? {})).toEqual(['bullet'])
+  })
+
+  it.each(['Exported', 'Factory'])('documents the subcomponents of a %s story meta', async (title) => {
+    const { payload, nextCalls } = await request(binding(), story(title))
+    expect(nextCalls).toBe(0)
+    expect(payload?.subcomponents?.ListItem?.error).toBeUndefined()
+    expect(Object.keys(payload?.subcomponents?.ListItem?.argTypes ?? {})).toEqual(['bullet'])
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card
@@ -147,6 +197,28 @@ describe('createDocgenProvider', () => {
     expect(payload?.argTypes).toEqual({ label: labelArgType })
   })
 
+  it("answers for a component the checker resolved, and hands one on when the checker's own warning stays", async () => {
+    const checker = (message: string, severity: 'info' | 'warning') => ({
+      ...warning(['Button'], severity),
+      code: 'SEMANTIC_BACKEND',
+      message,
+    })
+    const answered = binding()
+    answered.output.diagnostics = [
+      checker('1 component(s) resolved by the TypeScript checker', 'info'),
+      checker('1 prop(s) of 1 component(s) keep their structural type', 'info'),
+    ]
+    const { payload, nextCalls } = await request(answered, story('Button'))
+    expect(nextCalls).toBe(0)
+    expect(payload?.argTypes).toEqual({ label: labelArgType })
+
+    const stopped = binding()
+    stopped.output.diagnostics = [
+      checker('the TypeScript checker stopped without answering; the structural props are used', 'warning'),
+    ]
+    expect(await request(stopped, story('Button'))).toEqual({ payload: NEXT, nextCalls: 1 })
+  })
+
   it('warns once per component handed on, with the reason', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     const fake = binding()
@@ -161,7 +233,7 @@ describe('createDocgenProvider', () => {
     warn.mockRestore()
   })
 
-  it('reads dependencies and lists inherited props unless told not to, and passes the HTML attribute choice on', async () => {
+  it('reads dependencies and collapses large inherited sources unless told not to, and passes the HTML attribute choice on', async () => {
     const seen: unknown[] = []
     const spy = (fake: FakeBinding) => {
       const init = fake.initializeSessionIndex
@@ -172,13 +244,74 @@ describe('createDocgenProvider', () => {
       return fake
     }
     await request(spy(binding()), story('Button'))
-    expect(seen[0]).toMatchObject({ loadDependencies: true, collapseInheritedProps: 'none', htmlAttributes: undefined })
+    expect(seen[0]).toMatchObject({
+      loadDependencies: true,
+      collapseInheritedProps: 'dependencies',
+      htmlAttributes: undefined,
+    })
     await request(spy(binding()), story('Button'), {
       loadDependencies: false,
       htmlAttributes: 'full',
-      collapseInheritedProps: 'all',
+      collapseInheritedProps: 'none',
     })
-    expect(seen[1]).toMatchObject({ loadDependencies: false, collapseInheritedProps: 'all', htmlAttributes: 'full' })
+    expect(seen[1]).toMatchObject({ loadDependencies: false, collapseInheritedProps: 'none', htmlAttributes: 'full' })
+  })
+
+  it('warns once, at a level Storybook shows, when the session cannot start, and starts again on the next request', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const fake = binding()
+    const create = fake.createSession
+    fake.createSession = () => {
+      throw new Error('no binding for this platform')
+    }
+    const provider = createDocgenProvider({}, fake)(async () => NEXT)
+
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(warn.mock.calls).toEqual([
+      ["[caliper-docgen] could not start: no binding for this platform; Storybook's own docgen answers instead"],
+    ])
+
+    fake.createSession = create
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+    warn.mockRestore()
+  })
+
+  it('words a refresh failure of a running session as one, and reports it again after a refresh succeeds', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const fake = binding()
+    const ensureFresh = fake.ensureFresh
+    const provider = createDocgenProvider({}, fake)(async () => NEXT)
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+
+    fake.ensureFresh = async () => {
+      throw new Error('disk gone')
+    }
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    fake.ensureFresh = ensureFresh
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+    fake.ensureFresh = async () => {
+      throw new Error('disk gone again')
+    }
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(warn.mock.calls).toEqual([
+      ["[caliper-docgen] could not refresh: disk gone; Storybook's own docgen answers instead"],
+      ["[caliper-docgen] could not refresh: disk gone again; Storybook's own docgen answers instead"],
+    ])
+    warn.mockRestore()
+  })
+
+  it('fails at startup for a fallback or checker that is not a choice, and for the old semanticTypes', () => {
+    expect(() => createDocgenProvider({ fallback: 'Degraded' as never }, binding())).toThrow(
+      "[caliper-docgen] fallback is 'Degraded', expected 'degraded' or 'never'",
+    )
+    expect(() => createDocgenProvider({ checker: 'on-demand' as never }, binding())).toThrow(
+      "[caliper-docgen] checker is 'on-demand', expected true or false",
+    )
+    expect(() => createDocgenProvider({ semanticTypes: 'off' } as never, binding())).toThrow(
+      "[caliper-docgen] semanticTypes was replaced by checker: the checker is on by default, and 'checker: false' turns it off",
+    )
   })
 
   it('passes a docs-only entry straight on without starting a session', async () => {
@@ -186,5 +319,190 @@ describe('createDocgenProvider', () => {
     const docs = { ...story('Intro', './src/Intro.mdx'), type: 'docs', storiesImports: [] } as unknown as IndexEntry
     expect(await request(fake, docs)).toEqual({ payload: NEXT, nextCalls: 1 })
     expect(fake.initializations).toBe(0)
+  })
+})
+
+// The lifecycle itself is tested in lifecycle.test.ts; these test the provider's reports and how it carries out what
+// the dev server asks of it.
+describe('the provider as an adapter of the answer lifecycle', () => {
+  function linked(fake: FakeBinding, options: CaliperStorybookOptions = {}) {
+    const posted: ToDevServer[] = []
+    let receive: (message: ToProvider) => void = () => {}
+    const link: Link<ToDevServer, ToProvider> = {
+      post: (message) => posted.push(message),
+      listen: (listener) => {
+        receive = listener
+      },
+    }
+    const provider = createDocgenProvider(options, fake, link)(async () => NEXT)
+    return { provider, posted, say: (message: ToProvider) => receive(message) }
+  }
+
+  it("reports every answer with the binding's pending keys, the subcomponents asked before a parent handed on", async () => {
+    for (const lazy of [true, false]) {
+      const fake = binding()
+      // The parent is degraded (handed on) and pending; its subcomponent is pending too.
+      fake.output.diagnostics = [warning(['List'])]
+      fake.pending.add('List').add('ListItem')
+      const { provider, posted } = linked(fake, { lazy })
+      expect(await provider({ entry: story('List') })).toEqual(NEXT)
+      expect(posted).toEqual([
+        {
+          type: 'answer',
+          provider: expect.any(String),
+          component: 'list',
+          revision: 1,
+          pending: ['ListItem', 'List'],
+          revisionNow: 1,
+        },
+      ])
+    }
+  })
+
+  it('keeps the newest completion when an older async fallback finishes after a newer request', async () => {
+    const fake = binding()
+    fake.output.diagnostics = [warning(['Card'])]
+    fake.pending.add('Card')
+    const posted: ToDevServer[] = []
+    const link: Link<ToDevServer, ToProvider> = { post: (message) => posted.push(message), listen: () => {} }
+    let finishFallback: (payload: DocgenPayload) => void = () => {}
+    const fallback = new Promise<DocgenPayload>((done) => {
+      finishFallback = done
+    })
+    const provider = createDocgenProvider({}, fake, link)(() => fallback)
+    // The first request is handed on to a slow provider; the checker answers before it returns.
+    const older = provider({ entry: story('Card') })
+    await vi.waitFor(() => expect(fake.resolved).toContain('Card'))
+    fake.output.diagnostics = []
+    fake.pending.clear()
+    const newer = await provider({ entry: story('Card') })
+    expect(Object.keys(newer!.argTypes!)).toEqual(['title'])
+    finishFallback(NEXT)
+    // What the service stores from the older request is the newer payload; only the newer one is announced.
+    expect(await older).toEqual(newer)
+    expect(posted).toEqual([
+      { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [], revisionNow: 1 },
+    ])
+  })
+
+  it('reports an answer with nothing pending, so the lifecycle knows the structural answer was replaced', async () => {
+    const { provider, posted } = linked(binding())
+    await provider({ entry: story('Card') })
+    expect(posted).toEqual([
+      { type: 'answer', provider: expect.any(String), component: 'card', revision: 1, pending: [], revisionNow: 1 },
+    ])
+  })
+
+  it('stamps an answer the next provider gave with the revision the request saw, so it is not asked for again until an edit', async () => {
+    // Each way a request ends without a component of the session: the answer is Storybook's, but the lifecycle still
+    // compares its revision with the files'. A stamp below the session's would refresh it again, with the same result,
+    // for as long as a client shows the story.
+    const outcomes: Record<string, { lacksCard?: true; looksFail?: true; entry: IndexEntry }> = {
+      'the session lacks the story component': { lacksCard: true, entry: story('Card') },
+      'the story file is not there': { entry: story('Gone') },
+      'the files cannot be looked at': { looksFail: true, entry: story('Card') },
+    }
+    vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const seen: Record<
+      string,
+      { payload: DocgenPayload | undefined; revision: number; now: number; effects: unknown[] }
+    > = {}
+    for (const [outcome, { lacksCard, looksFail, entry: handedOn }] of Object.entries(outcomes)) {
+      const fake = binding()
+      if (lacksCard) delete fake.output.components!.Card
+      fake.updates.push({})
+      const { provider, posted } = linked(fake)
+      // A request that looked at the files, after an edit: the session is at revision 2.
+      await provider({ entry: story('Button') })
+      if (looksFail) {
+        fake.ensureFresh = async () => {
+          throw new Error('disk gone')
+        }
+      }
+      const payload = await provider({ entry: handedOn })
+      const answer = posted.at(-1) as Extract<ToDevServer, { type: 'answer' }>
+      // What the dev server does with it: a client shows the story and nothing is left to ask for.
+      const state = initialState()
+      step(state, { type: 'selected', client: 'a', component: answer.component })
+      const { type: _type, ...event } = answer
+      const effects = step(state, { type: 'answer', ...event })
+      seen[outcome] = { payload, revision: answer.revision, now: answer.revisionNow, effects }
+    }
+    vi.restoreAllMocks()
+    const handedOn = { payload: NEXT, revision: 2, now: 2, effects: [] }
+    expect(seen).toEqual({
+      'the session lacks the story component': handedOn,
+      'the story file is not there': handedOn,
+      'the files cannot be looked at': handedOn,
+    })
+  })
+
+  it('carries out a watch addressed to it, and reports the revision the files are at; not one for another', async () => {
+    const fake = binding()
+    fake.pending.add('Card')
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'watch', provider: 'someone-else', component: 'card', revision: 1, keys: ['Card'] })
+    fake.settled = Promise.resolve(false)
+    say({ type: 'watch', provider: id, component: 'card', revision: 1, keys: ['Card'] })
+    await vi.waitFor(() =>
+      expect(posted.slice(1)).toEqual([
+        { type: 'settled', component: 'card', revision: 1, keys: ['Card'], ok: false, revisionNow: 1 },
+      ]),
+    )
+    expect(fake.settles).toEqual([['Card']])
+  })
+
+  it("resolves the named stories' components in the background, in order, the newest list replacing the queue", async () => {
+    const fake = binding()
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'prefetch', provider: 'someone-else', entries: [story('Card')] })
+    say({ type: 'prefetch', provider: id, entries: [story('List'), story('Card')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card']]))
+    say({ type: 'prefetch', provider: undefined, entries: [story('Button')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card'], ['Button']]))
+  })
+
+  it('a replaced prefetch cancels the queued requests', async () => {
+    const fake = binding()
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'prefetch', provider: id, entries: [story('List'), story('Card')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem'], ['Card']]))
+    expect(fake.cancelled).toEqual([])
+    // The client navigated away: what the old list asked for is dropped, and the new list is asked for.
+    say({ type: 'prefetch', provider: id, entries: [story('Button')] })
+    await vi.waitFor(() => expect(fake.prefetched.at(-1)).toEqual(['Button']))
+    expect(fake.cancelled).toEqual([['List', 'ListItem', 'Card']])
+    // An empty list, as for a client that shows the last story, cancels too.
+    say({ type: 'prefetch', provider: id, entries: [] })
+    await vi.waitFor(() => expect(fake.cancelled).toEqual([['List', 'ListItem', 'Card'], ['Button']]))
+  })
+
+  it('asks again for the prefetched components after an edit dropped them', async () => {
+    const fake = binding()
+    const { provider, posted, say } = linked(fake)
+    await provider({ entry: story('Card') })
+    const id = (posted[0] as { provider: string }).provider
+    say({ type: 'prefetch', provider: id, entries: [story('List')] })
+    await vi.waitFor(() => expect(fake.prefetched).toEqual([['List', 'ListItem']]))
+    // An edit: the next request sees revision 2, and the binding dropped the queued neighbour requests.
+    fake.updates.push({})
+    await provider({ entry: story('Card') })
+    await vi.waitFor(() =>
+      expect(fake.prefetched).toEqual([
+        ['List', 'ListItem'],
+        ['List', 'ListItem'],
+      ]),
+    )
+    // No edit since: asked once more only.
+    await provider({ entry: story('Card') })
+    await new Promise((settled) => setTimeout(settled, 10))
+    expect(fake.prefetched).toHaveLength(2)
+    expect(fake.cancelled).toEqual([])
   })
 })

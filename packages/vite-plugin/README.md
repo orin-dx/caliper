@@ -1,6 +1,6 @@
 # caliper-docgen-vite-plugin
 
-A Vite plugin that exposes your React components' props on a virtual module and updates it through HMR as you edit.
+A Vite plugin that exposes your React components' props on a virtual module and updates it through HMR as you edit. Its props come from caliper-docgen's structural resolver: unlike the CLI and the Storybook addon, it does not ask the TypeScript checker, since it serves every component at once.
 
 ```bash
 npm install --save-dev caliper-docgen-vite-plugin
@@ -20,8 +20,10 @@ export default defineConfig({
 ```ts
 import docgen from 'virtual:caliper-docgen'
 
-// A component maps each prop name to an id; each distinct prop is written once, in `docgen.props`.
-const label = docgen.props[docgen.components['Button'].props.label]
+// A component lists the ids of its prop sets; a prop set maps each prop name to a prop id, and each distinct prop is
+// written once, in `docgen.props`.
+const [firstSetId] = docgen.components['Button'].props
+const label = docgen.props[docgen.propSets[firstSetId].label]
 ```
 
 On every change the virtual module reloads with the same output a fresh extraction would give, including removed components, enums and diagnostics. To apply changes yourself, listen for the update event:
@@ -31,7 +33,7 @@ import.meta.hot?.on(
   'caliper-docgen:update',
   ({ updatedKeys, updatedComponents, props, removedKeys, diagnostics, removedDiagnostics }) => {
     // Events arrive in revision order, each a delta from the one before: delete removedKeys, set updatedKeys[i] to
-    // updatedComponents[i], merge props into docgen.props, drop removedDiagnostics and add diagnostics. Props no
+    // updatedComponents[i], merge props, propSets and nameLists into the tables of the same names, drop removedDiagnostics and add diagnostics. Props no
     // component refers to any more can be dropped.
   },
 )

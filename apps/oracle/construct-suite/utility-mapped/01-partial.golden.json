@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a",
+          "b"
+        ],
+        "index": false,
+        "alias": "Partial"
+      }
+    ],
+    "alias": "Partial"
+  },
+  "text": "Partial<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/01-partial.tsx"
+    },
+    "order": null
+  }
+}

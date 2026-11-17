@@ -28,7 +28,7 @@ The watch path reuses analysis across file changes. A single-file update calls `
 
 `WatchSession` publishes one immutable `Revision` at a time: global source data, the named-type index, resolved components with their recorded dependencies, diagnostics and the assembled output. An update builds the next revision off to the side and publishes it with one atomic store, so a reader sees one complete revision. Cold extraction and watch revisions share `Revision::assemble()`, and a watch snapshot equals a cold extract of the same files (see `docs/architecture/pipeline-orchestration.md`).
 
-Between parse and resolve, the declarations of installed packages that project types name are loaded by name into a shared `DependencyLayer` (`dependency_types.rs`, on by default; ADR 0010). A lazy session (`WatchSession::lazy`, ADR 0016) parses and indexes every file but resolves a component only when a request names it, which is how the Storybook addon runs; every answer equals the batch extraction's for the same key. A session can also ask a warm TypeScript 7.1 checker for the requested component (`semanticTypes: 'on-demand'`, ADR 0022), experimental and off by default.
+Between parse and resolve, the declarations of installed packages that project types name are loaded by name into a shared `DependencyLayer` (`dependency_types.rs`, on by default; ADR 0010). A lazy session (`WatchSession::lazy`, ADR 0016) parses and indexes every file but resolves a component only when a request names it, which is how the Storybook addon runs; every answer equals the batch extraction's for the same key. A session asks a warm TypeScript checker (the built-in `tsrs`) for the requested component (ADR 0022) unless `checker: false`, and the CLI's `extract`, `check` and `inspect` merge the checker's whole-project answer over the structural one unless `--no-checker` (ADR 0026); `watch` and the Vite plugin stay structural.
 
 ## Crate and package graph
 
@@ -37,8 +37,7 @@ graph TD
     core["crates/core\ncaliper-docgen-core\nExtraction and resolution — file I/O, no async"]
     binding["crates/binding\ncaliper-docgen-napi\nNAPI + tokio runtime"]
     cli["crates/cli\ncaliper-docgen\nCLI binary"]
-    semantic["crates/semantic\ncaliper-docgen-semantic\nExperimental TS 7.1 backend"]
-    tsc["crates/tsc-client\ncaliper-docgen-tsc-client\ntsc --api transport"]
+    semantic["crates/semantic\ncaliper-docgen-semantic\nTS 7.1 checker backend (default)"]
     napi["packages/napi\ncaliper-docgen-napi\nTS types + dev binary loader"]
     vite["packages/vite-plugin\ncaliper-docgen-vite-plugin\nVite HMR plugin"]
     storybook["packages/storybook\ncaliper-docgen-storybook\nStorybook 11 docgen provider"]
@@ -47,7 +46,6 @@ graph TD
     core --> binding
     core --> cli
     core --> semantic
-    tsc --> semantic
     semantic --> cli
     semantic --> binding
     binding --> napi
@@ -57,7 +55,7 @@ graph TD
     napi -.->|"runtime dep"| oracle
 ```
 
-`crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host. It does read and write files itself: source discovery, module resolution, the parse and dependency caches (`cache.rs`, `dependency_types.rs`) and tsconfig lookups. It never spawns a process; the checker backend that does lives in `crates/semantic`. `crates/semantic` and `crates/tsc-client` are published crates, always compiled into the CLI and the binding and enabled at run time (ADR 0007); Callisto publishes them before the CLI.
+`crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host. It does read and write files itself: source discovery, module resolution, the parse and dependency caches (`cache.rs`, `dependency_types.rs`) and tsconfig lookups. It never runs the TypeScript checker; `crates/semantic`, which links it (the `tsrs` crates), does. `crates/semantic` is a published crate, always compiled into the CLI and the binding and enabled at run time (ADR 0007); Callisto publishes it before the CLI.
 
 ## Module layout
 
@@ -121,7 +119,6 @@ known.rs          — library shortcuts: VariantProps, sx, css, cva, tv, defineR
 react_types.rs    — React builtin recognition + notable HTML attribute table
 import_map.rs     — import binding resolution
 cache.rs          — DTS parse cache (content-hash keys, msgpack, atomic write, discarded when the build changes)
-plugin.rs         — DocgenPlugin and PluginRegistry hooks
 toon.rs           — TOON token-optimized output
 panic_guard.rs    — contain_panic, the one panic-containment boundary (ADR 0005)
 ```
@@ -141,9 +138,9 @@ commands/
   completions.rs  — shell completion generation
 ```
 
-### `crates/semantic/src/` and `crates/tsc-client/src/`
+### `crates/semantic/src/`
 
-`semantic` is the experimental TypeScript 7.1 backend: `lib.rs` (the whole-project run), `on_demand.rs` (a warm checker that answers one component at a time), `component.rs`, `convert.rs`, `locate.rs` (finds the project's `tsc`) and `rpc.rs` (typed calls over one `tsc --api` session). `tsc-client` is the process supervisor and JSON-RPC transport under it.
+`semantic` is the TypeScript 7.1 checker backend, on by default: `lib.rs` (the whole-project run), `on_demand.rs` (a warm checker that answers one component at a time), `checker.rs` (the built-in `tsrs` checker, on threads of its own), `component.rs`, `convert.rs` and `rpc.rs` (typed calls over one checker session).
 
 ## Key types
 
@@ -187,7 +184,7 @@ The merged view across all parsed files: component declarations, type aliases, i
 
 ### OXC instead of the TypeScript compiler
 
-`react-docgen-typescript` creates a TypeScript `Program` — this loads all imported types transitively, runs type inference, and is single-threaded. `caliper-docgen` parses each file independently in parallel with no type-checking pass. The trade-off: TypeScript-only semantics (conditional types, `infer`, deep utility type evaluation) fall through to `{ kind: "opaque" }`. Everything structurally expressible — interfaces, intersections, unions, `Omit`, `Pick`, `VariantProps` — resolves correctly.
+`react-docgen-typescript` creates a TypeScript `Program` — this loads all imported types transitively, runs type inference, and is single-threaded. `caliper-docgen` parses each file independently in parallel, and its structural resolver reads types from the syntax with no type-checking pass. Since ADR 0026 the checker decides types by default and the structural resolver is the fallback and `--no-checker`'s answer. Its trade-off: TypeScript-only semantics (conditional types, `infer`, deep utility type evaluation) fall through to `{ kind: "opaque" }`. Everything structurally expressible — interfaces, intersections, unions, `Omit`, `Pick`, `VariantProps` — resolves correctly.
 
 ### `FxHashMap` over `HashMap`
 

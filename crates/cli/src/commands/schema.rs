@@ -27,6 +27,23 @@ fn schema_value() -> serde_json::Value {
                 "type": "string",
                 "pattern": "^[0-9a-f]{16}$"
             },
+            "componentExport": {
+                "description": "One way a module exports a component: `Card` for `export function Card` and for `export { _Card as Card }`, `default` for `export default Menu`, and for a sub-component attached to an exported component the export it hangs from with the properties that reach it, so `Menu.Item = Item` beside `export default Menu` is `default` with members `[\"Item\"]`",
+                "type": "object",
+                "required": ["name", "members"],
+                "properties": {
+                    "name": { "type": "string" },
+                    "members": { "type": "array", "items": { "type": "string" } }
+                }
+            },
+            "opaqueReason": {
+                "description": "Why a prop type is `opaque`: `type` of the `reason` in an `{ kind: \"opaque\" }` type, with the named fields of its variant",
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                    "type": { "type": "string", "enum": caliper_docgen_core::types::OpaqueReason::KINDS }
+                }
+            },
             "prop": {
                 "type": "object",
                 "required": ["name", "required", "type"],
@@ -72,7 +89,12 @@ fn schema_value() -> serde_json::Value {
                                     "omitted": { "$ref": "#/definitions/nameListId" },
                                     "htmlElement": { "type": ["string", "null"] },
                                     "totalProps": { "type": "integer" },
-                                    "members": { "$ref": "#/definitions/nameListId" }
+                                    "members": { "$ref": "#/definitions/nameListId" },
+                                    "used": {
+                                        "description": "The members of this collapsed layer relevance evidence puts forward (ADR 0028): ambient members consumers pass at the call-site floor or the body reads, in the order of `members`. Absent when none is",
+                                        "type": "array",
+                                        "items": { "type": "string" }
+                                    }
                                 }
                             }
                         },
@@ -90,15 +112,16 @@ fn schema_value() -> serde_json::Value {
                         "methods": { "type": "array" },
                         "detectedBy": {
                             "type": "string",
-                            "enum": [
-                                "fcAnnotation", "forwardRef", "forwardRefExoticDecl", "hocWrapper", "classComponent",
-                                "functionDeclaration", "anonymousDefaultExport", "attachedSubComponent",
-                                "typedFunctionExpression", "wrapperTypeArgument"
-                            ]
+                            "enum": caliper_docgen_core::types::DetectionRule::ALL.map(|rule| rule.name())
                         },
                         "exported": {
                             "description": "Whether its module exports it, directly or as a sub-component attached to an exported component",
                             "type": "boolean"
+                        },
+                        "exports": {
+                            "description": "How its module exports it, in source order (ADR 0027). `exported` is whether there are any",
+                            "type": "array",
+                            "items": { "$ref": "#/definitions/componentExport" }
                         }
                     }
                 }
@@ -171,6 +194,101 @@ pub fn cmd_schema() -> Result<()> {
 mod tests {
     use super::*;
 
+    fn read_repo_file(relative: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(relative);
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    }
+
+    #[test]
+    fn detected_by_enum_lists_every_rust_variant_in_order() {
+        let schema = schema_value();
+        let listed: Vec<&str> = schema["properties"]["components"]["additionalProperties"]["properties"]["detectedBy"]
+            ["enum"]
+            .as_array()
+            .expect("detectedBy enum is an array")
+            .iter()
+            .map(|value| value.as_str().expect("variant names are strings"))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                "fcAnnotation",
+                "forwardRef",
+                "forwardRefExoticDecl",
+                "hocWrapper",
+                "classComponent",
+                "functionDeclaration",
+                "anonymousDefaultExport",
+                "attachedSubComponent",
+                "typedFunctionExpression",
+                "wrapperTypeArgument",
+                "importedMemberAlias",
+                "memoExoticDecl",
+                "taggedFactory",
+                "factoryResult",
+            ]
+        );
+    }
+
+    #[test]
+    fn typescript_detection_rule_union_matches_the_rust_enum() {
+        let declarations = read_repo_file("packages/napi/index.d.ts");
+        let union = declarations
+            .split("export type DetectionRule =")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("index.d.ts declares DetectionRule");
+        let ts_names: Vec<&str> =
+            union.lines().filter_map(|line| line.trim().strip_prefix("| '")?.strip_suffix('\'')).collect();
+        let rust_names: Vec<String> =
+            caliper_docgen_core::types::DetectionRule::ALL.iter().map(|rule| rule.name()).collect();
+        assert_eq!(ts_names, rust_names.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn typescript_opaque_reason_union_matches_the_rust_enum() {
+        let declarations = read_repo_file("packages/napi/index.d.ts");
+        let union = declarations
+            .split("export type OpaqueReason =")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("index.d.ts declares OpaqueReason");
+        let ts_names: Vec<&str> =
+            union.lines().filter_map(|line| line.trim().strip_prefix("| { type: '")?.split('\'').next()).collect();
+        assert_eq!(ts_names, caliper_docgen_core::types::OpaqueReason::KINDS);
+    }
+
+    #[test]
+    fn schema_opaque_reason_enum_lists_every_rust_variant() {
+        let schema = schema_value();
+        let listed: Vec<&str> = schema["definitions"]["opaqueReason"]["properties"]["type"]["enum"]
+            .as_array()
+            .expect("opaqueReason type enum is an array")
+            .iter()
+            .map(|value| value.as_str().expect("names are strings"))
+            .collect();
+        assert_eq!(listed, caliper_docgen_core::types::OpaqueReason::KINDS);
+    }
+
+    #[test]
+    fn every_reader_declares_the_schema_version_rust_writes() {
+        let version = caliper_docgen_core::types::SCHEMA_VERSION;
+        let python = format!("SUPPORTED_SCHEMA_VERSION = {version}");
+        let typescript = format!("export const {python}");
+        let readers = [
+            ("scripts/schema_version.py", &python),
+            ("apps/oracle/src/schema-version.ts", &typescript),
+            ("packages/storybook/src/schema.ts", &typescript),
+            ("packages/vite-plugin/src/schema.ts", &typescript),
+        ];
+        for (path, declaration) in readers {
+            assert!(
+                read_repo_file(path).lines().any(|line| line == declaration),
+                "{path} must declare `{declaration}`"
+            );
+        }
+    }
+
     #[test]
     fn test_cmd_schema_valid_json() {
         assert!(cmd_schema().is_ok());
@@ -203,6 +321,7 @@ mod tests {
         components.insert(
             "Button".to_string(),
             ComponentEntry {
+                relevance: None,
                 display_name: "Button".into(),
                 file_path: "src/Button.tsx".into(),
                 description: "A button".into(),
@@ -214,6 +333,7 @@ mod tests {
                     html_element: Some("button".into()),
                     total_props: 3,
                     members: vec![],
+                    used: Vec::new(),
                 }],
                 notable_inherited: BTreeMap::from([(
                     "onClick".to_string(),
@@ -234,6 +354,10 @@ mod tests {
                 methods: vec![],
                 detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
                 exported: true,
+                exports: vec![
+                    caliper_docgen_core::types::ComponentExport::named("default"),
+                    caliper_docgen_core::types::ComponentExport::named("default").member("Item"),
+                ],
             },
         );
 
@@ -301,6 +425,21 @@ mod tests {
         assert_ne!(button["inheritance"][0]["omitted"], serde_json::json!([]), "omitted must be non-empty");
         assert!(!button["discriminantProp"].is_null(), "discriminantProp must be non-null");
         assert_ne!(button["composes"], serde_json::json!([]), "composes must be non-empty");
+
+        let schema = schema_value();
+        let component_schema = &schema["properties"]["components"]["additionalProperties"]["properties"];
+        assert_eq!(
+            component_schema["exports"]["items"],
+            serde_json::json!({ "$ref": "#/definitions/componentExport" })
+        );
+        let export_fields: Vec<&String> =
+            button["exports"][1].as_object().expect("an export is an object").keys().collect();
+        let described: Vec<&String> = schema["definitions"]["componentExport"]["properties"]
+            .as_object()
+            .expect("componentExport lists its properties")
+            .keys()
+            .collect();
+        assert_eq!(export_fields, described);
         assert_ne!(button["tags"], serde_json::json!({}), "component tags must be non-empty");
 
         let variant = &value["props"][variant_id];

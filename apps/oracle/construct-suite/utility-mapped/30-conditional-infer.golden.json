@@ -1,0 +1,27 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      }
+    ]
+  },
+  "text": "string | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/30-conditional-infer.tsx"
+    },
+    "order": null
+  }
+}

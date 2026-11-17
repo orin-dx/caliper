@@ -47,7 +47,7 @@ export declare function initializeSession(sessionId: number, options: JsExtractO
 
 /**
  * Like [`initialize_session`], but returns only what a host needs to find a component and judge whether its props are
- * complete: `{ components: { key: { filePath, displayName } }, diagnostics }`. The props stay in the session for
+ * complete: `{ components: { key: { filePath, displayName, exports } }, diagnostics }`. The props stay in the session for
  * [`session_docgen_info`]. A host that documents one component at a time skips serializing and parsing every prop of
  * every component, which is tens of megabytes when dependencies are loaded.
  */
@@ -61,11 +61,23 @@ export declare function isResolutionConfig(sessionId: number, filePath: string):
 
 /** Options passed from TypeScript — flat struct for easy NAPI marshalling. */
 export interface JsExtractOptions {
+  /** Source directories to scan. */
   srcDirs: Array<string>
+  /**
+   * Extra gitignore-style glob patterns to exclude, relative to each source directory (on top of built-in: stories,
+   * tests, snapshots).
+   */
   exclude?: Array<string>
+  /** `'full'` (the default) lists all of an element's attributes, `'curated'` a compact subset, `'none'` none. */
   htmlAttributes?: 'curated' | 'full' | 'none'
+  /**
+   * Path to the tsconfig that governs module resolution. When unset, each importing file uses the nearest
+   * `tsconfig.json` above it.
+   */
   tsconfigPath?: string
+  /** Additional builtin type names beyond the React standard set. */
   extraBuiltins?: Array<string>
+  /** Cache directory; by default one under `node_modules/.cache/caliper-docgen` above the first source directory. */
   cacheDir?: string
   /**
    * Read and write the on-disk caches (default `true`). `false` reads and writes nothing under `cacheDir`; the
@@ -74,7 +86,11 @@ export interface JsExtractOptions {
   cache?: boolean
   /** Load the dependency type declarations project types reference (default `true`). */
   loadDependencies?: boolean
-  /** Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`). */
+  /**
+   * Which inherited sources to list as one layer of names: large ambient dependency sources and any source of more
+   * than 200 props, the project's own included (`'dependencies'`, the default), those and project sources of more
+   * than 30 props (`'all'`), or none.
+   */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
   /**
    * Session only (`createSession`, `initializeSession`, `extractFileIncremental`): parse and index every file, and
@@ -83,33 +99,22 @@ export interface JsExtractOptions {
    */
   lazy?: boolean
   /**
-   * Session only: `'on-demand'` asks TypeScript's 7.1 checker for each component a request names, and answers
-   * with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Needs
-   * `typescript@beta` installed or `tscPath`. `'off'` (the default) never starts it.
+   * Session only: keep the built-in TypeScript checker warm and ask it for each component a request names, which
+   * answers with the structural props when the checker is slower than `semanticWaitMs` (ADR 0022, ADR 0026). On by
+   * default; `false` never starts it, so the structural resolver answers alone. `extractAll` does not ask it.
    */
-  semanticTypes?: 'off' | 'on-demand'
+  checker?: boolean
   /**
-   * Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
-   * `node_modules/typescript/bin/tsc`.
-   */
-  tscPath?: string
-  /**
-   * Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
-   * it takes the structural answer (default 150).
+   * Session only, with the checker on: how many milliseconds a request waits for the checker before it takes the
+   * structural answer (default 150).
    */
   semanticWaitMs?: number
-}
-
-/** What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session. */
-export interface JsLazyStats {
-  revision: number
-  files: number
-  /** Components found by parsing. */
-  components: number
-  /** Components resolved since the last edit that could change them. */
-  resolved: number
-  /** Dependency declaration files loaded for the names resolved components reached. */
-  dependencyFiles: number
+  /**
+   * Session only, with the checker on: how many milliseconds a request waits for the checker when the structural
+   * pass lists no props for the component (default 2000). A value below `semanticWaitMs` gives such a component
+   * `semanticWaitMs`.
+   */
+  semanticWaitEmptyMs?: number
 }
 
 /**
@@ -120,10 +125,24 @@ export interface JsLazyStats {
 export declare function resolutionConfigFiles(sessionId: number): Array<string>
 
 /**
- * What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
- * diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
- * component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
- * whether a component's props may be incomplete from the same call that returns them.
+ * Waits up to `waitMs` until the checker has no request in flight for any of `keys`, for a host that showed a
+ * component's structural props because the checker had not answered in time: once this resolves `true`, a request for
+ * those components gets the checker's kept answer, unless a source file changed since. `false` when a request was
+ * still in flight at the deadline, for a session without the checker, and for an unknown or closed session. Runs off
+ * the calling thread.
+ */
+export declare function sessionCheckerSettled(sessionId: number, keys: Array<string>, waitMs: number): Promise<boolean>
+
+/**
+ * What a host needs to answer for one component, decided here and nowhere else, for a lazy and an eager session
+ * alike: `{ key: { docgenInfo, diagnostics, awaitsChecker, revision } }`. `docgenInfo` is the documentation with the
+ * checker's props merged when it answered in time; `diagnostics` are the component's own, each with `affects` set to
+ * the key, the checker's merged and the structural ones its props supersede dropped (a project diagnostic that names
+ * the component is among them; one that names none is in the session index only). `awaitsChecker` says the props are
+ * the structural ones because the checker had not answered in time, so asking again once `sessionCheckerSettled`
+ * resolves `true` gets its props; `revision` is the session's revision of the files the answer was made at, which
+ * only rises. A key the session has no component under is left out. A lazy session resolves each requested component
+ * now (in parallel). Errors for an unknown or closed session.
  */
 export declare function sessionComponentAnswers(sessionId: number, keys: Array<string>): string
 
@@ -131,30 +150,32 @@ export declare function sessionComponentAnswers(sessionId: number, keys: Array<s
  * One component as TOON, the compact text an agent reads (`render_component_slice_toon` in the core crate): its prop table
  * with each prop's declaring type, why a prop's type is partly a guess, its inherited layers, and the warnings and
  * errors that say its props may be incomplete. For an in-process host that answers one question about one component
- * and has no use for a project's whole output. `null` when the session has no component under `key`. A lazy session
- * resolves the component now.
+ * and has no use for a project's whole output. `null` when the session has no component under `key`; errors for an
+ * unknown or closed session. A lazy session resolves the component now.
  */
 export declare function sessionComponentToon(sessionId: number, key: string): string | null
 
 /**
- * Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
- * decide; the rest come from parsing alone. Empty for an unknown or uninitialized session.
- */
-export declare function sessionComponentKeys(sessionId: number): Array<string>
-
-/**
  * The session's components with these keys as react-docgen-typescript documents them (`__docgenInfo`, which
  * Storybook converts to argTypes), as a JSON object keyed by component key. A key the session doesn't have is left
- * out; so is every key before the session is initialized.
+ * out; so is every key before the session is initialized. Errors for an unknown or closed session.
  */
 export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>): string
 
-export declare function sessionStats(sessionId: number): JsLazyStats | null
+/**
+ * Resolves the components under `keys` in the background, without returning them: a request for one later is
+ * answered from what this resolved. These are the components of the stories next to the one shown: with the checker
+ * on (the default) it asks the checker for each at neighbour priority, after any component someone waits for and
+ * before warm-up and fill work, and does not wait for it; the answers are kept for the requests that follow. Runs off
+ * the calling thread and returns how many of the keys it resolved. An eager session and an unknown session resolve
+ * nothing. `sessionCancel` drops these requests once the client no longer shows the stories.
+ */
+export declare function sessionPrefetch(sessionId: number, keys: Array<string>): Promise<number>
 
 /**
- * Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
- * holds the dependency declarations and resolver memos that components share, so the first request a host answers
- * does not load them. Runs off the calling thread and returns how many components it resolved. An eager session, an
- * unknown session and a count of 0 resolve nothing.
+ * Tells the checker that the client no longer shows the components under `keys` (it navigated away, which replaced
+ * what `sessionPrefetch` asked for): a request for one of them that nobody waits for and that the checker has not
+ * started is dropped before it is converted. A request someone waits for, and one already being converted, is
+ * answered and kept. Does nothing without the checker, and for an unknown or closed session.
  */
-export declare function sessionWarmUp(sessionId: number, count: number): Promise<number>
+export declare function sessionCancel(sessionId: number, keys: Array<string>): void

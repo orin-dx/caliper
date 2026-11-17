@@ -3,9 +3,13 @@
 use oxc_ast::ast::*;
 use rustc_hash::FxHashMap;
 
-use crate::types::{ComponentMapping, DefaultSource, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, RawDefault};
+use crate::types::{
+    CollectedTypeAlias, ComponentMapping, DefaultSource, DetectionRule, DiagnosticCode, EnumEntry, EnumValue,
+    RawDefault,
+};
 
-use super::{is_pascal_case, js_text, SourceDataCollector};
+use super::uses::Subject;
+use super::{SourceDataCollector, is_pascal_case, js_text};
 
 /// Extract the binding name and the `as const`-peeled inner expression from
 /// `const NAME = <expr> as const` (or `<const><expr>`). Shared by
@@ -227,6 +231,76 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// Whether the node being visited is in an ambient context: a declaration file, or a `declare` namespace or module.
+    fn in_ambient_context(&self) -> bool {
+        let path = self.file_path.as_str();
+        self.ambient_depth > 0 || [".d.ts", ".d.mts", ".d.cts"].iter().any(|suffix| path.ends_with(suffix))
+    }
+
+    /// The value of each member of `node` as TypeScript reads it: an initializer that is a literal is that literal, and a
+    /// member with none counts up from the previous number, starting at 0. `None` where the value is not known: an
+    /// initializer that is not a literal, a member after one that is not a number, and a member with no initializer of
+    /// a non-const ambient enum, whose values only the declaration's implementation knows.
+    pub(super) fn enum_member_values(&self, node: &TSEnumDeclaration<'_>) -> Vec<Option<EnumValue>> {
+        let counts_up = !(node.declare || self.in_ambient_context()) || node.r#const;
+        let mut next = Some(0.0_f64);
+        node.body
+            .members
+            .iter()
+            .map(|member| {
+                let value = match &member.initializer {
+                    Some(init) => self.expression_to_enum_value(init),
+                    None => next.filter(|_| counts_up).map(EnumValue::Number),
+                };
+                next = match value {
+                    Some(EnumValue::Number(n)) => Some(n + 1.0),
+                    _ => None,
+                };
+                value
+            })
+            .collect()
+    }
+
+    /// A prop typed with the enum is the union of its values, over every declaration that merges into it. One declaration
+    /// with a value that is not known leaves the enum without a union, never a partial one.
+    pub(super) fn record_enum_union(&mut self, key: &str, values: &[Option<EnumValue>]) {
+        use crate::types::CollectedType;
+        let previous = self.enum_unions.remove(key);
+        let contribution: Option<Vec<CollectedType>> = values
+            .iter()
+            .map(|value| match value {
+                Some(EnumValue::String(s)) => Some(CollectedType::StringLiteral(s.as_str().into())),
+                Some(EnumValue::Number(n)) => Some(CollectedType::NumberLiteral(*n)),
+                _ => None,
+            })
+            .collect();
+        let merged = match (&previous, contribution) {
+            (None, contribution) => contribution,
+            (Some(Some(earlier)), Some(more)) => Some(earlier.iter().cloned().chain(more).collect()),
+            (Some(_), _) => None,
+        };
+        let target = merged.as_ref().and_then(|members| match members.as_slice() {
+            [] => None,
+            [only] => Some(only.clone()),
+            _ => Some(CollectedType::Union(members.clone())),
+        });
+        match target {
+            Some(target) => {
+                let alias = CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() };
+                if previous.is_some() {
+                    self.data.type_aliases.insert(key.to_owned(), alias);
+                } else {
+                    self.data.type_aliases.entry(key.to_owned()).or_insert(alias);
+                }
+            }
+            None if previous.is_some() => {
+                self.data.type_aliases.remove(key);
+            }
+            None => {}
+        }
+        self.enum_unions.insert(key.to_owned(), merged);
+    }
+
     pub(super) fn expression_to_enum_value<'a>(&self, expr: &Expression<'a>) -> Option<EnumValue> {
         match expr {
             Expression::StringLiteral(s) => Some(EnumValue::String(js_text::lossy(s.value).into_owned())),
@@ -294,7 +368,7 @@ impl<'src> SourceDataCollector<'src> {
             return;
         }
 
-        if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
+        if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.is_binding_named(&obj_name)) {
             mapping.param_defaults.extend(defaults);
         }
     }
@@ -315,6 +389,18 @@ impl<'src> SourceDataCollector<'src> {
     /// declined there as speculative.
     pub(super) fn try_scan_object_assign_sub_components<'a>(&mut self, stmt: &ExpressionStatement<'a>) {
         let Expression::CallExpression(call) = &stmt.expression else { return };
+        self.scan_object_assign_call(call);
+    }
+
+    /// The same scan for `const Root = Object.assign(RootImpl, { Item: (props: P) => … })`, whose call is a
+    /// declaration's initializer and not a statement.
+    pub(super) fn try_scan_object_assign_declarator<'a>(&mut self, init: Option<&Expression<'a>>) {
+        if let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) {
+            self.scan_object_assign_call(call);
+        }
+    }
+
+    fn scan_object_assign_call<'a>(&mut self, call: &CallExpression<'a>) {
         let Expression::StaticMemberExpression(callee) = &call.callee else { return };
         if !matches!(&callee.object, Expression::Identifier(id) if id.name.as_str() == "Object") {
             return;
@@ -343,49 +429,100 @@ impl<'src> SourceDataCollector<'src> {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
                 Expression::Identifier(sub) => {
-                    self.record_attached(sub.name.as_str(), parent_id.name.as_str());
+                    self.record_attached(Subject::local(sub.name.as_str()), parent_id.name.as_str(), &key_name);
                     continue;
                 }
                 _ => continue,
             };
-            self.record_attached(&key_name, parent_id.name.as_str());
-
-            let Some(first_param) = params.items.first() else { continue };
-            let Some(type_ann) = &first_param.type_annotation else {
-                self.record_skip(
-                    DiagnosticCode::SkippedCandidate,
-                    format!("'{key_name}' is an Object.assign-attached sub-component with an untyped first param"),
-                    first_param.span,
-                );
-                continue;
-            };
-            let Some((props_name, type_args)) = self.extract_type_name_from_type(&type_ann.type_annotation) else {
-                self.record_skip(
-                    DiagnosticCode::SkippedCandidate,
-                    format!(
-                        "'{key_name}' is an Object.assign-attached sub-component whose first param's type \
-                         annotation isn't a recognizable props type reference"
-                    ),
-                    type_ann.span,
-                );
-                continue;
-            };
-
-            let (description, tags) = self.find_jsdoc_with_tags(span_start);
-            let param_defaults = self.extract_param_defaults(params);
-            self.data.component_mappings.push(
-                ComponentMapping::new(
-                    key_name,
-                    props_name,
-                    self.file_path.clone(),
-                    span_start,
-                    span_end,
-                    DetectionRule::AttachedSubComponent,
-                )
-                .with_props_type_args(type_args)
-                .with_doc(description, tags)
-                .with_param_defaults(param_defaults),
-            );
+            self.record_attached(Subject::Inline(span_start), parent_id.name.as_str(), &key_name);
+            self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);
         }
+    }
+
+    /// `Root.Item = (props: ItemProps) => …` at statement level: a sub-component that exists only on the assignment.
+    /// An assigned identifier is already detected under its own name and attached by `record_member_assignment`.
+    pub(super) fn try_scan_member_assigned_sub_component<'a>(&mut self, stmt: &ExpressionStatement<'a>) {
+        let Expression::AssignmentExpression(assignment) = &stmt.expression else { return };
+        let AssignmentTarget::StaticMemberExpression(target) = &assignment.left else { return };
+        let Expression::Identifier(parent) = &target.object else { return };
+        let key_name = target.property.name.as_str();
+        if !is_pascal_case(parent.name.as_str()) || !is_pascal_case(key_name) {
+            return;
+        }
+        let (params, span_start, span_end) = match super::component::peel_expr(&assignment.right) {
+            Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
+            Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
+            Expression::CallExpression(call) => {
+                // `Root.Item = memo(...)` is a component this scan cannot read; any other call (`createContext`)
+                // is not a component, so it is not reported.
+                let wrapper = match super::component::peel_expr(&call.callee) {
+                    Expression::Identifier(id) => id.name.as_str(),
+                    Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+                    _ => return,
+                };
+                if matches!(wrapper, "memo" | "forwardRef") {
+                    self.record_skip(
+                        DiagnosticCode::SkippedCandidate,
+                        format!(
+                            "'{key_name}' is a property-assigned sub-component wrapped in {wrapper}(), which is not \
+                             read; only an inline function or a named component is"
+                        ),
+                        call.span,
+                    );
+                }
+                return;
+            }
+            _ => return,
+        };
+        self.record_attached(Subject::Inline(span_start), parent.name.as_str(), key_name);
+        self.record_inline_sub_component(key_name.to_owned(), "a property-assigned", params, span_start, span_end);
+    }
+
+    /// Map an inline function that carries a sub-component, or say why its props cannot be read. `how` completes
+    /// "'Item' is …  sub-component".
+    fn record_inline_sub_component(
+        &mut self,
+        key_name: String,
+        how: &str,
+        params: &FormalParameters<'_>,
+        span_start: u32,
+        span_end: u32,
+    ) {
+        let Some(first_param) = params.items.first() else { return };
+        let Some(type_ann) = &first_param.type_annotation else {
+            self.record_skip(
+                DiagnosticCode::SkippedCandidate,
+                format!("'{key_name}' is {how} sub-component with an untyped first param"),
+                first_param.span,
+            );
+            return;
+        };
+        let Some((props_name, type_args)) = self.extract_type_name_from_type(&type_ann.type_annotation) else {
+            self.record_skip(
+                DiagnosticCode::SkippedCandidate,
+                format!(
+                    "'{key_name}' is {how} sub-component whose first param's type \
+                     annotation isn't a recognizable props type reference"
+                ),
+                type_ann.span,
+            );
+            return;
+        };
+
+        let (description, tags) = self.find_jsdoc_with_tags(span_start);
+        let param_defaults = self.extract_param_defaults(params);
+        self.data.component_mappings.push(
+            ComponentMapping::new(
+                key_name,
+                props_name,
+                self.file_path.clone(),
+                span_start,
+                span_end,
+                DetectionRule::AttachedSubComponent,
+            )
+            .with_props_type_args(type_args)
+            .with_doc(description, tags)
+            .with_param_defaults(param_defaults),
+        );
     }
 }

@@ -1,0 +1,27 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      }
+    ]
+  },
+  "text": "string | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/16-literal-union-alias.tsx"
+    },
+    "order": null
+  }
+}

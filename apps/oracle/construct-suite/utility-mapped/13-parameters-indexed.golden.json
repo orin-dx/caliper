@@ -1,0 +1,30 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "x"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ x: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/13-parameters-indexed.tsx"
+    },
+    "order": null
+  }
+}

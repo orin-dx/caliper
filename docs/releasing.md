@@ -1,6 +1,6 @@
 # Releasing
 
-How a change becomes a published release, and what to check afterwards. Callisto 0.16.0 drives it (`callisto.toml`, `.github/workflows/callisto-release.yml`); its own guide is `docs/releasing.md` in `orin-dx/callisto`.
+How a change becomes a published release, and what to check afterwards. Callisto 0.20.0 drives it (`callisto.toml`, `.github/workflows/callisto-release.yml`); its own guide is `docs/releasing.md` in `orin-dx/callisto`.
 
 ## Flow
 
@@ -20,17 +20,17 @@ How a change becomes a published release, and what to check afterwards. Callisto
 
 The workflow runs on every push to `main`, daily at 05:23 UTC, and on manual dispatch. Every run first asks `callisto release pending` for the oldest merged release commit whose tags or GitHub Release are missing, and finishes that one before anything newer. When none is unfinished, a push to a release commit releases it and any other run refreshes the release pull request.
 
-The workflow file must stay named `callisto-release.yml`. Callisto verifies each asset's attestation against that exact workflow path (`gh attestation verify --signer-workflow <repo>/.github/workflows/callisto-release.yml`), and the path is fixed in Callisto 0.16.0.
+The workflow file must stay named `callisto-release.yml`. Callisto verifies each asset's attestation against that exact workflow path (`gh attestation verify --signer-workflow <repo>/.github/workflows/callisto-release.yml`), and the path is fixed in Callisto 0.20.0.
 
 ## What a release produces
 
 | Output | Where | Notes |
 | --- | --- | --- |
-| Crates | crates.io | `caliper-docgen-core`, `-tsc-client`, `-semantic`, `caliper-docgen` |
-| npm packages | npm, with provenance | CLI wrapper and its five platform packages, napi binding and its platform packages, Vite plugin, Storybook addon |
+| Crates | crates.io | `caliper-docgen-core`, `-semantic`, `caliper-docgen` |
+| npm packages | npm, with provenance | CLI wrapper and its four platform packages, napi binding and its platform packages, Vite plugin, Storybook addon |
 | Tags | this repository | One per package, such as `cargo/caliper-docgen@x.y.z` and `npm/caliper-docgen@x.y.z` |
 | GitHub Release | this repository | One per version, on the tag `cargo/caliper-docgen@x.y.z`; notes are the `## x.y.z` section of `crates/cli/CHANGELOG.md` |
-| CLI binaries | the GitHub Release | `caliper-docgen-<target>.tar.gz` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`; each holds the binary at the archive root |
+| CLI binaries | the GitHub Release | `caliper-docgen-<target>.tar.gz` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`; each holds the binary at the archive root |
 
 Tag names do not change. The Homebrew tap reads the `npm/caliper-docgen@x.y.z` tag (`CONTRIBUTING.md`, Releases).
 

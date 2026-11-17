@@ -1,0 +1,54 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "tuple",
+            "elements": [
+              {
+                "k": "prim",
+                "name": "number"
+              },
+              {
+                "k": "prim",
+                "name": "number"
+              }
+            ]
+          },
+          {
+            "k": "tuple",
+            "elements": [
+              {
+                "k": "prim",
+                "name": "number"
+              },
+              {
+                "k": "prim",
+                "name": "number"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "text": "[[number, number], [number, number]] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/24-tuple-nested.tsx"
+    },
+    "order": null
+  }
+}

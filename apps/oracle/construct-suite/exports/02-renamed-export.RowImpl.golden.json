@@ -1,0 +1,19 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "renamed",
+    "of": "string"
+  },
+  "text": "\"renamed\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "exports/02-renamed-export.tsx"
+    },
+    "order": null
+  }
+}

@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession, extract};
 use camino::{Utf8Path, Utf8PathBuf};
 use tempfile::TempDir;
 
@@ -42,11 +42,7 @@ fn options(root: &Utf8Path) -> PipelineOptions {
 }
 
 fn session(root: &Utf8Path, lazy: bool) -> WatchSession {
-    if lazy {
-        WatchSession::lazy(options(root))
-    } else {
-        WatchSession::new(options(root))
-    }
+    if lazy { WatchSession::lazy(options(root)) } else { WatchSession::new(options(root)) }
 }
 
 fn names(session: &WatchSession, key: &str) -> BTreeSet<String> {

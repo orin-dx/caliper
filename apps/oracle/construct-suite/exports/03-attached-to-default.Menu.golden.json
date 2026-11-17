@@ -1,0 +1,19 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "menu",
+    "of": "string"
+  },
+  "text": "\"menu\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "MenuProps",
+      "file": "exports/03-attached-to-default.tsx"
+    },
+    "order": null
+  }
+}

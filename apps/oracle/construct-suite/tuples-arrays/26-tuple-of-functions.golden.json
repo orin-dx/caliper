@@ -1,0 +1,53 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "function",
+            "params": [
+              {
+                "optional": false,
+                "rest": false,
+                "type": {
+                  "k": "prim",
+                  "name": "string"
+                }
+              }
+            ],
+            "returns": {
+              "k": "prim",
+              "name": "void"
+            }
+          },
+          {
+            "k": "function",
+            "params": [],
+            "returns": {
+              "k": "prim",
+              "name": "number"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "text": "[(a: string) => void, () => number] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/26-tuple-of-functions.tsx"
+    },
+    "order": null
+  }
+}

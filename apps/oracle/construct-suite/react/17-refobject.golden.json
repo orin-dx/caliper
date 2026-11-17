@@ -1,0 +1,32 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "current"
+        ],
+        "index": false,
+        "alias": "RefObject"
+      }
+    ],
+    "alias": "RefObject"
+  },
+  "text": "RefObject<HTMLInputElement | null> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/17-refobject.tsx"
+    },
+    "order": null
+  }
+}

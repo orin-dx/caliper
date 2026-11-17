@@ -1,0 +1,19 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "item",
+    "of": "string"
+  },
+  "text": "\"item\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "ItemProps",
+      "file": "exports/03-attached-to-default.tsx"
+    },
+    "order": null
+  }
+}

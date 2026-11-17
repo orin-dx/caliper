@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DocgenSession } from '../../src/session.js'
 import { SUPPORTED_SCHEMA_VERSION, assertSchemaVersion, expandDiagnostics } from '../../src/schema.js'
@@ -49,5 +50,16 @@ describe('expandDiagnostics', () => {
     expect(() => expandDiagnostics([{ ...diagnostic, affects: 'abc' }], {})).toThrow(
       'The caliper-docgen output refers to name list abc, which its nameLists lacks.',
     )
+  })
+})
+
+// Each package is published on its own and has no shared runtime package to import this module from, so the file is
+// copied and this test keeps the copies identical.
+describe('schema.ts in the vite plugin', () => {
+  it('is the same file as this package has, apart from the package it names in its error', () => {
+    const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
+    const own = read('../../src/schema.ts')
+    const plugin = read('../../../vite-plugin/src/schema.ts')
+    expect(plugin).toBe(own.replace('caliper-docgen-storybook', 'caliper-docgen-vite-plugin'))
   })
 })

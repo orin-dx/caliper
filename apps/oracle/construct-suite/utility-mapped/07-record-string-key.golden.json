@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [],
+        "index": true,
+        "indexValue": {
+          "k": "prim",
+          "name": "boolean"
+        },
+        "alias": "Record"
+      }
+    ],
+    "alias": "Record"
+  },
+  "text": "Record<string, boolean> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/07-record-string-key.tsx"
+    },
+    "order": null
+  }
+}

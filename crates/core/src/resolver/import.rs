@@ -87,7 +87,7 @@ fn declared_name(ctx: &ResolutionContext, file: &Utf8Path, name: &str) -> Option
 /// run out of chain to follow — in which case the original (barrel_file,
 /// name) is returned unchanged, so the caller's existing "cannot resolve"
 /// diagnostic still fires exactly as it did before this existed.
-fn follow_reexports(
+pub(super) fn follow_reexports(
     file: Utf8PathBuf,
     name: String,
     ctx: &ResolutionContext,
@@ -96,10 +96,10 @@ fn follow_reexports(
     depth: u8,
 ) -> (Utf8PathBuf, String) {
     #[cfg(test)]
-    if let Some((scope, count)) = FOLLOW_REEXPORTS_CALLS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
-        if file.starts_with(&*scope) {
-            *count += 1;
-        }
+    if let Some((scope, count)) = FOLLOW_REEXPORTS_CALLS.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
+        && file.starts_with(&*scope)
+    {
+        *count += 1;
     }
 
     super::deps::record(&file);
@@ -161,6 +161,18 @@ pub(super) fn lookup_interface<'g>(
 ) -> Option<&'g CollectedInterface> {
     super::deps::record(Utf8Path::new(canonical_file));
     ctx.named_types.lookup_interface(Utf8Path::new(canonical_file), canonical_name)
+}
+
+/// `lookup_interface` for a name written in `scope`: a declaration local to an enclosing function body, block or
+/// `switch` case of the same file comes first.
+pub(super) fn lookup_interface_from<'g>(
+    ctx: &'g ResolutionContext,
+    canonical_file: &str,
+    canonical_name: &str,
+    scope: &DeclarationScope,
+) -> Option<&'g CollectedInterface> {
+    super::deps::record(Utf8Path::new(canonical_file));
+    ctx.named_types.lookup_interface_from(Utf8Path::new(canonical_file), canonical_name, scope)
 }
 
 /// Same as `lookup_interface`, for type aliases. Returns the name that

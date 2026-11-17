@@ -1,0 +1,26 @@
+{
+  "checker": {
+    "k": "array",
+    "element": {
+      "k": "object",
+      "fields": [
+        "id",
+        "tags"
+      ],
+      "index": false
+    },
+    "alias": "Array"
+  },
+  "text": "{ id: number; tags: string[]; }[]",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "seed/02-array-of-records.tsx"
+    },
+    "order": null
+  }
+}

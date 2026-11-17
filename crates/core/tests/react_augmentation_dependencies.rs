@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::ExtractionOutput;
 use camino::Utf8PathBuf;
 use tempfile::TempDir;
@@ -65,6 +65,8 @@ fn run(project: &Project) -> ExtractionOutput {
         src_dirs: vec![project.root.join("src")],
         cache_dir: Some(project.root.join(".cache")),
         html_attributes: HtmlAttributeMode::Full,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         load_dependencies: true,
         ..Default::default()
     })

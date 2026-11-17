@@ -1,0 +1,52 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "green",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "red",
+        "of": "string"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      }
+    ]
+  },
+  "text": "\"green\" | \"red\" | (string & {}) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/14-literal-union-string-and.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "red",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "green",
+        "of": "string"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      }
+    ]
+  }
+}

@@ -1,16 +1,16 @@
 //! `impl Visit for SourceDataCollector` — the AST walker entry points.
 
 use oxc_ast::ast::*;
-use oxc_ast_visit::{walk, Visit};
+use oxc_ast_visit::{Visit, walk};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
     CollectedInterface, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef,
-    ImportBinding, LexedExport, RawProp, TypeName,
+    ImportBinding, LexedExport, RawProp, ScopeKind, TypeName,
 };
 
 use super::component::Binding;
-use super::{declaration_name, is_constant_name, is_pascal_case, js_text, SourceDataCollector};
+use super::{SourceDataCollector, declaration_name, is_constant_name, is_pascal_case, js_text};
 
 impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_import_declaration(&mut self, node: &ImportDeclaration<'a>) {
@@ -62,32 +62,38 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// `export { Foo }`: local specifiers, no source.
     fn visit_export_named_declaration(&mut self, node: &ExportNamedDeclaration<'a>) {
         for spec in &node.specifiers {
-            self.record_exported_local(spec.local.name().as_str());
             // Recorded as a local declaration for now; `finish()` turns it into a re-export when `local` is an import.
             let (local, exported) = (spec.local.name().as_str(), spec.exported.name().as_str());
+            self.record_exported_local(local, exported);
             self.pending_local_exports.push((self.data.exports.len(), local.to_owned()));
             self.data.exports.push(LexedExport::LocalDeclaration {
                 name: exported.to_owned(),
                 is_type_only: node.export_kind.is_type() || spec.export_kind.is_type(),
                 declared_as: (local != exported).then(|| local.to_owned()),
             });
-            if let Some((base_name, props_name)) = self.cast_component_aliases.get(local).cloned() {
-                if let Some(index) =
-                    self.data.component_mappings.iter().position(|mapping| mapping.component_name == base_name)
-                {
-                    let mut public = self.data.component_mappings[index].clone();
-                    public.component_name = exported.to_owned();
-                    public.props_type_name = props_name;
-                    public.props_type_args.clear();
-                    public.wrapper_callee = None;
-                    public.rule = crate::types::DetectionRule::FcAnnotation;
-                    if base_name == exported {
-                        self.data.component_mappings[index] = public;
-                    } else {
-                        self.data.component_mappings.push(public);
-                    }
-                    self.record_exported_local(exported);
+            if let Some((base_name, props_name)) = self.cast_component_aliases.get(local).cloned()
+                && let Some(index) =
+                    self.data.component_mappings.iter().position(|mapping| mapping.is_binding_named(&base_name))
+            {
+                let mut public = self.data.component_mappings[index].clone();
+                public.component_name = exported.to_owned();
+                public.props_type_name = props_name;
+                public.props_type_args.clear();
+                public.wrapper_callee = None;
+                public.rule = crate::types::DetectionRule::FcAnnotation;
+                // `const A = Inner as VFC<P>` was already bound as an alias of `Inner`; the cast replaces that
+                // mapping so `A` is published once, with `P`.
+                // A rename (`export { A as B }`) replaces only the mapping of the inner component being re-exported
+                // under its own name; another local that happens to be called `B` keeps its mapping.
+                let existing = (local == exported || base_name == exported)
+                    .then(|| self.data.component_mappings.iter().position(|mapping| mapping.is_binding_named(exported)))
+                    .flatten();
+                if let Some(at) = existing {
+                    self.data.component_mappings[at] = public;
+                } else {
+                    self.data.component_mappings.push(public);
                 }
+                self.record_exported_local(exported, exported);
             }
         }
 
@@ -125,7 +131,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             Declaration::VariableDeclaration(vd) => {
                 for declarator in &vd.declarations {
                     match &declarator.id {
-                        BindingPattern::BindingIdentifier(id) => self.record_exported_local(id.name.as_str()),
+                        BindingPattern::BindingIdentifier(id) => {
+                            self.record_exported_local(id.name.as_str(), id.name.as_str());
+                        }
                         // `export const { Option, Item: Row } = Imported` exports `Option` and `Row`.
                         BindingPattern::ObjectPattern(pattern) => {
                             for property in &pattern.properties {
@@ -135,7 +143,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                                     is_type_only: false,
                                     declared_as: None,
                                 });
-                                self.record_exported_local(local.name.as_str());
+                                self.record_exported_local(local.name.as_str(), local.name.as_str());
                             }
                         }
                         _ => {}
@@ -144,7 +152,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             }
             declaration => {
                 if let Some(name) = declaration_name(declaration) {
-                    self.record_exported_local(name);
+                    self.record_exported_local(name, name);
                 }
             }
         }
@@ -171,7 +179,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_ts_interface_declaration(&mut self, node: &TSInterfaceDeclaration<'a>) {
         let name = node.id.name.as_str();
-        let key = self.scoped_key(name);
+        let scope = self.current_scope();
+        let mut key = self.scoped_key(name);
+        key.extend(scope.local_key_suffix());
 
         let extends: Vec<ExtendsRef> = node.extends.iter().map(|ext| self.collect_extends(ext)).collect();
 
@@ -180,21 +190,46 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         // find_jsdoc's proximity match, leaving the interface's own description empty.
         let (description, tags) = self.find_jsdoc_with_tags(node.span.start);
 
-        let props: Vec<RawProp> =
-            node.body.body.iter().filter_map(|sig| self.collect_property_signature(sig)).collect();
+        let accessors = super::Accessors::of(&node.body.body);
+        let props: Vec<RawProp> = node
+            .body
+            .body
+            .iter()
+            .filter(|sig| !accessors.is_shadowed_setter(sig))
+            .filter_map(|sig| self.collect_property_signature(sig))
+            .collect();
 
-        self.data.interfaces.insert(
-            key.clone(),
-            CollectedInterface {
-                scoped_key: key.clone(),
-                name: name.into(),
-                file_path: self.file_path.clone(),
-                props,
-                extends,
-                description,
-                tags,
-            },
-        );
+        // Declarations of one name in one scope merge, as TypeScript merges them: members and `extends` accumulate,
+        // and the first description stands. The key carries the scope, so a declaration in another scope is an entry
+        // of its own.
+        if let Some(merged) = self.data.interfaces.get_mut(&key) {
+            for prop in props {
+                if !merged.props.iter().any(|existing| existing.name == prop.name) {
+                    merged.props.push(prop);
+                }
+            }
+            merged.extends.extend(extends);
+            if merged.description.is_empty() {
+                merged.description = description;
+            }
+            for (tag, value) in tags {
+                merged.tags.entry(tag).or_insert(value);
+            }
+        } else {
+            self.data.interfaces.insert(
+                key.clone(),
+                CollectedInterface {
+                    scoped_key: key.clone(),
+                    name: name.into(),
+                    scope,
+                    file_path: self.file_path.clone(),
+                    props,
+                    extends,
+                    description,
+                    tags,
+                },
+            );
+        }
 
         // Record declared type parameter names (`interface Foo<TData, TValue>` →
         // ["TData", "TValue"]) so the resolver can recognize bare references to
@@ -219,6 +254,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             return;
         };
         self.data.type_aliases.insert(key.clone(), alias);
+        let scope = self.current_scope();
+        self.data.type_alias_scopes.insert(key.clone(), scope);
 
         // Record declared type parameter names (`type Assign<T, U> = ...` → ["T", "U"])
         // so the resolver can substitute call-site arguments into the alias body —
@@ -236,7 +273,11 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// nodes and qualify nothing.
     fn visit_ts_namespace_declaration(&mut self, node: &TSNamespaceDeclaration<'a>) {
         self.namespace_stack.push(node.id.name.as_str().into());
+        self.ambient_depth += u32::from(node.declare);
+        self.enter_scope(ScopeKind::Namespace);
         walk::walk_ts_namespace_declaration(self, node);
+        self.leave_scope();
+        self.ambient_depth -= u32::from(node.declare);
         self.qualify_namespace_references();
         self.namespace_stack.pop();
     }
@@ -245,46 +286,55 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// declarations are keyed as `React.`-qualified ones (`NamedTypeIndex::react_augmentations` reads them). Any other
     /// `declare module "x"` qualifies nothing.
     fn visit_ts_external_module_declaration(&mut self, node: &TSExternalModuleDeclaration<'a>) {
+        self.ambient_depth += 1;
+        self.enter_scope(ScopeKind::Namespace);
         if node.id.value != "react" {
             walk::walk_ts_external_module_declaration(self, node);
+            self.leave_scope();
+            self.ambient_depth -= 1;
             return;
         }
         self.namespace_stack.push("React".into());
         walk::walk_ts_external_module_declaration(self, node);
+        self.leave_scope();
+        self.ambient_depth -= 1;
         self.qualify_namespace_references();
         self.namespace_stack.pop();
     }
 
     fn visit_ts_enum_declaration(&mut self, node: &TSEnumDeclaration<'a>) {
+        // An enum declared in a function body or a block is not the enum a module's types name: `scoped_key` ignores
+        // those scopes, so its union and entries would merge into, or replace, a module-level enum of the same name.
+        if self.function_depth > 0 || self.block_depth > 0 {
+            return;
+        }
         let enum_name = node.id.name.as_str();
         let key = self.scoped_key(enum_name);
 
+        let values = self.enum_member_values(node);
         let entries: Vec<EnumEntry> = node
             .body
             .members
             .iter()
-            .filter_map(|member| {
+            .zip(&values)
+            .filter_map(|(member, value)| {
                 let name = match &member.id {
                     TSEnumMemberName::Identifier(id) => id.name.as_str().to_owned(),
                     TSEnumMemberName::String(s) => js_text::lossy(s.value).into_owned(),
                     TSEnumMemberName::ComputedString(s) => js_text::lossy(s.value).into_owned(),
                     TSEnumMemberName::ComputedTemplateString(_) => return None,
                 };
-
-                let value = match &member.initializer {
-                    Some(init) => {
-                        self.expression_to_enum_value(init).unwrap_or_else(|| EnumValue::String(name.clone()))
-                    }
-                    None => EnumValue::String(name.clone()),
-                };
-
+                let value = value.clone().unwrap_or_else(|| EnumValue::String(name.clone()));
                 let description = self.find_jsdoc(member.span.start);
                 Some(EnumEntry { name, value, description })
             })
             .collect();
 
+        self.record_enum_union(&key, &values);
         if !entries.is_empty() {
-            self.data.enums.insert(key, entries);
+            let scope = self.current_scope();
+            self.data.enum_declarations.insert(key.clone(), scope);
+            self.data.enums.entry(key).or_default().extend(entries);
         }
     }
 
@@ -297,67 +347,73 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 let name = id.name.as_str().to_owned();
                 self.try_collect_variant_bag(declarator, &name);
                 self.record_object_assign_declarator(&name, declarator.init.as_ref());
+                if self.is_tsx && self.function_depth == 0 {
+                    self.try_scan_object_assign_declarator(declarator.init.as_ref());
+                }
                 if self.function_depth == 0 {
                     self.try_record_cast_component_alias(declarator, &name);
                     if let Some(init) = declarator.init.as_ref() {
                         self.record_bound_function_result(&name, init);
                     }
                 }
-                if self.function_depth == 0 && node.kind.is_const() {
-                    if let Some(Expression::Identifier(target)) =
+                if self.function_depth == 0
+                    && node.kind.is_const()
+                    && let Some(Expression::Identifier(target)) =
                         declarator.init.as_ref().map(super::component::peel_expr)
-                    {
-                        self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
-                    }
+                {
+                    self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
                 }
             }
             if self.is_tsx && self.function_depth == 0 {
                 self.try_record_destructured_imports(declarator);
             }
             if self.is_tsx && self.function_depth > 0 {
-                if let Some(name) = self.extract_pascal_name(declarator) {
-                    if self.detect_component(&Binding::of(declarator), &name).is_some() {
-                        self.skip_local_component(&name, declarator.span);
-                    }
+                if let Some(name) = self.extract_pascal_name(declarator)
+                    && self.detect_component(&Binding::of(declarator), &name).is_some()
+                {
+                    self.skip_local_component(&name, declarator.span);
                 }
-            } else if self.is_tsx {
-                if let Some(name) = self.extract_pascal_name(declarator) {
-                    self.decline_reason = None;
-                    self.argument_declined = false;
-                    self.alias_candidate = None;
-                    let binding = Binding::of(declarator);
-                    if let Some(mapping) = self.detect_component(&binding, &name) {
-                        self.data.component_mappings.push(mapping);
-                        continue;
-                    }
-                    // try_rename_identifier_wrapped_component is itself a give-up-quietly
-                    // path (a bare/wrapped identifier re-binding, not a props-bearing
-                    // component candidate) — only record a skip when even that finds
-                    // nothing, so plain aliasing (`const Button = InternalButton;`)
-                    // doesn't spuriously report as an unsupported candidate. Also skip
-                    // no-initializer declarations (`declare var Date: DateConstructor`) —
-                    // those are ambient type-only bindings handled by Pattern 5 below
-                    // (or legitimately not components at all), not failed candidates.
-                    if declarator.init.is_some()
-                        && !self.try_rename_identifier_wrapped_component(&binding, &name)
-                        && !self.try_record_wrapper_call(&binding, &name)
-                        && !self.try_record_tagged_factory(&binding, &name)
-                        && !self.try_record_imported_member_alias(&binding, &name)
-                        && !self.try_record_factory_call(&binding, &name)
-                        && !self.try_defer_identifier_alias(&name, declarator.span)
-                    {
-                        // `MENU_OPTIONS` is a constant, not a component that failed to qualify; a rule that gave a
-                        // reason for declining it still reports it.
-                        let declined = self.decline_reason.take();
-                        if declined.is_some() || !is_constant_name(&name) {
-                            let message = declined.unwrap_or_else(|| {
-                                format!(
-                                    "'{name}' is a PascalCase binding but matched no known component pattern \
+            } else if self.is_tsx
+                && let Some(name) = self.extract_pascal_name(declarator)
+            {
+                self.decline_reason = None;
+                self.argument_declined = false;
+                self.alias_candidate = None;
+                let binding = Binding::of(declarator);
+                if let Some(mapping) = self.detect_component(&binding, &name) {
+                    self.data.component_mappings.push(mapping);
+                    continue;
+                }
+                // try_rename_identifier_wrapped_component is itself a give-up-quietly
+                // path (a bare/wrapped identifier re-binding, not a props-bearing
+                // component candidate) — only record a skip when even that finds
+                // nothing, so plain aliasing (`const Button = InternalButton;`)
+                // doesn't spuriously report as an unsupported candidate. Also skip
+                // no-initializer declarations (`declare var Date: DateConstructor`) —
+                // those are ambient type-only bindings handled by Pattern 5 below
+                // (or legitimately not components at all), not failed candidates.
+                if let Some(init) = declarator.init.as_ref() {
+                    self.record_factory_props(declarator.span.start, init);
+                }
+                if declarator.init.is_some()
+                    && !self.try_rename_identifier_wrapped_component(&binding, &name)
+                    && !self.try_record_wrapper_call(&binding, &name)
+                    && !self.try_record_tagged_factory(&binding, &name)
+                    && !self.try_record_imported_member_alias(&binding, &name)
+                    && !self.try_record_factory_call(&binding, &name)
+                    && !self.try_defer_identifier_alias(&name, declarator.span)
+                {
+                    // `MENU_OPTIONS` is a constant, not a component that failed to qualify; a rule that gave a
+                    // reason for declining it still reports it.
+                    let declined = self.decline_reason.take();
+                    if declined.is_some() || !is_constant_name(&name) {
+                        let message = declined.unwrap_or_else(|| {
+                            format!(
+                                "'{name}' is a PascalCase binding but matched no known component pattern \
                                      (FC annotation, forwardRef, HOC wrapper, or identifier alias)"
-                                )
-                            });
-                            self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
-                        }
+                            )
+                        });
+                        self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
                     }
                 }
             }
@@ -418,71 +474,72 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.record_function_type_params(func.span, func.type_parameters.as_deref());
         self.props_params.push((first_param_name(&func.params), func.span.start, func.span.end));
         // Pattern 4: `function Button(props: ButtonProps) { ... }`
-        if self.is_tsx {
-            if let Some(id) = &func.id {
-                let name = id.name.as_str();
-                let declaration =
-                    matches!(func.r#type, FunctionType::FunctionDeclaration | FunctionType::TSDeclareFunction);
-                if is_pascal_case(name) && declaration && self.function_depth > 0 {
-                    let typed = func.params.items.first().is_some_and(|p| p.type_annotation.is_some());
-                    let shape = super::evidence::FunctionShape::of_function(func);
-                    if typed && super::evidence::renders(&shape, &*self).is_ok() {
-                        self.skip_local_component(name, func.span);
-                    }
-                } else if is_pascal_case(name) && declaration {
-                    if let Some(first_param) = func.params.items.first() {
-                        if let Some(type_ann) = &first_param.type_annotation {
-                            if let Err(reason) =
-                                super::evidence::renders(&super::evidence::FunctionShape::of_function(func), &*self)
-                            {
-                                // A `declare function` with a non-element return type is an API declaration, not a
-                                // component that failed to qualify: lib.dom.d.ts alone declares dozens of them.
-                                if func.r#type == FunctionType::FunctionDeclaration {
-                                    self.record_skip(
-                                        DiagnosticCode::SkippedCandidate,
-                                        format!("'{name}' takes a typed props parameter but {reason}"),
-                                        func.span,
-                                    );
-                                }
-                            } else if let Some((props_name, type_args)) =
-                                self.extract_type_name_from_type(&type_ann.type_annotation)
-                            {
-                                if func.params.items.len() > 1 {
-                                    self.takes_a_second_parameter.insert(name.into());
-                                }
-                                let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
-                                let param_defaults = self.extract_param_defaults(&func.params);
-                                self.data.component_mappings.push(
-                                    ComponentMapping::new(
-                                        name.to_owned(),
-                                        props_name,
-                                        self.file_path.clone(),
-                                        func.span.start,
-                                        func.span.end,
-                                        DetectionRule::FunctionDeclaration,
-                                    )
-                                    .with_props_type_args(type_args)
-                                    .with_doc(description, tags)
-                                    .with_param_defaults(param_defaults),
-                                );
-                            } else {
-                                self.record_skip(
-                                    DiagnosticCode::SkippedCandidate,
-                                    format!(
-                                        "'{name}' is a PascalCase function declaration whose first param's type \
-                                         annotation isn't a recognizable props type reference"
-                                    ),
-                                    type_ann.span,
-                                );
-                            }
-                        } else {
+        if self.is_tsx
+            && let Some(id) = &func.id
+        {
+            let name = id.name.as_str();
+            let declaration =
+                matches!(func.r#type, FunctionType::FunctionDeclaration | FunctionType::TSDeclareFunction);
+            if is_pascal_case(name) && declaration && self.function_depth > 0 {
+                let typed = func.params.items.first().is_some_and(|p| p.type_annotation.is_some());
+                let shape = super::evidence::FunctionShape::of_function(func);
+                if typed && super::evidence::renders(&shape, &*self).is_ok() {
+                    self.skip_local_component(name, func.span);
+                }
+            } else if is_pascal_case(name)
+                && declaration
+                && let Some(first_param) = func.params.items.first()
+            {
+                if let Some(type_ann) = &first_param.type_annotation {
+                    if let Err(reason) =
+                        super::evidence::renders(&super::evidence::FunctionShape::of_function(func), &*self)
+                    {
+                        // A `declare function` with a non-element return type is an API declaration, not a
+                        // component that failed to qualify: lib.dom.d.ts alone declares dozens of them.
+                        if func.r#type == FunctionType::FunctionDeclaration {
                             self.record_skip(
                                 DiagnosticCode::SkippedCandidate,
-                                format!("'{name}' is a PascalCase function declaration with an untyped first param"),
-                                first_param.span,
+                                format!("'{name}' takes a typed props parameter but {reason}"),
+                                func.span,
                             );
                         }
+                    } else if let Some((props_name, type_args)) =
+                        self.extract_type_name_from_type(&type_ann.type_annotation)
+                    {
+                        if func.params.items.len() > 1 {
+                            self.takes_a_second_parameter.insert(name.into());
+                        }
+                        let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
+                        let param_defaults = self.extract_param_defaults(&func.params);
+                        self.data.component_mappings.push(
+                            ComponentMapping::new(
+                                name.to_owned(),
+                                props_name,
+                                self.file_path.clone(),
+                                func.span.start,
+                                func.span.end,
+                                DetectionRule::FunctionDeclaration,
+                            )
+                            .with_props_type_args(type_args)
+                            .with_doc(description, tags)
+                            .with_param_defaults(param_defaults),
+                        );
+                    } else {
+                        self.record_skip(
+                            DiagnosticCode::SkippedCandidate,
+                            format!(
+                                "'{name}' is a PascalCase function declaration whose first param's type \
+                                         annotation isn't a recognizable props type reference"
+                            ),
+                            type_ann.span,
+                        );
                     }
+                } else {
+                    self.record_skip(
+                        DiagnosticCode::SkippedCandidate,
+                        format!("'{name}' is a PascalCase function declaration with an untyped first param"),
+                        first_param.span,
+                    );
                 }
             }
         }
@@ -490,9 +547,45 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.props_params.pop();
     }
 
+    fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        self.block_depth += 1;
+        self.enter_scope(ScopeKind::Block);
+        walk::walk_block_statement(self, block);
+        self.leave_scope();
+        self.block_depth -= 1;
+    }
+
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        self.block_depth += 1;
+        self.enter_scope(ScopeKind::Block);
+        walk::walk_static_block(self, block);
+        self.leave_scope();
+        self.block_depth -= 1;
+    }
+
+    fn visit_switch_statement(&mut self, switch: &SwitchStatement<'a>) {
+        self.block_depth += 1;
+        walk::walk_switch_statement(self, switch);
+        self.block_depth -= 1;
+    }
+
+    /// Each `case` or `default` clause is a scope of its own for the declarations directly in it, though in
+    /// JavaScript the whole `switch` body shares one lexical scope.
+    fn visit_switch_case(&mut self, case: &SwitchCase<'a>) {
+        self.enter_scope(ScopeKind::SwitchCase);
+        walk::walk_switch_case(self, case);
+        self.leave_scope();
+    }
+
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         self.function_depth += 1;
+        self.enter_scope(ScopeKind::FunctionBody);
+        if self.body_result_keys.iter().any(|(_, start)| *start == body.span.start) {
+            let scope = self.current_scope();
+            self.body_scopes.insert(body.span.start, scope);
+        }
         walk::walk_function_body(self, body);
+        self.leave_scope();
         self.function_depth -= 1;
     }
 
@@ -508,7 +601,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 .as_ref()
                 .map(|declaration| declaration.params.iter().map(|p| p.name.name.as_str().into()).collect())
                 .unwrap_or_default();
-            self.pending_classes.push((self.scoped_key(id.name.as_str()), id.name.as_str().into(), params));
+            let scope = self.current_scope();
+            self.pending_classes.push((self.scoped_key(id.name.as_str()), id.name.as_str().into(), params, scope));
         }
         if self.is_tsx && self.function_depth > 0 {
             if let Some(id) = &class.id {
@@ -517,30 +611,30 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     self.skip_local_component(name, class.span);
                 }
             }
-        } else if self.is_tsx {
-            if let Some(id) = &class.id {
-                let name = id.name.as_str();
-                if is_pascal_case(name) {
-                    if let Some(family) = self.super_class_is_component_family(class) {
-                        if let Some(mapping) = self.try_class_component(class, name) {
-                            self.data.component_mappings.push(mapping);
-                        } else if class.heritage.as_ref().is_some_and(|h| h.type_arguments.is_some()) {
-                            // Extends Component/PureComponent WITH type args, but the
-                            // props argument itself is an exotic shape
-                            // extract_type_name_from_type doesn't match. No type args
-                            // at all is left silent — mirrors visit_function's Pattern 4
-                            // zero-params contract (a genuinely untyped candidate, not a
-                            // malformed one).
-                            self.record_skip(
-                                DiagnosticCode::SkippedCandidate,
-                                format!(
-                                    "'{name}' is a class component extending {family} whose props type \
+        } else if self.is_tsx
+            && let Some(id) = &class.id
+        {
+            let name = id.name.as_str();
+            if is_pascal_case(name)
+                && let Some(family) = self.super_class_is_component_family(class)
+            {
+                if let Some(mapping) = self.try_class_component(class, name) {
+                    self.data.component_mappings.push(mapping);
+                } else if class.heritage.as_ref().is_some_and(|h| h.type_arguments.is_some()) {
+                    // Extends Component/PureComponent WITH type args, but the
+                    // props argument itself is an exotic shape
+                    // extract_type_name_from_type doesn't match. No type args
+                    // at all is left silent — mirrors visit_function's Pattern 4
+                    // zero-params contract (a genuinely untyped candidate, not a
+                    // malformed one).
+                    self.record_skip(
+                        DiagnosticCode::SkippedCandidate,
+                        format!(
+                            "'{name}' is a class component extending {family} whose props type \
                                      argument isn't a recognizable props type reference"
-                                ),
-                                class.span,
-                            );
-                        }
-                    }
+                        ),
+                        class.span,
+                    );
                 }
             }
         }
@@ -574,36 +668,32 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 _ => None,
             },
         };
-        match local {
-            Some(name) => {
-                self.record_exported_local(name);
-                // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
-                // when it is an import, as `export { Tooltip as default }` is.
-                self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));
-                self.data.exports.push(LexedExport::LocalDeclaration {
-                    name: "default".to_owned(),
-                    is_type_only: false,
-                    declared_as: Some(name.to_owned()),
-                });
-            }
-            None => {
-                if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
-                    self.record_exported_local(&name);
-                }
-            }
+        if let Some(name) = local {
+            self.record_exported_local(name, "default");
+            // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
+            // when it is an import, as `export { Tooltip as default }` is.
+            self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));
+            self.data.exports.push(LexedExport::LocalDeclaration {
+                name: "default".to_owned(),
+                is_type_only: false,
+                declared_as: Some(name.to_owned()),
+            });
         }
         // An anonymous default export has no binding name, so the component is named after its file, as
-        // `try_anonymous_default_export_component` already does for `export default function(props: Props) {}`.
+        // `try_anonymous_default_export_component` already does for `export default function(props: Props) {}`. It is
+        // no binding, so its export is its own and a component of the file with that name is another.
+        let mut is_a_component = false;
         if self.is_tsx {
             match &node.declaration {
                 ExportDefaultDeclarationKind::FunctionDeclaration(func) if func.id.is_none() => {
                     self.try_anonymous_default_export_component(func);
                 }
                 ExportDefaultDeclarationKind::ClassDeclaration(class) if class.id.is_none() => {
-                    if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
-                        if let Some(mapping) = self.try_class_component(class, &name) {
-                            self.data.component_mappings.push(mapping);
-                        }
+                    if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path)
+                        && let Some(mapping) = self.try_class_component(class, &name)
+                    {
+                        self.anonymous_default = Some(mapping.span_start);
+                        self.data.component_mappings.push(mapping.without_binding());
                     }
                 }
                 // `export default (props: P) => …`, `export default memo(function Badge(…))`,
@@ -616,13 +706,24 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         self.decline_reason = None;
                         self.argument_declined = false;
                         if let Some(mapping) = self.detect_component(&binding, &name) {
-                            self.data.component_mappings.push(mapping);
-                        } else {
-                            self.try_record_wrapper_call(&binding, &name);
+                            self.anonymous_default = Some(mapping.span_start);
+                            self.data.component_mappings.push(mapping.without_binding());
+                            is_a_component = true;
+                        } else if self.try_record_wrapper_call(&binding, &name) {
+                            self.anonymous_default = Some(node.span.start);
+                            is_a_component = true;
                         }
                     }
                 }
             }
+        }
+        // `export default React.forwardRef(Inner) as T`: the default is the component the call wraps.
+        if !is_a_component
+            && let Some(expression) = node.declaration.as_expression()
+            && let Some(wrapped) = self.component_wrapped_by(expression)
+        {
+            self.record_exported_local(&wrapped, "default");
+            self.record_object_assign_declarator(&wrapped, node.declaration.as_expression());
         }
         walk::walk_export_default_declaration(self, node);
     }
@@ -633,6 +734,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.record_member_assignment(node);
         if self.is_tsx {
             self.try_scan_object_assign_sub_components(node);
+            self.try_scan_member_assigned_sub_component(node);
         }
         walk::walk_expression_statement(self, node);
     }

@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "a",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "b",
+        "of": "string"
+      }
+    ],
+    "alias": "Kind"
+  },
+  "text": "Kind | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/20-declare-enum.tsx"
+    },
+    "order": null
+  }
+}

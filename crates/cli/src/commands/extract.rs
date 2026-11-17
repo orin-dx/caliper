@@ -2,7 +2,7 @@ use std::io::Write;
 
 use miette::{IntoDiagnostic, Result, WrapErr};
 
-use crate::config::{build_options, BuildOptionsArgs};
+use crate::config::{BuildOptionsArgs, build_options};
 use crate::output::{print_diagnostics, print_summary, write_atomic};
 
 /// Returns the process exit code (0 = success, 2 = extraction reported an
@@ -29,11 +29,8 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
     let mut options = options;
-    if args.experimental_semantic_types {
-        options.experimental_semantic_types = true;
-    }
-    if let Some(path) = &args.tsc_path {
-        options.semantic_tsc_path = Some(path.into());
+    if args.no_checker {
+        options.checker = false;
     }
 
     let pb = if !quiet && !args.json {
@@ -46,9 +43,34 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         None
     };
 
-    let mut output = caliper_docgen_core::pipeline::extract(&options);
-    if options.experimental_semantic_types {
-        apply_semantic_backend(&options, &mut output);
+    let timeout = std::time::Duration::from_millis(args.semantic_timeout_ms);
+    let mut started = Prestarted::default();
+    let mut output = match options.checker {
+        // What the checker's run needs that the structural pass does not decide starts now, beside the pass.
+        true => {
+            let cache_dir = options.effective_cache_dir();
+            // With an answer kept the checker is most likely not needed, and a program opened for nothing takes the
+            // structural pass's cores; so only a run with none kept (or a run with the cache off) opens it early.
+            let open_early =
+                !(options.use_cache && cache_dir.join(caliper_docgen_semantic::KEPT_ANSWER_FILE).is_file());
+            let setup = semantic_setup(&options);
+            let (keep, early) = (options.use_cache, &mut started.early);
+            caliper_docgen_core::pipeline::extract_with_early_roots(&options, |roots| {
+                if let (true, Some((root, tsconfig))) = (open_early, setup) {
+                    *early = caliper_docgen_semantic::start_early(root, tsconfig, timeout, &roots, keep);
+                }
+            })
+        }
+        false => caliper_docgen_core::pipeline::extract(&options),
+    };
+    if options.checker {
+        use caliper_docgen_core::types::semantic::ResolverFacts;
+        let resolver = match (args.no_structural_fallback, args.no_resolver_facts) {
+            (true, _) => ResolverFacts::NoFallback,
+            (false, true) => ResolverFacts::Off,
+            (false, false) => ResolverFacts::Used,
+        };
+        apply_semantic_backend(&options, timeout, resolver, None, Pass::Extract(started), &mut output);
     }
 
     if let Some(pb) = pb {
@@ -66,15 +88,23 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
             print_diagnostics(&output.diagnostics);
         }
 
-        let json = match args.format {
-            crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
-            crate::OutputFormat::Rdt => serialize_rdt(&output, args.include_unexported).into_diagnostic()?,
-            crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
-        };
+        if matches!(args.format, crate::OutputFormat::Rdt) && args.out.is_none() {
+            // The document is written as it is rendered, not built whole first.
+            let mut stdout = std::io::BufWriter::with_capacity(1 << 16, std::io::stdout().lock());
+            caliper_docgen_core::pipeline::rdt::write(&output, args.include_unexported, &mut stdout)
+                .into_diagnostic()?;
+            writeln!(stdout).and_then(|()| stdout.flush()).into_diagnostic()?;
+        } else {
+            let json = match args.format {
+                crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
+                crate::OutputFormat::Rdt => serialize_rdt(&output, args.include_unexported).into_diagnostic()?,
+                crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
+            };
 
-        match args.out {
-            Some(ref path) => write_atomic(path, &json).into_diagnostic().wrap_err(format!("Writing to {path}"))?,
-            None => println!("{json}"),
+            match args.out {
+                Some(ref path) => write_atomic(path, &json).into_diagnostic().wrap_err(format!("Writing to {path}"))?,
+                None => println!("{json}"),
+            }
         }
     }
 
@@ -87,32 +117,101 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     Ok(exit_code)
 }
 
-/// Resolve the components the structural pass found with TypeScript's checker and merge the answer over `output`. An
-/// unavailable checker leaves `output` as it was, plus one diagnostic.
-fn apply_semantic_backend(
+/// Which command asks the checker for the whole project.
+enum Pass {
+    /// `extract`: the process ends with the run, and the answer may be kept on disk for the next. Carries what the run
+    /// started while the structural pass ran.
+    Extract(Prestarted),
+    /// `check` and `inspect`: the answer is not kept.
+    Check,
+}
+
+/// What `extract` started while the structural pass ran.
+#[derive(Default)]
+struct Prestarted {
+    /// The checker's program, opened over the root files the structural pass predicted.
+    early: Option<caliper_docgen_semantic::EarlyStart>,
+}
+
+/// The project root the checker runs in and the tsconfig it reads, as the request will have them; `None` with no
+/// project directory.
+fn semantic_setup(
     options: &caliper_docgen_core::pipeline::PipelineOptions,
-    output: &mut caliper_docgen_core::types::ExtractionOutput,
-) {
-    let project_root = options
+) -> Option<(camino::Utf8PathBuf, Option<camino::Utf8PathBuf>)> {
+    let root = options
         .src_dirs
         .first()
-        .and_then(|dir| std::fs::canonicalize(dir).ok())
-        .and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok())
-        .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()));
-    let Some(project_root) = project_root else {
+        .and_then(|dir| caliper_docgen_core::canonical_path::canonicalize(dir).ok())
+        .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()))?;
+    let tsconfig = options
+        .tsconfig_path
+        .clone()
+        .or_else(|| root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
+    Some((root, tsconfig))
+}
+
+/// Resolve the components the structural pass found with TypeScript's checker, all in one program, and merge the answer
+/// over `output`; with `only`, just the component under that key. The run waits for the checker; one request (or its
+/// start) that takes longer than `timeout`, like an unavailable checker, leaves `output` as it was, plus one
+/// diagnostic. `pass` says which command asks ([`Pass`]): `extract`'s process ends with the run
+/// ([`caliper_docgen_semantic::Teardown::OneShot`]), and with the cache on its answer is kept in the cache directory and
+/// reused while the checker would read the disk as it did (`caliper_docgen_semantic::resolve_cached`).
+fn apply_semantic_backend(
+    options: &caliper_docgen_core::pipeline::PipelineOptions,
+    timeout: std::time::Duration,
+    resolver: caliper_docgen_core::types::semantic::ResolverFacts,
+    only: Option<&str>,
+    pass: Pass,
+    output: &mut caliper_docgen_core::types::ExtractionOutput,
+) {
+    let Some((project_root, tsconfig)) = semantic_setup(options) else {
         let outcome = caliper_docgen_core::types::semantic::SemanticOutcome::unavailable("no project directory");
         caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
         return;
     };
-    let mut request =
-        caliper_docgen_semantic::SemanticRequest::new(project_root, caliper_docgen_semantic::targets_of(output));
-    request.tsconfig = options
-        .tsconfig_path
-        .clone()
-        .or_else(|| request.project_root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
-    request.tsc_path = options.semantic_tsc_path.clone();
-    let outcome = caliper_docgen_semantic::resolve(request);
-    caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
+    let cx = caliper_docgen_core::types::options::CollapseContext::of(options);
+    // The merge below is asked with the same `cx` over this `output`, so the props it leaves to a layer go unconverted.
+    let mut targets = caliper_docgen_semantic::targets_collapsing(output, cx);
+    if let Some(key) = only {
+        targets.retain(|target| target.key == key);
+    }
+    resolver.ready(&mut targets);
+    let mut request = caliper_docgen_semantic::SemanticRequest::new(project_root, targets);
+    request.tsconfig = tsconfig;
+    request.request_timeout = timeout;
+    let (teardown, started) = match pass {
+        Pass::Extract(started) => (caliper_docgen_semantic::Teardown::OneShot, Some(started)),
+        Pass::Check => (caliper_docgen_semantic::Teardown::Session, None),
+    };
+    let request = request.with_teardown(teardown);
+    let outcome = match started {
+        Some(started) if options.use_cache => {
+            caliper_docgen_semantic::resolve_cached_early(request, &options.effective_cache_dir(), started.early)
+        }
+        Some(started) => caliper_docgen_semantic::resolve_early(request, started.early),
+        None => caliper_docgen_semantic::resolve(request),
+    };
+    caliper_docgen_core::types::semantic::merge_semantic_in(
+        output,
+        outcome,
+        resolver,
+        caliper_docgen_core::types::options::CollapseContext::of(options),
+    );
+}
+
+/// What `check` and `inspect` run: unless `--no-checker` or the config turned it off, [`apply_semantic_backend`] at the
+/// default timeout, with the resolver's facts, for `only` the component under that key when given.
+pub(crate) fn apply_checker(
+    options: &caliper_docgen_core::pipeline::PipelineOptions,
+    no_checker: bool,
+    only: Option<&str>,
+    output: &mut caliper_docgen_core::types::ExtractionOutput,
+) {
+    if options.checker && !no_checker {
+        let timeout = std::time::Duration::from_millis(crate::DEFAULT_SEMANTIC_TIMEOUT_MS);
+        let resolver = caliper_docgen_core::types::semantic::ResolverFacts::Used;
+        apply_semantic_backend(options, timeout, resolver, only, Pass::Check, output);
+    }
 }
 
 /// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding. Like react-docgen-typescript, only

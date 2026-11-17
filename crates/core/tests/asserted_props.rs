@@ -12,9 +12,9 @@
 
 use std::collections::BTreeMap;
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Prop name to `(required, type)` of the component `name` in `source`.
 fn props_of(source: &str, name: &str) -> BTreeMap<String, (bool, Value)> {
@@ -83,7 +83,9 @@ fn an_assertion_to_a_type_that_is_not_a_one_parameter_function_changes_nothing()
         props_of(&format!("{DECLARATION}\nexport default Masonry as React.ComponentType<MasonryProps>\n"), "Masonry");
     assert!(!props.contains_key("children"), "{:?}", props.keys());
     let props = props_of(
-        &format!("{DECLARATION}\nexport default Masonry as unknown as (props: React.PropsWithChildren<MasonryProps>) => null\n"),
+        &format!(
+            "{DECLARATION}\nexport default Masonry as unknown as (props: React.PropsWithChildren<MasonryProps>) => null\n"
+        ),
         "Masonry",
     );
     assert!(!props.contains_key("children"), "a double assertion is not read: {:?}", props.keys());

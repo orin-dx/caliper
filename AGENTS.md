@@ -1,10 +1,11 @@
 # caliper-docgen
 
-10-100x faster than react-docgen-typescript. OXC parses TypeScript/TSX; we extract React component props and emit RDT-compatible JSON via `--format rdt`. See `docs/STATUS.md` for current state and known gaps.
+Faster than react-docgen-typescript; measured numbers are in `docs/performance.md`. OXC parses TypeScript/TSX; we extract React component props and emit RDT-compatible JSON via `--format rdt`. See `docs/STATUS.md` for current state and known gaps.
 
 ## Commands
 
 ```bash
+just lint doc-check machete typos          # what CI runs; pass before pushing
 cargo test -p caliper-docgen-core          # unit + snapshot tests
 cargo clippy -p caliper-docgen-core -- -D warnings
 cargo build --release                         # full build including CLI
@@ -47,11 +48,35 @@ Two habits that repeatedly caught real bugs during the 2026-08-12 spec-validatio
 - `crates/core` — pure extraction logic; @crates/core/AGENTS.md
 - `crates/cli` — clap CLI, no logic; @crates/cli/AGENTS.md
 - `crates/binding` — thin NAPI wrapper, delegates to core
+- `crates/semantic` — TypeScript 7.1 checker backend, on by default (`docs/type-checker-integration.md`)
+
+## Scripts
+
+No new sh, py or mjs script unless a CI job, the weekly or a documented recipe calls it; prefer a Rust test or the existing oracle TypeScript. A measurement run once is recorded in docs (`docs/measurement.md`, `docs/gate-measurements.md`), not committed as a script. Each script's caller is listed in `docs/measurement.md`.
+
+## Plugins
+
+Start work with `/wisp:work`, or the mode directly so its checks run:
+
+- Options before deciding: `/wisp:explore`. Does it work: `/wisp:spike`.
+- Bug or review findings: `/wisp:fix`. Real feature or shared change: `/wisp:build`.
+- Verify or find bugs: `/wisp:check`. Commit, changeset or release: `/wisp:ship`.
+
+State the tier, the brief and the evidence bar first; end with the evidence and a "Not verified:" list.
+
+Packs: rust-house, ts-house
+
+Pull requests are opened by Entire from the branch's trail, so `/wisp:ship` stops at the commit: push the branch and create or link its trail (`entire trail create`). Do not open the PR with `gh`.
 
 ## Writing and commits
 
 - Succinct: short sentences, bullets, tables. No backstory, hedging or filler. Banned words are in `docs/adr/README.md`.
-- Changesets become bullets under generated changelog headings. Write one short, consumer-facing paragraph per changeset; start with the outcome, and include an upgrade action or cost when needed. Do not start the body with a heading or list marker.
+- Changesets live in `.changeset/` as one file per consumer-visible topic, with a front matter line per affected package (`cargo/caliper-docgen: patch`, `npm/caliper-docgen: minor`). Changesets become the project's changelog, so write them for the people who use it, not for the implementer.
+  - Open with a bold lead-in naming the change as the user sees it, then one line on its value: what they can now do or what changed for them.
+  - When there is more to say, add short bullets in this order: why it matters, how to adopt it (commands, configuration, migration), and limits they will hit. Use sub-bullets for detail.
+  - Group a longer entry under bold labels such as **Upgrading** or **Scripting**. Do not use `#` headings; the changelog supplies those.
+  - Put a breaking change in its own paragraph starting `**Breaking:**` (old behavior, new behavior, what to do), and a step users must take in one starting `**Action:**`. Never inside a bullet: the release PR lists them under "Read before merging" only as paragraphs.
+  - One idea per bullet. Leave out internals unless the user must know them.
 - Never hard-wrap Markdown, commit messages or PR descriptions: one line per paragraph.
 - Comments: only the non-obvious why, no history (the commit records it). Fill to 120 columns (`.rustfmt.toml`). Rewriting a comment block counts as writing it: re-fill and cut it, don't inherit the old wrapping.
 - Commits: imperative subject, at most one or two sentences of why, no list of what changed, no "This commit...". Skip the body when the subject says it all.

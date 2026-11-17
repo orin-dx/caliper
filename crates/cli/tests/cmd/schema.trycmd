@@ -31,6 +31,48 @@ $ caliper-docgen schema
       "type": "string",
       "pattern": "^[0-9a-f]{16}$"
     },
+    "componentExport": {
+      "description": "One way a module exports a component: `Card` for `export function Card` and for `export { _Card as Card }`, `default` for `export default Menu`, and for a sub-component attached to an exported component the export it hangs from with the properties that reach it, so `Menu.Item = Item` beside `export default Menu` is `default` with members `[/"Item/"]`",
+      "type": "object",
+      "required": [
+        "name",
+        "members"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "opaqueReason": {
+      "description": "Why a prop type is `opaque`: `type` of the `reason` in an `{ kind: /"opaque/" }` type, with the named fields of its variant",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "conditionalType",
+            "mappedType",
+            "moduleAugmentation",
+            "runtimeDependent",
+            "unresolvableImport",
+            "pandaCodegenMissing",
+            "depthExceeded",
+            "indexedAccess",
+            "unsupportedExpression"
+          ]
+        }
+      }
+    },
     "prop": {
       "type": "object",
       "required": [
@@ -79,7 +121,7 @@ $ caliper-docgen schema
     "schemaVersion": {
       "description": "The shape of this JSON (ADR 0017). A reader checks it equals the version it was written for",
       "type": "integer",
-      "const": 4
+      "const": 8
     },
     "components": {
       "type": "object",
@@ -135,6 +177,13 @@ $ caliper-docgen schema
                 },
                 "members": {
                   "$ref": "#/definitions/nameListId"
+                },
+                "used": {
+                  "description": "The members of this collapsed layer relevance evidence puts forward (ADR 0028): ambient members consumers pass at the call-site floor or the body reads, in the order of `members`. Absent when none is",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -176,12 +225,23 @@ $ caliper-docgen schema
               "anonymousDefaultExport",
               "attachedSubComponent",
               "typedFunctionExpression",
-              "wrapperTypeArgument"
+              "wrapperTypeArgument",
+              "importedMemberAlias",
+              "memoExoticDecl",
+              "taggedFactory",
+              "factoryResult"
             ]
           },
           "exported": {
             "description": "Whether its module exports it, directly or as a sub-component attached to an exported component",
             "type": "boolean"
+          },
+          "exports": {
+            "description": "How its module exports it, in source order (ADR 0027). `exported` is whether there are any",
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/componentExport"
+            }
           }
         }
       }

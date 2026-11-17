@@ -7,33 +7,32 @@ install-tools:
     cargo install cargo-nextest --locked
     cargo install cargo-llvm-cov --locked
     cargo install cargo-machete --locked
-    cargo install cargo-mutants --locked
     cargo install cargo-semver-checks --locked
     rustup component add llvm-tools-preview
 
-# Check the public Rust API of the core crate for SemVer breaks against the last published version. The version only
-# moves in the release PR, so a break is accepted when a pending minor or major changeset covers the crate.
+# Check the public Rust API of every published library crate for SemVer breaks against the last published version.
+# The version only moves in the release PR, so a break is accepted when a pending minor or major changeset covers the
+# crate. The CLI crate is a binary and has no library API.
 semver:
     #!/usr/bin/env bash
     set -uo pipefail
-    if cargo semver-checks check-release -p caliper-docgen-core; then
-        exit 0
-    fi
-    if grep -qsE '^cargo/caliper-docgen-core: (minor|major)$' .changeset/*.md; then
-        echo "breaking API changes are covered by a pending minor or major changeset for caliper-docgen-core"
-        exit 0
-    fi
-    echo "breaking API changes need a minor or major changeset for cargo/caliper-docgen-core" >&2
-    exit 1
+    status=0
+    for crate in caliper-docgen-core caliper-docgen-semantic; do
+        if cargo semver-checks check-release -p "$crate"; then
+            continue
+        fi
+        if grep -qsE "^cargo/$crate: (minor|major)$" .changeset/*.md; then
+            echo "breaking API changes are covered by a pending minor or major changeset for $crate"
+            continue
+        fi
+        echo "breaking API changes need a minor or major changeset for cargo/$crate" >&2
+        status=1
+    done
+    exit "$status"
 
 # Build with the minimum supported Rust version declared in Cargo.toml.
 msrv:
     cargo +$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml) check --workspace --exclude caliper-docgen-napi --locked
-
-# Install all dependencies
-install:
-    pnpm install
-    cargo fetch
 
 # Build all projects. Rust crates build via one workspace-wide cargo
 # invocation, not `moon run :build` — that fans out one `cargo build -p`
@@ -47,8 +46,8 @@ build:
     moon run napi:build vite-plugin:build
     cargo build --release
 
-# Run all tests (Rust + TypeScript)
-test: test-rust test-ts
+# Run all tests (Rust, the native binding crate, TypeScript, Python)
+test: test-rust test-napi test-ts test-py
 
 # Run Rust tests (via nextest, which doesn't run doctests — paired
 # with `cargo test --doc` to cover those too)
@@ -56,11 +55,43 @@ test-rust:
     cargo nextest run --workspace --exclude caliper-docgen-napi --locked
     cargo test --doc --workspace --exclude caliper-docgen-napi
 
+# The binding crate is excluded from the workspace recipes, so its own unit tests run here.
+test-napi:
+    cargo nextest run -p caliper-docgen-napi --locked
+
+# Run the Python tests for the scripts (standard library only, no dependencies)
+test-py:
+    python3 -m unittest discover -s scripts -p 'test_*.py'
+
 # Run TypeScript tests
 test-ts:
     pnpm --filter caliper-docgen-vite-plugin test
     pnpm --filter caliper-docgen-storybook test
     pnpm --filter caliper-docgen-oracle test
+
+# Compare the Go checker and tsrs on every construct-suite row (run on every tsrs bump; see apps/oracle/construct-suite/README.md)
+test-parity:
+    pnpm --filter caliper-docgen-oracle construct:parity
+
+# The checker gates of ADR 0026, with nothing allowed to skip: the golden check, tsrs-against-Go parity, and the construct
+# suite through the checker path (the release binary, which links tsrs) held to checker-expectations.json; see
+# apps/oracle/construct-suite/README.md.
+test-checker-lane:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release --locked -p caliper-docgen
+    export REQUIRE_CALIPER_BIN=1 CALIPER_BIN="$PWD/target/release/caliper-docgen"
+    pnpm --filter caliper-docgen-oracle construct:check
+    pnpm --filter caliper-docgen-oracle construct:parity
+    CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker
+    pnpm --filter caliper-docgen-oracle exec vitest run tests/construct-checker-lane.test.ts
+    # S5's gate on tsrs: generic components instantiated.
+    cargo test --locked -p caliper-docgen-semantic --lib instantiate
+    cargo test --locked -p caliper-docgen-semantic --test instantiate
+    # S6's gate on tsrs: a kept snapshot brought up to date, and an edit nobody announced caught loudly.
+    cargo test --locked -p caliper-docgen-semantic --test watch
+    # The built-in checker's stack holds a type 10,000 deep without aborting its host (trail 369): release only.
+    cargo test --release --locked -p caliper-docgen-semantic --lib a_type_nested_ten_thousand_deep -- --ignored --exact checker::tests::a_type_nested_ten_thousand_deep_is_printed_in_full
 
 # Build the native binding and run the Vite plugin against it
 test-integration:
@@ -68,13 +99,31 @@ test-integration:
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-vite-plugin test:integration
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-storybook test:integration
 
+# Measure ADR 0026's memory, determinism, first-answer and watch gates on the built-in checker, as the addon runs it
+# (docs/gate-measurements.md). Builds the large project outside the repository (GATE_FIXTURES, default
+# ~/Projects/caliper-fixtures/gate-large), so it needs the network or a warm pnpm store; `just gate-measure --runs 3`
+# passes options to every gate. Takes minutes, runs every gate, and fails if any failed.
+gate-measure *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fixtures="${GATE_FIXTURES:-$HOME/Projects/caliper-fixtures/gate-large}"
+    node scripts/gate_fixtures.mjs "$fixtures"
+    cargo build --release --locked -p caliper-docgen-semantic --example gate_harness
+    failed=0
+    for gate in memory determinism first-answer watch; do
+        target/release/examples/gate_harness "$gate" --src "$fixtures/src" --tsc built-in {{ args }} || failed=1
+    done
+    exit "$failed"
+
+# The deterministic construct suite on the release binary: goldens current, then the suite, which must not skip
+test-construct:
+    cargo build --release -p caliper-docgen --locked
+    CALIPER_BIN="$PWD/target/release/caliper-docgen" pnpm --filter caliper-docgen-oracle construct:check
+    CALIPER_BIN="$PWD/target/release/caliper-docgen" REQUIRE_CALIPER_BIN=1 pnpm --filter caliper-docgen-oracle test
+
 # Pack the npm packages and check napi arrives only as vite-plugin's transitive dependency (pm: npm or pnpm)
 verify-install pm="pnpm":
     scripts/verify-install.sh {{ pm }}
-
-# Run the criterion benchmarks (single fixtures); `just bench` compares a whole library against main
-bench-criterion:
-    cargo bench --workspace --exclude caliper-docgen-napi
 
 # Rust and TypeScript line coverage; with a threshold, fails if either is below it
 coverage threshold="": (coverage-rust threshold) (coverage-ts threshold)
@@ -94,10 +143,6 @@ coverage-ts threshold="":
     pnpm --filter caliper-docgen-vite-plugin exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
     pnpm --filter caliper-docgen-storybook exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
 
-# Rust coverage report, opened in the browser
-coverage-html:
-    cargo llvm-cov nextest --workspace --exclude caliper-docgen-napi --locked --html --open
-
 # Documentation build check (warnings, including broken intra-doc links,
 # treated as errors)
 doc-check:
@@ -107,10 +152,6 @@ doc-check:
 machete:
     cargo machete
 
-# Mutation testing sweep — slow, run on demand, not part of `just ci`
-mutants:
-    cargo mutants --workspace --exclude caliper-docgen-napi
-
 ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src/**/*.ts' 'packages/storybook/tests/**/*.ts' 'packages/storybook/*.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/oracle/src/**/*.ts' 'apps/oracle/tests/**/*.ts'"
 ts_src_only := "'packages/vite-plugin/src' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src' 'packages/storybook/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/oracle/src'"
 ts_tests_only := "'packages/vite-plugin/tests' 'packages/storybook/tests' 'apps/oracle/tests'"
@@ -119,7 +160,8 @@ md_src := "'**/*.md' '!node_modules/**' '!target/**' '!dist/**'"
 # Lint and format check
 lint:
     cargo fmt --check
-    cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
+    cargo clippy --workspace --all-targets --locked -- -D warnings
+    node scripts/check-packaging.mjs
     pnpm exec oxfmt --check {{ts_src}}
     pnpm exec oxfmt --check {{md_src}}
     pnpm exec oxlint {{ts_src_only}}
@@ -150,7 +192,7 @@ zizmor:
 # `just ci` can't drift apart.
 pre-commit:
     cargo fmt --check
-    cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
+    cargo clippy --workspace --all-targets --locked -- -D warnings
     typos
     cargo deny check
 
@@ -160,23 +202,3 @@ ci: lint test deny typos zizmor doc-check machete semver msrv (coverage "90")
 # Time and memory of this checkout (or a branch) against origin/main on Mantine and Chakra; see docs/measurement.md.
 bench *args:
     python3 scripts/bench.py {{args}}
-
-# Clean build artifacts
-clean:
-    moon clean
-    cargo clean
-    rm -rf node_modules
-
-# Setup toolchain via proto
-setup:
-    proto install
-    pnpm install
-    moon sync vcs-hooks
-
-# Run moon commands
-moon *args:
-    moon {{args}}
-
-# Run cargo commands
-cargo *args:
-    cargo {{args}}

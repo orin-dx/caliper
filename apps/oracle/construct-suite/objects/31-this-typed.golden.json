@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "next",
+          "value"
+        ],
+        "index": false,
+        "alias": "Chain"
+      }
+    ],
+    "alias": "Chain"
+  },
+  "text": "Chain | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/31-this-typed.tsx"
+    },
+    "order": null
+  }
+}

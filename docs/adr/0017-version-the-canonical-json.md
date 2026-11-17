@@ -21,7 +21,7 @@ Every canonical JSON document carries `schemaVersion`, an integer: `ExtractionOu
 - A mismatched install fails at the first read with a message that says what to update, instead of a type error deep in a consumer.
 - Every shape change needs a deliberate bump, a changeset and a reader update. That is the point, and it costs a small coordinated release each time.
 - An old reader cannot read new output at all, even the parts that didn't change. We accept that over a reader that half-works.
-- `ExtractionOutput`'s `Deserialize` rejects a version other than `SCHEMA_VERSION`. Reading older versions would need a migration per version, which nothing needs today.
+- The readers (the Vite plugin and the Storybook addon; `ExtractionOutput` once had a `Deserialize`, removed as unused) reject a version other than `SCHEMA_VERSION`. Reading older versions would need a migration per version, which nothing needs today.
 
 ## Alternatives considered
 

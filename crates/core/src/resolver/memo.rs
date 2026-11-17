@@ -5,7 +5,7 @@
 //! defaults, and on the depth it is reached at. So a recording keeps every read the resolution made of those
 //! (`StateReads`), and another component reuses it only when its own state gives the same answer to each one. Then
 //! the resolution would take exactly the same steps, so the recording replays its effects instead: the chain itself,
-//! with its props shared rather than copied, its diagnostics, the cycle-set and in-scope additions, whether it showed
+//! with its props shared rather than copied, its diagnostics, the cycle-set additions, whether it showed
 //! an unevaluated alias by name, and the files watch mode must re-resolve the component for.
 //!
 //! Only the first read of a key says what the state held on entry: a later one may see what the resolution itself
@@ -26,7 +26,7 @@ use rustc_hash::FxHashSet;
 use crate::types::{ComponentMapping, Diagnostic, ResolveState, StateReads};
 
 use super::deps::Dependencies;
-use super::{ResolvedChain, MAX_DEPTH, MAX_NAMED_NESTING};
+use super::{MAX_DEPTH, MAX_NAMED_NESTING, ResolvedChain};
 use crate::types::PropType;
 
 /// Recordings kept per interface and depth. A component whose state differs from all of them resolves the chain itself.
@@ -116,6 +116,8 @@ struct Recording<T> {
     deps: Dependencies,
     /// `ResolveState::expand_all` while recording: a chain with collapsed sources must not answer an expanding state.
     expand_all: bool,
+    /// `ResolveState::omitted` while recording: which sources collapse depends on it.
+    omitted: Option<Arc<rustc_hash::FxHashSet<String>>>,
     keys_only: bool,
     /// The depth the resolution started at, and how much deeper than that it checked against the limit. Depth decides
     /// the result only through the limit and `depth > 0` (collapse, which the key holds), so a state that
@@ -151,10 +153,15 @@ impl<T: Clone> Recording<T> {
         depth_fits
             && state.named_in_progress.len() + self.reach <= MAX_NAMED_NESTING
             && self.expand_all == state.expand_all
+            && self.omitted == state.omitted
             && self.keys_only == state.keys_only
             && reads.visited.iter().all(|(key, present)| state.visited.contains(key) == *present)
             && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(key) == *present)
-            && reads.in_scope.iter().all(|(name, present)| state.in_scope_type_params.contains(name) == *present)
+            && (!reads.needs_empty_scope || state.binds_nothing())
+            && reads.in_scope.iter().all(|(name, present)| state.binds(name) == *present)
+            && reads.body_reads.iter().all(|(name, read)| {
+                mapping.is_some_and(|mapping| crate::types::global::body_reads(mapping, name) == *read)
+            })
             && reads.defaults.iter().all(|(name, found)| {
                 mapping.is_some_and(|mapping| {
                     mapping.param_defaults.get(name.as_str()).map(|d| (d.value.as_str(), d.computed))
@@ -171,7 +178,6 @@ impl<T: Clone> Recording<T> {
             reads.append(&self.reads, true, true);
         }
         state.visited.extend(self.reads.visited_added.iter().copied());
-        state.in_scope_type_params.extend(self.reads.in_scope_added.iter().cloned());
         state.shared_diagnostics.extend(self.shared.iter().cloned());
         state.named_unevaluated |= self.named_unevaluated;
         super::deps::replay(&self.deps);
@@ -257,6 +263,7 @@ impl<T: Clone> Memo<T> {
         reads.named = first_reads(reads.named);
         reads.in_scope = first_reads(reads.in_scope);
         reads.defaults = first_reads(reads.defaults);
+        reads.body_reads = first_reads(reads.body_reads);
         let named_unevaluated = state.named_unevaluated;
         state.named_unevaluated = entry_unevaluated || named_unevaluated;
         state.reads = enclosing;
@@ -278,8 +285,8 @@ impl<T: Clone> Memo<T> {
             + reads.named.len()
             + reads.in_scope.len()
             + reads.defaults.len()
-            + reads.visited_added.len()
-            + reads.in_scope_added.len();
+            + reads.body_reads.len()
+            + reads.visited_added.len();
         let recording = Recording {
             value: value.clone(),
             reach: high.saturating_sub(entry_nesting),
@@ -288,6 +295,7 @@ impl<T: Clone> Memo<T> {
             deps,
             reads,
             expand_all: state.expand_all,
+            omitted: state.omitted.clone(),
             keys_only: state.keys_only,
             entry_depth: depth,
             depth_reach: depth_high.saturating_sub(depth),
@@ -296,12 +304,15 @@ impl<T: Clone> Memo<T> {
         let mut recordings = self.recordings.entry(map_key).or_default();
         let same = |r: &Recording<T>| {
             r.expand_all == recording.expand_all
+                && r.omitted == recording.omitted
                 && r.keys_only == recording.keys_only
                 && r.depth_fired == recording.depth_fired
                 && r.reads.visited == recording.reads.visited
                 && r.reads.named == recording.reads.named
                 && r.reads.in_scope == recording.reads.in_scope
+                && r.reads.needs_empty_scope == recording.reads.needs_empty_scope
                 && r.reads.defaults == recording.reads.defaults
+                && r.reads.body_reads == recording.reads.body_reads
         };
         // Components resolving the same chain concurrently record it several times; one copy is enough.
         let duplicate = recordings.iter().any(|r| same(r));

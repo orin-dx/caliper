@@ -25,7 +25,7 @@ When adding a public type, run through the checklist in the `rust-types` skill. 
 
 ## Panic containment
 
-Anything reachable from a rayon `.map()` or a `DocgenPlugin` impl must go through `panic_guard::contain_panic` — see `pipeline/mod.rs` and `plugin.rs` for the call sites, and `docs/adr/0005-panic-containment-boundary.md` for why.
+Anything reachable from a rayon `.map()` must go through `panic_guard::contain_panic` — see `pipeline/mod.rs` for the call sites, and `docs/adr/0005-panic-containment-boundary.md` for why.
 
 ## Snapshot tests
 

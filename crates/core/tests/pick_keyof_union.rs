@@ -11,7 +11,9 @@
 //! `JSX.IntrinsicElements['img']` (next/image) read as `React.JSX` does. A lazy session answers as a batch run does.
 use std::collections::BTreeSet;
 
-use caliper_docgen_core::pipeline::{extract, ComponentAnswer, HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{
+    CollapseInheritedProps, ComponentAnswer, HtmlAttributeMode, PipelineOptions, WatchSession, extract,
+};
 use caliper_docgen_core::types::{ComponentEntry, ExtractionOutput};
 use camino::Utf8PathBuf;
 use tempfile::TempDir;
@@ -101,6 +103,8 @@ fn options(dir: &TempDir, mode: HtmlAttributeMode) -> PipelineOptions {
         src_dirs: vec![root.clone()],
         cache_dir: Some(root.join(".cache")),
         html_attributes: mode,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: CollapseInheritedProps::None,
         ..Default::default()
     }
 }

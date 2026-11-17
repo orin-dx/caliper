@@ -1,0 +1,31 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "icon",
+          "onClick"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ icon: ReactNode; onClick?: MouseEventHandler<HTMLButtonElement> | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/37-react-member.tsx"
+    },
+    "order": null
+  }
+}

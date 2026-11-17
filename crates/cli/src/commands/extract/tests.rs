@@ -15,8 +15,10 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         load_dependencies: false,
         no_load_dependencies: false,
         collapse_inherited_props: None,
-        experimental_semantic_types: false,
-        tsc_path: None,
+        no_checker: true,
+        semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
+        no_resolver_facts: false,
+        no_structural_fallback: false,
     }
 }
 
@@ -253,19 +255,11 @@ fn rdt_output_gives_each_component_its_absolute_file_path() {
 use caliper_docgen_core::types::PropType;
 
 #[test]
-fn rdt_type_json_zero_and_one_member_unions_never_produce_enum_shape() {
+fn rdt_type_json_empty_unions_never_produce_enum_shape() {
     assert_eq!(rdt_type_json(&PropType::Union(vec![])), serde_json::json!({"name": ""}));
-    assert_eq!(
-        rdt_type_json(&PropType::Union(vec![PropType::StringLiteral("x".into())])),
-        serde_json::json!({"name": "\"x\""})
-    );
     assert_eq!(
         rdt_type_json(&PropType::LiteralUnion { members: vec![], has_default: false }),
         serde_json::json!({"name": ""})
-    );
-    assert_eq!(
-        rdt_type_json(&PropType::LiteralUnion { members: vec!["only".into()], has_default: false }),
-        serde_json::json!({"name": "\"only\""})
     );
 }
 
@@ -331,6 +325,7 @@ fn rdt_type_json_union_with_one_non_literal_member_never_produces_enum_shape() {
 fn serialize_rdt_emits_composes_exactly() {
     use caliper_docgen_core::types::ComponentEntry;
     let entry = ComponentEntry {
+        relevance: None,
         display_name: "Widget".to_string(),
         file_path: "Widget.tsx".into(),
         description: String::new(),
@@ -343,6 +338,7 @@ fn serialize_rdt_emits_composes_exactly() {
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
         exported: true,
+        exports: Vec::new(),
     };
     let mut components = std::collections::BTreeMap::new();
     components.insert("Widget".to_string(), entry);
@@ -364,6 +360,7 @@ fn serialize_rdt_emits_composes_exactly() {
 fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_core::types::ComponentEntry {
     use caliper_docgen_core::types::{ComponentEntry, ParsedProp};
     ComponentEntry {
+        relevance: None,
         display_name: name.to_string(),
         file_path: format!("{name}.tsx").into(),
         description: String::new(),
@@ -391,6 +388,7 @@ fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
         exported: true,
+        exports: Vec::new(),
     }
 }
 
@@ -484,9 +482,13 @@ export function Button(props: ButtonProps) { return null; }
         json: false,
         load_dependencies: false,
         no_load_dependencies: false,
-        collapse_inherited_props: None,
-        experimental_semantic_types: false,
-        tsc_path: None,
+        // The expanded view (ADR 0028 relevance 'all'): `htmlAttributes` decides which attributes are known, and
+        // every one known is a row. Under the default, relevance lists only those evidence shows.
+        collapse_inherited_props: Some(crate::CollapseInheritedPropsArg::None),
+        no_checker: true,
+        semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
+        no_resolver_facts: false,
+        no_structural_fallback: false,
     };
 
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);
@@ -569,7 +571,7 @@ export function Comp(props: Props) { return null; }
     assert_eq!(parsed["Comp"]["composes"], serde_json::json!(["\"a\" | \"b\""]));
 }
 
-/// `extract` over one component, optionally with the experimental checker pointed at a `tsc` that is not there.
+/// `extract` over one component, with the checker pointed at a `tsc` that is not there, or with `--no-checker`.
 fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_json::Value {
     std::fs::write(tmp.path().join("Plain.tsx"), "export function Plain(props: { a: string }) { return null; }\n")
         .unwrap();
@@ -587,8 +589,11 @@ fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_
         load_dependencies: false,
         no_load_dependencies: false,
         collapse_inherited_props: None,
-        experimental_semantic_types: semantic,
-        tsc_path: semantic.then(|| tmp.path().join("no-such-tsc").to_str().unwrap().to_owned()),
+        no_checker: !semantic,
+        // Too short for the checker to build a program, so it is unavailable.
+        semantic_timeout_ms: if semantic { 1 } else { crate::DEFAULT_SEMANTIC_TIMEOUT_MS },
+        no_resolver_facts: false,
+        no_structural_fallback: false,
     };
 
     assert_eq!(cmd_extract(args, true, None).unwrap(), 0);
@@ -597,7 +602,7 @@ fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_
 }
 
 #[test]
-fn the_default_output_has_no_semantic_backend_diagnostics() {
+fn the_no_checker_output_has_no_semantic_backend_diagnostics() {
     let output = extract_with_semantic_flag(&tempfile::TempDir::new().unwrap(), false);
 
     let codes: Vec<_> = output["diagnostics"].as_array().unwrap().iter().map(|d| d["code"].clone()).collect();
@@ -621,5 +626,203 @@ fn an_unavailable_checker_adds_one_warning_and_leaves_every_component_as_it_was(
     assert_eq!(added.len(), 1, "{added:?}");
     assert_eq!(added[0]["code"], "SEMANTIC_BACKEND");
     assert_eq!(added[0]["severity"], "warning");
-    assert!(added[0]["message"].as_str().unwrap().contains("no tsc binary at"), "{added:?}");
+    assert!(added[0]["message"].as_str().unwrap().contains("timed out"), "{added:?}");
+}
+
+#[test]
+fn the_checker_is_on_by_default_with_a_ten_second_timeout() {
+    use clap::Parser;
+
+    let parsed = crate::Cli::try_parse_from(["caliper-docgen", "extract"]).unwrap();
+    let crate::Command::Extract(args) = parsed.command else { panic!("not extract") };
+    assert!(!args.no_checker);
+    assert_eq!(args.semantic_timeout_ms, 10_000);
+
+    for flag in [&["--semantic-timeout-ms", "500"][..], &["--no-resolver-facts"], &["--no-structural-fallback"]] {
+        let refused = crate::Cli::try_parse_from([&["caliper-docgen", "extract", "--no-checker"][..], flag].concat());
+        assert!(refused.is_err(), "{flag:?} with --no-checker is refused");
+    }
+    let removed = crate::Cli::try_parse_from(["caliper-docgen", "extract", "--experimental-semantic-types"]);
+    assert!(removed.is_err(), "the old opt-in flag is gone");
+    let removed = crate::Cli::try_parse_from(["caliper-docgen", "extract", "--tsc-path", "/opt/tsc"]);
+    assert!(removed.is_err(), "the checker binary flag is gone");
+}
+
+// The RDT-shaped projection Storybook's `extractArgTypes` turns into controls.
+
+#[test]
+fn rdt_type_json_single_literal_is_a_one_option_enum() {
+    assert_eq!(
+        rdt_type_json(&PropType::StringLiteral("button".into())),
+        serde_json::json!({"name": "enum", "raw": "\"button\"", "value": [{"value": "\"button\""}]})
+    );
+    assert_eq!(
+        rdt_type_json(&PropType::NumberLiteral(1.0)),
+        serde_json::json!({"name": "enum", "raw": "1", "value": [{"value": "1"}]})
+    );
+    assert_eq!(
+        rdt_type_json(&PropType::Union(vec![PropType::StringLiteral("x".into())])),
+        serde_json::json!({"name": "enum", "raw": "\"x\"", "value": [{"value": "\"x\""}]})
+    );
+    assert_eq!(
+        rdt_type_json(&PropType::LiteralUnion { members: vec!["only".into()], has_default: false }),
+        serde_json::json!({"name": "enum", "raw": "\"only\"", "value": [{"value": "\"only\""}]})
+    );
+}
+
+#[test]
+fn rdt_type_json_leaves_empty_unions_a_bare_name_and_a_lone_boolean_literal_a_type_name() {
+    assert_eq!(rdt_type_json(&PropType::Union(vec![])), serde_json::json!({"name": ""}));
+    assert_eq!(
+        rdt_type_json(&PropType::LiteralUnion { members: vec![], has_default: false }),
+        serde_json::json!({"name": ""})
+    );
+    // Storybook's own docgen gives a lone `true` no options either.
+    assert_eq!(rdt_type_json(&PropType::BoolLiteral(true)), serde_json::json!({"name": "true"}));
+}
+
+#[test]
+fn rdt_type_json_boolean_in_a_mixed_literal_union_is_never_a_string_option() {
+    let mixed = PropType::Union(vec![
+        PropType::StringLiteral("a".into()),
+        PropType::NumberLiteral(1.0),
+        PropType::BoolLiteral(true),
+    ]);
+    assert_eq!(rdt_type_json(&mixed), serde_json::json!({"name": "\"a\" | 1 | true"}));
+    // Without a boolean the shape is the one the string and number options always had.
+    let plain = PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::NumberLiteral(1.0)]);
+    assert_eq!(
+        rdt_type_json(&plain),
+        serde_json::json!({"name": "enum", "raw": "\"a\" | 1", "value": [{"value": "\"a\""}, {"value": "1"}]})
+    );
+}
+
+/// Storybook splits a type name at `|` and `JSON.parse`s each part. Run through its real `extractArgTypes`, the type
+/// names below made `value?: 'a|b' | true` an `object` control and turned `'a\\b'` into a backspace, so a union whose
+/// text does not survive that is an enum, whose options keep the literals ("true" then is the string).
+#[test]
+fn rdt_type_json_boolean_union_with_text_storybook_would_split_or_misparse_stays_an_enum() {
+    let with_bool = |literal: PropType, last: PropType| PropType::Union(vec![literal, last]);
+    assert_eq!(
+        rdt_type_json(&with_bool(PropType::StringLiteral("a|b".into()), PropType::BoolLiteral(true))),
+        serde_json::json!({"name": "enum", "raw": "\"a|b\" | true", "value": [{"value": "\"a|b\""}, {"value": "true"}]})
+    );
+    assert_eq!(
+        rdt_type_json(&with_bool(PropType::StringLiteral("a\"b".into()), PropType::BoolLiteral(true))),
+        serde_json::json!({"name": "enum", "raw": "\"a\"b\" | true", "value": [{"value": "\"a\"b\""}, {"value": "true"}]})
+    );
+    let backslash = PropType::Union(vec![
+        PropType::StringLiteral("a\\b".into()),
+        PropType::NumberLiteral(1.0),
+        PropType::BoolLiteral(false),
+    ]);
+    assert_eq!(
+        rdt_type_json(&backslash),
+        serde_json::json!({"name": "enum", "raw": "\"a\\b\" | 1 | false", "value": [{"value": "\"a\\b\""}, {"value": "1"}, {"value": "false"}]})
+    );
+    // Guards: safe text keeps the type name (a real boolean option); no boolean keeps the enum.
+    let safe = PropType::Union(vec![
+        PropType::StringLiteral("a".into()),
+        PropType::NumberLiteral(1.0),
+        PropType::BoolLiteral(true),
+    ]);
+    assert_eq!(rdt_type_json(&safe), serde_json::json!({"name": "\"a\" | 1 | true"}));
+    let no_bool = with_bool(PropType::StringLiteral("a|b".into()), PropType::StringLiteral("c".into()));
+    assert_eq!(
+        rdt_type_json(&no_bool),
+        serde_json::json!({"name": "enum", "raw": "\"a|b\" | \"c\"", "value": [{"value": "\"a|b\""}, {"value": "\"c\""}]})
+    );
+}
+
+#[test]
+fn rdt_type_json_non_literal_unions_and_ordinary_types_are_unchanged() {
+    assert_eq!(rdt_type_json(&PropType::String), serde_json::json!({"name": "string"}));
+    let open = PropType::Union(vec![
+        PropType::StringLiteral("a".into()),
+        PropType::StringLiteral("b".into()),
+        PropType::String,
+    ]);
+    assert_eq!(rdt_type_json(&open), serde_json::json!({"name": "\"a\" | \"b\" | string"}));
+    let nullable =
+        PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::StringLiteral("b".into()), PropType::Null]);
+    assert_eq!(rdt_type_json(&nullable), serde_json::json!({"name": "\"a\" | \"b\" | null"}));
+}
+
+/// The probe rows of the Storybook output review.
+const CONTROL_PROBE: &str = r#"
+import * as React from "react";
+type Size = 'sm' | 'md' | 'lg';
+export interface ProbeProps {
+  /** single literal */ kind?: 'button';
+  /** single number */ one?: 1;
+  /** mixed literal union */ mixed?: 'a' | 1 | true;
+  /** literal union */ size?: Size;
+  /** open union */ loose?: 'a' | 'b' | string;
+  /** plain */ label: string;
+  /** @ignore */ hidden?: string;
+  /** @internal */ internal?: string;
+  /** @deprecated use size */ old?: string;
+}
+export function Probe(props: ProbeProps) { return null; }
+"#;
+
+fn extract_control_probe() -> caliper_docgen_core::types::ExtractionOutput {
+    let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    std::fs::write(tmp.path().join("Probe.tsx"), CONTROL_PROBE).unwrap();
+    let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = caliper_docgen_core::pipeline::PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(camino::Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    caliper_docgen_core::pipeline::extract(&options)
+}
+
+#[test]
+fn an_ignore_tagged_prop_has_no_rdt_entry_and_other_tags_keep_theirs() {
+    let output = extract_control_probe();
+    let doc = caliper_docgen_core::pipeline::rdt::docgen_info(&output.components["Probe"]);
+    let props = doc["props"].as_object().unwrap();
+    assert!(!props.contains_key("hidden"), "{:?}", props.keys().collect::<Vec<_>>());
+    assert!(props.contains_key("internal") && props.contains_key("old"));
+    let rdt: serde_json::Value = serde_json::from_str(&serialize_rdt(&output, false).unwrap()).unwrap();
+    assert!(!rdt["Probe"]["props"].as_object().unwrap().contains_key("hidden"));
+}
+
+#[test]
+fn the_storybook_docgen_info_projects_the_probe_rows_the_way_storybook_reads_them() {
+    let output = extract_control_probe();
+    let entry = output.components.get("Probe").expect("a Probe component");
+    let doc = caliper_docgen_core::pipeline::rdt::docgen_info(entry);
+    let ty = |prop: &str| doc["props"][prop]["type"].clone();
+
+    assert_eq!(
+        ty("kind"),
+        serde_json::json!({"name": "enum", "raw": "\"button\"", "value": [{"value": "\"button\""}]})
+    );
+    assert_eq!(ty("one"), serde_json::json!({"name": "enum", "raw": "1", "value": [{"value": "1"}]}));
+    assert_eq!(ty("mixed"), serde_json::json!({"name": "\"a\" | 1 | true"}));
+    assert_eq!(
+        ty("size"),
+        serde_json::json!({
+            "name": "enum",
+            "raw": "\"sm\" | \"md\" | \"lg\"",
+            "value": [{"value": "\"sm\""}, {"value": "\"md\""}, {"value": "\"lg\""}]
+        })
+    );
+    assert_eq!(ty("loose"), serde_json::json!({"name": "\"a\" | \"b\" | string"}));
+    assert_eq!(ty("label"), serde_json::json!({"name": "string"}));
+
+    // Storybook's docgen drops `@ignore` and nothing else.
+    let mut names: Vec<&str> = doc["props"].as_object().unwrap().keys().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["internal", "kind", "label", "loose", "mixed", "old", "one", "size"]);
+
+    // `--format rdt` projects the same props.
+    let rdt: serde_json::Value = serde_json::from_str(&serialize_rdt(&output, false).unwrap()).unwrap();
+    assert!(rdt["Probe"]["props"].get("hidden").is_none());
+    assert_eq!(rdt["Probe"]["props"]["kind"]["type"], ty("kind"));
+
+    // The canonical output keeps the ignored prop and its tag.
+    assert_eq!(output.components["Probe"].props["hidden"].tags.get("ignore").map(String::as_str), Some(""));
 }

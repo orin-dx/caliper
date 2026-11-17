@@ -1,0 +1,507 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout, clippy::print_stderr)]
+//! The measurable ADR 0026 gates, through the session a Storybook addon runs: a lazy `WatchSession` asking a warm
+//! `OnDemand` over the built-in checker (`just gate-measure` runs all four). `--tsc built-in` names it, and is the
+//! default; the binary route went with trail 369 slice 4.
+//!
+//!   gate_harness memory       --src DIR [--tsc built-in] [--edits 650] [--max-rss-mib N]
+//!   gate_harness determinism  --src DIR [--tsc built-in] [--components 150] [--threads 1,2,4] [--runs 3]
+//!   gate_harness first-answer --src DIR [--tsc built-in] [--component ChakraButton] [--runs 5] [--budget-ms 150]
+//!   gate_harness watch        --src DIR [--tsc built-in] [--edits 300] [--sample 100] [--budget-ms 25]
+//!                             [--max-rss-mib N] [--props button|own]
+//!
+//! `first-answer` (S4) times the first answer for one component in fresh sessions: see [`first_answer`]. `watch` (S6)
+//! times edit-and-query on the snapshot the checker keeps: see [`watch`].
+//! `memory` rewrites one component's file, tells the session, and asks for the component, `--edits` times; it samples
+//! this process's resident memory and the checker's arenas after every answer and prints the peaks and whether the last
+//! answer equals a fresh session's (see [`memory`]). `determinism` asks a fresh checker for the same components under
+//! each `RAYON_NUM_THREADS` (the checker reads it once per process, so each variant runs in a re-executed copy of this
+//! binary with the variable set, and fails if the copy did not see the requested count; see docs/gate-measurements.md),
+//! `--runs` times each, alternating the query order, and byte-compares every output. Each prints one JSON line and exits 1 on a failed check.
+use std::process::Command;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use caliper_docgen_core::pipeline::{CollapseInheritedProps, ComponentAnswer, PipelineOptions, WatchSession};
+use caliper_docgen_core::react_types::{react_attribute_mode, react_props_wanted_for};
+use caliper_docgen_core::types::DiagnosticSeverity;
+use caliper_docgen_core::types::semantic::{SemanticProvider, SemanticTarget};
+use caliper_docgen_semantic::{OnDemand, OnDemandConfig};
+use camino::Utf8PathBuf;
+
+/// The allocator of the native binding (the Storybook addon's process) and the CLI, so memory reads as theirs.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+const CHECKER_NOTE: &str = "resolved by the TypeScript checker";
+
+/// `--tsc built-in`: the checker linked into this process, the only one. It has no process of its own, so the gates
+/// that sample memory read this process (the host's share included), and the checker's own arenas apart.
+const BUILT_IN: &str = "built-in";
+
+/// The resident MiB of the address range the linked `tsrs` crates carve their arenas from: what the memory bound reads
+/// for the built-in checker (`Backend::memory_mib`).
+fn arena_mib() -> u64 {
+    let resident = tsrs_core::memsplit::resident(tsrs_core::reserve::base().addr(), tsrs_core::reserve::RESERVE);
+    u64::try_from(resident >> 20).unwrap_or(u64::MAX)
+}
+
+/// After an answer: this process's resident MiB, and the checker's arena MiB.
+fn memory_after() -> (u64, u64) {
+    (process_stats(std::process::id()).map_or(0, |(mib, _)| mib), arena_mib())
+}
+
+fn arg(args: &[String], name: &str) -> Option<String> {
+    args.iter().position(|a| a == name).and_then(|at| args.get(at + 1)).cloned()
+}
+
+/// A lazy session with a warm checker, configured as the addon configures it (dependencies loaded, nothing collapsed).
+/// The checker runs in this process: a setting it reads from the environment (`RAYON_NUM_THREADS`) goes there before
+/// this call.
+fn open(src: &Utf8PathBuf, max_rss_mib: Option<u64>) -> (WatchSession, Arc<OnDemand>) {
+    let mut config = OnDemandConfig::new(src.clone());
+    config.tsconfig = src.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file());
+    config.request_timeout = Duration::from_secs(120);
+    config.max_rss_mib = max_rss_mib.unwrap_or(config.max_rss_mib);
+    let checker = Arc::new(OnDemand::new(config));
+    let options = PipelineOptions {
+        src_dirs: vec![src.clone()],
+        load_dependencies: true,
+        collapse_inherited_props: CollapseInheritedProps::None,
+        ..PipelineOptions::default()
+    };
+    let session = WatchSession::lazy(options).with_semantic(checker.clone(), Duration::from_secs(120));
+    drop(session.initialize());
+    (session, checker)
+}
+
+fn by_checker(answer: &ComponentAnswer) -> bool {
+    answer.diagnostics.iter().any(|d| d.message.contains(CHECKER_NOTE))
+}
+
+/// Resident MiB and thread count of a process, from `ps`; `None` once it has gone.
+fn process_stats(pid: u32) -> Option<(u64, usize)> {
+    let ps = |args: &[&str]| {
+        let out = Command::new("ps").args(args).arg("-p").arg(pid.to_string()).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    let rss: u64 = ps(&["-o", "rss="])?.trim().parse().ok()?;
+    Some((rss / 1024, ps(&["-M"])?.lines().count().saturating_sub(1)))
+}
+
+/// CPU time a process has used, in milliseconds, from `ps` (`[hh:]mm:ss.ss`); `None` once it has gone. Unlike wall
+/// time, it does not grow with the machine's load.
+fn cpu_ms(pid: u32) -> Option<f64> {
+    let out = Command::new("ps").args(["-o", "cputime=", "-p", &pid.to_string()]).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let seconds = text.trim().split(':').try_fold(0.0, |total, part| Some(total * 60.0 + part.parse::<f64>().ok()?));
+    out.status.success().then_some(seconds?).map(|seconds| seconds * 1000.0)
+}
+
+fn edit_source(n: usize) -> String {
+    format!(
+        "import type {{ ButtonProps }} from '@chakra-ui/react'\nexport function GateEdited(props: ButtonProps & {{ edit{n}: string }}) {{\n  return null\n}}\n"
+    )
+}
+
+/// The same program (the file still imports Chakra, so the checker loads it whole), but a component with one prop of
+/// its own: what an edit costs the checker, with almost nothing to convert.
+fn own_props_source(n: usize) -> String {
+    format!(
+        "import type {{ ButtonProps }} from '@chakra-ui/react'\nexport type Kept = ButtonProps\nexport function GateEdited(props: {{ edit{n}: string }}) {{\n  return null\n}}\n"
+    )
+}
+
+/// The `memory` gate. With a `--max-rss-mib` the checker passes, it stops answering at the first check past it: from
+/// then on every answer must be structural, and one must carry the warning that names the bound.
+fn memory(src: &Utf8PathBuf, edits: usize, max_rss_mib: Option<u64>) -> bool {
+    let file = src.join("GateEdited.tsx");
+    std::fs::write(&file, edit_source(0)).unwrap();
+    let (session, checker) = open(src, max_rss_mib);
+    let (mut peak, mut answered, mut stale) = (0, 0, 0);
+    let (mut arena_peak, mut arena_last) = (0, 0);
+    let (mut structural, mut first_structural, mut bound_warned) = (0, None, false);
+    for n in 1..=edits {
+        std::fs::write(&file, edit_source(n)).unwrap();
+        session.update_file(&file);
+        let answer = session.component("GateEdited").expect("GateEdited is a component");
+        // The answer must be the checker's, for this edit: a structural fallback would measure nothing.
+        if by_checker(&answer) {
+            answered += 1;
+            stale += usize::from(!answer.entry.props.contains_key(&format!("edit{n}")));
+        } else {
+            structural += 1;
+            first_structural.get_or_insert(n);
+        }
+        bound_warned |= answer.diagnostics.iter().any(|d| d.message.contains("bound (`max_rss_mib`)"));
+        let (resident, arena) = memory_after();
+        peak = peak.max(resident);
+        arena_peak = arena_peak.max(arena);
+        arena_last = arena;
+    }
+    // A stop follows the reply it is due after, so one more request settles it.
+    drop(checker.request(Vec::new()).recv_timeout(Duration::from_secs(120)));
+    let last = session.component("GateEdited").unwrap();
+    let (fresh_session, _fresh) = open(src, None);
+    let fresh = fresh_session.component("GateEdited").unwrap();
+    let ok = stale == 0
+        && match first_structural {
+            None => answered == edits && last == fresh,
+            // Stopped at the bound: the checker answered every edit before it, and none after.
+            Some(at) => bound_warned && answered == at - 1 && answered + structural == edits,
+        };
+    println!(
+        "{{\"gate\":\"memory\",\"edits\":{edits},\"maxRssMib\":{},\"answeredByChecker\":{answered},\"staleAnswers\":{stale},\"structuralAnswers\":{structural},\"boundWarned\":{bound_warned},\"peakRssMib\":{peak},\"peakArenaMib\":{arena_peak},\"lastArenaMib\":{arena_last},\"finalEqualsFresh\":{},\"ok\":{ok}}}",
+        max_rss_mib.map_or("null".to_string(), |mib| mib.to_string()),
+        last == fresh,
+    );
+    ok
+}
+
+/// One determinism variant: every sampled component asked of a fresh checker, in `keys` order or reversed.
+struct Variant {
+    /// What the process saw as `RAYON_NUM_THREADS`, the setting tsrs reads once, when its first worker pool starts.
+    applied: Option<String>,
+    hash: u64,
+    bytes: usize,
+    structural: Vec<String>,
+    asked: usize,
+    most_threads: usize,
+}
+
+fn sample_keys(src: &Utf8PathBuf, components: usize) -> Vec<String> {
+    let (probe, _checker) = open(src, None);
+    let mut keys = probe.component_keys();
+    keys.retain(|key| key != "GateEdited");
+    keys.sort();
+    let step = (keys.len() / components.max(1)).max(1);
+    keys.into_iter().step_by(step).take(components).collect()
+}
+
+/// Asks one fresh checker for `keys`; its settings must already be in this process's environment (see [`open`]).
+fn run_variant(src: &Utf8PathBuf, keys: &[String], run: usize) -> Variant {
+    let (session, _checker) = open(src, None);
+    let mut order = keys.to_vec();
+    if run % 2 == 1 {
+        order.reverse();
+    }
+    let (mut text, mut structural, mut most_threads) = (Vec::new(), Vec::new(), 0);
+    for key in &order {
+        let answer = session.component(key).expect("a sampled key is a component");
+        if !by_checker(&answer) {
+            structural.push(key.clone());
+        }
+        text.push((
+            key.clone(),
+            format!("{}\n{:?}", serde_json::to_string(&answer.entry).unwrap(), answer.diagnostics),
+        ));
+        if let Some((_, count)) = process_stats(std::process::id()) {
+            most_threads = most_threads.max(count);
+        }
+    }
+    text.sort();
+    let bytes = text.iter().map(|(key, body)| format!("{key}\n{body}\n")).collect::<String>();
+    structural.sort();
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::hash::Hash::hash(&bytes, &mut hasher);
+    Variant {
+        applied: std::env::var("RAYON_NUM_THREADS").ok(),
+        hash: std::hash::Hasher::finish(&hasher),
+        bytes: bytes.len(),
+        asked: order.len(),
+        structural,
+        most_threads,
+    }
+}
+
+/// `determinism-variant`: one variant in this process, started with `RAYON_NUM_THREADS` set by the caller.
+/// Fails unless the process was started with the requested count, so a variant can never be labelled with a setting it
+/// did not run under.
+fn determinism_variant(src: &Utf8PathBuf, components: usize, count: &str, run: usize) -> bool {
+    let applied = std::env::var("RAYON_NUM_THREADS").ok();
+    if applied.as_deref() != Some(count) {
+        eprintln!("requested {count} threads but RAYON_NUM_THREADS is {applied:?}: the setting was not applied");
+        return false;
+    }
+    let keys = sample_keys(src, components);
+    let variant = run_variant(src, &keys, run);
+    println!(
+        "{}",
+        serde_json::json!({
+            "applied": variant.applied, "hash": variant.hash, "bytes": variant.bytes, "components": keys.len(),
+            "answeredByChecker": variant.asked - variant.structural.len(), "structuralOnly": variant.structural,
+            "maxProcessThreads": variant.most_threads,
+        })
+    );
+    true
+}
+
+/// A variant in a fresh copy of this binary: tsrs reads the count once per process, so it cannot change inside
+/// one. `None` when the child fails or reports a count other than the one asked for.
+fn variant_in_a_copy(src: &Utf8PathBuf, components: usize, count: &str, run: usize) -> Option<serde_json::Value> {
+    let output = Command::new(std::env::current_exe().expect("the harness's own path"))
+        .args([
+            "determinism-variant",
+            "--src",
+            src.as_str(),
+            "--tsc",
+            BUILT_IN,
+            "--components",
+            &components.to_string(),
+        ])
+        .args(["--threads", count, "--run", &run.to_string()])
+        .env("RAYON_NUM_THREADS", count)
+        .stderr(std::process::Stdio::inherit())
+        .output()
+        .ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    (output.status.success() && value["applied"] == count).then_some(value)
+}
+
+fn determinism(src: &Utf8PathBuf, components: usize, threads: &[String], runs: usize) -> bool {
+    let mut reference: Option<u64> = None;
+    let (mut ok, mut variants, mut sampled) = (true, Vec::new(), 0);
+    for count in threads {
+        for run in 0..runs {
+            let reversed = run % 2 == 1;
+            let found = variant_in_a_copy(src, components, count, run).map(|v| {
+                sampled = v["components"].as_u64().unwrap_or(0) as usize;
+                (
+                    v["hash"].as_u64().unwrap_or(0),
+                    v["bytes"].as_u64().unwrap_or(0) as usize,
+                    v["answeredByChecker"].as_u64().unwrap_or(0) as usize,
+                    v["structuralOnly"].to_string(),
+                    v["maxProcessThreads"].as_u64().unwrap_or(0) as usize,
+                )
+            });
+            let Some((hash, bytes, answered, structural, most_threads)) = found else {
+                ok = false;
+                variants.push(format!("{{\"threads\":{count},\"run\":{run},\"applied\":false}}"));
+                continue;
+            };
+            let same = *reference.get_or_insert(hash) == hash;
+            // A component the checker declines keeps its structural answer; that is deterministic too, and is listed.
+            ok &= same;
+            variants.push(format!(
+                "{{\"threads\":{count},\"run\":{run},\"reversed\":{reversed},\"bytes\":{bytes},\"answeredByChecker\":{answered},\"structuralOnly\":{structural},\"maxProcessThreads\":{most_threads},\"applied\":true,\"equalsFirst\":{same}}}"
+            ));
+        }
+    }
+    // Nothing sampled compares nothing.
+    ok &= sampled > 0;
+    println!("{{\"gate\":\"determinism\",\"components\":{sampled},\"variants\":[{}],\"ok\":{ok}}}", variants.join(","));
+    ok
+}
+
+fn percentile(sorted: &[f64], at: f64) -> f64 {
+    let index = ((sorted.len() as f64 * at).ceil() as usize).clamp(1, sorted.len().max(1)) - 1;
+    sorted.get(index).copied().unwrap_or(0.0)
+}
+
+/// Each answer's JSON entry and diagnostics, in `keys` order.
+fn answer_bytes(session: &WatchSession, keys: &[String]) -> Vec<String> {
+    keys.iter()
+        .map(|key| {
+            let answer = session.component(key).expect("a sampled key is a component");
+            format!("{key}\n{}\n{:?}", serde_json::to_string(&answer.entry).unwrap(), answer.diagnostics)
+        })
+        .collect()
+}
+
+/// The options of [`watch`].
+struct WatchRun {
+    edits: usize,
+    sample: usize,
+    budget_ms: f64,
+    max_rss_mib: Option<u64>,
+    own_props: bool,
+}
+
+/// ADR 0026 S6: edit-and-query on the kept snapshot. Rewrites one component's file (`ButtonProps & { edit{n}: string }`),
+/// applies it with `update_file`, which tells the checker, and times that and the component's answer, `--edits` times,
+/// sampling this process's resident memory and the checker's arenas after each. Then it times the checker's answer alone on its unchanged
+/// snapshot, and byte-compares the edited component and every `--sample`th other component with a fresh session asked
+/// in reverse order. Passes when every answer is the checker's, carries its edit and no warning, its arenas stay under
+/// `--max-rss-mib`, the bytes match, and the p95 is at most `--budget-ms`. `--props own` edits a component with one prop
+/// of its own in the same program instead ([`own_props_source`]).
+fn watch(src: &Utf8PathBuf, run: WatchRun) -> bool {
+    let WatchRun { edits, sample, budget_ms, max_rss_mib, own_props } = run;
+    let source = if own_props { own_props_source } else { edit_source };
+    let file = src.join("GateEdited.tsx");
+    std::fs::write(&file, source(0)).unwrap();
+    let (session, checker) = open(src, max_rss_mib);
+    let threshold = max_rss_mib.unwrap_or(OnDemandConfig::new(src.clone()).max_rss_mib);
+    drop(session.component("GateEdited").expect("GateEdited is a component"));
+    let (mut times, mut updates, mut peak) = (Vec::new(), Vec::new(), 0);
+    let (mut answered, mut stale, mut warned, mut arena_peak) = (0, 0, 0, 0);
+    // CPU time is what an edit costs whatever else the machine runs; the checker's is this process's.
+    let own_cpu = cpu_ms(std::process::id());
+    for n in 1..=edits {
+        std::fs::write(&file, source(n)).unwrap();
+        let began = Instant::now();
+        session.update_file(&file);
+        updates.push(began.elapsed().as_secs_f64() * 1000.0);
+        let answer = session.component("GateEdited").expect("GateEdited is a component");
+        times.push(began.elapsed().as_secs_f64() * 1000.0);
+        answered += usize::from(by_checker(&answer));
+        stale += usize::from(!answer.entry.props.contains_key(&format!("edit{n}")));
+        warned += usize::from(answer.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Warning));
+        let (resident, arena) = memory_after();
+        peak = peak.max(resident);
+        arena_peak = arena_peak.max(arena);
+    }
+    let own_cpu = own_cpu.zip(cpu_ms(std::process::id())).map_or(0.0, |(start, end)| (end - start) / edits as f64);
+    let snapshots = checker.snapshots();
+
+    // The checker's answer alone: the same request the session sends, on the snapshot it keeps, nothing changed.
+    let entry = session.component("GateEdited").unwrap().entry;
+    let target = SemanticTarget {
+        key: "GateEdited".to_string(),
+        file_path: entry.file_path.clone(),
+        display_name: entry.display_name.clone(),
+        exports: entry.exports.clone(),
+        described: entry.props.values().filter(|p| !p.description.is_empty()).map(|p| p.name.clone()).collect(),
+        react_wanted: react_props_wanted_for(
+            react_attribute_mode(
+                session.options.html_attributes,
+                caliper_docgen_core::react_types::expanded(&entry, session.options.collapse_inherited_props),
+            ),
+            &entry,
+        ),
+        // Every prop converted: the session's request decides its layering from the structural answer, which this
+        // merged entry no longer is, so this times at most the work the session's request does.
+        layering: None,
+    };
+    let mut query = Vec::new();
+    for _ in 0..21 {
+        let began = Instant::now();
+        drop(checker.request(vec![target.clone()]).recv_timeout(Duration::from_secs(120)));
+        query.push(began.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    let mut keys = session.component_keys();
+    keys.retain(|key| key != "GateEdited");
+    keys.sort();
+    let mut keys: Vec<String> = keys.into_iter().step_by(sample.max(1)).collect();
+    keys.insert(0, "GateEdited".to_string());
+    let watched = answer_bytes(&session, &keys);
+    let (fresh_session, _fresh) = open(src, None);
+    let reversed: Vec<String> = keys.iter().rev().cloned().collect();
+    let mut fresh = answer_bytes(&fresh_session, &reversed);
+    fresh.reverse();
+    let identical = watched == fresh;
+
+    times.sort_by(f64::total_cmp);
+    updates.sort_by(f64::total_cmp);
+    query.sort_by(f64::total_cmp);
+    let (p50, p95, p99) = (percentile(&times, 0.5), percentile(&times, 0.95), percentile(&times, 0.99));
+    // The bound is on what the checker holds, its arenas, since this process is the host's as well.
+    let ok = answered == edits && stale == 0 && warned == 0 && identical && arena_peak <= threshold && p95 <= budget_ms;
+    println!(
+        "{{\"gate\":\"watch\",\"props\":\"{}\",\"edits\":{edits},\"answeredByChecker\":{answered},\"staleAnswers\":{stale},\"warnedAnswers\":{warned},\"snapshots\":{{\"created\":{},\"updated\":{}}},\"peakRssMib\":{peak},\"peakArenaMib\":{arena_peak},\"maxRssMib\":{threshold},\"editAndQueryMs\":{{\"p50\":{p50:.1},\"p95\":{p95:.1},\"p99\":{p99:.1},\"max\":{:.1}}},\"updateFileMs\":{{\"p50\":{:.1}}},\"cpuMsPerEdit\":{{\"caliper\":{own_cpu:.1}}},\"queryOnlyMs\":{{\"p50\":{:.1},\"min\":{:.1}}},\"budgetMs\":{budget_ms},\"comparedComponents\":{},\"comparedBytes\":{},\"equalsFreshReversed\":{identical},\"ok\":{ok}}}",
+        if own_props { "own" } else { "button" },
+        snapshots.created,
+        snapshots.updated,
+        times.last().copied().unwrap_or(0.0),
+        percentile(&updates, 0.5),
+        percentile(&query, 0.5),
+        query.first().copied().unwrap_or(0.0),
+        keys.len(),
+        watched.iter().map(String::len).sum::<usize>(),
+    );
+    ok
+}
+
+/// ADR 0026 S4: how long a story waits for the checker's answer through the Rust client. Each run opens a fresh session
+/// as the addon does (the checker started in the background at creation), waits until that checker is up, then asks for
+/// `key` once and times the whole answer: the structural pass and the checker's program and conversion for the
+/// component. Passes when every answer is the checker's and the median is at most `budget_ms`, the addon's default
+/// `semanticWaitMs`.
+fn first_answer(src: &Utf8PathBuf, key: &str, runs: usize, budget_ms: u128) -> bool {
+    let (mut start, mut first, mut structural, mut answered) = (Vec::new(), Vec::new(), Vec::new(), 0);
+    for _ in 0..runs.max(1) {
+        let plain = WatchSession::lazy(PipelineOptions {
+            src_dirs: vec![src.clone()],
+            load_dependencies: true,
+            collapse_inherited_props: CollapseInheritedProps::None,
+            ..PipelineOptions::default()
+        });
+        drop(plain.initialize());
+        let began = Instant::now();
+        drop(plain.component(key).expect("the key is a component"));
+        structural.push(began.elapsed().as_millis());
+
+        let (session, checker) = open(src, None);
+        let began = Instant::now();
+        checker.warm_up();
+        // Queued behind the warm-up, an empty request returns once the checker is up and initialized.
+        drop(checker.request(Vec::new()).recv_timeout(Duration::from_secs(120)));
+        start.push(began.elapsed().as_millis());
+        let began = Instant::now();
+        let answer = session.component(key).expect("the key is a component");
+        first.push(began.elapsed().as_millis());
+        answered += usize::from(by_checker(&answer));
+    }
+    let median = |values: &mut Vec<u128>| {
+        values.sort_unstable();
+        values[values.len() / 2]
+    };
+    let (start_ms, first_ms, structural_ms) = (median(&mut start), median(&mut first), median(&mut structural));
+    let ok = answered == first.len() && first_ms <= budget_ms;
+    println!(
+        "{{\"gate\":\"first-answer\",\"component\":{key:?},\"runs\":{},\"answeredByChecker\":{answered},\"startMs\":{start_ms},\"structuralMs\":{structural_ms},\"firstAnswerMs\":{first_ms},\"firstAnswerEachMs\":{first:?},\"budgetMs\":{budget_ms},\"ok\":{ok}}}",
+        first.len(),
+    );
+    ok
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let src = Utf8PathBuf::from(arg(&args, "--src").expect("--src"));
+    let src = Utf8PathBuf::from_path_buf(std::fs::canonicalize(src).unwrap()).unwrap();
+    if let Some(tsc) = arg(&args, "--tsc").filter(|tsc| tsc != BUILT_IN) {
+        eprintln!("--tsc {tsc}: the built-in checker is the only one (`--tsc {BUILT_IN}`, the default)");
+        std::process::exit(2);
+    }
+    let number = |name: &str, default: usize| arg(&args, name).map_or(default, |n| n.parse().expect("a number"));
+    let ok = match args.get(1).map(String::as_str) {
+        Some("memory") => {
+            memory(&src, number("--edits", 650), arg(&args, "--max-rss-mib").map(|n| n.parse().expect("a number")))
+        }
+        Some("determinism") => {
+            let threads = arg(&args, "--threads").unwrap_or_else(|| "1,2,4".to_string());
+            determinism(
+                &src,
+                number("--components", 150),
+                &threads.split(',').map(str::to_string).collect::<Vec<_>>(),
+                number("--runs", 3),
+            )
+        }
+        Some("determinism-variant") => determinism_variant(
+            &src,
+            number("--components", 150),
+            &arg(&args, "--threads").expect("--threads"),
+            number("--run", 0),
+        ),
+        Some("watch") => watch(
+            &src,
+            WatchRun {
+                edits: number("--edits", 300),
+                sample: number("--sample", 100),
+                budget_ms: arg(&args, "--budget-ms").map_or(25.0, |n| n.parse().expect("a number")),
+                max_rss_mib: arg(&args, "--max-rss-mib").map(|n| n.parse().expect("a number")),
+                own_props: arg(&args, "--props").is_some_and(|props| props == "own"),
+            },
+        ),
+        Some("first-answer") => first_answer(
+            &src,
+            &arg(&args, "--component").unwrap_or_else(|| "ChakraButton".to_string()),
+            number("--runs", 5),
+            arg(&args, "--budget-ms").map_or(150, |n| n.parse().expect("a number")),
+        ),
+        _ => {
+            eprintln!("usage: gate_harness memory|determinism|first-answer|watch --src DIR [--tsc {BUILT_IN}]");
+            false
+        }
+    };
+    std::process::exit(i32::from(!ok));
+}

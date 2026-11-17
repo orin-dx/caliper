@@ -1,7 +1,7 @@
 [package]
 name = "caliper-docgen-semantic"
-description = "Experimental TypeScript 7.1 checker backend for caliper-docgen: asks `tsc --api` for each component's props"
-version = "0.3.0"
+description = "TypeScript 7.1 checker backend for caliper-docgen: asks the built-in checker (tsrs) for each component's props"
+version = "0.5.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -11,19 +11,26 @@ homepage.workspace = true
 [lints]
 workspace = true
 
-[[bin]]
-name = "replay-tsc"
-path = "tests/bin/replay_tsc.rs"
-
 [dependencies]
-caliper-docgen-core       = { path = "../core", version = "0.9.0" }
-caliper-docgen-tsc-client = { path = "../tsc-client", version = "0.2.0" }
+caliper-docgen-core       = { path = "../core", version = "0.11.0" }
 tokio                     = { workspace = true, features = ["time", "rt", "sync"] }
 serde.workspace           = true
-serde_json.workspace      = true
+serde_json                = { workspace = true, features = ["raw_value"] }
 camino.workspace          = true
 tracing.workspace         = true
 rustc-hash.workspace      = true
+tsrs_api.workspace        = true
+tsrs_vfs.workspace        = true
+tsrs_core.workspace       = true
+rmp-serde.workspace       = true
+xxhash-rust.workspace     = true
+libmimalloc-sys.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace            = true
 
 [dev-dependencies]
 tempfile.workspace        = true
+insta.workspace           = true
+# The native binding's allocator, so the gate harness measures memory as the addon's process holds it.
+mimalloc                  = { version = "0.1", default-features = false }

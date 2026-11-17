@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "displayName",
+          "propTypes"
+        ],
+        "index": false,
+        "alias": "FC"
+      }
+    ],
+    "alias": "FC"
+  },
+  "text": "FC<IconProps> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/08-fc-props.tsx"
+    },
+    "order": null
+  }
+}

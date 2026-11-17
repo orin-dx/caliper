@@ -27,6 +27,15 @@ fn config_schema_rejects_unknown_fields() {
 }
 
 #[test]
+fn the_config_help_lists_exactly_the_keys_the_schema_accepts() {
+    let err = serde_json::from_str::<DocgenConfigSchema>(r#"{ "noSuchKey": 1 }"#).unwrap_err().to_string();
+    let listed = err.split("expected one of ").nth(1).expect("serde lists the fields");
+    let listed = listed.split(" at line").next().expect("split yields a first part");
+    let accepted: std::collections::BTreeSet<&str> = listed.split(", ").map(|key| key.trim_matches('`')).collect();
+    assert_eq!(accepted, CONFIG_KEYS.into_iter().collect());
+}
+
+#[test]
 fn config_schema_rejects_options_that_were_removed_for_doing_nothing() {
     // These were accepted and ignored before; a config still naming one must now say so instead of looking honored.
     for key in
@@ -88,7 +97,7 @@ export default {
     let opts = try_load_config(&config_path).expect("real config file should load successfully");
     let opts = opts.expect("expected Some(PipelineOptions)");
 
-    assert_eq!(opts.src_dirs, vec![camino::Utf8PathBuf::from("src/components")]);
+    assert_eq!(opts.src_dirs, vec![canonical_dir(&tmp).join("src/components")]);
     assert_eq!(opts.html_attributes, HtmlAttributeMode::Full);
 }
 
@@ -119,7 +128,7 @@ fn try_load_config_resolves_a_relative_path_whose_parent_is_not_the_cwd() {
     let opts = try_load_config(&relative_config_path)
         .expect("a relative --config path should resolve regardless of its parent directory")
         .expect("expected Some(PipelineOptions)");
-    assert_eq!(opts.src_dirs, vec![camino::Utf8PathBuf::from("src/components")]);
+    assert_eq!(opts.src_dirs, vec![canonical_dir(&tmp).join("src/components")]);
 }
 
 // ── SPEC-CLI-001d AC-001: a --config path containing quote/backslash
@@ -152,7 +161,7 @@ fn config_path_containing_quotes_and_an_exit_payload_is_not_interpreted_as_javas
         .expect("expected Some(PipelineOptions), proving the real config content was evaluated");
     assert_eq!(
         opts.src_dirs,
-        vec![camino::Utf8PathBuf::from("src/components")],
+        vec![canonical_dir(&tmp).join(dangerous_name).join("src/components")],
         "expected the actual config content, not something an injected statement could have produced"
     );
 }
@@ -369,19 +378,25 @@ fn load_dependencies_is_on_by_default_and_the_config_and_the_flags_set_it() {
 }
 
 #[test]
-fn the_experimental_semantic_backend_is_off_unless_the_config_turns_it_on() {
+fn the_checker_is_on_unless_the_config_turns_it_off() {
     let options = |json: &str| {
         let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
         schema.into_pipeline_options().unwrap()
     };
 
-    let off = options("{}");
-    assert!(!off.experimental_semantic_types);
-    assert_eq!(off.semantic_tsc_path, None);
+    let default = options("{}");
+    assert!(default.checker);
 
-    let on = options(r#"{ "experimentalSemanticTypes": true, "tscPath": "node_modules/typescript/bin/tsc" }"#);
-    assert!(on.experimental_semantic_types);
-    assert_eq!(on.semantic_tsc_path, Some("node_modules/typescript/bin/tsc".into()));
+    let off = options(r#"{ "checker": false }"#);
+    assert!(!off.checker);
+}
+
+#[test]
+fn the_old_opt_in_key_and_the_removed_checker_binary_are_refused_by_name() {
+    for key in ["experimentalSemanticTypes", "tscPath"] {
+        let refused = serde_json::from_str::<DocgenConfigSchema>(&format!(r#"{{ "{key}": true }}"#)).unwrap_err();
+        assert!(refused.to_string().contains(key), "{refused}");
+    }
 }
 
 #[test]
@@ -455,28 +470,122 @@ fn a_config_with_an_unrecognized_html_attributes_is_an_error_naming_the_file_and
     );
 }
 
-#[test]
-fn a_config_that_leaves_the_checker_alone_has_nothing_to_say() {
-    assert_eq!(ignored_semantic_config_note("check", &PipelineOptions::default()), None);
+/// A fresh directory under `apps/oracle` (where `tsx` resolves from), holding `docgen.config.ts` with `source`.
+/// `package_json` is written beside it when given, which decides whether the `.ts` file is an ES module.
+fn config_in_oracle(source: &str, package_json: Option<&str>) -> (tempfile::TempDir, std::path::PathBuf) {
+    let oracle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/oracle");
+    let tmp = tempfile::TempDir::new_in(&oracle_dir).unwrap();
+    let config_path = tmp.path().join("docgen.config.ts");
+    std::fs::write(&config_path, source).unwrap();
+    if let Some(package_json) = package_json {
+        std::fs::write(tmp.path().join("package.json"), package_json).unwrap();
+    }
+    (tmp, config_path)
+}
+
+fn canonical_dir(dir: &tempfile::TempDir) -> camino::Utf8PathBuf {
+    camino::Utf8PathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap()
 }
 
 #[test]
-fn the_note_names_each_checker_key_the_config_set() {
-    let on = PipelineOptions { experimental_semantic_types: true, ..Default::default() };
-    assert_eq!(
-        ignored_semantic_config_note("inspect", &on).as_deref(),
-        Some(
-            "warning: the config sets experimentalSemanticTypes, but `inspect` never runs the TypeScript checker, so \
-             its output is the structural result. Only `extract` runs the checker."
-        )
-    );
+fn a_missing_config_path_is_a_typed_error_naming_the_path() {
+    let missing = std::path::Path::new("/nonexistent-parent-dir-xyz/docgen.config.ts");
 
-    let path = PipelineOptions { semantic_tsc_path: Some("/opt/tsc".into()), ..Default::default() };
-    assert_eq!(
-        ignored_semantic_config_note("watch", &path).as_deref(),
-        Some(
-            "warning: the config sets tscPath, but `watch` never runs the TypeScript checker, so its output is the \
-             structural result. Only `extract` runs the checker."
-        )
+    let err = try_load_config(missing).expect_err("a config that does not exist cannot load");
+
+    let typed = err.downcast_ref::<ConfigNotFound>().expect("the error is a ConfigNotFound, not node's failure");
+    assert_eq!(typed.path, missing);
+    assert_eq!(typed.to_string(), "config file /nonexistent-parent-dir-xyz/docgen.config.ts does not exist");
+}
+
+#[test]
+fn relative_paths_in_a_config_resolve_against_the_config_files_directory() {
+    let (tmp, config_path) = config_in_oracle(
+        "export default { srcDirs: [\"src/components\", \"/abs/dir\"], tsconfigPath: \"tsconfig.app.json\" };\n",
+        None,
     );
+    let dir = canonical_dir(&tmp);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.src_dirs, vec![dir.join("src/components"), camino::Utf8PathBuf::from("/abs/dir")]);
+    assert_eq!(opts.tsconfig_path, Some(dir.join("tsconfig.app.json")));
+}
+
+#[test]
+fn a_relative_cache_dir_in_a_config_resolves_against_the_config_files_directory() {
+    let (tmp, config_path) = config_in_oracle("export default { cacheDir: \".cache/docgen\" };\n", None);
+    let dir = canonical_dir(&tmp);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.cache_dir, Some(dir.join(".cache/docgen")));
+}
+
+#[test]
+fn an_absolute_cache_dir_in_a_config_is_kept() {
+    let (_tmp, config_path) = config_in_oracle("export default { cacheDir: \"/abs/cache\" };\n", None);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.cache_dir, Some(camino::Utf8PathBuf::from("/abs/cache")));
+}
+
+#[test]
+fn a_function_default_export_is_called_for_its_config() {
+    let (tmp, config_path) = config_in_oracle("export default () => ({ srcDirs: [\"from-function\"] });\n", None);
+    let dir = canonical_dir(&tmp);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.src_dirs, vec![dir.join("from-function")]);
+}
+
+#[test]
+fn a_promise_default_export_is_awaited_for_its_config() {
+    let (tmp, config_path) =
+        config_in_oracle("export default Promise.resolve({ srcDirs: [\"from-promise\"] });\n", None);
+    let dir = canonical_dir(&tmp);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.src_dirs, vec![dir.join("from-promise")]);
+}
+
+#[test]
+fn an_async_function_default_export_is_awaited_for_its_config() {
+    let (tmp, config_path) = config_in_oracle("export default async () => ({ srcDirs: [\"from-async\"] });\n", None);
+    let dir = canonical_dir(&tmp);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.src_dirs, vec![dir.join("from-async")]);
+}
+
+#[test]
+fn a_default_export_that_is_not_an_object_says_what_it_is() {
+    let (_tmp, config_path) = config_in_oracle("export default 42;\n", None);
+
+    let err = try_load_config(&config_path).expect_err("a number is not a config");
+
+    // miette wraps the message across lines and prefixes each with a gutter.
+    let message = format!("{err:?}").split_whitespace().filter(|word| *word != "│").collect::<Vec<_>>().join(" ");
+    assert!(
+        message.contains(
+            "docgen.config.ts must export a config object (or a function or promise resolving to one), but its \
+             default export is a number"
+        ),
+        "got: {message}"
+    );
+}
+
+#[test]
+fn a_config_in_a_package_without_type_module_loads_like_one_in_a_module_package() {
+    let (tmp, config_path) =
+        config_in_oracle("export default { srcDirs: [\"src/components\"] };\n", Some(r#"{ "name": "cjs-fixture" }"#));
+    let dir = canonical_dir(&tmp);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.src_dirs, vec![dir.join("src/components")]);
 }

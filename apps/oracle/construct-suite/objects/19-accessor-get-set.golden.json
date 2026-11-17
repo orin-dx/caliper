@@ -1,0 +1,32 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "value"
+        ],
+        "index": false,
+        "alias": "Box"
+      }
+    ],
+    "alias": "Box"
+  },
+  "text": "Box | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/19-accessor-get-set.tsx"
+    },
+    "order": null
+  }
+}

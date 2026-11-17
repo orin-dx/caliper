@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "red",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "blue",
+        "of": "string"
+      }
+    ],
+    "alias": "Color"
+  },
+  "text": "Color | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/21-merged-enum.tsx"
+    },
+    "order": null
+  }
+}

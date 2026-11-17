@@ -12,6 +12,7 @@ use crate::pipeline::PipelineOptions;
 // from "a configured directory that happens to contain no files".
 fn empty_options() -> PipelineOptions {
     let dir = tempfile::TempDir::new().unwrap().keep();
+    crate::pipeline::tests::install_stub_typescript(&dir);
     PipelineOptions { src_dirs: vec![Utf8PathBuf::from_path_buf(dir).unwrap()], ..Default::default() }
 }
 
@@ -147,9 +148,54 @@ fn a_path_outside_every_source_directory_changes_nothing() {
     assert!(session.snapshot().diagnostics.is_empty());
 }
 
+#[test]
+fn a_change_to_a_gitignored_file_changes_nothing() {
+    let (tmp, widget, options) = widget_project("export function Widget() { return null; }\n");
+    std::fs::create_dir(tmp.path().join(".git")).expect("create .git");
+    std::fs::write(tmp.path().join(".gitignore"), "src/Generated.tsx\n").expect("write .gitignore");
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+    // An unrelated path is ignored, so its answer carries the current revision.
+    let revision = session.update_file(camino::Utf8Path::new("/nonexistent/x.tsx")).revision;
+
+    let generated = widget.with_file_name("Generated.tsx");
+    std::fs::write(&generated, "export function Generated() { return null; }\n").expect("write Generated.tsx");
+    let update = session.update_file(&generated);
+
+    assert_eq!(update.revision, revision, "a gitignored file is not a source file: {update:?}");
+
+    // The same change to a file that is not ignored makes a new revision, so the check above could have failed.
+    let kept = widget.with_file_name("Kept.tsx");
+    std::fs::write(&kept, "export function Kept() { return null; }\n").expect("write Kept.tsx");
+    assert!(session.update_file(&kept).revision > revision);
+}
+
+// Discovery reports the target of an unignored symlink even where the target is gitignored, and the watcher
+// canonicalizes a changed path to that target: an edit through the alias must still reach the component.
+#[cfg(unix)]
+#[test]
+fn an_edit_to_a_discovered_alias_of_a_gitignored_file_is_applied() {
+    let (tmp, widget, options) = widget_project("export function Widget() { return null; }\n");
+    std::fs::create_dir(tmp.path().join(".git")).expect("create .git");
+    std::fs::write(tmp.path().join(".gitignore"), "src/Target.tsx\n").expect("write .gitignore");
+    let target = widget.with_file_name("Target.tsx");
+    std::fs::write(&target, "export function Target() { return null; }\n").expect("write Target.tsx");
+    let alias = widget.with_file_name("Alias.tsx");
+    std::os::unix::fs::symlink(&target, &alias).expect("symlink");
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+    let revision = session.update_file(camino::Utf8Path::new("/nonexistent/x.tsx")).revision;
+
+    std::fs::write(&target, "export function Target(props: { a: string }) { return null; }\n").expect("edit");
+    let update = session.update_file(&alias);
+
+    assert!(update.revision > revision, "{update:?}");
+}
+
 /// A src dir holding `Widget.tsx` and the options over it; the DTS cache lives beside it, outside the watched tree.
 fn widget_project(source: &str) -> (tempfile::TempDir, Utf8PathBuf, PipelineOptions) {
     let tmp = tempfile::tempdir().expect("tempdir");
+    crate::pipeline::tests::install_stub_typescript(tmp.path());
     let src = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().expect("canonicalize")).expect("utf8").join("src");
     std::fs::create_dir(&src).expect("create src");
     let widget = src.join("Widget.tsx");
@@ -354,6 +400,29 @@ fn ensure_fresh_before_initialize_reports_every_component() {
     assert_eq!(update.updated_keys, cold.components.keys().cloned().collect::<Vec<_>>());
     assert_eq!(update.updated_components, cold.components.values().cloned().collect::<Vec<_>>());
     assert_matches_cold(&session);
+}
+
+#[test]
+fn a_file_created_in_a_folder_an_exclude_list_keeps_is_noticed() {
+    let (_tmp, widget, mut options) = widget_project("export function Widget(props: { w: string }) { return null; }\n");
+    options.exclude_patterns = ["*", "!*/", "!*.tsx"].map(String::from).to_vec();
+    let ui = widget.with_file_name("ui");
+    std::fs::create_dir(&ui).unwrap();
+    std::fs::write(ui.join("Button.tsx"), "export function Button(props: { b: string }) { return null; }\n").unwrap();
+    let watched = WatchSession::new(options.clone());
+    let _ignored = watched.initialize();
+    let polled = fresh_session(&options);
+    assert_eq!(polled.snapshot().components.keys().collect::<Vec<_>>(), ["Button", "Widget"]);
+
+    let created = ui.join("New.tsx");
+    std::fs::write(&created, "export function New(props: { n: string }) { return null; }\n").unwrap();
+    let expected = watched.update_file(&created);
+    let update = polled.ensure_fresh();
+
+    assert_eq!(expected.updated_keys, ["New"]);
+    assert_eq!(delta(&update), delta(&expected));
+    assert_eq!(polled.snapshot().components.keys().collect::<Vec<_>>(), ["Button", "New", "Widget"]);
+    assert_matches_cold(&polled);
 }
 
 const BROKEN: &str = "export const = ;\n";
@@ -632,47 +701,20 @@ fn typescript_7_without_its_platform_package_is_reported_once_by_extract_and_ini
 }
 
 // ── SPEC-PIPELINE-001 AC-014: initialize() called twice does not re-run
-// extraction — a plugin hook counter is unchanged on the second call, and
-// the second call's diagnostics are empty regardless of the first call's.
+// extraction, and the second call's diagnostics are empty regardless of the first call's.
 
 #[test]
 fn initialize_called_twice_does_not_rerun_extraction_or_replay_diagnostics() {
-    use crate::plugin::{DocgenPlugin, PluginRegistry};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc as StdArc;
-
-    struct CountingPlugin(StdArc<AtomicUsize>);
-    impl DocgenPlugin for CountingPlugin {
-        fn name(&self) -> &str {
-            "counting-plugin"
-        }
-        fn on_file_extracted(&self, _path: &camino::Utf8Path, _data: &mut crate::types::SourceData) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").to_owned();
     std::fs::write(dir.join("Button.tsx").as_std_path(), "export const Button = () => null;")
         .expect("write Button.tsx");
 
-    let count = StdArc::new(AtomicUsize::new(0));
-    let mut plugins = PluginRegistry::new();
-    plugins.register(CountingPlugin(count.clone()));
-
-    let options = PipelineOptions { src_dirs: vec![dir], plugins, ..Default::default() };
+    let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
 
     let first = session.initialize();
-    let count_after_first = count.load(Ordering::SeqCst);
-    assert!(count_after_first > 0, "expected the plugin hook to have run at least once");
-
     let second = session.initialize();
-    assert_eq!(
-        count.load(Ordering::SeqCst),
-        count_after_first,
-        "second initialize() call must not re-parse/re-extract"
-    );
     assert_eq!(second, first, "a second initialize() returns the current snapshot unchanged");
 }
 
@@ -1176,7 +1218,10 @@ fn every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract() {
     let files: &[(&str, &str)] = &[
         ("shared.ts", "export interface SharedProps { size: 'sm' | 'lg'; }\n"),
         ("index.ts", "export type { SharedProps } from './shared';\n"),
-        ("button/Button.tsx", "import type { SharedProps } from '../index';\nexport function Button(props: SharedProps) { return null; }\n"),
+        (
+            "button/Button.tsx",
+            "import type { SharedProps } from '../index';\nexport function Button(props: SharedProps) { return null; }\n",
+        ),
         ("Card.tsx", "export function Card(props: { title: string }) { return null; }\n"),
         ("sizes.ts", "export const SIZES = ['sm', 'lg'] as const;\n"),
         (
@@ -1308,7 +1353,7 @@ fn an_update_reports_the_keys_it_changed_and_removed() {
 }
 
 /// The strings in a JSON array.
-fn strings<'a>(array: &'a serde_json::Value) -> impl Iterator<Item = &'a str> {
+fn strings(array: &serde_json::Value) -> impl Iterator<Item = &str> {
     array.as_array().unwrap().iter().map(|id| id.as_str().unwrap())
 }
 
@@ -1470,6 +1515,9 @@ fn editing_a_wrapper_callees_result_type_updates_the_components_it_builds() {
              export const Button = factory<ButtonFactory>((props) => <button>{props.label}</button>);\n",
         ),
     ]);
+    // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+    let options =
+        PipelineOptions { collapse_inherited_props: crate::pipeline::CollapseInheritedProps::None, ..options };
     let session = WatchSession::new(options.clone());
     let _initial = session.initialize();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
@@ -1485,4 +1533,45 @@ fn editing_a_wrapper_callees_result_type_updates_the_components_it_builds() {
     let props: Vec<&String> = snapshot.components["Button"].props.keys().collect();
     assert_eq!(props, ["component", "label", "ref", "renderRoot", "unstyled"]);
     assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
+}
+
+/// Waits for the revision behind `weak` to be freed: the session frees a replaced revision on another thread.
+fn assert_freed_soon(weak: &std::sync::Weak<crate::pipeline::revision::Revision>, what: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while weak.upgrade().is_some() {
+        assert!(std::time::Instant::now() < deadline, "{what}: the replaced revision was never freed");
+        thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_revision_replaced_by_update_file_is_freed_once_nobody_holds_it() {
+    let (_tmp, widget, options) = widget_project("export function Widget(props: { a: string }) { return null; }\n");
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+    let replaced = Arc::downgrade(&session.current.load_full().unwrap());
+
+    std::fs::write(&widget, "export function Widget(props: { a: string; bb?: number }) { return null; }\n").unwrap();
+    let update = session.update_file(&widget);
+
+    assert_eq!(update.revision, 2);
+    assert_freed_soon(&replaced, "update_file");
+    assert_matches_cold(&session);
+}
+
+#[test]
+fn a_revision_replaced_by_ensure_fresh_is_freed_once_nobody_holds_it() {
+    let (_tmp, widget, options) = widget_project("export function Widget(props: { a: string }) { return null; }\n");
+    let other = widget.with_file_name("Other.tsx");
+    let session = fresh_session(&options);
+    let replaced = Arc::downgrade(&session.current.load_full().unwrap());
+
+    // Two changed files make `ensure_fresh` build an intermediate revision as well as the published one.
+    std::fs::write(&widget, "export function Widget(props: { a: string; bb?: number }) { return null; }\n").unwrap();
+    std::fs::write(&other, "export function Other(props: { c: boolean }) { return null; }\n").unwrap();
+    let update = session.ensure_fresh();
+
+    assert!(update.revision > 1);
+    assert_freed_soon(&replaced, "ensure_fresh");
+    assert_matches_cold(&session);
 }

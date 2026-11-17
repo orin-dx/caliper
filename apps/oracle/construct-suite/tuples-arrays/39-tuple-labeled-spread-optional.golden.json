@@ -1,0 +1,45 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "union",
+            "members": [
+              {
+                "k": "prim",
+                "name": "undefined"
+              },
+              {
+                "k": "prim",
+                "name": "string"
+              }
+            ]
+          },
+          {
+            "k": "prim",
+            "name": "number"
+          }
+        ]
+      }
+    ]
+  },
+  "text": "[a: string | undefined, b: number] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/39-tuple-labeled-spread-optional.tsx"
+    },
+    "order": null
+  }
+}

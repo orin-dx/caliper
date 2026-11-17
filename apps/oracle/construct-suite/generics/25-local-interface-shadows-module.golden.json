@@ -1,0 +1,32 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a"
+        ],
+        "index": false,
+        "alias": "Item"
+      }
+    ],
+    "alias": "Item"
+  },
+  "text": "Item | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/25-local-interface-shadows-module.tsx"
+    },
+    "order": null
+  }
+}

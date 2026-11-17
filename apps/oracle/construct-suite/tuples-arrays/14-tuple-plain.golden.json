@@ -1,0 +1,36 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "prim",
+            "name": "string"
+          },
+          {
+            "k": "prim",
+            "name": "number"
+          }
+        ]
+      }
+    ]
+  },
+  "text": "[string, number] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/14-tuple-plain.tsx"
+    },
+    "order": null
+  }
+}

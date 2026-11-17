@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 use std::path::Path;
-use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use caliper_docgen_core::pipeline::{PipelineOptions, WatchSession};
 use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtractionOutput};
@@ -10,7 +10,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use miette::{IntoDiagnostic, Result};
 use watchexec_signals::Signal;
 
-use crate::config::{build_options, warn_ignored_semantic_config, BuildOptionsArgs};
+use crate::config::{BuildOptionsArgs, build_options};
 use crate::output::{print_diagnostics, print_summary, write_atomic};
 
 /// Watch mode never runs `--strict` — there's no CLI flag for it — so this is always `exit_code(false)`.
@@ -40,7 +40,6 @@ fn start_session(
         no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
-    warn_ignored_semantic_config("watch", &options, quiet);
 
     if !quiet {
         println!();
@@ -120,10 +119,10 @@ fn read_keys(
     mut on_key: impl FnMut(KeyEvent) -> Option<i32>,
 ) -> std::io::Result<i32> {
     loop {
-        if let Event::Key(key) = next()? {
-            if let Some(code) = on_key(key) {
-                return Ok(code);
-            }
+        if let Event::Key(key) = next()?
+            && let Some(code) = on_key(key)
+        {
+            return Ok(code);
         }
     }
 }
@@ -132,7 +131,7 @@ fn read_keys(
 /// session would leave the cursor in its column. Turn output processing back on; input stays raw.
 #[cfg(unix)]
 fn keep_output_processing() -> std::io::Result<()> {
-    use rustix::termios::{tcgetattr, tcsetattr, OptionalActions, OutputModes};
+    use rustix::termios::{OptionalActions, OutputModes, tcgetattr, tcsetattr};
 
     let stdin = std::io::stdin();
     let mut termios = tcgetattr(&stdin)?;
@@ -161,7 +160,13 @@ fn spawn_keyboard_thread(session: Arc<WatchSession>, quiet: bool, out: Option<St
         match quit {
             // watchexec has no graceful-quit handle reachable from this thread, so this hard-exits, with the tracked
             // code so a session that quit on an unresolved error still fails the shell.
-            Ok(code) => std::process::exit(code),
+            Ok(code) => {
+                #[allow(
+                    clippy::exit,
+                    reason = "the keyboard quit runs off the main thread, which watchexec never returns to"
+                )]
+                std::process::exit(code);
+            }
             Err(error) => tracing::warn!("key shortcuts stopped: {error}; stop watching with Ctrl-C"),
         }
     });
@@ -175,8 +180,8 @@ fn ends_session(signal: Signal) -> bool {
 /// inotify reports opening and reading a file, and applying a change reads it: acting on those reads would apply the
 /// file again, endlessly.
 fn is_read(event: &watchexec_events::Event) -> bool {
-    use watchexec_events::filekind::FileEventKind;
     use watchexec_events::Tag;
+    use watchexec_events::filekind::FileEventKind;
 
     event.tags.iter().any(|tag| matches!(tag, Tag::FileEventKind(FileEventKind::Access(_))))
 }
@@ -230,7 +235,10 @@ fn handle_change(session: &WatchSession, path: &Path, quiet: bool, out: Option<&
     }
     // The cumulative snapshot, not this event's delta: a clean update to one file must not reset the exit code while
     // an earlier file in the session still has an unresolved error.
-    publish(&session.snapshot(), out, exit_code);
+    match session.current_output() {
+        Some(output) => publish(&output, out, exit_code),
+        None => publish(&session.snapshot(), out, exit_code),
+    }
 }
 
 /// The source directories, and the tsconfigs, `package.json` files and lockfiles above them: editing one rebuilds the
@@ -407,6 +415,20 @@ mod tests {
         let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(prop_names(&written, "Widget"), vec!["label", "size"]);
         assert_eq!(exit_code.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn publishing_the_shared_output_writes_the_bytes_of_a_snapshot_copy() {
+        let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
+        let session = session_over(&src, &scratch);
+        let _ignored = session.initialize();
+        let (shared, copied) = (scratch.path().join("shared.json"), scratch.path().join("copied.json"));
+
+        publish(&session.current_output().unwrap(), shared.to_str(), &AtomicI32::new(0));
+        publish(&session.snapshot(), copied.to_str(), &AtomicI32::new(0));
+
+        assert_eq!(std::fs::read(&shared).unwrap(), std::fs::read(&copied).unwrap());
     }
 
     #[test]

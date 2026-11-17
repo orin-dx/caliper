@@ -1,0 +1,30 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "items"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ items: string[]; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/15-awaited-returntype.tsx"
+    },
+    "order": null
+  }
+}

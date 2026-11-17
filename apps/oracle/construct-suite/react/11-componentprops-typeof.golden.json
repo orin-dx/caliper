@@ -1,0 +1,30 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "tone"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ tone: \"a\" | \"b\"; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/11-componentprops-typeof.tsx"
+    },
+    "order": null
+  }
+}

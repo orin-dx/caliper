@@ -1,0 +1,19 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "option",
+    "of": "string"
+  },
+  "text": "\"option\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "OptionProps",
+      "file": "exports/06-object-assign.tsx"
+    },
+    "order": null
+  }
+}

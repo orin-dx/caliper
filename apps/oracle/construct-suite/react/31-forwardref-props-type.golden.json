@@ -1,0 +1,45 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "intersection",
+        "members": [
+          {
+            "k": "object",
+            "fields": [
+              "label"
+            ],
+            "index": false,
+            "alias": "InnerProps"
+          },
+          {
+            "k": "object",
+            "fields": [
+              "key",
+              "ref"
+            ],
+            "index": false,
+            "alias": "RefAttributes"
+          }
+        ]
+      }
+    ]
+  },
+  "text": "(InnerProps & RefAttributes<HTMLButtonElement>) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/31-forwardref-props-type.tsx"
+    },
+    "order": null
+  }
+}

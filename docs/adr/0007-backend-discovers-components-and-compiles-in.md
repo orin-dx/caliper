@@ -1,8 +1,10 @@
 # 0007. Let the backend discover components, always compile it in, and keep structural as the default
 
-**Status:** Accepted, discovery not yet implemented **Date:** 2026-10-21
+**Status:** Accepted, discovery not yet implemented, superseded in part by 0026 **Date:** 2026-10-21
 
 **Note (2026-11-02):** The first Decision bullet (discovery) is not built. `merge_semantic` (`crates/core/src/types/semantic.rs`) skips a checker component that has no structural match, and `ComponentEntry` records no origin. The only provenance is the `SemanticBackend` `Info` diagnostic and its `affects` keys. The rest shipped: a runtime opt-in, always compiled in, structural as default and fallback, and `schemaVersion` (ADR 0017).
+
+**Note (2026-11-02):** The Consequences bullet "`WatchSession::update_file` must notify it" is met by clearing the session's cached checker answers on every published revision, not by notifying tsc; see the note on ADR 0006. `ensure_fresh`, the rebuild and the cold path do the same. Per-component invalidation and the parity test against `extract()` are not built.
 
 ## Context
 

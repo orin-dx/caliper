@@ -34,7 +34,7 @@ impl SourceDataCollector<'_> {
         let name = id.name.as_str();
         let file = self.file_path.clone();
         let Some(index) =
-            self.data.component_mappings.iter().position(|m| m.component_name == name && m.file_path == file)
+            self.data.component_mappings.iter().position(|m| m.is_binding_named(name) && m.file_path == file)
         else {
             return;
         };
@@ -47,7 +47,7 @@ impl SourceDataCollector<'_> {
         let Some((props_name, mut props_args)) = self.extract_type_name_from_type(&annotation.type_annotation) else {
             return;
         };
-        if props_name.starts_with("__anon_") && !type_params.is_empty() {
+        if crate::types::is_synthesized_alias(&props_name) && !type_params.is_empty() {
             self.data.type_alias_params.insert(self.scoped_key(&props_name), type_params.clone());
             props_args =
                 type_params.iter().map(|name| CollectedType::Named { name: name.clone(), args: Vec::new() }).collect();

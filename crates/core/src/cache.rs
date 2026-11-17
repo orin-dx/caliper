@@ -38,7 +38,29 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 25: the `TaggedFactory` detection rule.
 /// 26: function parameters record whether they are optional or rest.
 /// 28: the `FactoryResult` detection rule, and function results recorded for more functions.
-const CACHE_SCHEMA_VERSION: u32 = 28;
+/// 30: `SourceData::enum_declarations`.
+/// 31: `SourceData::enum_declarations` records each declaration's scope, and `interface_scopes`, `type_alias_scopes`
+///     and `class_scopes` record where the other declarations sit.
+/// 32: `CollectedInterface::scope` replaces `SourceData::interface_scopes`, an interface in a function body, block or
+///     `switch` case has the scope in its key, and `FunctionResult` records the scope its names are written in.
+/// 33: tuple elements record their kind and label, and the types gain bigint literals, `unique symbol` and object
+///     types with call or construct signatures (`CollectedType::Callable`).
+/// 34: moves with canonical `SCHEMA_VERSION` 6 (`PropType::BigInt`); `CollectedType` is unchanged, so this only
+///     retires entries written before `bigint` became a primitive.
+/// 35: a leading underscore and digits no longer keep a name from being PascalCase (`_3D`, `_Box`), so a declaration the
+///     extractor skipped before can be a component candidate; `SourceData` is unchanged.
+/// 36: `ComponentMapping::exports` replaces `exported`: how the module exports each component (ADR 0027).
+/// 37: `ComponentMapping::bound`: an anonymous default export is no binding of the name it takes from its file.
+/// 38: `ComponentMapping::local_name`: a component its module exports under another name is named by the export.
+/// 39: `ComponentMapping::body` and `SourceData::jsx_usages`: what component bodies and the rest of a file write in JSX
+/// (trail 405).
+/// 40: `JsxTag::Scoped`: a body's tag bound in an inner scope is no longer recorded as the module binding's name.
+/// 41: `ComponentMapping::factory_props`: the props a factory call's own arguments give the component it builds.
+/// 42: a file-level tag bound in an inner scope is `JsxTag::Scoped` too, and a JSX spread of the whole props object no
+///     longer sets `BodyFacts::handed_on`.
+/// 43: `ComponentMapping::factory_type_params`: the type parameters of a factory call's render function.
+/// 44: a JSX element's children pass `children`: a `Named("children")` attribute after its others.
+const CACHE_SCHEMA_VERSION: u32 = 45;
 
 const DATA_FILE: &str = "dts.msgpack";
 
@@ -203,18 +225,18 @@ impl DtsCache {
 
         // Checked before reading, so a cache file that isn't ours (or a corrupt one) can't make a run allocate it all.
         let path = dir.join(DATA_FILE);
-        if let Ok(meta) = std::fs::metadata(path.as_std_path()) {
-            if meta.len() > MAX_CACHE_FILE_BYTES {
-                return Err(LoadFailure::Unreadable(format!(
-                    "it is {} bytes, over the {MAX_CACHE_FILE_BYTES}-byte limit",
-                    meta.len()
-                )));
-            }
+        if let Ok(meta) = std::fs::metadata(path.as_std_path())
+            && meta.len() > MAX_CACHE_FILE_BYTES
+        {
+            return Err(LoadFailure::Unreadable(format!(
+                "it is {} bytes, over the {MAX_CACHE_FILE_BYTES}-byte limit",
+                meta.len()
+            )));
         }
         let bytes = match std::fs::read(path.as_std_path()) {
             Ok(bytes) => bytes,
             Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {
-                return Err(LoadFailure::Absent)
+                return Err(LoadFailure::Absent);
             }
             Err(error) => return Err(LoadFailure::Unreadable(error.to_string())),
         };

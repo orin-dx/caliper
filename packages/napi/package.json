@@ -1,6 +1,6 @@
 {
   "name": "caliper-docgen-napi",
-  "version": "0.9.0",
+  "version": "0.11.0",
   "description": "Native Node.js bindings for caliper-docgen",
   "keywords": [
     "react",
@@ -24,29 +24,28 @@
       "aarch64-apple-darwin",
       "x86_64-apple-darwin",
       "x86_64-unknown-linux-gnu",
-      "x86_64-pc-windows-msvc",
       "aarch64-unknown-linux-gnu"
     ]
   },
   "scripts": {
-    "build:napi": "napi build --platform --release --manifest-path ../../crates/binding/Cargo.toml --output-dir . --dts binding.d.ts",
+    "build:napi": "napi build --platform --release --manifest-path ../../crates/binding/Cargo.toml --output-dir . --dts binding.d.ts && node ../../scripts/napi-loader-version.mjs",
     "artifacts": "napi artifacts"
   },
   "files": [
     "index.js",
     "index.d.ts",
     "binding.d.ts",
-    "*.node"
+    "*.node",
+    "NOTICE"
   ],
   "optionalDependencies": {
-    "caliper-docgen-napi-darwin-arm64": "0.9.0",
-    "caliper-docgen-napi-darwin-x64": "0.9.0",
-    "caliper-docgen-napi-linux-arm64-gnu": "0.9.0",
-    "caliper-docgen-napi-linux-x64-gnu": "0.9.0",
-    "caliper-docgen-napi-win32-x64-msvc": "0.9.0"
+    "caliper-docgen-napi-darwin-arm64": "0.11.0",
+    "caliper-docgen-napi-darwin-x64": "0.11.0",
+    "caliper-docgen-napi-linux-arm64-gnu": "0.11.0",
+    "caliper-docgen-napi-linux-x64-gnu": "0.11.0"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.10.8"
+    "@napi-rs/cli": "^3.10.12"
   },
   "license": "FSL-1.1-MIT",
   "repository": {

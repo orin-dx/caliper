@@ -10,7 +10,7 @@
 //! parameter, a cyclic alias and an alias past the depth limit keep the call, a known object or intersection reduces,
 //! and a lazy session prints what a batch run prints.
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{PipelineOptions, WatchSession, extract};
 use camino::Utf8PathBuf;
 
 const PRELUDE: &str = r#"

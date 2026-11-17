@@ -1,6 +1,6 @@
 # Performance
 
-How fast Caliper is and what it costs is recorded in `docs/measurement.md`: a weekly run on five pinned corpora, and `just bench` for a change that touches the resolver. The criterion benches (`cargo bench -p caliper-docgen-core`) and `docs/benchmarks.md` cover single fixtures. This page keeps the measurements that explain where the time goes.
+How fast Caliper is and what it costs is recorded in `docs/measurement.md`: a weekly run on five pinned corpora, and `just bench` for a change that touches the resolver. Both run the default, the checker (ADR 0026 S8); the figures below are the structural resolver's (`--no-checker`), measured before that and by hand, and the checker's cost is in `docs/gate-measurements.md` ("The checker is the default") and, once recorded, in the weekly. The criterion benches (`cargo bench -p caliper-docgen-core`) and `docs/benchmarks.md` cover single fixtures. This page keeps the measurements that explain where the time goes.
 
 The per-pull-request scorecard that used to enforce these numbers is gone. It caught one real regression (Mantine 38% and Chakra 47% slower after a batch of 20 resolver pull requests merged on 2026-10-26, found by the weekly run), and its gates failed on runner noise and on bases that had moved. The figures below came from it and are history, not limits.
 
@@ -41,11 +41,11 @@ Whether `--load-dependencies` can become the default (ADR 0010). The five repos 
 - **Chakra's peak memory with dependencies, by change** (`/usr/bin/time -l`, default threads): 367 MiB before the literal-type work, 494 MiB after member reads through csstype's `Fallback<T>` (#144), 388 MiB once an alias's arguments are resolved once and equal props are shared. Peak memory scales with threads (248 MiB on one thread, 388 on 18) because each thread holds the types it is building; measure memory before and after any change that evaluates more types, not only time.
 - **Chakra's cost blocks the default.** Loaded dependencies let each of Chakra's 600 components reach its own ~705-prop style system: 398,000 props, 497 ms and 1.3 GB (RDT: 637,000 props, 27 s, 2.7 GB). `--collapse-inherited-props all` cuts that to 5,515 props but still 281 ms and 835 MiB, so most of the cost is not the listed props.
 
-RDT (`withCustomConfig`, `shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`) took 1.6 to 27 s and 0.6 to 2.7 GB per repo. The fixture harness also gained the switch: `CALIPER_LOAD_DEPENDENCIES=1 pnpm --filter caliper-docgen-validate run:ours`, then `parity.ts caliper-docgen`.
+RDT (`withCustomConfig`, `shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`) took 1.6 to 27 s and 0.6 to 2.7 GB per repo. The harness that ran this is not in the repository; `scripts/weekly.py` records the same comparison.
 
 ## Storybook addon request path, 2026-10-24
 
-Where the addon's time went, and what changed. Method: `packages/storybook/scripts/storybook-parity.mjs --no-baseline`, the `caliper-never` variant (it answers every component), before (`--dist` of the previous build and its binding) interleaved with after, best of 3, Apple silicon. Peak RSS is the child process's.
+Where the addon's time went, and what changed. Method: the `caliper-never` variant of the parity measurement (`docs/storybook-parity.md`), which answers every component, with the previous build and its binding before, interleaved with after, best of 3, Apple silicon. Peak RSS is the child process's.
 
 | Corpus, story set                 | Metric           | Before     | After      |
 | --------------------------------- | ---------------- | ---------- | ---------- |
@@ -132,3 +132,9 @@ Output is exact: the new default is byte-identical to the previous build's `--lo
 | shadcn   | 144 → 188 | 1.28 → 1.72 |    220 → 301 |  5.9 → 12.2 |
 
 The default is slower and larger than the old one at that commit: wall time +9 to +31%, peak RSS +12 to +37%, canonical JSON +42 to +105%. Most of the wall time was a lookup bug, fixed in #241 (indexing component lookups by name): shadcn `full` went from 153 to 127 ms, against 124 ms for the old default, with identical output. On the Storybook request path the first story was no slower with `full` than with `none`. Storybook parity (props Storybook lists that the addon lacks, antd / shadcn / Spectrum): 37 / 0 / 1 → 34 / 0 / 1. `ref` on `forwardRef` components written as `React.forwardRef(Inner)` is listed since #244; `PurePanel`'s 33 props, Drawer's own, remain because the declared type does not extend them.
+
+## Release binaries carry no symbol table
+
+`[profile.release]` sets `strip = "symbols"`. The CLI went from 34.9 MB to 28.7 MB (-17.7%) and the napi addon from 32.0 MB to 26.0 MB (-18.7%), measured on macOS arm64 with Rust 1.99.1; the output of `extract --json` is byte-identical apart from `stats`. Panics still print their message and `file:line`, and the panic guards recover as before (`panic` stays `unwind`); what is lost is the function names in a backtrace (`RUST_BACKTRACE=1` prints frames without names).
+
+To profile or read a backtrace, build without the strip: `CARGO_PROFILE_RELEASE_STRIP=none cargo build --release`. `[profile.bench]` inherits the release profile, so `just bench` and `cargo bench` also strip the debug info it asks for; add `CARGO_PROFILE_BENCH_STRIP=none` to profile one.

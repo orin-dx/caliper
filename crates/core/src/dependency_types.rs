@@ -10,8 +10,8 @@
 //! back to it, re-export answers come from it, and dependency components form a value index for `typeof` that is never
 //! emitted.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -72,8 +72,12 @@ impl Unresolved {
     }
 }
 
+/// A demanded name that panics the loader under `#[cfg(test)]`, to drive the containment path.
+#[cfg(test)]
+const DEMAND_PANIC_TEST_NAME: &str = "__DEPENDENCY_PANIC_TEST__";
+
 fn is_typescript(path: &Utf8Path) -> bool {
-    matches!(path.extension(), Some("ts" | "tsx" | "mts" | "cts"))
+    crate::extractor::is_typescript(path.as_std_path())
 }
 
 // ─── Demands ──────────────────────────────────────────────────────────────────
@@ -125,6 +129,10 @@ fn alias_refs(alias: &CollectedTypeAlias, out: &mut FxHashSet<CompactString>) {
 fn mapping_refs(mapping: &ComponentMapping, out: &mut FxHashSet<CompactString>) {
     out.insert(CompactString::from(mapping.props_type_name.as_str()));
     mapping.props_type_args.iter().for_each(|arg| type_refs(arg, out));
+    // A factory call's callback annotation (`make('div', (props: ExternalProps) => ...)`) names types only here.
+    if let Some(factory_props) = &mapping.factory_props {
+        type_refs(factory_props, out);
+    }
 }
 
 fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
@@ -138,18 +146,22 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
         }
         CollectedType::Union(members)
         | CollectedType::Intersection(members)
-        | CollectedType::Tuple(members)
         | CollectedType::TemplateLiteral(members) => members.iter().for_each(|member| type_refs(member, out)),
+        CollectedType::Tuple(elements) => elements.iter().for_each(|element| type_refs(&element.element_type, out)),
         CollectedType::Array(inner) | CollectedType::Readonly(inner) | CollectedType::KeyOf(inner) => {
             type_refs(inner, out)
         }
         CollectedType::AtFile { inner, .. } => type_refs(inner, out),
-        CollectedType::Object(fields) => fields.iter().for_each(|field| {
-            type_refs(&field.collected_type, out);
-            if let Some(key) = &field.index_key {
-                type_refs(key, out);
+        CollectedType::Object(fields) => field_refs(fields, out),
+        CollectedType::Callable { signatures, fields } => {
+            for signature in signatures {
+                let mut inner = FxHashSet::default();
+                signature.params.iter().for_each(|param| type_refs(param, &mut inner));
+                type_refs(&signature.return_type, &mut inner);
+                out.extend(inner.into_iter().filter(|name| !signature.type_params.contains(name)));
             }
-        }),
+            field_refs(fields, out);
+        }
         CollectedType::IndexedAccess { obj, key } => {
             type_refs(obj, out);
             type_refs(key, out);
@@ -185,8 +197,19 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::UniqueSymbol
         | CollectedType::Raw(_) => {}
     }
+}
+
+fn field_refs(fields: &[crate::types::CollectedObjectField], out: &mut FxHashSet<CompactString>) {
+    fields.iter().for_each(|field| {
+        type_refs(&field.collected_type, out);
+        if let Some(key) = &field.index_key {
+            type_refs(key, out);
+        }
+    })
 }
 
 /// The module and exported name path `reference` (as written in `file`) reaches through one of `imports`, if it is
@@ -274,7 +297,7 @@ pub(crate) struct DependencyLayer {
     /// Falls back to the parent's.
     pub(crate) import_map: Arc<ImportResolutionMap>,
     /// `(module, name)` → the declaring `(file, name)`, or `None` when the module's types do not export it.
-    exports: FxHashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
+    exports: dashmap::ReadOnlyView<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>, FxBuildHasher>,
     /// `(directory, specifier)` → module, for every resolution the loader made.
     resolutions: FxHashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     files: FxHashSet<PathKey>,
@@ -288,9 +311,19 @@ pub(crate) struct DependencyLayer {
     claimed: FxHashSet<(PathKey, CompactString)>,
     /// Every parsed file's data (stubs included), so an extension reuses them.
     parsed: FxHashMap<PathKey, Option<Arc<SourceData>>>,
+    /// The panics this layer's own demands hit, contained, and the dependency files it could not read; the demands they
+    /// covered stay unanswered.
+    panics: Vec<Diagnostic>,
 }
 
 impl DependencyLayer {
+    /// The contained panics of this layer and the ones it extends, in message order.
+    pub(crate) fn panic_diagnostics(&self) -> Vec<Diagnostic> {
+        let mut all: Vec<Diagnostic> = self.chain().flat_map(|layer| layer.panics.iter().cloned()).collect();
+        all.sort_by(|a, b| a.message.cmp(&b.message));
+        all
+    }
+
     /// This layer and then each one it extends.
     fn chain(&self) -> impl Iterator<Item = &DependencyLayer> {
         std::iter::successors(Some(self), |layer| layer.parent.as_deref())
@@ -406,16 +439,38 @@ struct Loader<'a> {
     re_exports: FxDashMap<PathKey, Arc<OnceLock<Arc<[String]>>>>,
     /// Something was resolved or answered that the index did not hold.
     learned: AtomicBool,
+    /// The diagnostics of demands that panicked and of dependency files that could not be read.
+    panics: Mutex<Vec<Diagnostic>>,
 }
 
 impl Loader<'_> {
+    /// The text of a dependency file. One that is missing is skipped quietly, since resolution found it a moment ago and
+    /// a dangling link or a racing uninstall declares nothing; one that exists but cannot be read is reported once,
+    /// because its declarations are then absent from every answer.
+    fn read(&self, file: &Utf8Path) -> Option<String> {
+        match std::fs::read_to_string(file) {
+            Ok(source) => Some(source),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                let mut diagnostic = Diagnostic::io_read_error(file, &error);
+                // The package's types are not the project's, and the run still produces its output.
+                diagnostic.severity = crate::types::DiagnosticSeverity::Warning;
+                let mut failures = self.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !failures.iter().any(|known| known.file == diagnostic.file) {
+                    failures.push(diagnostic);
+                }
+                None
+            }
+        }
+    }
+
     fn parse(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
         if let Some(found) = self.parent.and_then(|parent| parent.parsed_data(file.as_str())) {
             return found.clone();
         }
         let cell = self.parsed.entry(PathKey::from(file)).or_default().clone();
         cell.get_or_init(|| {
-            let source = std::fs::read_to_string(file).ok()?;
+            let source = self.read(file)?;
             let mut data = crate::extractor::parse_file(file, &source);
             // Problems inside a package's types are not the project's; an unresolved demand is reported instead.
             data.diagnostics.clear();
@@ -445,19 +500,21 @@ impl Loader<'_> {
             ModuleResolution::File(_) => Err(Unresolved::NoTypes),
             ModuleResolution::Unresolved(_) => Err(Unresolved::Unresolvable),
         };
-        self.learn(Utf8Path::new(dir));
+        // An unresolved import is not kept in the index, so asking again is not new knowledge.
+        if result.is_ok() {
+            self.learn(Utf8Path::new(dir));
+        }
         self.resolutions.insert(key, result.clone());
         result
     }
 
     fn in_project(&self, file: &Utf8Path) -> bool {
-        !file.as_str().contains("/node_modules/") && self.project_dirs.iter().any(|dir| file.starts_with(dir))
+        !in_node_modules(file.as_str()) && self.project_dirs.iter().any(|dir| file.starts_with(dir))
     }
 
     /// React's own types stay with the resolver's React handling (builtins, curated HTML attributes).
     fn is_react(file: &Utf8Path) -> bool {
-        let path = file.as_str();
-        path.contains("/node_modules/@types/react/") || path.contains("/node_modules/react/")
+        crate::origin::declaration_origin(file.as_str()) == crate::origin::Origin::React
     }
 
     /// The `(file, name)` declaring `name` as exported from `module`.
@@ -522,7 +579,9 @@ impl Loader<'_> {
         for export in &data.exports {
             match export {
                 LexedExport::ReExportNamed { local_name, source_name, source_specifier, .. } if local_name == head => {
-                    let target = self.resolve(module, source_specifier).ok()?;
+                    // An explicit export shadows a wildcard one, so a hop that cannot be resolved leaves the name unanswered
+                    // rather than to a later `export *`; `unresolved_cause` names the hop.
+                    let Ok(target) = self.resolve(module, source_specifier) else { return None };
                     let next = match rest {
                         Some(rest) => format!("{source_name}.{rest}"),
                         None => source_name.clone(),
@@ -530,7 +589,7 @@ impl Loader<'_> {
                     return self.find_export_in(&target, &next, visited, cut);
                 }
                 LexedExport::ReExportNamespace { namespace, source_specifier } if namespace == head => {
-                    let target = self.resolve(module, source_specifier).ok()?;
+                    let Ok(target) = self.resolve(module, source_specifier) else { return None };
                     return self.find_export_in(&target, rest?, visited, cut);
                 }
                 // `export { DialogContent as Content }`, the way bundled typings (Radix's) name their parts.
@@ -576,7 +635,19 @@ impl Loader<'_> {
         None
     }
 
+    /// Runs `demand` on the scope, recording a panic as a diagnostic instead of letting it end the whole load.
+    fn spawn_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+        scope.spawn(move |scope| {
+            let label = format!("dependency demand {}#{}", demand.specifier, demand.name);
+            if let Err(panic) = crate::panic_guard::contain_panic(&label, || self.demand(scope, demand)) {
+                self.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(panic);
+            }
+        });
+    }
+
     fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+        #[cfg(test)]
+        assert!(&*demand.name != DEMAND_PANIC_TEST_NAME, "injected panic");
         let key = demand.key();
         if self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone()) {
             return;
@@ -608,9 +679,73 @@ impl Loader<'_> {
         match self.find_export(&module, &demand.name) {
             Some((file, name)) => self.load_declaration(scope, file, name),
             None => {
-                self.unresolved.insert(key, Unresolved::NotExported);
+                let cause = self.unresolved_cause(&module, &demand.name).unwrap_or(Unresolved::NotExported);
+                self.unresolved.insert(key, cause);
             }
         }
+    }
+
+    /// Why a name `module` seems not to export was not found: a re-export hop on the way to it that cannot be
+    /// resolved. A named or namespace hop for the name is the cause outright; an unresolvable `export *` only could
+    /// have held it, so it is reported when nothing else explains the miss. `None` means every hop resolved.
+    fn unresolved_cause(&self, module: &Utf8Path, name: &str) -> Option<Unresolved> {
+        let mut visited = FxHashSet::default();
+        let mut star = None;
+        self.unresolved_cause_in(module, name, &mut visited, &mut star).or(star)
+    }
+
+    fn unresolved_cause_in(
+        &self,
+        module: &Utf8Path,
+        name: &str,
+        visited: &mut FxHashSet<(PathKey, CompactString)>,
+        star: &mut Option<Unresolved>,
+    ) -> Option<Unresolved> {
+        if !visited.insert((PathKey::from(module), CompactString::from(name))) {
+            return None;
+        }
+        let data = self.parse(module)?;
+        let (head, rest) = match name.split_once('.') {
+            Some((head, rest)) => (head, Some(rest)),
+            None => (name, None),
+        };
+        // The order `find_export_uncached` reads them in: an explicit export answers for its name and shadows every
+        // wildcard, so a wildcard is looked into only when no explicit export names it.
+        for star_pass in [false, true] {
+            for export in &data.exports {
+                let (specifier, next) = match export {
+                    LexedExport::ReExportNamed { local_name, source_name, source_specifier, .. }
+                        if !star_pass && local_name == head =>
+                    {
+                        let next = rest.map_or_else(|| source_name.clone(), |rest| format!("{source_name}.{rest}"));
+                        (source_specifier, next)
+                    }
+                    LexedExport::ReExportNamespace { namespace, source_specifier }
+                        if !star_pass && namespace == head =>
+                    {
+                        (source_specifier, rest?.to_owned())
+                    }
+                    // `export *` never carries `default`, as `find_export_uncached` enforces.
+                    LexedExport::ReExportAll { source_specifier, .. } if star_pass && head != "default" => {
+                        (source_specifier, name.to_owned())
+                    }
+                    _ => continue,
+                };
+                match self.resolve(module, specifier) {
+                    Err(cause) if star_pass => {
+                        star.get_or_insert(cause);
+                    }
+                    Err(cause) => return Some(cause),
+                    Ok(target) => {
+                        let cause = self.unresolved_cause_in(&target, &next, visited, star);
+                        if cause.is_some() || !star_pass {
+                            return cause;
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// A module imported for its own sake: only what it merges into React is read.
@@ -670,10 +805,10 @@ impl Loader<'_> {
             let mut names: Vec<&String> = data.interfaces.keys().collect();
             names.sort();
             for key in names {
-                if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':')) {
-                    if name.starts_with("React.") {
-                        self.load_declaration(scope, file.clone(), CompactString::from(name));
-                    }
+                if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':'))
+                    && name.starts_with("React.")
+                {
+                    self.load_declaration(scope, file.clone(), CompactString::from(name));
                 }
             }
         }
@@ -691,12 +826,12 @@ impl Loader<'_> {
         if let Some(parsed) = parsed {
             return parsed.map(|data| scan_of(&data, file));
         }
-        if let Some(cell) = self.re_exports.get(file.as_str()) {
-            if let Some(found) = cell.get() {
-                return Some((false, found.clone()));
-            }
+        if let Some(cell) = self.re_exports.get(file.as_str())
+            && let Some(found) = cell.get()
+        {
+            return Some((false, found.clone()));
         }
-        let source = std::fs::read_to_string(file).ok()?;
+        let source = self.read(file)?;
         if entry || may_declare_into_react(&source) {
             return self.parse(file).map(|data| scan_of(&data, file));
         }
@@ -794,16 +929,17 @@ impl Loader<'_> {
                 } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
                     stack.push(qualified);
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
-                    scope.spawn(move |scope| self.demand(scope, demand));
+                    self.spawn_demand(scope, demand);
                 }
             }
         }
     }
 
-    /// Note that an answer about `dir` is new, when `write_index` would keep it. A project file's own imports are
-    /// resolved on every run and never reach the index, so they must not make a warm run rewrite it.
+    /// Note that an answer about `dir` is new. A project file's own imports are resolved on every run and never reach
+    /// the index, so they must not make a warm run rewrite it. Export answers of a package that `write_index` drops
+    /// still count here, since only the written bytes tell; `write_index` leaves the file alone when they are unchanged.
     fn learn(&self, dir: &Utf8Path) {
-        if dir.as_str().contains("/node_modules/") && self.package_of(dir).is_some() {
+        if in_node_modules(dir.as_str()) && self.package_of(dir).is_some() {
             self.learned.store(true, Ordering::Relaxed);
         }
     }
@@ -815,7 +951,7 @@ impl Loader<'_> {
         let found = dir
             .ancestors()
             .find(|candidate| candidate.join("package.json").is_file())
-            .filter(|candidate| candidate.as_str().contains("/node_modules/"))
+            .filter(|candidate| in_node_modules(candidate.as_str()))
             .map(|candidate| Box::from(candidate.as_str()));
         self.packages.insert(Box::from(dir.as_str()), found.clone());
         found
@@ -869,7 +1005,7 @@ fn declares(data: &SourceData, file: &Utf8Path, name: &str) -> bool {
         || data.type_aliases.contains_key(&key)
         || data.enums.contains_key(&key)
         || data.const_arrays.contains_key(&key)
-        || data.component_mappings.iter().any(|m| m.component_name == name)
+        || data.component_mappings.iter().any(|m| m.binding_name() == name)
         // A constant declared by its type alone (`declare const Primitive: Primitives`).
         || data.type_aliases.contains_key(&format!("{file}:typeof {name}"))
 }
@@ -883,7 +1019,7 @@ fn declaration_refs(data: &SourceData, file: &Utf8Path, name: &str, out: &mut Fx
     if let Some(alias) = data.type_aliases.get(&key) {
         alias_refs(alias, out);
     }
-    for mapping in data.component_mappings.iter().filter(|m| m.component_name == name) {
+    for mapping in data.component_mappings.iter().filter(|m| m.binding_name() == name) {
         mapping_refs(mapping, out);
     }
     // A reference that omits an argument reads the default (`DOMAttributes<T = FocusableElement>`).
@@ -908,12 +1044,8 @@ pub(crate) fn load(
     previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
     let resolvers = ModuleResolvers::new(options);
-    let project_dirs: Vec<Utf8PathBuf> = options
-        .src_dirs
-        .iter()
-        .filter_map(|dir| std::fs::canonicalize(dir).ok())
-        .filter_map(|dir| Utf8PathBuf::from_path_buf(dir).ok())
-        .collect();
+    let project_dirs: Vec<Utf8PathBuf> =
+        options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
     let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
     let flatten = previous.filter(|_| parent.is_none());
     let loader = Loader {
@@ -935,6 +1067,7 @@ pub(crate) fn load(
         module_demands: DashMap::default(),
         re_exports: DashMap::default(),
         learned: AtomicBool::new(false),
+        panics: Mutex::new(Vec::new()),
     };
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
@@ -952,7 +1085,7 @@ pub(crate) fn load(
                 for (key, value) in &layer.resolutions {
                     loader.resolutions.insert(key.clone(), value.clone());
                 }
-                for (key, value) in &layer.exports {
+                for (key, value) in layer.exports.iter() {
                     loader.exports.insert(key.clone(), value.clone());
                 }
                 for (key, data) in &layer.parsed {
@@ -976,6 +1109,12 @@ pub(crate) fn load(
                 for (module, files) in &layer.augmenters {
                     loader.augmenters.insert(module.clone(), files.clone());
                 }
+                // The demands a panic covered stay unanswered in the flattened layer, so its report stays too.
+                loader
+                    .panics
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .extend(layer.panics.iter().cloned());
             }
         }
         (Some(_), None) => {}
@@ -983,16 +1122,13 @@ pub(crate) fn load(
     rayon::scope(|scope| {
         for demand in demands {
             let loader = &loader;
-            scope.spawn(move |scope| {
-                let label = format!("dependency demand {}#{}", demand.specifier, demand.name);
-                let _contained = crate::panic_guard::contain_panic(&label, || loader.demand(scope, demand));
-            });
+            loader.spawn_demand(scope, demand);
         }
     });
-    if let (None, Some(path)) = (previous, &index_path) {
-        if loader.learned.load(Ordering::Relaxed) {
-            write_index(path, &loader);
-        }
+    if let (None, Some(path)) = (previous, &index_path)
+        && loader.learned.load(Ordering::Relaxed)
+    {
+        write_index(path, &loader);
     }
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();
@@ -1016,7 +1152,7 @@ pub(crate) fn load(
     component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
     let mut component_positions: FxHashMap<CompactString, Vec<usize>> = FxHashMap::default();
     for (position, mapping) in component_mappings.iter().enumerate() {
-        component_positions.entry(CompactString::from(mapping.component_name.as_str())).or_default().push(position);
+        component_positions.entry(CompactString::from(mapping.binding_name())).or_default().push(position);
     }
     let named_types = Arc::new(named);
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
@@ -1032,7 +1168,7 @@ pub(crate) fn load(
     let import_map = Arc::new(
         ImportResolutionMap::build(&imports).with_fallback(parent.as_ref().map(|layer| layer.import_map.clone())),
     );
-    let exports: FxHashMap<_, _> = loader.exports.into_iter().collect();
+    let exports = loader.exports.into_read_only();
     let resolutions: FxHashMap<_, _> = loader.resolutions.into_iter().collect();
     let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
     let files: FxHashSet<PathKey> = files.into_iter().collect();
@@ -1061,6 +1197,7 @@ pub(crate) fn load(
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
         parsed: loader.parsed.into_iter().map(|(key, cell)| (key, cell.get().cloned().flatten())).collect(),
+        panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
     }
 }
 
@@ -1088,6 +1225,10 @@ struct PackageIndex {
     /// A row is dropped on read when any of those packages' `package.json` changed, as well as this package's.
     #[serde(default)]
     augmenters: Vec<AugmenterRow>,
+    /// The other packages the resolutions and exports above lead into. They hold only while those packages'
+    /// `package.json` files do, and while the packages that are themselves in the index do.
+    #[serde(default)]
+    depends_on: Vec<PackageStampRow>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1104,21 +1245,59 @@ fn index_path(options: &PipelineOptions) -> (Utf8PathBuf, u64) {
     (dir.join(format!("dependency-index-{fingerprint:016x}.msgpack")), fingerprint)
 }
 
+/// Whether `path` lies inside a `node_modules` directory, spelled with either separator (a Windows path has
+/// backslashes once the verbatim prefix is gone).
+pub(crate) use crate::types::options::in_node_modules;
+
 fn package_stamp(dir: &str) -> Option<(u128, u64)> {
     let meta = std::fs::metadata(Utf8Path::new(dir).join("package.json")).ok()?;
     let mtime = meta.modified().ok()?.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_nanos();
     Some((mtime, meta.len()))
 }
 
-/// Seed the loader from the index's packages whose `package.json` is unchanged.
+/// The directories of the index's packages whose answers still hold: the package's own `package.json` and those of the
+/// packages it leads into are unchanged, and so are the answers of those that are themselves in the index (a re-export
+/// chain is only as current as its newest link).
+fn current_packages(packages: &[PackageIndex]) -> FxHashSet<&str> {
+    let unchanged = |dir: &str, mtime_ns: u128, size: u64| package_stamp(dir) == Some((mtime_ns, size));
+    let mut current: FxHashSet<&str> = packages
+        .iter()
+        .filter(|package| unchanged(&package.dir, package.mtime_ns, package.size))
+        .filter(|package| package.depends_on.iter().all(|(dir, mtime_ns, size)| unchanged(dir, *mtime_ns, *size)))
+        .map(|package| package.dir.as_str())
+        .collect();
+    let by_dir: FxHashMap<&str, &PackageIndex> =
+        packages.iter().map(|package| (package.dir.as_str(), package)).collect();
+    loop {
+        let stale: Vec<&str> = current
+            .iter()
+            .copied()
+            .filter(|dir| {
+                by_dir[dir]
+                    .depends_on
+                    .iter()
+                    .any(|(dep, ..)| by_dir.contains_key(dep.as_str()) && !current.contains(dep.as_str()))
+            })
+            .collect();
+        if stale.is_empty() {
+            return current;
+        }
+        for dir in stale {
+            current.remove(dir);
+        }
+    }
+}
+
+/// Seed the loader from the index's packages whose answers still hold.
 fn read_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
     let Ok(bytes) = std::fs::read(path) else { return };
     let Ok(index) = rmp_serde::from_slice::<IndexFile>(&bytes) else { return };
     if index.fingerprint != *fingerprint {
         return;
     }
+    let current: FxHashSet<String> = current_packages(&index.packages).into_iter().map(str::to_owned).collect();
     for package in index.packages {
-        if package_stamp(&package.dir) != Some((package.mtime_ns, package.size)) {
+        if !current.contains(&package.dir) {
             continue;
         }
         for (dir, specifier, result) in package.resolutions {
@@ -1157,16 +1336,34 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
                     resolutions: Vec::new(),
                     exports: Vec::new(),
                     augmenters: Vec::new(),
+                    depends_on: Vec::new(),
                 },
             );
         }
         Some(package)
     };
+    // The package a file belongs to, when it is another one than `from`.
+    let other_package = |file: &Utf8Path, from: &str| -> Option<Box<str>> {
+        loader.package_of(file.parent()?).filter(|package| &**package != from)
+    };
+    let mut depends_on: FxHashMap<Box<str>, FxHashSet<Box<str>>> = FxHashMap::default();
+    // A package with an unresolved import, or one leading into such a package, has export lookups that walked past
+    // it; installing the missing package changes them, and the index could not say so, so none of its exports are kept.
+    let mut with_unresolved: FxHashSet<Box<str>> = FxHashSet::default();
     let mut resolutions: Vec<(Box<str>, ResolutionRow)> = Vec::new();
     for item in loader.resolutions.iter() {
         let ((dir, specifier), result) = (item.key(), item.value());
-        if let Some(package) = entry(Utf8Path::new(dir)) {
-            resolutions.push((package, (dir.to_string(), specifier.to_string(), result.clone().map(String::from))));
+        let Some(package) = entry(Utf8Path::new(dir)) else { continue };
+        match result {
+            Ok(target) => {
+                if let Some(other) = other_package(target, &package) {
+                    depends_on.entry(package.clone()).or_default().insert(other);
+                }
+                resolutions.push((package, (dir.to_string(), specifier.to_string(), Ok(target.to_string()))));
+            }
+            Err(_) => {
+                with_unresolved.insert(package);
+            }
         }
     }
     let mut exports: Vec<(Box<str>, ExportRow)> = Vec::new();
@@ -1175,10 +1372,28 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         let module: &str = std::borrow::Borrow::borrow(module);
         let Some(dir) = Utf8Path::new(module).parent() else { continue };
         if let Some(package) = entry(dir) {
+            if let Some(other) = found.as_ref().and_then(|(file, _)| other_package(file, &package)) {
+                depends_on.entry(package.clone()).or_default().insert(other);
+            }
             let found = found.as_ref().map(|(file, name)| (file.to_string(), name.to_string()));
             exports.push((package, (module.to_owned(), name.to_string(), found)));
         }
     }
+    // A package that leads into one with an unresolved import has export lookups that walked past it too.
+    loop {
+        let reaching: Vec<Box<str>> = depends_on
+            .iter()
+            .filter(|(package, others)| {
+                !with_unresolved.contains(*package) && others.iter().any(|other| with_unresolved.contains(other))
+            })
+            .map(|(package, _)| package.clone())
+            .collect();
+        if reaching.is_empty() {
+            break;
+        }
+        with_unresolved.extend(reaching);
+    }
+    exports.retain(|(package, _)| !with_unresolved.contains(package));
     let mut augmenters: Vec<(Box<str>, AugmenterRow)> = Vec::new();
     for item in loader.augmenters.iter() {
         let (module, files): (&str, _) = (std::borrow::Borrow::borrow(item.key()), item.value());
@@ -1186,6 +1401,17 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         if let Some(package) = entry(dir) {
             let crossed = loader.augmenter_crossed.get(item.key()).map(|crossed| crossed.clone()).unwrap_or_default();
             augmenters.push((package, (module.to_owned(), files.iter().map(ToString::to_string).collect(), crossed)));
+        }
+    }
+    for (package, others) in depends_on {
+        // A dependency whose stamp cannot be read gets one that never matches, so the rows it supports are dropped.
+        let stamps = others.iter().map(|other| {
+            let (mtime_ns, size) = package_stamp(other).unwrap_or_default();
+            (other.to_string(), mtime_ns, size)
+        });
+        if let Some(index) = packages.get_mut(&package) {
+            index.depends_on.extend(stamps);
+            index.depends_on.sort();
         }
     }
     for (package, row) in augmenters {
@@ -1211,14 +1437,27 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         package.augmenters.sort();
     }
     let Ok(bytes) = rmp_serde::to_vec(&IndexFile { fingerprint: *fingerprint, packages }) else { return };
+    // Answers the index does not keep (those of a package with an unresolved import) make every run learn again; the
+    // file is left alone when it would not change.
+    if std::fs::read(path).is_ok_and(|existing| existing == bytes) {
+        return;
+    }
     let Some(dir) = path.parent() else { return };
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let temp = path.with_extension(format!("tmp{}", std::process::id()));
+    let temp = temp_path(path);
     if std::fs::write(&temp, bytes).is_ok() && std::fs::rename(&temp, path).is_err() {
         let _removed = std::fs::remove_file(&temp);
     }
+}
+
+/// A name no other write of `path` shares, within this process or another: writers racing on one name would rename
+/// each other's half-written files into place.
+fn temp_path(path: &Utf8Path) -> Utf8PathBuf {
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let write = WRITES.fetch_add(1, Ordering::Relaxed);
+    path.with_extension(format!("tmp{}-{write}", std::process::id()))
 }
 
 #[cfg(test)]

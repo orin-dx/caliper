@@ -21,8 +21,10 @@ export interface CaliperStorybookOptions {
    */
   loadDependencies?: boolean
   /**
-   * Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop. Default:
-   * `'none'`, every inherited prop listed.
+   * Which large inherited sources to list as one inherited layer of names instead of prop by prop. Default:
+   * `'dependencies'`: a dependency's DOM, ARIA and style-system sources of more than 30 props, and any other source,
+   * the project's own included, of more than 200 props. `'all'` also collapses project sources of more than 30 props;
+   * `'none'` lists every inherited prop.
    */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
   /**
@@ -31,31 +33,35 @@ export interface CaliperStorybookOptions {
    */
   lazy?: boolean
   /**
-   * With a lazy session, resolve a few components in the background after it starts. Default: `false`: it did not
-   * make the first story faster in measurement.
+   * How many stories' components to document before the browser asks for them. When the dev server starts, the story
+   * Storybook opens is documented through Storybook's docgen service; then, after it and after every story the browser
+   * opens, the components of the next `prefetchStories - 1` stories in the sidebar are resolved in the background
+   * (checker included), nearest first, behind every story someone opened. Default: `1`, the opening story only. `0`
+   * waits for the browser.
    */
-  warmUp?: boolean
+  prefetchStories?: number
   /**
-   * With a lazy session, once this many distinct components have been asked for, resolve all the rest in the
-   * background in one parallel pass. It lowers the median story latency of a project read end to end (Spectrum's
-   * 50 stories: 19 ms to 5 ms) but not the total time, and raises peak memory by 170 to 420 MB, so it is off by
-   * default: `0`.
+   * Ask the built-in TypeScript checker for each component a story names. Default: `true`: it is kept warm in the
+   * background, asked for exactly the requested component, and the structural props stand when it is slower than
+   * `semanticWaitMs`; its answer then replaces them in the open story when it arrives, without a reload, and is kept
+   * for the next request. `false` never starts it.
    */
-  fillAfter?: number
-  /**
-   * Ask TypeScript's 7.1 checker for each component a story names (experimental). `'off'` (the default) never starts
-   * it. `'on-demand'` keeps one `tsc` warm in the background, asks it for exactly the requested component, and uses
-   * the structural props when it is slower than `semanticWaitMs`; its answer is kept for the next request. Needs
-   * `typescript@beta` (7.1) installed, or `tscPath`.
-   */
-  semanticTypes?: 'off' | 'on-demand'
-  /** The `tsc` binary to run, instead of the nearest `node_modules/typescript/bin/tsc`. */
-  tscPath?: string
+  checker?: boolean
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
   semanticWaitMs?: number
   /**
-   * When a component's resolution reported a warning or an error, its props may be incomplete. `'degraded'` (the
-   * default) hands such a component to the next docgen provider, React's own; `'never'` always answers.
+   * How many milliseconds a story waits for the checker when caliper-docgen's own pass lists no props for its
+   * component (a `ComponentProps<typeof Button>` of a library it cannot read), since there is nothing to show before
+   * the checker answers. Default: `2000`. A value below `semanticWaitMs` gives such a story `semanticWaitMs`.
+   */
+  semanticWaitEmptyMs?: number
+  /**
+   * When a warning or an error stays on a component's answer, its props may be incomplete. `'degraded'` (the default)
+   * hands such a component to the next docgen provider, React's own; `'never'` always answers. Once the checker
+   * (`checker`) answers for a component, a warning caliper-docgen's own pass reported about what that answer
+   * replaces (a component it could not find, a prop type it could not resolve) is gone from the answer and hands
+   * nothing on; one about what the checker could not read either, or the checker's own (it stopped, it is
+   * unavailable), stays and does.
    */
   fallback?: 'degraded' | 'never'
 }

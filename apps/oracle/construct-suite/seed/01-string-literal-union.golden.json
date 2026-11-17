@@ -1,0 +1,51 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "lit",
+        "value": "large",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "medium",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "small",
+        "of": "string"
+      }
+    ],
+    "alias": "Size"
+  },
+  "text": "Size",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "seed/01-string-literal-union.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "small",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "medium",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "large",
+        "of": "string"
+      }
+    ]
+  }
+}

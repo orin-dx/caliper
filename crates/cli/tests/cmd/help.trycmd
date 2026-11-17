@@ -6,7 +6,8 @@ Usage: caliper-docgen [OPTIONS] <COMMAND>
 
 Commands:
   extract      Extract prop types and write to stdout or --out file
-  watch        Watch for changes and re-extract
+  watch        Watch for changes and re-extract with the structural resolver (no
+               checker)
   check        Validate extraction — exits 2 if any errors, or 1 if --strict and
                there are warnings. For CI
   inspect      Show resolved props for a single component (debugging tool)

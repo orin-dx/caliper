@@ -19,11 +19,12 @@ pub mod watch;
 
 pub use crate::types::options::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions};
 pub use revision::{ComponentAnswer, ComponentLocation};
+pub use semantic_hook::awaits_checker;
 pub use watch::{LazyStats, WatchSession};
 
 /// Filename that trips a simulated panic in the Phase 2 parse closure —
 /// exists only to let tests exercise `panic_guard::contain_panic`'s
-/// containment without a plugin hook to inject a real one through.
+/// containment without a real panic to trigger.
 #[cfg(test)]
 const PARSE_PANIC_TEST_SENTINEL: &str = "__PANIC_TEST__.tsx";
 
@@ -40,6 +41,7 @@ const RESOLVE_PANIC_TEST_SENTINEL: &str = "ResolvePanicTestSentinel";
 
 /// Result of processing a single file change in watch mode. Its JSON writes the updated components' props as ids, with
 /// a `props` table holding every prop they refer to (ADR 0009).
+#[derive(Debug)]
 pub struct IncrementalUpdate {
     /// The session revision this update produced; a consumer can drop an update older than one it already applied.
     pub revision: u64,
@@ -50,18 +52,20 @@ pub struct IncrementalUpdate {
     pub updated_keys: Vec<String>,
     /// Output keys that no longer exist: the component was renamed, deleted, or stopped being a component.
     pub removed_keys: Vec<String>,
+    /// The files of the components in `updated_components`, sorted and without duplicates.
     pub affected_files: Vec<Utf8PathBuf>,
     /// Diagnostics this revision added. A client holding the previous output applies `removed_keys`, then
     /// `updated_keys`, then drops `removed_diagnostics` and adds these, and holds the new output.
     pub diagnostics: Vec<Diagnostic>,
     /// Diagnostics the previous revision had and this one does not: fixed, or replaced by a changed one.
     pub removed_diagnostics: Vec<Diagnostic>,
+    /// How long building this revision took, in milliseconds.
     pub duration_ms: u64,
 }
 
 impl Serialize for IncrementalUpdate {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use crate::types::output::interned::{intern, InternedComponent, Tables};
+        use crate::types::output::interned::{InternedComponent, Tables, intern};
         use serde::ser::SerializeStruct;
 
         let IncrementalUpdate {
@@ -112,6 +116,7 @@ impl Serialize for SessionIndex<'_> {
         struct Location<'a> {
             file_path: &'a str,
             display_name: &'a str,
+            exports: &'a [crate::types::ComponentExport],
         }
 
         let mut lists = NameLists::new();
@@ -119,7 +124,11 @@ impl Serialize for SessionIndex<'_> {
         let locations: std::collections::BTreeMap<&str, Location<'_>> = self
             .locations
             .iter()
-            .map(|at| (at.key.as_str(), Location { file_path: at.file_path.as_str(), display_name: &at.display_name }))
+            .map(|at| {
+                let location =
+                    Location { file_path: at.file_path.as_str(), display_name: &at.display_name, exports: &at.exports };
+                (at.key.as_str(), location)
+            })
             .collect();
         let mut out = serializer.serialize_struct("SessionIndex", 4)?;
         out.serialize_field("schemaVersion", &crate::types::SCHEMA_VERSION)?;
@@ -171,6 +180,17 @@ pub fn incremental_update_to_json(update: &IncrementalUpdate) -> Result<String, 
 /// Stateless extraction — suitable for CLI and NAPI cold runs.
 pub fn extract(options: &PipelineOptions) -> ExtractionOutput {
     revision::Revision::cold_output(options)
+}
+
+/// [`extract`], handing `on_roots` the checker program's root files (the files of the components that export something,
+/// in the order the output lists them) as soon as the project is parsed and merged, while the rest of the pass is still
+/// to run. The list is a prediction: it is the one the finished output gives unless resolution drops a component, so
+/// work started on it must be checked against the output's own before it is used.
+pub fn extract_with_early_roots(
+    options: &PipelineOptions,
+    on_roots: impl FnOnce(Vec<Utf8PathBuf>),
+) -> ExtractionOutput {
+    revision::Revision::cold_output_early(options, Some(Box::new(on_roots)))
 }
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
@@ -236,7 +256,12 @@ pub(super) fn merge_parsed_dts_file(
 pub(super) fn resolve_guarded(
     mappings: &[&ComponentMapping],
     ctx: &ResolutionContext,
-) -> Vec<(ComponentEntry, ResolvedDiagnostics, crate::resolver::Dependencies)> {
+) -> Vec<(
+    ComponentEntry,
+    ResolvedDiagnostics,
+    crate::resolver::Dependencies,
+    Option<std::sync::Arc<crate::relevance::Inputs>>,
+)> {
     mappings
         .par_iter()
         .copied()
@@ -252,6 +277,7 @@ pub(super) fn resolve_guarded(
             })
             .unwrap_or_else(|diag| {
                 let stub = ComponentEntry {
+                    relevance: None,
                     display_name: mapping.component_name.clone(),
                     file_path: mapping.file_path.clone(),
                     description: String::new(),
@@ -263,12 +289,13 @@ pub(super) fn resolve_guarded(
                     tags: Default::default(),
                     methods: vec![],
                     detected_by: mapping.rule,
-                    exported: mapping.exported,
+                    exported: mapping.exported(),
+                    exports: mapping.exports.clone(),
                 };
                 // A panicked resolution re-runs on any edit to its own file.
                 let mut deps = crate::resolver::Dependencies::default();
                 deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
-                (stub, ResolvedDiagnostics { own: vec![diag], shared: Vec::new() }, deps)
+                (stub, ResolvedDiagnostics { own: vec![diag], shared: Vec::new() }, deps, None)
             })
         })
         .collect()

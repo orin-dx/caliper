@@ -7,8 +7,8 @@ use oxc_ast::ast::*;
 
 use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode};
 
-use super::evidence::{renders, FunctionShape};
-use super::{is_pascal_case, ReactApi, SourceDataCollector};
+use super::evidence::{FunctionShape, Scope, renders};
+use super::{ReactApi, SourceDataCollector, is_pascal_case};
 
 /// Peel any wrapping `as X` casts, `satisfies X` checks or `!` assertions down to the real
 /// expression underneath. Needed because component libraries commonly cast a
@@ -68,13 +68,13 @@ impl<'b, 'a> Binding<'b, 'a> {
     }
 }
 
-/// Names `@types/react` (and its `React.`-qualified form) recognizes as a
-/// function-component type. Shared between `extract_props_from_type_annotation`
-/// (which additionally requires the props argument itself to resolve) and
-/// `type_annotation_is_fc_family` below (which only needs to know the
-/// annotation *looked like* one of these) so the two checks can't drift apart.
-const FC_FAMILY_TYPE_NAMES: &[&str] =
-    &["FC", "FunctionComponent", "ComponentType", "VFC", "VoidFunctionComponent", "ForwardRefComponent"];
+/// Whether `bare` is a React export that types a function component: the shared family plus the forwardRef
+/// component type. Used by `extract_props_from_type_annotation` (which additionally requires the props argument
+/// itself to resolve) and `type_annotation_is_fc_family` below (which only needs to know the annotation *looked
+/// like* one of these) so the two checks can't drift apart.
+fn is_fc_family_type(bare: &str) -> bool {
+    crate::react_types::FC_FAMILY_TYPE_NAMES.contains(&bare) || bare == "ForwardRefComponent"
+}
 
 /// PascalCase a file's stem for naming an anonymous default-exported
 /// component that has no identifier of its own — e.g. `button-group.tsx` →
@@ -100,14 +100,14 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_cast_component_alias<'a>(&mut self, decl: &VariableDeclarator<'a>, name: &str) {
         let Some(Expression::TSAsExpression(assertion)) = decl.init.as_ref() else { return };
         let Expression::Identifier(inner) = assertion.expression.without_parentheses() else { return };
-        let has_base = self.data.component_mappings.iter().any(|mapping| mapping.component_name == inner.name.as_str());
+        let has_base = self.data.component_mappings.iter().any(|mapping| mapping.is_binding_named(inner.name.as_str()));
         if !has_base {
             return;
         }
         let TSType::TSTypeReference(reference) = &assertion.type_annotation else { return };
         let type_name = self.extract_type_ref_name(reference);
         let Some(bare) = self.react_type_export(&type_name) else { return };
-        if !matches!(bare.as_str(), "ForwardRefExoticComponent" | "FunctionComponent" | "FC" | "ComponentType") {
+        if bare != "ForwardRefExoticComponent" && !is_fc_family_type(&bare) {
             return;
         }
         let Some(props) = reference.type_arguments.as_ref().and_then(|args| args.params.first()) else { return };
@@ -127,11 +127,7 @@ impl<'src> SourceDataCollector<'src> {
         match &decl.id {
             BindingPattern::BindingIdentifier(id) => {
                 let name = id.name.as_str();
-                if is_pascal_case(name) {
-                    Some(name.to_owned())
-                } else {
-                    None
-                }
+                if is_pascal_case(name) { Some(name.to_owned()) } else { None }
             }
             _ => None,
         }
@@ -174,8 +170,7 @@ impl<'src> SourceDataCollector<'src> {
         match ty {
             TSType::TSTypeReference(tr) => {
                 let type_name = self.extract_type_ref_name(tr);
-                if !self.react_type_export(&type_name).is_some_and(|bare| FC_FAMILY_TYPE_NAMES.contains(&bare.as_str()))
-                {
+                if !self.react_type_export(&type_name).is_some_and(|bare| is_fc_family_type(&bare)) {
                     return None;
                 }
                 let (props_name, type_args) = self.extract_props_arg(&tr.type_arguments)?;
@@ -348,10 +343,10 @@ impl<'src> SourceDataCollector<'src> {
         };
 
         // Rules out anonymous utility functions, which aren't components.
-        if let Some(fn_name_str) = fn_name {
-            if !is_pascal_case(fn_name_str) {
-                return None;
-            }
+        if let Some(fn_name_str) = fn_name
+            && !is_pascal_case(fn_name_str)
+        {
+            return None;
         }
 
         let first_param = params.items.first()?;
@@ -403,7 +398,7 @@ impl<'src> SourceDataCollector<'src> {
                             || self.data.imports.iter().any(|binding| {
                                 binding.local_name == prefix
                                     && binding.exported_name == "*"
-                                    && binding.specifier == "react"
+                                    && super::is_react_module(&binding.specifier)
                             }))
                 })
         };
@@ -449,7 +444,7 @@ impl<'src> SourceDataCollector<'src> {
         let (props_name, props_args) = match props_type {
             crate::types::CollectedType::Named { name, args } => (name, args),
             props => {
-                let name = format!("__anon_{}", self.data.type_aliases.len());
+                let name = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let key = self.scoped_key(&name);
                 self.data.type_aliases.insert(
                     key,
@@ -513,17 +508,13 @@ impl<'src> SourceDataCollector<'src> {
                 || self.data.imports.iter().any(|binding| {
                     binding.local_name == name
                         && binding.exported_name == "ReactElement"
-                        && binding.specifier == "react"
+                        && super::is_react_module(&binding.specifier)
                 })
         };
         let returns_element = |ty: &crate::types::CollectedType| match ty {
             crate::types::CollectedType::Named { name, .. } => is_element(name),
             crate::types::CollectedType::Union(members) => members.iter().any(|member| {
-                if let crate::types::CollectedType::Named { name, .. } = member {
-                    is_element(name)
-                } else {
-                    false
-                }
+                if let crate::types::CollectedType::Named { name, .. } = member { is_element(name) } else { false }
             }),
             _ => false,
         };
@@ -535,7 +526,7 @@ impl<'src> SourceDataCollector<'src> {
         let type_params: Vec<crate::types::TypeName> = type_parameters
             .map(|declaration| declaration.params.iter().map(|param| param.name.name.as_str().into()).collect())
             .unwrap_or_default();
-        if props_name.starts_with("__anon_") && !type_params.is_empty() {
+        if crate::types::is_synthesized_alias(&props_name) && !type_params.is_empty() {
             self.data.type_alias_params.insert(self.scoped_key(&props_name), type_params.clone());
             props_args = type_params
                 .iter()
@@ -589,6 +580,7 @@ impl<'src> SourceDataCollector<'src> {
 
         let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
         let param_defaults = self.extract_param_defaults(&func.params);
+        self.anonymous_default = Some(func.span.start);
         self.data.component_mappings.push(
             ComponentMapping::new(
                 name,
@@ -598,6 +590,7 @@ impl<'src> SourceDataCollector<'src> {
                 func.span.end,
                 DetectionRule::AnonymousDefaultExport,
             )
+            .without_binding()
             .with_props_type_args(type_args)
             .with_doc(description, tags)
             .with_param_defaults(param_defaults),
@@ -684,7 +677,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(type_ann) = decl.type_annotation.as_ref() else { return false };
         let TSType::TSTypeReference(tr) = peel_parens(&type_ann.type_annotation) else { return false };
         let type_name = self.extract_type_ref_name(tr);
-        self.react_type_export(&type_name).is_some_and(|bare| FC_FAMILY_TYPE_NAMES.contains(&bare.as_str()))
+        self.react_type_export(&type_name).is_some_and(|bare| is_fc_family_type(&bare))
     }
 
     /// Rename an already-collected component mapping to its real public export name
@@ -728,8 +721,8 @@ impl<'src> SourceDataCollector<'src> {
     fn alias_shape<'a>(&mut self, decl: &Binding<'_, 'a>) -> Option<(String, Option<AliasCall>)> {
         let init = decl.init.as_ref()?;
         let (inner, call) = match peel_expr(init) {
-            Expression::CallExpression(call) => match call.arguments.first() {
-                Some(Argument::Identifier(id)) => (id.name.as_str().to_owned(), Some(&**call)),
+            Expression::CallExpression(call) => match aliased_component(call) {
+                Some(Expression::Identifier(id)) => (id.name.as_str().to_owned(), Some(&**call)),
                 _ => return None,
             },
             Expression::Identifier(id) => (id.name.as_str().to_owned(), None),
@@ -742,14 +735,15 @@ impl<'src> SourceDataCollector<'src> {
         }
         // `getDisplayName(Card)` has the same shape as `memo(Card)` but returns a string; only a call that follows the
         // component-wrapper conventions produces a component.
-        let wrapper = super::evidence::Scope::is_react_wrapper(&*self, call) || is_component_wrapper_call(call);
+        // `Object.assign(Impl, { Item })` returns `Impl` itself with the statics attached.
+        let wrapper = is_component_alias_call(&*self, call);
         // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
         Some((inner, Some(AliasCall { wrapper, forward_ref: self.is_forward_ref_call(call) })))
     }
 
     /// Bind `name` to a clone of the component `inner` once that is collected.
     fn alias_outcome(&mut self, name: &str, inner: &str, call: Option<AliasCall>) -> AliasOutcome {
-        let Some(base) = self.data.component_mappings.iter().find(|m| m.component_name == inner) else {
+        let Some(base) = self.data.component_mappings.iter().find(|m| m.is_binding_named(inner)) else {
             return AliasOutcome::NoBase;
         };
         if call.is_some_and(|call| !call.wrapper) {
@@ -784,7 +778,7 @@ impl<'src> SourceDataCollector<'src> {
             let before = pending.len();
             let mut waiting = Vec::new();
             for alias in pending {
-                if self.data.component_mappings.iter().any(|m| m.component_name == alias.name) {
+                if self.data.component_mappings.iter().any(|m| m.is_binding_named(&alias.name)) {
                     continue;
                 }
                 match self.alias_outcome(&alias.name, &alias.inner, alias.call) {
@@ -909,10 +903,35 @@ impl<'src> SourceDataCollector<'src> {
     }
 }
 
-/// Whether a call wrapping a component returns a component, by React's own wrappers and the ecosystem's conventions:
+/// Whether a call wrapping a component returns a component: React's `memo` and `forwardRef` as the file binds them,
+/// or the ecosystem's conventions.
+pub(super) fn is_component_wrapper(scope: &dyn Scope, call: &CallExpression<'_>) -> bool {
+    scope.is_react_wrapper(call) || is_component_wrapper_call(call)
+}
+
+/// Whether a call returns the component it is given, so that what it is bound or exported as is that component: a
+/// component wrapper, or `Object.assign(Impl, { Item })`, which returns `Impl` with the statics attached. The one place
+/// that says which calls make an alias of a component; [`aliased_component`] says which argument it is.
+pub(super) fn is_component_alias_call(scope: &dyn Scope, call: &CallExpression<'_>) -> bool {
+    is_component_wrapper(scope, call) || is_object_assign_call(call)
+}
+
+/// The argument of a component alias call that is the component: the first.
+pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
+    call.arguments.first()?.as_expression().map(peel_expr)
+}
+
+/// Whether the call is `Object.assign(...)`.
+pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
+    matches!(&call.callee, Expression::StaticMemberExpression(callee)
+        if callee.property.name == "assign"
+            && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"))
+}
+
+/// Whether a call wrapping a component returns a component, by the ecosystem's conventions:
 /// `memo`, anything named like `forwardRef`, `withX(...)` higher-order components, `createXComponent(...)` factories,
 /// `observer`, and curried wrappers such as `connect(...)(Component)` or `styled(...)(Component)`.
-pub(super) fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
+fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
     // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`.
     let callee = match peel_expr(&call.callee) {
         Expression::Identifier(id) => id.name.as_str(),

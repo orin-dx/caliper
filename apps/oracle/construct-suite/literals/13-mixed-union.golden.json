@@ -1,0 +1,64 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "auto",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "0",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "100",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "true",
+        "of": "boolean"
+      }
+    ]
+  },
+  "text": "\"auto\" | 0 | 100 | true | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/13-mixed-union.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "auto",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "0",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "100",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "true",
+        "of": "boolean"
+      }
+    ]
+  }
+}

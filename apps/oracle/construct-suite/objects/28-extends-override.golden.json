@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "kind",
+          "size"
+        ],
+        "index": false,
+        "alias": "Derived"
+      }
+    ],
+    "alias": "Derived"
+  },
+  "text": "Derived | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/28-extends-override.tsx"
+    },
+    "order": null
+  }
+}

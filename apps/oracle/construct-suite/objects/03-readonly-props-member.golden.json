@@ -1,0 +1,21 @@
+{
+  "checker": {
+    "k": "object",
+    "fields": [
+      "x"
+    ],
+    "index": false
+  },
+  "text": "{ x: number; }",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "objects/03-readonly-props-member.tsx"
+    },
+    "order": null
+  }
+}

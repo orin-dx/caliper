@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "getAge",
+          "getName"
+        ],
+        "index": false,
+        "alias": "Getters"
+      }
+    ],
+    "alias": "Getters"
+  },
+  "text": "Getters<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/27-mapped-as-clause.tsx"
+    },
+    "order": null
+  }
+}

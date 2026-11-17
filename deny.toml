@@ -13,9 +13,11 @@ allow = [
     "ISC",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "Unicode-3.0",  # unicode-ident, unicode-id-start
+    "Unicode-3.0",  # unicode-ident
     "Zlib",         # foldhash (via simd-json → oxc_resolver)
     "CC0-1.0",      # notify (via watchexec)
+    "BSL-1.0",      # xxhash-rust (via tsrs_core): permissive; attribution only in source form
+    "Unicode-DFS-2016", # unicode-id-start 1.1.2, which tsrs_core pins: permissive, the Unicode data license
 ]
 
 [bans]

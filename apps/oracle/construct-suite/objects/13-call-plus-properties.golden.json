@@ -1,0 +1,30 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "displayName"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ (): void; displayName?: string | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/13-call-plus-properties.tsx"
+    },
+    "order": null
+  }
+}

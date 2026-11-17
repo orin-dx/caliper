@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "id",
+          "label"
+        ],
+        "index": false,
+        "alias": "Item"
+      }
+    ],
+    "alias": "Item"
+  },
+  "text": "Item | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/26-interface-extends.tsx"
+    },
+    "order": null
+  }
+}

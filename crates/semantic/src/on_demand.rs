@@ -1,123 +1,236 @@
 //! A warm checker that answers for the components a session asks about, one request at a time.
 //!
 //! The one-shot [`crate::resolve`] roots a single program at every component's file. A Storybook session asks about
-//! one component per story, so this keeps one `tsc --api` process alive, starts it on the first request, and roots a
-//! small program at just the requested files: the checker loads what those files import, not the project.
+//! one component per story, so this keeps one checker warm, starts it on the first request, and roots a small program at
+//! just the requested files: the checker loads what those files import, not the project.
 //!
-//! The process runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
-//! never nests runtimes and can bound how long it waits. A failure to start or a crash yields an outcome with no
-//! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down.
+//! The snapshot of that program is kept between requests (ADR 0026 S6). The warm-up ([`OnDemand::warm_up`]) builds the
+//! first: a program over the project's dependencies, so the first request re-roots it at its files and reads only what
+//! they add, instead of reading the lib and every dependency's declarations from the disk while someone waits. The next request brings it up to date with
+//! `updateSnapshot`, which re-reads only the files the session announced as changed ([`SemanticProvider::changed`]) and
+//! keeps the rest as parsed, re-rooting the program when the request names other files. The checker does not see an
+//! edit it is not told about, so before an answer every file the program read is compared with the stamp it had when
+//! read ([`crate::stamps`]): one that changed unannounced makes the answer come from a fresh snapshot, with a warning
+//! that names it.
+//!
+//! The worker runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
+//! never nests runtimes and can bound how long it waits. It converts an answer on the checker's thread
+//! ([`crate::checker::Client::run_on_thread`]), where each of its requests is answered in place instead of crossing a
+//! channel there and back; each request is still bounded by [`OnDemandConfig::request_timeout`]. A failure to start or a crash yields an outcome with no
+//! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down. A panic in
+//! the checker counts as a crash: its session is not asked again, and a fresh one starts.
+//!
+//! What the checker holds is bounded by [`OnDemandConfig::max_rss_mib`] ([`Backend::memory_mib`]). Its memory is read
+//! from its arenas, which leave out the host's (Node, Storybook), and it is never replaced: a closed session gives back
+//! only part of its arenas, and a fresh one parses every file again, so a replacement raises what this process holds
+//! (measured in `docs/gate-measurements.md`). Past the bound it stays down instead, and its components keep their
+//! structural answer with a warning that says why.
+//!
+//! Requests wait in three classes ([`Priority`]): an interactive one (a story someone opened) is answered before a
+//! neighbour (a prefetch of the stories next to it), and a neighbour before a background one (a warm-up, a fill), first
+//! come first served within each, and a request a caller raised while it waited goes with its new class, at the place it
+//! was first filed. So that lesser work is never starved, after [`INTERACTIVE_STREAK`] picks that bypassed a waiting
+//! lesser class, whichever class they served, the oldest request of a lesser class goes next. A request cancelled while it waits (its component no longer shown, its
+//! revision superseded by an edit) is dropped before it is converted; one being converted is not interrupted, since a
+//! checker call cannot be.
 
-use std::sync::mpsc;
+use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
-use caliper_docgen_tsc_client::Supervisor;
-use camino::Utf8PathBuf;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use caliper_docgen_core::types::semantic::{
+    Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority, SourceChange,
+};
+use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
+use camino::{Utf8Path, Utf8PathBuf};
+use rustc_hash::{FxHashMap, FxHashSet};
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::rpc::Rpc;
-use crate::{answer_with, supervisor_config, SemanticRequest, SUPPORTED_VERSIONS};
+use crate::checker::{Backend, Client};
+use crate::rpc::{CallError, Rpc};
+use crate::stamps::{self, Stamp};
+use crate::{SemanticRequest, answer_on, group_by_file, root_files};
+
+/// The file a warm-up snapshot's program is rooted at, in the project's root: held in the checker's memory, never
+/// written to disk ([`warm_source`]).
+const WARM_FILE: &str = "__caliper_warm_up__.ts";
+
+/// How many files an unannounced-edit warning names before it counts the rest.
+const UNTOLD_NAMED: usize = 5;
+
+/// Picks the checker makes in a row while a lesser class ([`Priority`]) waits, before the oldest request of a lesser
+/// class goes next: a waiting request goes behind at most this many picks of the classes before it.
+const INTERACTIVE_STREAK: u32 = 4;
 
 /// Crashes the checker may have before it stays down for the session.
 const MAX_RESTARTS: u32 = 3;
 
-/// Programs one `tsc` process builds before it is replaced. Its memory grows with every program it has loaded
-/// (measured: antd reached 600 MiB after 50 single-component programs), and a fresh process costs 30 to 70 ms.
-const MAX_REQUESTS_PER_PROCESS: u32 = 64;
-
-/// Resident memory, in MiB, past which a `tsc` process is replaced between requests. Measured single-component programs
-/// peak at 157 to 612 MiB (antd the highest); a process past this has loaded more than a story session needs.
+/// What the checker may hold, in MiB, between requests, measured by its arenas: past it, it stops for the session. Its
+/// arenas reached 46 MiB over 2,000 Chakra edits and 165 MiB over 937 Chakra and MUI components (single-component
+/// programs peaked at 157 to 612 MiB in a `tsc` process); past this, it has loaded more than a story session needs.
 const DEFAULT_MAX_RSS_MIB: u64 = 768;
 
-/// How many requests pass between memory checks: each reads the process table, which costs a few milliseconds.
+/// How many requests pass between memory checks: each reads the arenas' pages, which costs a few milliseconds. The
+/// checker is also checked after its first program.
 const RSS_CHECK_EVERY: u32 = 4;
 
-/// How long dropping a checker waits, by default, for its worker to finish a request and stop `tsc`, before leaving the
-/// worker to finish on its own. Closing a session must not wait for a 60 s request.
+/// How long dropping a checker waits, by default, for its worker to finish a request and stop the checker, before leaving
+/// the worker to finish on its own. Closing a session must not wait for a 60 s request.
 const DEFAULT_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
+/// How a warm [`OnDemand`] checker starts and is kept: where it runs, how long to wait on it, and what it may hold.
 #[derive(Debug, Clone)]
 pub struct OnDemandConfig {
-    /// Where `tsc` finds `node_modules`; its `--cwd`, and where the search for `typescript` starts.
+    /// Where the checker finds `node_modules`: its working directory.
     pub project_root: Utf8PathBuf,
+    /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
-    /// An explicit `tsc` binary, instead of `node_modules/typescript/bin/tsc` above `project_root`.
-    pub tsc_path: Option<Utf8PathBuf>,
-    /// Bound on each request to the checker, and on its start-up handshake.
+    /// Bound on each request to the checker.
     pub request_timeout: Duration,
-    pub expected_versions: &'static [&'static str],
-    /// Resident memory of the `tsc` process, in MiB, past which it is replaced after a request. A request that needs
-    /// more finishes first: the bound is between requests, not inside one.
+    /// What the checker may hold, in MiB, read after a request from its arenas (the part of this process's memory the
+    /// `tsrs` crates allocated): past it, the checker stops for the session, its components keeping their structural
+    /// answer with a warning. A request that needs more finishes first: the bound is between requests, not inside one.
     pub max_rss_mib: u64,
-    /// How long dropping the checker waits for a request in progress before it lets the worker finish alone.
+    /// How long dropping the checker waits for a request in progress before it lets the worker finish alone, and how
+    /// long a checker that panicked or went past its memory bound is given to close its session.
     pub shutdown_wait: Duration,
-    /// Environment for the `tsc` process; the tests use it to pick a replay scenario.
-    pub extra_env: Vec<(String, String)>,
 }
 
 impl OnDemandConfig {
+    /// A configuration for `project_root` with a 60 second request timeout, a 768 MiB memory bound, a 5 second shutdown
+    /// wait, and no explicit tsconfig.
     pub fn new(project_root: Utf8PathBuf) -> Self {
         Self {
             project_root,
             tsconfig: None,
-            tsc_path: None,
             request_timeout: Duration::from_secs(60),
-            expected_versions: SUPPORTED_VERSIONS,
             max_rss_mib: DEFAULT_MAX_RSS_MIB,
             shutdown_wait: DEFAULT_SHUTDOWN_WAIT,
-            extra_env: Vec::new(),
         }
     }
 }
 
-/// The resident memory of a process in MiB: `/proc` where it exists, else `ps`. `None` when neither answers.
-fn resident_mib(pid: u32) -> Option<u64> {
-    let kib = match std::fs::read_to_string(format!("/proc/{pid}/status")) {
-        Ok(status) => status
-            .lines()
-            .find_map(|line| line.strip_prefix("VmRSS:"))?
-            .split_whitespace()
-            .next()?
-            .parse::<u64>()
-            .ok()?,
-        Err(_) => {
-            let output = std::process::Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().ok()?;
-            String::from_utf8_lossy(&output.stdout).trim().parse::<u64>().ok()?
-        }
-    };
-    Some(kib / 1024)
+/// How the snapshots a warm checker answered from were made.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Snapshots {
+    /// Built from the disk with `createSnapshot`: the warm-up's, the first request of a checker that was not warmed up,
+    /// one after a file changed that the checker was not told about, or one after a snapshot could not be listed or
+    /// updated.
+    pub created: u32,
+    /// Brought up to date from the one before with `updateSnapshot`: announced edits re-read, the rest kept.
+    pub updated: u32,
+}
+
+/// What the worker thread reports about the checker, for the type that owns the thread to read.
+#[derive(Default)]
+struct Gauges {
+    created: AtomicU32,
+    updated: AtomicU32,
 }
 
 enum Job {
     /// Start the checker now instead of at the first request.
     Warm,
-    Answer {
-        targets: Vec<SemanticTarget>,
-        reply: mpsc::SyncSender<SemanticOutcome>,
-    },
+    /// Files changed on disk; queued before any request that may read them.
+    Changed(SourceChange),
+    Answer(Asked),
+    /// Tests only: the worker waits until this is released (or its sender dropped) before it takes another job, so a
+    /// test can queue requests while the worker is busy and know they are all filed before one is picked.
+    #[cfg(test)]
+    Hold(mpsc::Receiver<()>),
 }
 
-/// A warm `tsc` that answers for the components it is asked about. Dropping it stops the process.
+/// One request waiting for the checker.
+struct Asked {
+    targets: Vec<SemanticTarget>,
+    priority: SharedPriority,
+    delivery: Delivery,
+}
+
+/// The requests waiting for the checker. The next is the first of the first class waiting ([`Priority`]: interactive,
+/// then neighbour, then background), by arrival: a request a caller raised while it waited goes with its new class, at
+/// the place it was first filed. A request cancelled while it waited ([`SharedPriority::cancel`]) is dropped when the
+/// next is picked, before it is converted, which hands its delivery `None`; one the checker already took is not
+/// interrupted. A lesser class never waits past [`INTERACTIVE_STREAK`] picks that bypassed it, whichever class they
+/// served: then the oldest request of a lesser class is the next.
+struct Queue<T> {
+    /// Every waiting request with the number it arrived as.
+    waiting: Vec<(u64, T, SharedPriority)>,
+    /// Requests that arrived so far.
+    arrived: u64,
+    /// Picks in a row that went to a class while a lesser one waited.
+    bypassed: u32,
+}
+
+impl<T> Default for Queue<T> {
+    fn default() -> Self {
+        Self { waiting: Vec::new(), arrived: 0, bypassed: 0 }
+    }
+}
+
+impl<T> Queue<T> {
+    fn push(&mut self, item: T, priority: SharedPriority) {
+        self.waiting.push((self.arrived, item, priority));
+        self.arrived += 1;
+    }
+
+    fn is_empty(&self) -> bool {
+        self.waiting.is_empty()
+    }
+
+    /// The request the checker answers next, marked as started so a cancel after this no longer drops it.
+    fn next(&mut self) -> Option<T> {
+        loop {
+            let (_, item, priority) = self.pick()?;
+            if priority.start() {
+                return Some(item);
+            }
+        }
+    }
+
+    fn pick(&mut self) -> Option<(u64, T, SharedPriority)> {
+        self.waiting.retain(|(_, _, priority)| !priority.is_cancelled());
+        // Each priority is read once, so a request raised during the pick does not change the class it is picked by.
+        let classes: Vec<Priority> = self.waiting.iter().map(|(_, _, priority)| priority.get()).collect();
+        let first = *classes.iter().min()?;
+        let lesser = |index: &usize| classes[*index] > first;
+        let oldest = |indices: &mut dyn Iterator<Item = usize>| indices.min_by_key(|index| self.waiting[*index].0);
+        let lesser_waits = (0..classes.len()).any(|index| lesser(&index));
+        let starving = lesser_waits && self.bypassed >= INTERACTIVE_STREAK;
+        let index = match starving {
+            true => oldest(&mut (0..classes.len()).filter(lesser)),
+            false => oldest(&mut (0..classes.len()).filter(|index| classes[*index] == first)),
+        }?;
+        self.bypassed = if lesser_waits && !starving { self.bypassed + 1 } else { 0 };
+        Some(self.waiting.remove(index))
+    }
+}
+
+/// A warm checker that answers for the components it is asked about. Dropping it stops the checker.
 pub struct OnDemand {
     jobs: Option<UnboundedSender<Job>>,
     thread: Option<JoinHandle<()>>,
-    /// Receives once when the worker has stopped `tsc` and is about to exit.
+    /// Receives once when the worker has stopped the checker and is about to exit.
     stopped: std::sync::Mutex<Option<mpsc::Receiver<()>>>,
     shutdown_wait: Duration,
+    gauges: Arc<Gauges>,
 }
 
 impl OnDemand {
-    /// Starts the worker thread. The `tsc` process itself starts on the first request, or on [`OnDemand::warm_up`].
+    /// Starts the worker thread. The checker itself starts on the first request, or on [`OnDemand::warm_up`].
     pub fn new(config: OnDemandConfig) -> Self {
         let shutdown_wait = config.shutdown_wait;
         let (jobs, queue) = unbounded_channel();
         let (stopped_tx, stopped) = mpsc::channel();
+        let gauges = Arc::new(Gauges::default());
+        let worker_gauges = Arc::clone(&gauges);
         let thread = std::thread::Builder::new()
             .name("caliper-tsc".to_string())
             .spawn(move || {
-                worker(config, queue);
+                worker(config, queue, worker_gauges);
                 stopped_tx.send(()).ok();
             })
             .ok();
@@ -126,140 +239,271 @@ impl OnDemand {
             thread,
             stopped: std::sync::Mutex::new(Some(stopped)),
             shutdown_wait,
+            gauges,
         }
     }
 
-    /// Starts `tsc` in the background so the first request does not pay for it.
+    /// How many snapshots the answers so far came from, by how each was made.
+    pub fn snapshots(&self) -> Snapshots {
+        Snapshots {
+            created: self.gauges.created.load(Ordering::Relaxed),
+            updated: self.gauges.updated.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Starts the checker in the background, and builds the snapshot the first request starts from, so the first request
+    /// pays for neither: a program over the project's dependencies (the packages its nearest `package.json` lists under
+    /// `dependencies` and `peerDependencies`, and the lib), which the first request re-roots at its files.
     pub fn warm_up(&self) {
         if let Some(jobs) = &self.jobs {
             jobs.send(Job::Warm).ok();
         }
+    }
+
+    /// Tests only: holds the worker at its next job until the returned sender sends or is dropped (see [`Job::Hold`]).
+    #[cfg(test)]
+    fn hold(&self) -> mpsc::Sender<()> {
+        let (release, held) = mpsc::channel();
+        if let Some(jobs) = &self.jobs {
+            jobs.send(Job::Hold(held)).ok();
+        }
+        release
     }
 }
 
 impl SemanticProvider for OnDemand {
     fn request(&self, targets: Vec<SemanticTarget>) -> mpsc::Receiver<SemanticOutcome> {
         let (reply, receiver) = mpsc::sync_channel(1);
+        let delivery = Delivery::new(move |outcome| {
+            // `None` drops the sender, which the receiver reads as a checker that stopped without answering.
+            if let Some(outcome) = outcome {
+                reply.send(outcome).ok();
+            }
+        });
+        self.request_at(targets, SharedPriority::new(Priority::Interactive), delivery);
+        receiver
+    }
+
+    fn request_at(&self, targets: Vec<SemanticTarget>, priority: SharedPriority, delivery: Delivery) {
         match &self.jobs {
             Some(jobs) => {
-                if let Err(refused) = jobs.send(Job::Answer { targets, reply }) {
-                    if let Job::Answer { reply, .. } = refused.0 {
-                        reply.send(SemanticOutcome::unavailable("the checker thread has stopped")).ok();
-                    }
+                if let Err(refused) = jobs.send(Job::Answer(Asked { targets, priority, delivery }))
+                    && let Job::Answer(asked) = refused.0
+                {
+                    asked.delivery.deliver(Some(SemanticOutcome::unavailable("the checker thread has stopped")));
                 }
             }
-            None => {
-                reply.send(SemanticOutcome::unavailable("could not start the checker thread")).ok();
-            }
+            None => delivery.deliver(Some(SemanticOutcome::unavailable("could not start the checker thread"))),
         }
-        receiver
+    }
+
+    fn changed(&self, change: SourceChange) {
+        if let Some(jobs) = &self.jobs {
+            jobs.send(Job::Changed(change)).ok();
+        }
     }
 }
 
 impl Drop for OnDemand {
     fn drop(&mut self) {
-        // Closing the queue ends the worker loop, which shuts `tsc` down before the thread exits. A worker still inside
-        // a long request is left to finish it: `tsc` stops when it does, or with this process.
+        // Closing the queue ends the worker loop, which stops the checker before the thread exits. A worker still inside
+        // a long request is left to finish it: the checker stops when it does, or with this process.
         self.jobs.take();
         let receiver = self.stopped.get_mut().ok().and_then(Option::take);
         let stopped = receiver.is_none_or(|receiver| receiver.recv_timeout(self.shutdown_wait).is_ok());
-        if let Some(thread) = self.thread.take() {
-            if stopped {
-                thread.join().ok();
-            }
+        if let Some(thread) = self.thread.take()
+            && stopped
+        {
+            thread.join().ok();
         }
     }
 }
 
-fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>) {
+fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>, gauges: Arc<Gauges>) {
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {
             let reason = format!("could not start an async runtime: {error}");
             while let Some(job) = queue.blocking_recv() {
-                if let Job::Answer { reply, .. } = job {
-                    reply.send(SemanticOutcome::unavailable(reason.clone())).ok();
+                match job {
+                    Job::Answer(asked) => asked.delivery.deliver(Some(SemanticOutcome::unavailable(reason.clone()))),
+                    Job::Warm | Job::Changed(_) => {}
+                    #[cfg(test)]
+                    Job::Hold(_) => {}
                 }
             }
             return;
         }
     };
     runtime.block_on(async move {
-        let mut checker = Checker::default();
-        while let Some(job) = queue.recv().await {
-            match job {
-                Job::Warm => {
-                    checker.ensure(&config).await.ok();
-                }
-                Job::Answer { targets, reply } => {
-                    reply.send(checker.answer(&config, targets).await).ok();
-                    // After the reply, so the caller never waits for the memory check or the replacement.
-                    checker.maintain(&config).await;
+        let mut checker = Checker { gauges, ..Checker::default() };
+        let mut waiting = Queue::default();
+        let mut open = true;
+        loop {
+            // Every job sent so far is taken before the next request is picked, so the queues hold every request that
+            // waits, and a change is applied before any request sent after it.
+            if waiting.is_empty() && open {
+                match queue.recv().await {
+                    Some(job) => checker.take(&config, job, &mut waiting).await,
+                    None => open = false,
                 }
             }
+            while open {
+                match queue.try_recv() {
+                    Ok(job) => checker.take(&config, job, &mut waiting).await,
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => open = false,
+                }
+            }
+            let Some(asked) = waiting.next() else {
+                match open {
+                    true => continue,
+                    false => break,
+                }
+            };
+            asked.delivery.deliver(Some(checker.answer(&config, asked.targets).await));
+            // After the reply, so the caller never waits for the memory check or the replacement.
+            checker.maintain(&config).await;
         }
-        if let Some(supervisor) = checker.supervisor.take() {
-            supervisor.shutdown().await.ok();
+        if let Some(backend) = checker.backend.take() {
+            backend.shutdown().await;
         }
     });
 }
 
 #[derive(Default)]
 struct Checker {
-    supervisor: Option<Supervisor>,
-    /// Compiler options read once from the tsconfig for the running process.
+    backend: Option<Backend>,
+    /// Compiler options read once from the tsconfig for the running checker.
     options: Option<serde_json::Value>,
     restarts: u32,
-    /// Requests the running process has answered.
+    /// Requests the running checker has answered.
     served: u32,
     /// Why the checker cannot be used for the rest of the session.
     down: Option<String>,
+    gauges: Arc<Gauges>,
+    /// The snapshot the last request was answered from, kept for the next.
+    live: Option<Live>,
+    /// Files announced as changed since `live` was brought up to date.
+    told: FxHashSet<Utf8PathBuf>,
+}
+
+/// A snapshot kept between requests, and what its program read.
+struct Live {
+    rpc: Arc<Rpc>,
+    /// The files its program is rooted at.
+    roots: Vec<String>,
+    /// When the files were compared with the disk, just before the snapshot was built or brought up to date.
+    read_from: SystemTime,
+    /// Every file the program read, as it was then; `None` until listed after the reply the snapshot built.
+    stamps: Option<FxHashMap<Utf8PathBuf, Stamp>>,
+}
+
+/// The warning an answer carries when files the snapshot read changed and the checker was not told.
+fn untold_warning(files: &[Utf8PathBuf]) -> Diagnostic {
+    let mut named: Vec<String> = files.iter().take(UNTOLD_NAMED).map(ToString::to_string).collect();
+    if files.len() > UNTOLD_NAMED {
+        named.push(format!("{} more", files.len() - UNTOLD_NAMED));
+    }
+    Diagnostic::new(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::SemanticBackend,
+        format!(
+            "the TypeScript checker was not told that {} changed; it read every file again for this answer",
+            named.join(", ")
+        ),
+    )
+    .with_help(
+        "Whatever writes the project's files must tell the session (`update_file` or `ensure_fresh`); an edit the \
+         checker is not told about is answered from the text it read before.",
+    )
 }
 
 impl Checker {
+    /// Acts on a job as it arrives: starts the process, applies a change, or files a request by its priority.
+    async fn take(&mut self, config: &OnDemandConfig, job: Job, waiting: &mut Queue<Asked>) {
+        match job {
+            Job::Warm => {
+                if self.ensure(config).await.is_ok() {
+                    self.warm(config).await;
+                }
+            }
+            Job::Changed(change) => self.told(change).await,
+            Job::Answer(asked) => {
+                let priority = asked.priority.clone();
+                waiting.push(asked, priority);
+            }
+            #[cfg(test)]
+            Job::Hold(released) => {
+                released.recv().ok();
+            }
+        }
+    }
+
     async fn ensure(&mut self, config: &OnDemandConfig) -> Result<(), String> {
         if let Some(reason) = &self.down {
             return Err(reason.clone());
         }
-        if self.supervisor.as_ref().is_some_and(|supervisor| !supervisor.is_alive()) {
-            if let Some(dead) = self.supervisor.take() {
-                dead.shutdown().await.ok();
+        if self.backend.as_ref().is_some_and(|backend| !backend.is_alive()) {
+            if let Some(dead) = self.backend.take() {
+                dead.shutdown_within(config.shutdown_wait).await;
             }
             self.options = None;
+            self.live = None;
+            self.told.clear();
             self.restarts += 1;
             if self.restarts > MAX_RESTARTS {
                 return Err(self.stay_down("the checker kept crashing".to_string()));
             }
         }
-        if self.supervisor.is_none() {
-            let request = SemanticRequest {
-                project_root: config.project_root.clone(),
-                tsconfig: config.tsconfig.clone(),
-                tsc_path: config.tsc_path.clone(),
-                targets: Vec::new(),
-                request_timeout: config.request_timeout,
-                expected_versions: config.expected_versions,
-                record_to: None,
-                extra_env: config.extra_env.clone(),
-                prepared_options: None,
-            };
-            let started = supervisor_config(&request).map_err(|reason| self.stay_down(reason))?;
-            let supervisor = match Supervisor::spawn(started).await {
-                Ok(supervisor) => supervisor,
-                Err(error) => return Err(self.stay_down(error.to_string())),
-            };
+        if self.backend.is_none() {
+            let backend = Backend::start(&config.project_root, 1).map_err(|reason| self.stay_down(reason))?;
+            // A checker started after a crash counts its own programs.
+            self.served = 0;
             // Initialize the session and read the compiler options once; every request after builds only its program.
             let tsconfig = config.tsconfig.as_ref().map(|path| path.as_str());
-            match Rpc::prepare(&supervisor.client(), config.request_timeout, tsconfig).await {
+            match Rpc::prepare(&backend.client(), config.request_timeout, tsconfig).await {
                 Ok(options) => self.options = Some(options),
                 Err(error) => {
-                    supervisor.shutdown().await.ok();
+                    backend.shutdown().await;
                     return Err(self.stay_down(format!("the checker did not initialize: {error}")));
                 }
             }
-            self.supervisor = Some(supervisor);
+            self.backend = Some(backend);
         }
         Ok(())
+    }
+
+    /// Builds the snapshot the first request starts from (see [`OnDemand::warm_up`]) and keeps it as the live one, its
+    /// files stamped as a request's are after its reply. A checker that already keeps a snapshot keeps it. Past the
+    /// memory bound, the checker stops for the session, as after a reply.
+    async fn warm(&mut self, config: &OnDemandConfig) {
+        if self.live.is_some() {
+            return;
+        }
+        let (Some(backend), Some(options)) = (self.backend.as_ref(), self.options.as_ref()) else { return };
+        let file = config.project_root.join(WARM_FILE).to_string();
+        let source = warm_source(&config.project_root);
+        let started = std::time::Instant::now();
+        let read_from = SystemTime::now();
+        let client = backend.client();
+        match Rpc::open_in_memory(client, config.request_timeout, options, &[(file.clone(), source)]).await {
+            Ok(rpc) => {
+                self.gauges.created.fetch_add(1, Ordering::Relaxed);
+                self.live = Some(Live { rpc: Arc::new(rpc), roots: vec![file], read_from, stamps: None });
+            }
+            Err(error) => {
+                tracing::debug!(%error, "the warm-up snapshot was not built; the first request builds one");
+                return;
+            }
+        }
+        let held = self.backend.as_ref().and_then(Backend::memory_mib);
+        tracing::debug!(ms = started.elapsed().as_millis() as u64, held_mib = ?held, "the warm-up snapshot is built");
+        if Upkeep::decide(held, config.max_rss_mib) == Upkeep::Down {
+            self.stop_past_bound(config, held.unwrap_or_default()).await;
+            return;
+        }
+        self.stamp().await;
     }
 
     fn stay_down(&mut self, reason: String) -> String {
@@ -271,51 +515,660 @@ impl Checker {
         if let Err(reason) = self.ensure(config).await {
             return SemanticOutcome::unavailable(reason);
         }
-        let Some(supervisor) = self.supervisor.as_ref() else {
+        let Some(backend) = self.backend.as_ref() else {
             return SemanticOutcome::unavailable("the checker is not running");
         };
+        let client = backend.client();
         let mut request = SemanticRequest::new(config.project_root.clone(), targets);
         request.tsconfig = config.tsconfig.clone();
-        request.tsc_path = config.tsc_path.clone();
         request.request_timeout = config.request_timeout;
-        request.expected_versions = config.expected_versions;
-        request.extra_env.clone_from(&config.extra_env);
-        request.prepared_options.clone_from(&self.options);
-        let outcome = answer_with(supervisor, &request).await;
+        let roots = root_files(&request);
+        if roots.is_empty() {
+            return group_by_file(&request).0;
+        }
+        let answered = match self.snapshot_for(client, config.request_timeout, roots.clone()).await {
+            Ok((rpc, warning)) => {
+                // Converted on the checker's thread, where each request is answered in place: the answer waits for
+                // every request anyway, and none crosses a channel there and back.
+                let converted = rpc.run_on_thread(move |rpc| {
+                    let runtime =
+                        tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|error| {
+                            CallError::Fatal(format!(
+                                "could not start an async runtime on the checker's thread: {error}"
+                            ))
+                        })?;
+                    runtime.block_on(answer_on(std::slice::from_ref(&rpc), &request, &roots))
+                });
+                converted.await.and_then(|answered| answered).map(|mut outcome| {
+                    outcome.diagnostics.extend(warning);
+                    outcome
+                })
+            }
+            Err(error) => Err(error),
+        };
         self.served += 1;
-        outcome
+        match answered {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.forget().await;
+                SemanticOutcome::unavailable(format!("the checker stopped answering: {error}"))
+            }
+        }
     }
 
-    /// Replaces the process when it has built enough programs or grown past the memory bound. A planned replacement,
-    /// not a crash: the next request starts a fresh process.
-    async fn maintain(&mut self, config: &OnDemandConfig) {
-        let Some(supervisor) = self.supervisor.as_ref() else { return };
-        let worn = self.served >= MAX_REQUESTS_PER_PROCESS;
-        let bloated = !worn
-            && self.served.is_multiple_of(RSS_CHECK_EVERY)
-            && supervisor.process_id().and_then(resident_mib).is_some_and(|mib| mib > config.max_rss_mib);
-        if worn || bloated {
-            if let Some(old) = self.supervisor.take() {
-                old.shutdown().await.ok();
+    /// The snapshot to answer from, its program rooted at `roots`: the kept one brought up to date with the files the
+    /// checker was told about, or a fresh one when none is kept, the kept one cannot be checked or updated, or a file
+    /// it read changed with nobody telling the checker. The last comes with a warning that names the files.
+    async fn snapshot_for(
+        &mut self,
+        client: Client,
+        deadline: Duration,
+        roots: Vec<String>,
+    ) -> Result<(Arc<Rpc>, Option<Diagnostic>), CallError> {
+        let read_from = SystemTime::now();
+        let told = std::mem::take(&mut self.told);
+        let mut warning = None;
+        if let Some(live) = self.live.take() {
+            if let Some(stamps) = &live.stamps {
+                let drift = stamps::drift(stamps, &told);
+                if drift.untold.is_empty() {
+                    let reread: BTreeSet<Utf8PathBuf> = told.into_iter().chain(drift.unsure).collect();
+                    if reread.is_empty() && live.roots == roots {
+                        let rpc = live.rpc.clone();
+                        self.live = Some(live);
+                        return Ok((rpc, None));
+                    }
+                    let (changed, deleted): (Vec<String>, Vec<String>) = {
+                        let (present, gone): (Vec<_>, Vec<_>) = reread.into_iter().partition(|file| file.exists());
+                        (present.into_iter().map(String::from).collect(), gone.into_iter().map(String::from).collect())
+                    };
+                    let rerooted = (live.roots != roots).then_some(roots.as_slice());
+                    match live.rpc.updated(&changed, &deleted, rerooted).await {
+                        Ok(rpc) => {
+                            live.rpc.release().await;
+                            let rpc = Arc::new(rpc);
+                            self.gauges.updated.fetch_add(1, Ordering::Relaxed);
+                            self.live = Some(Live { rpc: rpc.clone(), roots, read_from, stamps: None });
+                            return Ok((rpc, None));
+                        }
+                        Err(CallError::Rejected(message)) => {
+                            tracing::debug!(%message, "the checker could not update its snapshot; building a fresh one");
+                        }
+                        Err(fatal) => {
+                            // The kept snapshot is no longer held anywhere else: release it before giving up on it.
+                            live.rpc.release().await;
+                            return Err(fatal);
+                        }
+                    }
+                } else {
+                    tracing::warn!(files = ?drift.untold, "files changed that the checker was not told about");
+                    warning = Some(untold_warning(&drift.untold));
+                }
             }
-            self.options = None;
-            self.served = 0;
+            live.rpc.release().await;
         }
+        let options = self.options.as_ref().ok_or_else(|| CallError::Fatal("the checker is not initialized".into()))?;
+        let rpc = Arc::new(Rpc::open_with(client, deadline, options, &roots, false).await?);
+        self.gauges.created.fetch_add(1, Ordering::Relaxed);
+        self.live = Some(Live { rpc: rpc.clone(), roots, read_from, stamps: None });
+        Ok((rpc, warning))
+    }
+
+    /// Files changed on disk: the kept snapshot reads them again at the next request, or, when anything may have
+    /// changed, is dropped.
+    async fn told(&mut self, change: SourceChange) {
+        match change {
+            SourceChange::Files(files) if self.live.is_some() => self.told.extend(files),
+            SourceChange::Files(_) => {}
+            SourceChange::Everything => self.forget().await,
+        }
+    }
+
+    /// Drops the kept snapshot, so the next request builds one from the disk.
+    async fn forget(&mut self) {
+        self.told.clear();
+        if let Some(live) = self.live.take() {
+            live.rpc.release().await;
+        }
+    }
+
+    /// Lists and stamps the files the kept snapshot's program read, once, after the reply it answered, so the first
+    /// answer does not wait for it. A snapshot that cannot be listed cannot be checked, and is dropped.
+    async fn stamp(&mut self) {
+        let Some(live) = self.live.as_mut().filter(|live| live.stamps.is_none()) else { return };
+        match live.rpc.source_file_names().await {
+            Ok(files) => {
+                // The warm-up's file is not on the disk: there is nothing to compare it with.
+                let files = files.into_iter().map(Utf8PathBuf::from).filter(|file| file.file_name() != Some(WARM_FILE));
+                live.stamps = Some(stamps::record(files.collect(), live.read_from))
+            }
+            Err(error) => {
+                tracing::debug!(%error, "could not list the snapshot's files; the next request builds a fresh one");
+                self.forget().await;
+            }
+        }
+    }
+
+    /// Stops the checker for the session past the memory bound (see [`Upkeep`]), and otherwise stamps the snapshot it
+    /// keeps.
+    async fn maintain(&mut self, config: &OnDemandConfig) {
+        let Some(backend) = self.backend.as_ref() else { return };
+        let held = Upkeep::checks_memory(self.served).then(|| backend.memory_mib()).flatten();
+        let upkeep = Upkeep::decide(held, config.max_rss_mib);
+        if upkeep == Upkeep::Down {
+            self.stop_past_bound(config, held.unwrap_or_default()).await;
+            return;
+        }
+        self.stamp().await;
+    }
+
+    /// Stops the checker for the session: it holds `mib`, past the memory bound, which a replacement would not give back.
+    async fn stop_past_bound(&mut self, config: &OnDemandConfig, mib: u64) {
+        tracing::warn!(held_mib = mib, bound_mib = config.max_rss_mib, "the built-in checker is past its memory bound");
+        self.live = None;
+        self.told.clear();
+        if let Some(old) = self.backend.take() {
+            old.shutdown_within(config.shutdown_wait).await;
+        }
+        self.options = None;
+        self.stay_down(format!(
+            "the built-in checker held {mib} MiB, more than its {} MiB bound (`max_rss_mib`), and this process keeps \
+             that memory, so components keep their structural answer for the rest of the session",
+            config.max_rss_mib
+        ));
+    }
+}
+
+/// The text of the file a warm-up roots its program at ([`WARM_FILE`]): an import of each package the nearest
+/// `package.json` at or above `project_root` lists under `dependencies` and `peerDependencies`, so the program reads
+/// their declarations as a component that imports them would. `@types` packages are left out: the compiler reads every
+/// one of them for any program. With no `package.json`, or none it can read, the file is empty and the program holds the
+/// lib and the `@types` packages alone.
+fn warm_source(project_root: &Utf8Path) -> String {
+    let Some(manifest) = project_root.ancestors().map(|dir| dir.join("package.json")).find(|file| file.is_file())
+    else {
+        return String::new();
+    };
+    let Ok(manifest) = std::fs::read_to_string(&manifest) else { return String::new() };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest) else { return String::new() };
+    let mut packages = BTreeSet::new();
+    for field in ["dependencies", "peerDependencies"] {
+        if let Some(listed) = manifest.get(field).and_then(serde_json::Value::as_object) {
+            packages.extend(listed.keys().filter(|name| !name.starts_with("@types/")).cloned());
+        }
+    }
+    packages.into_iter().map(|name| format!("import {};\n", serde_json::Value::String(name))).collect()
+}
+
+/// What becomes of a checker after a reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Upkeep {
+    /// It keeps answering.
+    Keep,
+    /// The checker holds more than the memory bound, which a replacement would not give back: it stays down for the
+    /// session.
+    Down,
+}
+
+impl Upkeep {
+    /// Whether to read what the checker holds after its `served`th program: the first, so that one program past the
+    /// bound is caught at once, and every [`RSS_CHECK_EVERY`]th.
+    fn checks_memory(served: u32) -> bool {
+        served == 1 || served.is_multiple_of(RSS_CHECK_EVERY)
+    }
+
+    fn decide(held_mib: Option<u64>, bound_mib: u64) -> Upkeep {
+        if held_mib.is_some_and(|mib| mib > bound_mib) { Upkeep::Down } else { Upkeep::Keep }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::resident_mib;
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+    use std::time::Duration;
+
+    use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+    use caliper_docgen_core::types::semantic::{
+        Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority, SourceChange,
+    };
+    use camino::Utf8PathBuf;
+    use std::sync::atomic::Ordering;
+
+    use super::{Checker, Job, OnDemand, OnDemandConfig, WARM_FILE, warm_source};
+
+    use super::{INTERACTIVE_STREAK, Queue, RSS_CHECK_EVERY, Upkeep};
+
+    /// A story asked while background requests wait is answered before them. The worker is held until all four are
+    /// queued ([`OnDemand::hold`]); it then files every queued job before it picks one, so the order does not depend on
+    /// how fast the test thread queues them. The answers arrive in the order the one worker gives them.
     #[test]
-    fn a_running_process_has_resident_memory() {
-        let mib = resident_mib(std::process::id()).expect("this process is listed");
-        assert!((1..16_384).contains(&mib), "{mib} MiB");
+    fn a_story_asked_behind_queued_background_requests_is_answered_before_them() {
+        let dir = tempfile::Builder::new().prefix("OnDemand").tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project");
+        for name in ["Button.tsx", "tsconfig.json"] {
+            std::fs::copy(fixtures.join(name), root.join(name)).unwrap();
+        }
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let target = |name: &str| crate::targets_of(&output).into_iter().find(|t| t.display_name == name).unwrap();
+        let checker = OnDemand::new(OnDemandConfig::new(root.clone()));
+        let (sender, answered) = std::sync::mpsc::channel();
+        let queue = |name: &'static str, priority: Priority| {
+            let sender = sender.clone();
+            let delivery = Delivery::new(move |outcome| {
+                sender.send((name, outcome)).ok();
+            });
+            checker.request_at(vec![target(name)], SharedPriority::new(priority), delivery);
+        };
+
+        let release = checker.hold();
+        for _ in 0..3 {
+            queue("Button", Priority::Background);
+        }
+        queue("Other", Priority::Interactive);
+        release.send(()).unwrap();
+
+        let order: Vec<&str> = (0..4)
+            .map(|_| {
+                let (name, outcome) = answered.recv_timeout(Duration::from_secs(60)).expect("an answer");
+                let outcome = outcome.expect("the checker answered");
+                assert_eq!(outcome.components.len(), 1, "{name}: {:?}", outcome.diagnostics);
+                name
+            })
+            .collect();
+
+        assert_eq!(order, ["Other", "Button", "Button", "Button"]);
+    }
+
+    /// A project whose `Button` takes props from the package `dep` it depends on, every file written an hour ago (a
+    /// stamp taken within two seconds of an edit cannot tell it from the next).
+    struct Warmed {
+        _dir: tempfile::TempDir,
+        root: Utf8PathBuf,
+        config: OnDemandConfig,
+    }
+
+    const BUTTON: &str = "import type { DepProps } from \"dep\";\nexport function Button(props: DepProps & { label: string }) { return null; }\n";
+
+    impl Warmed {
+        fn new() -> Self {
+            let dir = tempfile::Builder::new().prefix("Warmed").tempdir().unwrap();
+            let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+            let fixture = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project/tsconfig.json");
+            std::fs::copy(fixture, root.join("tsconfig.json")).unwrap();
+            std::fs::create_dir_all(root.join("node_modules/dep")).unwrap();
+            let mut config = OnDemandConfig::new(root.clone());
+            config.tsconfig = Some(root.join("tsconfig.json"));
+            let project = Self { _dir: dir, root, config };
+            project.write(
+                "package.json",
+                r#"{ "name": "app", "dependencies": { "dep": "1.0.0", "@types/dep": "1.0.0" } }"#,
+            );
+            project.write("node_modules/dep/package.json", r#"{ "name": "dep", "types": "index.d.ts" }"#);
+            project.write("node_modules/dep/index.d.ts", "export interface DepProps { fromDep?: string }\n");
+            project.write("Button.tsx", BUTTON);
+            project
+        }
+
+        /// Writes `text` to `name`, modified an hour ago, or half an hour ago when `later`.
+        fn write_at(&self, name: &str, text: &str, later: bool) {
+            std::fs::write(self.root.join(name), text).unwrap();
+            let file = std::fs::File::options().write(true).open(self.root.join(name)).unwrap();
+            let ago = Duration::from_secs(if later { 1800 } else { 3600 });
+            file.set_modified(std::time::SystemTime::now() - ago).unwrap();
+        }
+
+        fn write(&self, name: &str, text: &str) {
+            self.write_at(name, text, false);
+        }
+
+        fn button(&self) -> SemanticTarget {
+            let output = extract(&PipelineOptions { src_dirs: vec![self.root.clone()], ..PipelineOptions::default() });
+            crate::targets_of(&output).into_iter().find(|target| target.display_name == "Button").unwrap()
+        }
+    }
+
+    fn props(outcome: &SemanticOutcome) -> Vec<&str> {
+        outcome.components.iter().flat_map(|component| &component.props).map(|prop| prop.name.as_str()).collect()
+    }
+
+    fn current_thread() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+    }
+
+    /// Whether the checker still holds `snapshot`: releasing one it does not hold fails, as releasing an unknown one does.
+    fn holds(runtime: &tokio::runtime::Runtime, checker: &Checker, snapshot: u64) -> bool {
+        let client = checker.backend.as_ref().unwrap().client();
+        let params = serde_json::json!({ "snapshot": snapshot }).to_string().into_bytes();
+        runtime.block_on(client.request_raw("release", params, Duration::from_secs(60))).is_ok()
+    }
+
+    fn snapshot_of(checker: &Checker) -> u64 {
+        checker.live.as_ref().unwrap().rpc.snapshot_id()
+    }
+
+    /// The warm-up keeps a snapshot over the project's dependencies, its files stamped; the first request brings it up to
+    /// date, re-rooted at its file and with the edit announced before it read again, instead of building one, and the
+    /// warm-up's snapshot is released once replaced. The answer is a cold checker's. On the base the warm-up kept no
+    /// snapshot, and the first request built one.
+    #[test]
+    fn the_first_request_after_a_warm_up_updates_the_warm_snapshot_and_releases_it() {
+        let project = Warmed::new();
+        let runtime = current_thread();
+        let mut checker = Checker::default();
+
+        runtime.block_on(checker.take(&project.config, Job::Warm, &mut Queue::default()));
+        let warm = checker.live.as_ref().expect("the warm-up keeps a snapshot");
+        let stamped: Vec<String> = warm.stamps.as_ref().unwrap().keys().map(ToString::to_string).collect();
+        let warm_snapshot = snapshot_of(&checker);
+        assert_eq!(warm.roots, [project.root.join(WARM_FILE).to_string()]);
+        assert!(stamped.contains(&project.root.join("node_modules/dep/index.d.ts").to_string()), "{stamped:?}");
+        assert!(!stamped.iter().any(|file| file.ends_with(WARM_FILE)), "{stamped:?}");
+        project.write("Button.tsx", &BUTTON.replace("label: string", "label: string; edited: number"));
+        let changed = SourceChange::Files(vec![project.root.join("Button.tsx")]);
+        runtime.block_on(checker.take(&project.config, Job::Changed(changed), &mut Queue::default()));
+        let first = runtime.block_on(checker.answer(&project.config, vec![project.button()]));
+
+        assert_eq!(props(&first), ["fromDep", "label", "edited"], "{first:?}");
+        assert_eq!(
+            (checker.gauges.created.load(Ordering::Relaxed), checker.gauges.updated.load(Ordering::Relaxed)),
+            (1, 1),
+            "the warm-up built the one snapshot, which the first request brought up to date"
+        );
+        assert_eq!(checker.live.as_ref().unwrap().roots, [project.root.join("Button.tsx").to_string()]);
+        assert_ne!(snapshot_of(&checker), warm_snapshot);
+        assert!(!holds(&runtime, &checker, warm_snapshot), "the warm-up's snapshot is released once replaced");
+        let mut cold = Checker::default();
+        assert_eq!(runtime.block_on(cold.answer(&project.config, vec![project.button()])), first);
+        for checker in [checker, cold] {
+            runtime.block_on(checker.backend.unwrap().shutdown());
+        }
+    }
+
+    /// A dependency the warm-up read that changed with nobody telling the checker is read from the disk at the first
+    /// request, with a warning that names it, and the warm-up's snapshot is released.
+    #[test]
+    fn a_dependency_changed_unannounced_after_a_warm_up_is_read_again_with_a_warning() {
+        let project = Warmed::new();
+        let runtime = current_thread();
+        let mut checker = Checker::default();
+
+        runtime.block_on(checker.take(&project.config, Job::Warm, &mut Queue::default()));
+        let warm_snapshot = snapshot_of(&checker);
+        project.write_at("node_modules/dep/index.d.ts", "export interface DepProps { fromDep2?: string }\n", true);
+        let first = runtime.block_on(checker.answer(&project.config, vec![project.button()]));
+
+        assert_eq!(props(&first), ["fromDep2", "label"], "{first:?}");
+        let warned = first.diagnostics.iter().any(|d| d.message.contains("node_modules/dep/index.d.ts"));
+        assert!(warned, "{:?}", first.diagnostics);
+        assert_eq!(checker.gauges.created.load(Ordering::Relaxed), 2, "built again from the disk");
+        assert!(!holds(&runtime, &checker, warm_snapshot), "the warm-up's snapshot is released");
+        runtime.block_on(checker.backend.take().unwrap().shutdown());
     }
 
     #[test]
-    fn a_process_that_does_not_exist_has_none() {
-        assert_eq!(resident_mib(u32::MAX - 1), None);
+    fn a_warm_up_imports_each_package_the_project_depends_on_but_not_its_types_packages() {
+        let project = Warmed::new();
+        project.write(
+            "package.json",
+            r#"{ "dependencies": { "b": "1", "@scope/a": "1", "@types/react": "1" }, "peerDependencies": { "react": "1" }, "devDependencies": { "vitest": "1" } }"#,
+        );
+
+        assert_eq!(warm_source(&project.root), "import \"@scope/a\";\nimport \"b\";\nimport \"react\";\n");
+        assert_eq!(warm_source(&project.root.join("node_modules/dep")), "", "dep's own package.json lists nothing");
+    }
+
+    #[test]
+    fn the_checker_stops_past_the_bound_and_keeps_answering_within_it() {
+        assert_eq!(Upkeep::decide(Some(100), 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(None, 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(Some(768), 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(Some(800), 768), Upkeep::Down);
+    }
+
+    #[test]
+    fn the_checker_is_read_after_its_first_program_and_every_fourth() {
+        assert_eq!(RSS_CHECK_EVERY, 4);
+        let read = (1..=9).filter(|served| Upkeep::checks_memory(*served)).collect::<Vec<_>>();
+        assert_eq!(read, [1, 4, 8]);
+        assert!(Upkeep::checks_memory(64));
+    }
+
+    fn drain<T>(queue: &mut Queue<T>) -> Vec<T> {
+        std::iter::from_fn(|| queue.next()).collect()
+    }
+
+    fn push(queue: &mut Queue<&'static str>, item: &'static str, priority: Priority) -> SharedPriority {
+        let priority = SharedPriority::new(priority);
+        queue.push(item, priority.clone());
+        priority
+    }
+
+    #[test]
+    fn an_interactive_request_goes_before_every_background_one_and_each_queue_keeps_its_order() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        push(&mut queue, "fill 2", Priority::Background);
+        push(&mut queue, "story 1", Priority::Interactive);
+        push(&mut queue, "fill 3", Priority::Background);
+        push(&mut queue, "story 2", Priority::Interactive);
+
+        assert_eq!(drain(&mut queue), ["story 1", "story 2", "fill 1", "fill 2", "fill 3"]);
+    }
+
+    #[test]
+    fn a_background_request_raised_while_it_waits_goes_with_the_interactive_ones() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        let prefetch = push(&mut queue, "prefetch of the story", Priority::Background);
+        push(&mut queue, "story", Priority::Interactive);
+
+        prefetch.raise();
+
+        assert_eq!(drain(&mut queue), ["prefetch of the story", "story", "fill 1"]);
+    }
+
+    #[test]
+    fn a_waiting_background_request_goes_after_a_bounded_run_of_interactive_ones() {
+        assert_eq!(INTERACTIVE_STREAK, 4);
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        push(&mut queue, "fill 2", Priority::Background);
+        for story in ["story 1", "story 2", "story 3", "story 4", "story 5", "story 6", "story 7", "story 8", "story 9"]
+        {
+            push(&mut queue, story, Priority::Interactive);
+        }
+
+        assert_eq!(
+            drain(&mut queue),
+            [
+                "story 1", "story 2", "story 3", "story 4", "fill 1", "story 5", "story 6", "story 7", "story 8",
+                "fill 2", "story 9"
+            ]
+        );
+    }
+
+    #[test]
+    fn interactive_requests_with_no_background_waiting_do_not_count_toward_the_bound() {
+        let mut queue = Queue::default();
+        for story in ["story 1", "story 2", "story 3", "story 4", "story 5"] {
+            push(&mut queue, story, Priority::Interactive);
+            assert_eq!(queue.next(), Some(story));
+        }
+        push(&mut queue, "fill", Priority::Background);
+        push(&mut queue, "story 6", Priority::Interactive);
+
+        assert_eq!(drain(&mut queue), ["story 6", "fill"]);
+    }
+
+    /// The first test of ADR 0028 S1: a prefetch of a neighbouring story goes after the story shown and before a
+    /// fill, in arrival order within each class. On the base there was no neighbour class.
+    #[test]
+    fn a_neighbour_request_goes_after_an_on_screen_one_and_before_a_fill() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        push(&mut queue, "next story 1", Priority::Neighbour);
+        push(&mut queue, "story 1", Priority::Interactive);
+        push(&mut queue, "fill 2", Priority::Background);
+        push(&mut queue, "next story 2", Priority::Neighbour);
+        push(&mut queue, "story 2", Priority::Interactive);
+
+        assert_eq!(drain(&mut queue), ["story 1", "story 2", "next story 1", "next story 2", "fill 1", "fill 2"]);
+    }
+
+    /// The finding on change 279: with a fill waiting, interactive and neighbour requests arriving by turns used to reset
+    /// the run each switch, so the fill never went.
+    #[test]
+    fn a_waiting_fill_goes_within_the_bound_whichever_classes_are_served_before_it() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill", Priority::Background);
+        let mut picks = 0;
+        loop {
+            let class = if picks % 2 == 0 { Priority::Interactive } else { Priority::Neighbour };
+            push(&mut queue, "other", class);
+            picks += 1;
+            match queue.next() {
+                Some("fill") => break,
+                _ => assert!(picks <= INTERACTIVE_STREAK, "the fill was bypassed {picks} times"),
+            }
+        }
+    }
+
+    /// A request raised keeps the place it was first filed in: it goes before later arrivals of its new class.
+    #[test]
+    fn a_raised_request_keeps_the_age_it_was_first_filed_at() {
+        let mut queue = Queue::default();
+        let old = push(&mut queue, "old fill", Priority::Background);
+        push(&mut queue, "next story", Priority::Neighbour);
+        old.raise_to(Priority::Neighbour);
+
+        assert_eq!(drain(&mut queue), ["old fill", "next story"]);
+    }
+
+    /// The queue against a model: by class, then by arrival, except that after [`INTERACTIVE_STREAK`] picks that bypass a
+    /// waiting lesser class the oldest lesser request goes.
+    #[test]
+    fn the_queue_picks_as_a_class_then_arrival_model_with_the_bound_does() {
+        let classes = [Priority::Interactive, Priority::Neighbour, Priority::Background];
+        for seed in 0..200u64 {
+            let (mut queue, mut model, mut bypassed) = (Queue::default(), Vec::<(Priority, u64)>::new(), 0);
+            let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            for arrival in 0..40u64 {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let class = classes[(state >> 33) as usize % 3];
+                queue.push(arrival, SharedPriority::new(class));
+                model.push((class, arrival));
+                if (state >> 40) % 2 == 0 {
+                    let first = model.iter().map(|(class, _)| *class).min().unwrap();
+                    let lesser = model.iter().filter(|(class, _)| *class > first).map(|(_, at)| *at).min();
+                    let want = match lesser {
+                        Some(at) if bypassed >= INTERACTIVE_STREAK => at,
+                        _ => model.iter().filter(|(class, _)| *class == first).map(|(_, at)| *at).min().unwrap(),
+                    };
+                    bypassed = if lesser.is_none() || lesser == Some(want) { 0 } else { bypassed + 1 };
+                    model.retain(|(_, at)| *at != want);
+                    assert_eq!(queue.next(), Some(want), "seed {seed}, arrival {arrival}");
+                }
+            }
+        }
+    }
+
+    /// A neighbour joined by a story moves ahead with it; a fill joined by a neighbour moves ahead of the other fills.
+    #[test]
+    fn a_request_raised_while_it_waits_goes_with_its_new_class() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        let fill = push(&mut queue, "fill 2", Priority::Background);
+        push(&mut queue, "next story", Priority::Neighbour);
+        let next = push(&mut queue, "next story opened", Priority::Neighbour);
+
+        next.raise();
+        fill.raise_to(Priority::Neighbour);
+        next.raise_to(Priority::Background);
+
+        assert_eq!(next.get(), Priority::Interactive, "raising never lowers");
+        assert_eq!(drain(&mut queue), ["next story opened", "fill 2", "next story", "fill 1"]);
+    }
+
+    /// A request cancelled while it waits is dropped when the next is picked: its delivery is handed `None`, never an
+    /// outcome, and the checker answers the rest. An interactive request is waited for and cannot be cancelled; a
+    /// cancelled one raised again is no longer cancelled. On the base nothing could cancel a queued request.
+    #[test]
+    fn a_cancelled_request_is_never_answered() {
+        let delivered = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut queue = Queue::default();
+        let mut queued = |name: &'static str, priority: Priority| {
+            let delivered = delivered.clone();
+            let delivery = Delivery::new(move |outcome| delivered.lock().unwrap().push((name, outcome.is_some())));
+            let priority = SharedPriority::new(priority);
+            queue.push((name, delivery), priority.clone());
+            priority
+        };
+        let prefetch = queued("prefetch", Priority::Neighbour);
+        let fill = queued("fill", Priority::Background);
+        let story = queued("story", Priority::Interactive);
+        let raised = queued("prefetch opened", Priority::Neighbour);
+
+        assert!(prefetch.cancel());
+        assert!(fill.cancel());
+        assert!(raised.cancel());
+        assert!(!story.cancel(), "a story someone waits for is not cancelled");
+        raised.raise();
+        let mut answered = Vec::new();
+        while let Some((name, delivery)) = queue.next() {
+            answered.push(name);
+            delivery.deliver(Some(SemanticOutcome::default()));
+        }
+
+        assert_eq!(answered, ["story", "prefetch opened"]);
+        assert_eq!(
+            *delivered.lock().unwrap(),
+            [("prefetch", false), ("fill", false), ("story", true), ("prefetch opened", true)]
+        );
+        assert!(!story.is_cancelled() && !raised.is_cancelled());
+    }
+
+    /// A request the checker took is being converted: a cancel after that leaves it, and it stays answered.
+    #[test]
+    fn a_request_the_checker_took_is_not_cancelled() {
+        let mut queue = Queue::default();
+        let taken = push(&mut queue, "prefetch", Priority::Neighbour);
+        assert_eq!(queue.next(), Some("prefetch"));
+
+        assert!(!taken.cancel());
+        assert!(!taken.is_cancelled());
+    }
+
+    /// The streak bound holds across three classes: after a run of the first class while lesser ones wait, the oldest
+    /// lesser request goes, whatever its class.
+    #[test]
+    fn a_waiting_lesser_request_goes_after_a_bounded_run_of_the_first_class() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill", Priority::Background);
+        push(&mut queue, "next story", Priority::Neighbour);
+        for story in ["story 1", "story 2", "story 3", "story 4", "story 5"] {
+            push(&mut queue, story, Priority::Interactive);
+        }
+
+        assert_eq!(drain(&mut queue), ["story 1", "story 2", "story 3", "story 4", "fill", "story 5", "next story"]);
+    }
+
+    /// The bound counts picks of any class: the stories and neighbours answered before the fill all count toward it.
+    #[test]
+    fn picks_of_every_class_count_toward_the_bound() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill", Priority::Background);
+        for next in ["next 1", "next 2", "next 3", "next 4", "next 5"] {
+            push(&mut queue, next, Priority::Neighbour);
+        }
+        for story in ["story 1", "story 2", "story 3"] {
+            push(&mut queue, story, Priority::Interactive);
+        }
+
+        assert_eq!(
+            drain(&mut queue),
+            ["story 1", "story 2", "story 3", "next 1", "fill", "next 2", "next 3", "next 4", "next 5"]
+        );
     }
 }

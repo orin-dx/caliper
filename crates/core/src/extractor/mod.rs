@@ -13,20 +13,23 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_parser::{ParseOptions, Parser};
 use oxc_span::{SourceType, Span};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[cfg(test)]
 use crate::types::LexedExport;
 use crate::types::{
-    CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    ExtendsRef, ParamKind, RawProp, SourceData,
+    CollectedObjectField, CollectedSignature, CollectedTupleElement, CollectedType, CollectedTypeAlias,
+    DeclarationScope, Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtendsRef, ParamKind, RawProp, ScopeKind,
+    ScopeStep, SignatureKind, SourceData,
 };
 
 mod alias;
 mod asserted;
+mod body_facts;
 mod component;
 mod defaults;
 mod evidence;
+mod factory_props;
 mod interface;
 mod js_text;
 mod jsdoc;
@@ -35,6 +38,7 @@ mod uses;
 mod values;
 mod visit;
 mod wrapper;
+pub(crate) mod written;
 
 pub(crate) use reexports::re_export_specifiers;
 
@@ -58,9 +62,18 @@ impl ReactApi {
     }
 }
 
-/// Whether an import specifier is React itself: `react`, a subpath of it, or Preact's compatibility layer.
-fn is_react_module(specifier: &str) -> bool {
-    specifier == "react" || specifier.starts_with("react/") || specifier == "preact/compat"
+use crate::react_types::is_react_module;
+
+/// Whether an import brings in at least one binding that exists at runtime: not `import type {..}`, not a list of
+/// `type` specifiers, and not a bare `import 'x'`.
+fn imports_a_value(import: &ImportDeclaration<'_>) -> bool {
+    import.import_kind.is_value()
+        && import.specifiers.as_ref().is_some_and(|specifiers| {
+            specifiers.iter().any(|specifier| match specifier {
+                ImportDeclarationSpecifier::ImportSpecifier(named) => named.import_kind.is_value(),
+                _ => true,
+            })
+        })
 }
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
@@ -140,6 +153,11 @@ fn max_bracket_nesting_depth(source: &str) -> usize {
     max_depth
 }
 
+/// Whether `path` names a TypeScript source: the one list that source discovery and dependency loading both use.
+pub(crate) fn is_typescript(path: &std::path::Path) -> bool {
+    matches!(path.extension().and_then(|extension| extension.to_str()), Some("ts" | "tsx" | "mts" | "cts"))
+}
+
 /// Parse a single file and collect all extractable data.
 ///
 /// Completely pure — no I/O, no side effects, no cross-file dependencies.
@@ -174,7 +192,13 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     let ret = Parser::new(&allocator, source, source_type).with_options(options).parse();
 
     // .d.ts declaration files use the same React.FC / ForwardRefExoticComponent patterns as .tsx
-    let is_tsx = source_type.is_jsx() || source_type.is_typescript_definition();
+    // A plain `.ts` file cannot hold JSX but can build components with `createElement` and `forwardRef`, so it is read
+    // for components when it imports a value from React: that keeps the many `.ts` files with no React in them out.
+    let imports_react_value = ret.program.body.iter().any(|statement| {
+        matches!(statement, Statement::ImportDeclaration(import)
+            if imports_a_value(import) && is_react_module(&js_text::lossy(import.source.value)))
+    });
+    let is_tsx = source_type.is_jsx() || source_type.is_typescript_definition() || imports_react_value;
     let mut collector = SourceDataCollector::new(path, source, is_tsx);
 
     // oxc_parser recovers from errors: `ret.program` is usable even with diagnostics, so surface them rather than
@@ -203,7 +227,9 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     collector.comments = comments;
     collector.element_helpers = evidence::element_helpers(&ret.program);
     collector.visit_program(&ret.program);
-    collector.finish()
+    let mut data = collector.finish();
+    data.jsx_usages = body_facts::attach(&ret.program, &mut data.component_mappings, source_type.is_jsx());
+    data
     // allocator drops here — ALL arena memory freed
 }
 
@@ -237,6 +263,12 @@ pub(super) struct SourceDataCollector<'src> {
     /// `TSTypeName::QualifiedName` handling) — so storage keys must match, or a same-file
     /// reference to a namespace member can never resolve.
     pub(super) namespace_stack: Vec<CompactString>,
+    /// The regions that enclose the node being visited, outermost first: the scope a declaration is recorded in.
+    pub(super) scope_path: Vec<ScopeStep>,
+    /// For each region in `scope_path`, how many child regions it has opened so far.
+    pub(super) scope_children: Vec<u32>,
+    /// How many regions the module has opened directly.
+    pub(super) module_children: u32,
     /// `X.displayName = "..."` renames recorded during the main traversal but
     /// not yet applied — see `try_scan_display_name`. Applying these
     /// immediately would change `component_name` out from under any later
@@ -259,6 +291,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) alias_candidate: Option<(String, Option<component::AliasCall>)>,
     /// Calls to a plain function bound to a PascalCase name, resolved by what the callee returns.
     pub(super) pending_factory_calls: Vec<wrapper::PendingFactoryCall>,
+    /// The own props factory calls bound to PascalCase names give, attached to the mappings detection builds from them.
+    pub(super) pending_factory_props: Vec<factory_props::PendingFactoryProps>,
     /// Simple local aliases of generic functions, resolved after all declarations have been visited.
     pub(super) pending_function_aliases: Vec<(String, String)>,
     /// Local cast names and the base component and asserted props type they export.
@@ -275,19 +309,33 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) name_uses: rustc_hash::FxHashMap<CompactString, uses::NameUses>,
     /// Component candidates declared with a second parameter: a function component takes only props.
     pub(super) takes_a_second_parameter: FxHashSet<CompactString>,
-    /// Local names the module exports, under any exported name (`uses.rs`).
-    pub(super) exported_locals: FxHashSet<CompactString>,
-    /// `(sub-component, parent)` for each component attached to another (`Parent.Sub = Sub`,
-    /// `Object.assign(Parent, { Sub })`): exported when its parent is.
-    pub(super) attached_to: Vec<(CompactString, CompactString)>,
+    /// Local names the module exports, each with the names it exports them under, in source order (`uses.rs`).
+    pub(super) exported_locals: FxHashMap<CompactString, Vec<CompactString>>,
+    /// Where the component the module's anonymous default export is starts (`ComponentMapping::span_start`): it has no
+    /// binding to be exported by name, so `exports` finds it by this.
+    pub(super) anonymous_default: Option<u32>,
+    /// Each component attached to another (`Parent.Sub = Sub`, `Object.assign(Parent, { Sub })`): exported when its
+    /// parent is, through the parent's property.
+    pub(super) attached_to: Vec<uses::Attachment>,
     /// How many function bodies enclose the node being visited. A component declared inside one exists per call (a
     /// factory's returned component, a story's local helper), so no module imports it under that name.
     pub(super) function_depth: u32,
+    /// How many block statements, static blocks and `switch` statements enclose the node being visited.
+    pub(super) block_depth: u32,
+    /// How many `declare namespace` and `declare module` blocks enclose the node being visited.
+    pub(super) ambient_depth: u32,
+    /// The values of each enum seen so far, merged over its declarations; `None` once one declaration has a value that
+    /// is not known.
+    pub(super) enum_unions: rustc_hash::FxHashMap<String, Option<Vec<crate::types::CollectedType>>>,
     /// The span and type parameters of each generic function in the file, for `ComponentMapping::type_params`.
     pub(super) function_type_params: Vec<(u32, u32, Vec<CompactString>)>,
     /// `(scoped key, name, type parameters)` of each named class: a class is also a type, recorded in `finish` as an
     /// interface with no members unless the file declares an interface or alias of that name.
-    pub(super) pending_classes: Vec<(String, CompactString, Vec<CompactString>)>,
+    /// The function results whose scope is that of their function's body, with the start of the body.
+    pub(super) body_result_keys: Vec<(String, u32)>,
+    /// The scope of each body in `body_result_keys`, by start, once it has been entered.
+    pub(super) body_scopes: rustc_hash::FxHashMap<u32, DeclarationScope>,
+    pub(super) pending_classes: Vec<(String, CompactString, Vec<CompactString>, DeclarationScope)>,
     /// The first parameter's name of each function being visited, innermost last: `const { size = 'md' } = props` in
     /// the body destructures it.
     pub(super) props_params: Vec<(Option<CompactString>, u32, u32)>,
@@ -307,11 +355,15 @@ impl<'src> SourceDataCollector<'src> {
             element_helpers: FxHashSet::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
+            scope_path: Vec::new(),
+            scope_children: Vec::new(),
+            module_children: 0,
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
             pending_aliases: Vec::new(),
             pending_factory_calls: Vec::new(),
+            pending_factory_props: Vec::new(),
             alias_candidate: None,
             pending_function_aliases: Vec::new(),
             cast_component_aliases: Default::default(),
@@ -320,10 +372,16 @@ impl<'src> SourceDataCollector<'src> {
             argument_declined: false,
             name_uses: Default::default(),
             takes_a_second_parameter: FxHashSet::default(),
-            exported_locals: FxHashSet::default(),
+            exported_locals: FxHashMap::default(),
+            anonymous_default: None,
             attached_to: Vec::new(),
             function_depth: 0,
+            ambient_depth: 0,
+            block_depth: 0,
+            enum_unions: rustc_hash::FxHashMap::default(),
             function_type_params: Vec::new(),
+            body_result_keys: Vec::new(),
+            body_scopes: Default::default(),
             pending_classes: Vec::new(),
             props_params: Vec::new(),
             body_defaults: Vec::new(),
@@ -351,6 +409,26 @@ impl<'src> SourceDataCollector<'src> {
             format!("'{name}' is declared inside a function body, so no module can import it"),
             span,
         );
+    }
+
+    /// Enter a region of `kind` inside the current one; pair with `leave_scope`.
+    pub(super) fn enter_scope(&mut self, kind: ScopeKind) {
+        let siblings = self.scope_children.last_mut().unwrap_or(&mut self.module_children);
+        let ordinal = *siblings;
+        *siblings += 1;
+        self.scope_path.push(ScopeStep { kind, ordinal });
+        self.scope_children.push(0);
+    }
+
+    /// Leave the region `enter_scope` entered last.
+    pub(super) fn leave_scope(&mut self) {
+        self.scope_path.pop();
+        self.scope_children.pop();
+    }
+
+    /// The scope of a declaration at the node being visited.
+    pub(super) fn current_scope(&self) -> DeclarationScope {
+        DeclarationScope::new(self.scope_path.clone())
     }
 
     pub(super) fn scoped_key(&self, name: &str) -> String {
@@ -392,7 +470,8 @@ impl<'src> SourceDataCollector<'src> {
             crate::types::CollectedType::Object(fields) => has_component_member(fields),
             _ => false,
         };
-        // A literal is the type of `declare const SHOW_PARENT: "SHOW_PARENT"`, which `typeof SHOW_PARENT` names.
+        // A literal is the type of `declare const SHOW_PARENT: "SHOW_PARENT"`, which `typeof SHOW_PARENT` names, and
+        // `unique symbol` that of `declare const brand: unique symbol`.
         if !matches!(
             target,
             crate::types::CollectedType::Named { .. }
@@ -400,6 +479,7 @@ impl<'src> SourceDataCollector<'src> {
                 | crate::types::CollectedType::StringLiteral(_)
                 | crate::types::CollectedType::NumberLiteral(_)
                 | crate::types::CollectedType::BoolLiteral(_)
+                | crate::types::CollectedType::UniqueSymbol
         ) && !static_components
         {
             return;
@@ -484,25 +564,34 @@ impl<'src> SourceDataCollector<'src> {
             }
             for extends in &mut interface.extends {
                 *extends = extends.map_type_args(|arg| arg.rename_named(&rename));
-                if let ExtendsRef::SameFile { name, .. } = extends {
-                    if let Some(renamed) = rename(name) {
-                        *name = renamed;
-                    }
+                if let ExtendsRef::SameFile { name, .. } = extends
+                    && let Some(renamed) = rename(name)
+                {
+                    *name = renamed;
                 }
             }
         }
     }
 
     fn finish(mut self) -> SourceData {
-        for (key, name, params) in std::mem::take(&mut self.pending_classes) {
+        for (key, start) in std::mem::take(&mut self.body_result_keys) {
+            if let (Some(result), Some(scope)) =
+                (self.data.function_results.get_mut(&key), self.body_scopes.get(&start))
+            {
+                result.scope = scope.clone();
+            }
+        }
+        for (key, name, params, scope) in std::mem::take(&mut self.pending_classes) {
             if self.data.interfaces.contains_key(&key) || self.data.type_aliases.contains_key(&key) {
                 continue;
             }
+            self.data.class_scopes.insert(key.clone(), scope.clone());
             self.data.interfaces.insert(
                 key.clone(),
                 crate::types::CollectedInterface {
                     scoped_key: key.clone(),
                     name,
+                    scope,
                     file_path: self.file_path.clone(),
                     props: Vec::new(),
                     extends: Vec::new(),
@@ -518,6 +607,7 @@ impl<'src> SourceDataCollector<'src> {
         self.promote_wrapper_calls();
         self.promote_identifier_aliases();
         self.promote_factory_calls();
+        self.attach_factory_props();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
         // below can change what identifier a mapping currently answers to.
@@ -535,12 +625,15 @@ impl<'src> SourceDataCollector<'src> {
                 .collect();
             let hidden: FxHashSet<CompactString> =
                 self.aliased_away.iter().filter(|n| !exported.contains(n.as_str())).cloned().collect();
-            self.data.component_mappings.retain(|m| !hidden.contains(m.component_name.as_str()));
+            self.data.component_mappings.retain(|m| match uses::Subject::of(m) {
+                uses::Subject::Local(name) => !hidden.contains(&name),
+                uses::Subject::Inline(_) => true,
+            });
         }
-        let exported = self.exported_components();
-        self.drop_functions_used_only_as_functions(&exported);
+        let exports = self.component_exports();
+        self.drop_functions_used_only_as_functions(&exports);
         for mapping in &mut self.data.component_mappings {
-            mapping.exported = exported.contains(mapping.component_name.as_str());
+            mapping.exports = exports.get(&uses::Subject::of(mapping)).cloned().unwrap_or_default();
             for (start, end, defaults) in &self.body_defaults {
                 if *start >= mapping.span_start && *end <= mapping.span_end {
                     for (name, default) in defaults {
@@ -551,19 +644,51 @@ impl<'src> SourceDataCollector<'src> {
             for (start, end, params) in &self.function_type_params {
                 if *start >= mapping.span_start && *end <= mapping.span_end {
                     for param in params {
-                        if !mapping.type_params.contains(param) {
+                        // The render callback's own parameters are in scope for its props only (`factory_type_params`).
+                        if !mapping.type_params.contains(param) && !mapping.factory_type_params.contains(param) {
                             mapping.type_params.push(param.clone());
                         }
                     }
                 }
             }
         }
+        let mut named_by_display_name = FxHashSet::default();
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
-            if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
-                mapping.component_name = display_name;
+            if let Some(index) = self.data.component_mappings.iter().position(|m| m.is_binding_named(&obj_name)) {
+                self.data.component_mappings[index].component_name = display_name;
+                named_by_display_name.insert(index);
             }
         }
+        self.name_by_the_export(&named_by_display_name);
+        self.name_the_anonymous_default();
         self.data
+    }
+
+    /// A component its module exports under one name other than its own is reported under that name:
+    /// `export { _Card as Card }` is `Card`. The one place that names a component after an export; the exports
+    /// themselves are what identify it (ADR 0027). Left alone: a component with a `displayName`, one exported under
+    /// its own name or under several others, a sub-component (reached through a path) and one whose export name
+    /// another component already has.
+    fn name_by_the_export(&mut self, named_by_display_name: &FxHashSet<usize>) {
+        let mappings = &self.data.component_mappings;
+        let renames: Vec<(usize, String)> = mappings
+            .iter()
+            .enumerate()
+            .filter(|(index, mapping)| mapping.bound && !named_by_display_name.contains(index))
+            .filter_map(|(index, mapping)| {
+                let mut named = mapping.exports.iter().filter(|e| e.members.is_empty() && e.name != "default");
+                let (export, None) = (named.next()?, named.next()) else { return None };
+                let free = mappings.iter().all(|other| other.component_name != export.name);
+                (free && export.name != mapping.component_name).then(|| (index, export.name.clone()))
+            })
+            .collect();
+        let mut taken = FxHashSet::default();
+        for (index, name) in renames {
+            if taken.insert(name.clone()) {
+                let mapping = &mut self.data.component_mappings[index];
+                mapping.local_name = Some(std::mem::replace(&mut mapping.component_name, name));
+            }
+        }
     }
 
     /// `import { A } from "./a"; export { A }` re-exports `A` exactly like `export { A } from "./a"`, and
@@ -663,7 +788,7 @@ impl<'src> SourceDataCollector<'src> {
             .imports
             .iter()
             .find(|imp| imp.local_name.as_str() == name)
-            .is_none_or(|imp| imp.specifier == "react" || imp.specifier.starts_with("react/"))
+            .is_none_or(|imp| is_react_module(&imp.specifier))
     }
 
     // ─── ExtendsRef classification ────────────────────────────────────────────
@@ -680,10 +805,10 @@ impl<'src> SourceDataCollector<'src> {
         // the element from that instead of falling through to html_element_for's
         // static result (None for SVGAttributes/SVGProps, a generic "div"
         // fallback for HTMLProps) whenever it's one this crate recognizes.
-        if matches!(lookup_name, "SVGAttributes" | "SVGProps" | "HTMLProps") {
-            if let Some(element) = type_args.first().and_then(crate::react_types::html_element_from_collected) {
-                return ExtendsRef::Builtin { name: name.into(), element: Some(element.to_owned()), type_args };
-            }
+        if matches!(lookup_name, "SVGAttributes" | "SVGProps" | "HTMLProps")
+            && let Some(element) = type_args.first().and_then(crate::react_types::html_element_from_collected)
+        {
+            return ExtendsRef::Builtin { name: name.into(), element: Some(element.to_owned()), type_args };
         }
 
         if let Some(element) = crate::react_types::html_element_for(lookup_name) {
@@ -779,11 +904,17 @@ impl<'src> SourceDataCollector<'src> {
                 TSLiteral::StringLiteral(s) => CollectedType::StringLiteral(js_text::lossy(s.value).as_ref().into()),
                 TSLiteral::NumericLiteral(n) => CollectedType::NumberLiteral(n.value),
                 TSLiteral::BooleanLiteral(b) => CollectedType::BoolLiteral(b.value),
-                TSLiteral::UnaryExpression(u) => {
-                    // Handle negative numbers: -1
-                    let raw = self.source[u.span.start as usize..u.span.end as usize].to_owned();
-                    CollectedType::Raw(raw)
-                }
+                TSLiteral::BigIntLiteral(b) => CollectedType::BigIntLiteral(b.value.as_str().into()),
+                // `-1` and `-1n`, the only prefix expressions a literal type allows.
+                TSLiteral::UnaryExpression(u) => match (&u.operator, &u.argument) {
+                    (UnaryOperator::UnaryNegation, Expression::NumericLiteral(n)) => {
+                        CollectedType::NumberLiteral(-n.value)
+                    }
+                    (UnaryOperator::UnaryNegation, Expression::BigIntLiteral(b)) => {
+                        CollectedType::BigIntLiteral(format!("-{}", b.value.as_str()).into())
+                    }
+                    _ => CollectedType::Raw(self.source[u.span.start as usize..u.span.end as usize].to_owned()),
+                },
                 _ => CollectedType::Raw(self.source[lit.span.start as usize..lit.span.end as usize].to_owned()),
             },
 
@@ -818,19 +949,81 @@ impl<'src> SourceDataCollector<'src> {
                 CollectedType::Array(Box::new(self.ts_type_to_collected_at_depth(&a.element_type, depth + 1)))
             }
 
-            TSType::TSTupleType(t) => {
-                let members: Vec<CollectedType> =
-                    t.element_types.iter().map(|el| self.ts_tuple_element_to_collected(el, depth + 1)).collect();
-                CollectedType::Tuple(members)
-            }
+            TSType::TSTupleType(t) => CollectedType::Tuple(
+                t.element_types.iter().map(|el| self.ts_tuple_element_to_collected(el, depth + 1)).collect(),
+            ),
 
             TSType::TSTypeLiteral(lit) => {
+                let callables = lit
+                    .members
+                    .iter()
+                    .filter(|member| {
+                        matches!(
+                            member,
+                            TSSignature::TSCallSignatureDeclaration(_)
+                                | TSSignature::TSConstructSignatureDeclaration(_)
+                        )
+                    })
+                    .count();
+                let accessors = Accessors::of(&lit.members);
                 let fields: Vec<CollectedObjectField> = lit
                     .members
                     .iter()
-                    .filter_map(|member| self.ts_signature_to_object_field(member, depth + 1))
+                    .filter(|member| !accessors.is_shadowed_setter(member))
+                    .filter_map(|member| {
+                        let field = self.ts_signature_to_object_field(member, depth + 1)?;
+                        Some(CollectedObjectField {
+                            readonly: field.readonly || accessors.is_lone_getter(member),
+                            ..field
+                        })
+                    })
                     .collect();
-                CollectedType::Object(fields)
+                if callables == 0 {
+                    return CollectedType::Object(fields);
+                }
+                let mut signatures: Vec<CollectedSignature> = lit
+                    .members
+                    .iter()
+                    .filter_map(|member| {
+                        let (kind, type_parameters, params, return_type) = match member {
+                            TSSignature::TSCallSignatureDeclaration(call) => {
+                                (SignatureKind::Call, &call.type_parameters, &call.params, &call.return_type)
+                            }
+                            TSSignature::TSConstructSignatureDeclaration(new) => {
+                                (SignatureKind::Construct, &new.type_parameters, &new.params, &new.return_type)
+                            }
+                            TSSignature::TSIndexSignature(_)
+                            | TSSignature::TSPropertySignature(_)
+                            | TSSignature::TSMethodSignature(_) => return None,
+                        };
+                        let (params, param_names, param_kinds) =
+                            collect_params(params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
+                        let return_type = return_type
+                            .as_ref()
+                            .map(|rt| self.ts_type_to_collected_at_depth(&rt.type_annotation, depth + 1))
+                            .unwrap_or(CollectedType::Any);
+                        Some(CollectedSignature {
+                            kind,
+                            type_params: type_param_names(type_parameters.as_deref()),
+                            params,
+                            param_names,
+                            param_kinds,
+                            return_type,
+                        })
+                    })
+                    .collect();
+                // `{ (a: string): number }` alone is a function type.
+                if fields.is_empty() && signatures.len() == 1 && signatures[0].kind == SignatureKind::Call {
+                    let only = signatures.swap_remove(0);
+                    return CollectedType::Function {
+                        type_params: only.type_params,
+                        params: only.params,
+                        param_names: only.param_names,
+                        param_kinds: only.param_kinds,
+                        return_type: Box::new(only.return_type),
+                    };
+                }
+                CollectedType::Callable { signatures, fields }
             }
 
             TSType::TSFunctionType(f) => {
@@ -898,10 +1091,11 @@ impl<'src> SourceDataCollector<'src> {
 
             // TSTypeOperatorType covers keyof, unique, readonly. `keyof` is kept
             // structured (its operand may itself need substitution or resolution —
-            // see `CollectedType::KeyOf`), and so does `readonly`. `unique` is peeled to its operand,
-            // since docgen doesn't track symbol uniqueness. Neither is captured as raw source text, which made
-            // `readonly string[]` (real @types/react's ButtonHTMLAttributes `defaultValue`/`value`
-            // shape) degrade to Opaque even though the element type is fully knowable.
+            // see `CollectedType::KeyOf`), and so does `readonly`. `unique symbol` is its own type, which
+            // `typeof` the value declared with it names; `unique` on anything else (an error) is peeled. Neither is
+            // captured as raw source text, which made `readonly string[]` (real @types/react's
+            // ButtonHTMLAttributes `defaultValue`/`value` shape) degrade to Opaque even though the element type is
+            // fully knowable.
             TSType::TSTypeOperatorType(op) => match op.operator {
                 TSTypeOperatorOperator::Keyof => {
                     CollectedType::KeyOf(Box::new(self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1)))
@@ -909,7 +1103,10 @@ impl<'src> SourceDataCollector<'src> {
                 TSTypeOperatorOperator::Readonly => CollectedType::Readonly(Box::new(
                     self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1),
                 )),
-                TSTypeOperatorOperator::Unique => self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1),
+                TSTypeOperatorOperator::Unique => match &op.type_annotation {
+                    TSType::TSSymbolKeyword(_) => CollectedType::UniqueSymbol,
+                    other => self.ts_type_to_collected_at_depth(other, depth + 1),
+                },
             },
 
             TSType::TSInferType(i) => {
@@ -927,36 +1124,43 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// Convert a `TSTupleElement` (which is a superset of `TSType`) to a `CollectedType`.
-    ///
-    /// TSTupleElement inherits all TSType variants and adds TSOptionalType and TSRestType.
-    pub(super) fn ts_tuple_element_to_collected<'a>(&mut self, el: &TSTupleElement<'a>, depth: u8) -> CollectedType {
+    /// Convert a `TSTupleElement` (which is a superset of `TSType`) to a [`CollectedTupleElement`]: its type as
+    /// written, its label, and whether it is optional (`T?`, `name?: T`) or a rest element (`...T`, `...name: T`).
+    pub(super) fn ts_tuple_element_to_collected<'a>(
+        &mut self,
+        el: &TSTupleElement<'a>,
+        depth: u8,
+    ) -> CollectedTupleElement {
         match el {
-            TSTupleElement::TSOptionalType(o) => {
-                // T? in tuple → Union([T, Undefined])
-                let inner = self.ts_type_to_collected_at_depth(&o.type_annotation, depth + 1);
-                CollectedType::Union(vec![inner, CollectedType::Undefined])
-            }
+            TSTupleElement::TSOptionalType(o) => CollectedTupleElement {
+                kind: ParamKind::Optional,
+                ..CollectedTupleElement::required(self.ts_type_to_collected_at_depth(&o.type_annotation, depth + 1))
+            },
+            // `...name: T` is a rest element around a labelled member.
             TSTupleElement::TSRestType(r) => {
-                // ...T[] in tuple → Array(T)
-                CollectedType::Array(Box::new(self.ts_type_to_collected_at_depth(&r.type_annotation, depth + 1)))
+                let (label, ty) = match &r.type_annotation {
+                    TSType::TSNamedTupleMember(named) => {
+                        let inner = self.ts_tuple_element_to_collected(&named.element_type, depth + 1);
+                        (Some(CompactString::from(named.label.name.as_str())), inner.element_type)
+                    }
+                    other => (None, self.ts_type_to_collected_at_depth(other, depth + 1)),
+                };
+                CollectedTupleElement { element_type: ty, kind: ParamKind::Rest, label }
             }
-            // All TSType variants are inherited — we can safely transmute via span+raw fallback
-            // but the cleanest approach is to match the known shared variants.
-            // Since TSTupleElement inherits TSType, we cast via the span trick:
-            other => {
-                use oxc_span::GetSpan;
-                let span = other.span();
-                let raw = self.source[span.start as usize..span.end as usize].to_owned();
-                // Try to produce a real type from source-text parsing would require re-parsing,
-                // so instead we check common patterns via span-based raw parsing and use
-                // the raw fallback for anything we can't directly handle.
-                // For the common case of plain TSType variants (not TSOptionalType/TSRestType),
-                // we need to re-interpret the element as a TSType. We can't do this safely
-                // at runtime without unsafe, but all such variants produce valid CollectedType
-                // via raw text. Most real tuple usage is simple types.
-                CollectedType::Raw(raw)
+            TSTupleElement::TSNamedTupleMember(named) => {
+                let inner = self.ts_tuple_element_to_collected(&named.element_type, depth + 1);
+                let kind = if named.optional { ParamKind::Optional } else { inner.kind };
+                CollectedTupleElement { kind, label: Some(named.label.name.as_str().into()), ..inner }
             }
+            // The remaining variants are the plain `TSType`s the element inherits.
+            other => CollectedTupleElement::required(match other.as_ts_type() {
+                Some(ty) => self.ts_type_to_collected_at_depth(ty, depth + 1),
+                None => {
+                    use oxc_span::GetSpan;
+                    let span = other.span();
+                    CollectedType::Raw(self.source[span.start as usize..span.end as usize].to_owned())
+                }
+            }),
         }
     }
 
@@ -981,7 +1185,7 @@ impl<'src> SourceDataCollector<'src> {
                     .as_ref()
                     .map(|ta| self.ts_type_to_collected_at_depth(&ta.type_annotation, depth + 1))
                     .unwrap_or(CollectedType::Any);
-                let description = self.find_jsdoc(sig.span.start);
+                let (description, tags) = self.find_jsdoc_with_tags(sig.span.start);
                 Some(CollectedObjectField {
                     name,
                     collected_type,
@@ -989,6 +1193,7 @@ impl<'src> SourceDataCollector<'src> {
                     description,
                     readonly: sig.readonly,
                     index_key: None,
+                    tags,
                 })
             }
             TSSignature::TSIndexSignature(sig) => {
@@ -1000,44 +1205,25 @@ impl<'src> SourceDataCollector<'src> {
                     description: self.find_jsdoc(sig.span.start),
                     readonly: sig.readonly,
                     index_key: Some(Box::new(key)),
+                    tags: Default::default(),
                 })
             }
             TSSignature::TSMethodSignature(sig) => {
                 let name = js_text::property_name(&sig.key.static_name()?);
-                let (params, param_names, param_kinds) =
-                    collect_params(&sig.params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
-                let return_type = sig
-                    .return_type
-                    .as_ref()
-                    .map(|rt| self.ts_type_to_collected_at_depth(&rt.type_annotation, depth + 1))
-                    .unwrap_or(CollectedType::Void);
+                let collected_type =
+                    self.method_signature_type(sig, |this, t| this.ts_type_to_collected_at_depth(t, depth + 1));
+                let (description, tags) = self.find_jsdoc_with_tags(sig.span.start);
                 Some(CollectedObjectField {
                     name,
-                    collected_type: CollectedType::Function {
-                        type_params: type_param_names(sig.type_parameters.as_deref()),
-                        params,
-                        param_names,
-                        param_kinds,
-                        return_type: Box::new(return_type),
-                    },
+                    collected_type,
                     required: !sig.optional,
-                    description: String::new(),
+                    description,
                     readonly: false,
                     index_key: None,
+                    tags,
                 })
             }
             _ => None,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(super) fn expression_to_string<'a>(&self, expr: &Expression<'a>) -> String {
-        match expr {
-            Expression::NumericLiteral(n) => n.value.to_string(),
-            Expression::StringLiteral(s) => format!("\"{}\"", js_text::lossy(s.value)),
-            Expression::BooleanLiteral(b) => b.value.to_string(),
-            Expression::NullLiteral(_) => "null".to_owned(),
-            _ => "unknown".to_owned(),
         }
     }
 
@@ -1079,7 +1265,7 @@ impl<'src> SourceDataCollector<'src> {
             TSType::TSParenthesizedType(p) => self.extract_type_name_from_type(&p.type_annotation),
             TSType::TSUnionType(u) => {
                 let members: Vec<CollectedType> = u.types.iter().map(|t| self.ts_type_to_collected(t)).collect();
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data
                     .type_aliases
@@ -1088,7 +1274,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             TSType::TSIntersectionType(i) => {
                 let members: Vec<CollectedType> = i.types.iter().map(|t| self.ts_type_to_collected(t)).collect();
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data
                     .type_aliases
@@ -1101,7 +1287,7 @@ impl<'src> SourceDataCollector<'src> {
                 // alias so the resolver's existing alias machinery can resolve it, instead
                 // of silently dropping the whole component (the `_ => None` fallback below).
                 let collected = self.ts_type_to_collected(ty);
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data.type_aliases.insert(
                     scoped,
@@ -1158,21 +1344,10 @@ impl<'src> SourceDataCollector<'src> {
             TSSignature::TSMethodSignature(ms) => {
                 let name = js_text::property_name(&ms.key.static_name()?);
                 let (description, tags) = self.find_jsdoc_with_tags(ms.span.start);
-                let (params, param_names, param_kinds) = collect_params(&ms.params, |t| self.ts_type_to_collected(t));
-                let return_type = ms
-                    .return_type
-                    .as_ref()
-                    .map(|rt| self.ts_type_to_collected(&rt.type_annotation))
-                    .unwrap_or(CollectedType::Void);
+                let collected_type = self.method_signature_type(ms, |this, t| this.ts_type_to_collected(t));
                 Some(RawProp {
                     name,
-                    collected_type: CollectedType::Function {
-                        type_params: type_param_names(ms.type_parameters.as_deref()),
-                        params,
-                        param_names,
-                        param_kinds,
-                        return_type: Box::new(return_type),
-                    },
+                    collected_type,
                     required: !ms.optional,
                     description,
                     tags,
@@ -1185,11 +1360,97 @@ impl<'src> SourceDataCollector<'src> {
     }
 }
 
+impl SourceDataCollector<'_> {
+    /// The type of the property a method signature declares: a method's function type, a getter's return type, a
+    /// setter's parameter type. A getter is a property, not a method: `get size(): number` is `size: number`.
+    fn method_signature_type(
+        &mut self,
+        sig: &TSMethodSignature<'_>,
+        mut convert: impl FnMut(&mut Self, &TSType) -> CollectedType,
+    ) -> CollectedType {
+        match sig.kind {
+            TSMethodSignatureKind::Method => {
+                let (params, param_names, param_kinds) = collect_params(&sig.params, |t| convert(self, t));
+                let return_type = sig
+                    .return_type
+                    .as_ref()
+                    .map(|rt| convert(self, &rt.type_annotation))
+                    .unwrap_or(CollectedType::Void);
+                CollectedType::Function {
+                    type_params: type_param_names(sig.type_parameters.as_deref()),
+                    params,
+                    param_names,
+                    param_kinds,
+                    return_type: Box::new(return_type),
+                }
+            }
+            TSMethodSignatureKind::Get => {
+                sig.return_type.as_ref().map(|rt| convert(self, &rt.type_annotation)).unwrap_or(CollectedType::Any)
+            }
+            TSMethodSignatureKind::Set => sig
+                .params
+                .items
+                .first()
+                .and_then(|p| p.type_annotation.as_ref())
+                .map(|ta| convert(self, &ta.type_annotation))
+                .unwrap_or(CollectedType::Any),
+        }
+    }
+}
+
+/// The get and set accessors among an object type's or an interface's members, by property name. A getter and a
+/// setter of one name declare one property, typed by the getter; a getter alone makes it `readonly`.
+pub(super) struct Accessors {
+    getters: FxHashSet<String>,
+    setters: FxHashSet<String>,
+}
+
+impl Accessors {
+    pub(super) fn of(members: &[TSSignature<'_>]) -> Self {
+        let mut accessors = Self { getters: FxHashSet::default(), setters: FxHashSet::default() };
+        for member in members {
+            if let Some((kind, name)) = accessor(member) {
+                match kind {
+                    TSMethodSignatureKind::Get => accessors.getters.insert(name),
+                    TSMethodSignatureKind::Set => accessors.setters.insert(name),
+                    TSMethodSignatureKind::Method => false,
+                };
+            }
+        }
+        accessors
+    }
+
+    /// A setter whose property a getter of the same name declares.
+    pub(super) fn is_shadowed_setter(&self, member: &TSSignature<'_>) -> bool {
+        matches!(accessor(member), Some((TSMethodSignatureKind::Set, name)) if self.getters.contains(&name))
+    }
+
+    /// A getter with no setter of the same name: its property is `readonly`.
+    pub(super) fn is_lone_getter(&self, member: &TSSignature<'_>) -> bool {
+        matches!(accessor(member), Some((TSMethodSignatureKind::Get, name)) if !self.setters.contains(&name))
+    }
+}
+
+/// A getter's or setter's kind and property name; `None` for any other member.
+fn accessor(member: &TSSignature<'_>) -> Option<(TSMethodSignatureKind, String)> {
+    let TSSignature::TSMethodSignature(sig) = member else { return None };
+    match sig.kind {
+        TSMethodSignatureKind::Get | TSMethodSignatureKind::Set => {
+            Some((sig.kind, js_text::property_name(&sig.key.static_name()?)))
+        }
+        TSMethodSignatureKind::Method => None,
+    }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Whether `s` is written as a component or class name: an uppercase letter first, after any leading underscores and the
+/// digits that follow them. An identifier cannot start with a digit, so `3D.tsx` exports `_3D`, and Mantine writes an
+/// implementation component as `_Box`. `_helper` and `_3d` are not, which keeps a private function out of the candidates.
 pub(super) fn is_pascal_case(s: &str) -> bool {
-    let mut chars = s.chars();
-    chars.next().is_some_and(|c| c.is_uppercase())
+    let name = s.trim_start_matches('_');
+    let name = if name.len() < s.len() { name.trim_start_matches(|c: char| c.is_ascii_digit()) } else { name };
+    name.chars().next().is_some_and(char::is_uppercase)
 }
 
 /// Whether `name` is written as a constant, `MENU_OPTIONS` or `ORIGIN`: more than one letter and none lowercase. Such a
@@ -1270,6 +1531,9 @@ fn line_and_column(source: &str, offset: u32) -> (u32, u32) {
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod scope_tests;
+
 impl evidence::Scope for SourceDataCollector<'_> {
     fn may_be_react(&self, name: &str) -> bool {
         SourceDataCollector::may_be_react(self, name)
@@ -1281,5 +1545,17 @@ impl evidence::Scope for SourceDataCollector<'_> {
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
         matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
+    }
+
+    fn is_preact_h(&self, receiver: Option<&str>) -> bool {
+        self.data.imports.iter().any(|import| {
+            let binds = match receiver {
+                None => import.local_name.as_str() == "h" && import.exported_name.as_str() == "h",
+                Some(object) => {
+                    import.local_name.as_str() == object && matches!(import.exported_name.as_str(), "*" | "default")
+                }
+            };
+            binds && crate::react_types::is_preact_module(&import.specifier)
+        })
     }
 }

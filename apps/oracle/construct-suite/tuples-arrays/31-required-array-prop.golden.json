@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "array",
+    "element": {
+      "k": "prim",
+      "name": "string"
+    },
+    "alias": "Array"
+  },
+  "text": "string[]",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/31-required-array-prop.tsx"
+    },
+    "order": null
+  }
+}

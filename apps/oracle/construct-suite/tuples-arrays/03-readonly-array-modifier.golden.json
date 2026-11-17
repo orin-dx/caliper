@@ -1,0 +1,32 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "prim",
+          "name": "string"
+        },
+        "alias": "ReadonlyArray"
+      }
+    ],
+    "alias": "ReadonlyArray"
+  },
+  "text": "readonly string[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/03-readonly-array-modifier.tsx"
+    },
+    "order": null
+  }
+}

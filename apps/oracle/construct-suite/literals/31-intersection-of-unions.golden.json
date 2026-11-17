@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "b",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "c",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"b\" | \"c\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/31-intersection-of-unions.tsx"
+    },
+    "order": null
+  }
+}

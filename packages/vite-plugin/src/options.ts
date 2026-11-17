@@ -1,4 +1,4 @@
-import type { Diagnostic } from 'caliper-docgen-napi'
+import type { Diagnostic, JsExtractOptions } from 'caliper-docgen-napi'
 import type { DiagnosticLevel } from './diagnostics.js'
 
 export interface CaliperDocgenOptions {
@@ -25,8 +25,26 @@ export interface CaliperDocgenOptions {
   /** Load the type declarations your props reference from installed packages. On by default; `false` skips it. */
   loadDependencies?: boolean
   /**
-   * Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop: those from
-   * loaded dependencies (the default), every inherited source, or none.
+   * Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones (DOM
+   * and ARIA attributes, style systems) from loaded dependencies and any source of more than 200 props, the project's
+   * own included (the default), those and project sources of more than 30 props, or none.
    */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
+}
+
+/**
+ * What the native session is created with: the options, with the source directories made absolute. The plugin serves
+ * the whole output as one module and injects docs into every transformed file, and neither waits for a checker, so
+ * its session is the structural resolver's (`checker: false`); the CLI and the Storybook addon ask the checker.
+ */
+export function toNapiOptions(options: CaliperDocgenOptions, srcDirs: string[]): JsExtractOptions {
+  return {
+    srcDirs,
+    exclude: options.exclude,
+    htmlAttributes: options.htmlAttributes ?? (options.skipHtmlProps ? 'none' : undefined),
+    cache: options.cache,
+    loadDependencies: options.loadDependencies,
+    collapseInheritedProps: options.collapseInheritedProps,
+    checker: false,
+  }
 }

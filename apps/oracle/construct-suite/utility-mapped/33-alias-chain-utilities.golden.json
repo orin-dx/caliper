@@ -1,0 +1,23 @@
+{
+  "checker": {
+    "k": "object",
+    "fields": [
+      "a",
+      "b"
+    ],
+    "index": false,
+    "alias": "Readonly"
+  },
+  "text": "Readonly<Step2>",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/33-alias-chain-utilities.tsx"
+    },
+    "order": null
+  }
+}

@@ -9,7 +9,7 @@
 //! `NonNullable<Alias<T> | undefined>` inside the arguments of a generic alias that prints by name (csstype's
 //! `Fallback<T>` under Chakra's `ConditionalValue`): the argument shows reduced, not as a `NonNullable` call.
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use camino::Utf8PathBuf;
 
 fn type_text(source: &str, prop: &str) -> String {

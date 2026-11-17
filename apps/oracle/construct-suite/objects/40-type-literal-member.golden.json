@@ -1,0 +1,15 @@
+{
+  "checker": {
+    "k": "prim",
+    "name": "string"
+  },
+  "text": "string",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": null,
+    "order": null
+  }
+}

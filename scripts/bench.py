@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """A/B speed and memory of this checkout (or a branch) against origin/main, for when a change touches the resolver.
 
-Builds both in release mode, then times `extract --json` over Mantine and Chakra (source directory only, no
-dependencies, fetched once into .corpora/) with the two builds interleaved and alternating which goes first, and prints
-the median wall time and peak RSS of each side. Calibrated on CI runners and a laptop: with nothing changed, the ratio
-stays within 1.04 for time and 1.12 for memory, so more than 1.10x in time or 1.20x in memory is worth a look. Nothing
-enforces that.
+Builds both in release mode, then times `extract --json` in the Storybook addon's configuration (dependencies loaded,
+cache on after a warm-up run, large inherited sources collapsed: `--collapse-inherited-props dependencies`) over Mantine and Chakra with their dependencies installed
+(`scripts/corpora.py setup --corpus mantine --corpus chakra`; without them nothing would be loaded, so the run stops)
+with the two builds interleaved and alternating which goes first, and prints the median wall time and peak RSS of each
+side. The 1.10x time and 1.20x memory thresholds come from a calibration made with dependency loading and the cache
+off (within 1.04 for time and 1.12 for memory with nothing changed); it has not been repeated in this configuration, so
+treat them as a starting point. Nothing enforces them.
 
 Usage: scripts/bench.py [BRANCH] [--runs N] [--corpus NAME]...   (BRANCH defaults to this checkout, uncommitted work included)
 """
@@ -14,6 +16,7 @@ import os
 import shutil
 import statistics
 import subprocess
+import sys
 import tempfile
 
 import corpora
@@ -28,6 +31,22 @@ def build(manifest_dir, target_dir, destination):
     subprocess.run(['cargo', 'build', '--release', '--locked', '-p', 'caliper-docgen', '--manifest-path',
                     os.path.join(manifest_dir, 'Cargo.toml'), '--target-dir', target_dir], check=True)
     shutil.copy(os.path.join(target_dir, 'release', 'caliper-docgen'), destination)
+
+
+def extract_command(binary, src, cache_dir):
+    """The addon's configuration (packages/storybook/src/provider.ts): dependencies loaded, the cache on, and
+    large inherited sources collapsed (`dependencies`, the addon's default). Each side keeps its own cache directory so one build never reads the other's. The
+    checker answers, as it does by default."""
+    return [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'dependencies',
+            '--cache-dir', cache_dir]
+
+
+def forget_kept_answer(cache_dir):
+    """Removes the checker's answer `extract` keeps in the cache directory, so the next run asks the checker as a
+    first run does: the timed runs compare the checker's pass, not one build's kept answer against the other's."""
+    kept = os.path.join(cache_dir, 'checker-answers.msgpack')
+    if os.path.exists(kept):
+        os.remove(kept)
 
 
 def main():
@@ -56,13 +75,18 @@ def main():
             corpora_dir = os.path.abspath(corpora.DEFAULT_DIR)
             print(f"{'corpus':<9} {'base ms':>8} {'head ms':>8} {'ratio':>6}   {'base MiB':>8} {'head MiB':>8} {'ratio':>6}")
             for corpus in corpora.selected(args.corpus):
-                src = corpora.source_dir(corpus, corpora_dir)
-                command = lambda binary: [binary, 'extract', '--src', src, '--json', '--no-cache', '--no-load-dependencies']
+                src = corpora.ready(corpus, corpora_dir, sparse=False)
+                if not src:
+                    sys.exit(f"{corpus['name']}: dependencies not installed, so none would be loaded; "
+                             f"run `scripts/corpora.py setup --corpus {corpus['name']}`")
+                cache_of = lambda binary: os.path.join(tmp, 'cache-' + os.path.basename(binary))
+                command = lambda binary: extract_command(binary, src, cache_of(binary))
                 samples = {'base': [], 'head': []}
                 for label, binary in builds.items():
                     run_once(command(binary))
                 for i in range(args.runs):
                     for label in (('base', 'head') if i % 2 == 0 else ('head', 'base')):
+                        forget_kept_answer(cache_of(builds[label]))
                         samples[label].append(run_once(command(builds[label])))
                 median = {label: (statistics.median(s for s, _ in runs) * 1000, statistics.median(r for _, r in runs))
                           for label, runs in samples.items()}

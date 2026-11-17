@@ -8,9 +8,9 @@
 
 ## Decision
 
-`PropType` and `CollectedType` don't derive `Serialize`/`Deserialize`. Each has a hand-written impl (`to_json_value`/`from_json_value`) that builds a `serde_json::Value` directly instead of going through serde's derive machinery.
+`PropType` and `CollectedType` don't derive `Serialize`/`Deserialize`. Each has a hand-written impl (`to_json_value`/`from_json_value`) that builds a `serde_json::Value` directly instead of going through serde's derive machinery. Only the `Serialize` side of `PropType` remains: its `Deserialize` had no reader (the TypeScript side reads the JSON itself) and was removed.
 
-**Correction (2026-08-12):** this ADR originally listed `OpaqueReason` alongside `PropType`/`CollectedType` as hand-written. That was wrong — `OpaqueReason` derives `Serialize`/`Deserialize` normally (`crates/core/src/types/output.rs`) and isn't recursive (every variant holds a `String` or nothing), so it was never subject to the recursion-limit problem this ADR is about. What's manual is `PropType::to_tagged_value`/`from_tagged_value` assembling `OpaqueReason`'s JSON shape by hand as part of `PropType`'s own impl — `OpaqueReason` itself needs no special treatment. Found while building `docs/architecture/types-and-output-contract.md`.
+**Correction (2026-08-12):** this ADR originally listed `OpaqueReason` alongside `PropType`/`CollectedType` as hand-written. That was wrong — `OpaqueReason` derives `Serialize`/`Deserialize` normally (`crates/core/src/types/output.rs`) and isn't recursive (every variant holds a `String` or nothing), so it was never subject to the recursion-limit problem this ADR is about. `OpaqueReason` itself needs no special treatment, and its derive is tagged (`#[serde(tag = "type")]`) so `PropType`'s impl writes it as it stands. Found while building `docs/architecture/types-and-output-contract.md`.
 
 ## Consequences
 

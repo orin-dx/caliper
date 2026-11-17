@@ -1,20 +1,22 @@
 # Benchmarks: caliper-docgen vs. react-docgen-typescript vs. react-docgen
 
+> **Historical record.** The measurements below were taken on 2026-07-25 on an Apple Silicon (arm64) Mac running macOS, against the 21 fixture libraries as they were then and the code at that time. They are not current figures. The `criterion` tables (per-fixture cold extraction and incremental update) can be re-run with `cargo bench --workspace --exclude caliper-docgen-napi`, but on other hardware and today's tree they will give different numbers. The 50 ms whole-corpus run, the three-tool comparison and the agreement tables came from a fixtures harness that is no longer in the tree, and no script, `justfile` recipe or bench target reproduces them. Whole-library figures are in [`performance.md`](performance.md) (dated 2026-10, also history) and the weekly record described in [`measurement.md`](measurement.md). Sentences below that say a gap is deferred to a type checker describe the tree of that date.
+
 **Generated:** 2026-07-25.
 
 **Hardware:** Apple Silicon (arm64), macOS. Numbers below are absolute and will shift on different hardware — treat the _relative_ comparisons as the durable signal, not the absolute milliseconds.
 
-Whole-library numbers on five pinned public corpora are in [`performance.md`](performance.md), and the weekly record that tracks them against RDT and react-docgen is described in [`measurement.md`](measurement.md). Both halves of this report are a 2026-07-25 snapshot on the fixture libraries, taken with a fixtures harness that has since been removed (it is in git history, in `apps/validate/`, before the rename to `apps/oracle/`).
+Whole-library numbers on five pinned public corpora are in [`performance.md`](performance.md), and the weekly record that tracks them against RDT and react-docgen is described in [`measurement.md`](measurement.md). Both halves of this report are a 2026-07-25 snapshot on the fixture libraries, taken with a fixtures harness that is not in the repository.
 
 This report has two independent halves: **performance** (how fast) and **output quality** (how correct/complete). They're measured differently on purpose — a fast tool that produces wrong output isn't actually useful, and this project's whole premise is "faster AND at least as accurate," so both get held to a real, reproducible standard here. The Rust-internal numbers reproduce with `crates/core/benches/`; the cross-tool ones were produced by the removed harness, and the weekly record replaces them — see [Reproducing these numbers](#reproducing-these-numbers).
 
 ## Tools compared
 
-| Tool                      | Version   | Approach                                         |
-| ------------------------- | --------- | ------------------------------------------------ |
-| `caliper-docgen`          | this repo | OXC parser, no type-checking pass                |
-| `react-docgen-typescript` | 2.2.2     | full `ts.Program` + real TypeScript type checker |
-| `react-docgen`            | 7.1.1     | Babel AST walk, weak native TS support           |
+| Tool | Version | Approach |
+| --- | --- | --- |
+| `caliper-docgen` | this repo | OXC parser, no type-checking pass (measured before the checker became the default: today's `--no-checker`) |
+| `react-docgen-typescript` | 2.2.2 | full `ts.Program` + real TypeScript type checker |
+| `react-docgen` | 7.1.1 | Babel AST walk, weak native TS support |
 
 ---
 
@@ -64,7 +66,7 @@ Two costs affect all three equally, plus one extra for us:
 | `radix/button.d.ts` |                19.82 ms |
 | `mui/Button.d.ts`   | 21.33 ms [20.90, 21.78] |
 
-These all extract a small single-fixture-library directory in isolation with **no DTS cache warm** (`cache_dir: None` in the bench options) — the ~20ms floor here is dominated by re-parsing `@types/react`'s ambient globals from scratch every single call, not by the fixture file itself. This is why the 21-library whole-corpus number above (50ms) isn't 21×20ms: the pipeline parses `@types/react` once per process, not once per library.
+These all extract a small single-fixture-library directory in isolation with the default options, which keep the on-disk cache on; the ~20ms floor here is the per-call cost of parsing `@types/react`'s ambient globals and loading that cache, not the fixture file itself. This is why the 21-library whole-corpus number above (50ms) isn't 21×20ms: the pipeline parses `@types/react` once per process, not once per library.
 
 ### Incremental single-file update — the number RDT and react-docgen cannot produce at all
 
@@ -99,9 +101,9 @@ The single percentage can't distinguish "we're missing things" from "the compara
 
 ### Agreement rate vs. react-docgen-typescript
 
-`react-docgen-typescript` always fully expands the real `HTMLAttributes`/`AriaAttributes`/`<Element>HTMLAttributes` interface chain (~250-300 attrs per element) — it has a real type checker to walk that chain. This tool's _default_ is `HtmlAttributeMode::Curated` (~15-20 hand-picked common attrs).
+`react-docgen-typescript` always fully expands the real `HTMLAttributes`/`AriaAttributes`/`<Element>HTMLAttributes` interface chain (~250-300 attrs per element) — it has a real type checker to walk that chain. This tool's _default_ is `HtmlAttributeMode::Full`, which also expands the chain; `Curated` (~15-20 hand-picked common attrs) is opt-in.
 
-Comparing curated-mode output against RDT's always-full output would manufacture a huge fake "missing props" number — a default-mode mismatch, not a quality gap. So this comparison runs with `--html-attributes full` instead (this tool structurally resolving the same interface chain RDT does), the fair apples-to-apples setting.
+The comparison below ran with `--html-attributes full` (this tool structurally resolving the same interface chain RDT does), the fair apples-to-apples setting; curated output would manufacture a huge fake "missing props" number.
 
 | Metric                                             |     Value |
 | -------------------------------------------------- | --------: |
@@ -130,7 +132,7 @@ That 16.8% needs immediate context: **it is not evenly distributed, and the miss
 | `ark-ui/Select/SelectRoot` | 36 | 314 | same generic-substitution pattern |
 | `headlessui/Listbox/*` (3 components) | 5-14 | 234-246 | conditional type (`PropsOf<TTag> = TTag extends ... ? ... : never`) nested inside generic substitution |
 
-**Type-diff taxonomy** (1,953 real mismatches, classified by observable shape):
+**Type-diff taxonomy** (classified by observable shape; the harness is gone, so the buckets below are the ones it recorded and are not re-derived here, so their counts do not necessarily add up to the totals in the table above):
 
 | Bucket | Count | What it means |
 | --- | --: | --- |
@@ -156,9 +158,9 @@ That 16.8% needs immediate context: **it is not evenly distributed, and the miss
 
 The single most important number in this table is **9 of 20 (45%) returning zero props.** `react-docgen` is a Babel-era tool built primarily for `PropTypes`-based components. Its native TypeScript support is real but shallow — it frequently can't extract anything at all from an `interface`-typed function component, especially when the props type comes from a separate named interface rather than an inline object literal.
 
-A flat per-prop agreement rate is a weak signal when the comparator has no opinion on 42% of the corpus — the coverage claim in the next section is the more honest framing.
+A flat per-prop agreement rate is a weak signal when the comparator has no opinion on 45% of the corpus — the coverage claim in the next section is the more honest framing.
 
-**Type-diff taxonomy** (61 real mismatches):
+**Type-diff taxonomy** (classified by observable shape; the harness is gone, so the buckets below are the ones it recorded and are not re-derived here, so their counts do not necessarily add up to the totals in the table above):
 
 | Bucket                                                             | Count |
 | ------------------------------------------------------------------ | ----: |
@@ -175,7 +177,7 @@ A flat per-prop agreement rate is a weak signal when the comparator has no opini
 
 Direct answers to "what information do we have that RDT and react-docgen don't," each backed by a number above or a concrete check run against this corpus, not a claim:
 
-1. **Structured, typed degradation diagnostics.** Running this tool across all 21 fixture libraries produces **82 diagnostics** with typed codes (`UNRESOLVABLE_IMPORT`: 30, `OPAQUE_TYPE`: 29, `INDEXED_ACCESS_OPAQUE`: 19, `DISCRIMINATED_UNION`: 2, `TEMPLATE_LITERAL_OPAQUE`: 2), file/line context, and human-readable help text (e.g. _"Enable typescript-go to resolve indexed access types."_). Neither RDT nor react-docgen tell you _why_ a prop came out wrong or missing — they silently omit it or print a generic parse error. This tool's non-negotiable #6 ("always emit a Diagnostic when degrading, never fail silently," `AGENTS.md`) makes every gap in the tables above something a consumer's tooling can detect and act on, not something discovered by manually diffing output.
+1. **Structured, typed degradation diagnostics.** Running this tool across all 21 fixture libraries produces **82 diagnostics** with typed codes (`UNRESOLVABLE_IMPORT`: 30, `OPAQUE_TYPE`: 29, `INDEXED_ACCESS_OPAQUE`: 19, `DISCRIMINATED_UNION`: 2, `TEMPLATE_LITERAL_OPAQUE`: 2), file/line context, and human-readable help text (e.g. _"Declare the prop's type directly, or index a type declared in the project."_ for `INDEXED_ACCESS_OPAQUE`). Neither RDT nor react-docgen tell you _why_ a prop came out wrong or missing — they silently omit it or print a generic parse error. This tool's non-negotiable #6 ("always emit a Diagnostic when degrading, never fail silently," `AGENTS.md`) makes every gap in the tables above something a consumer's tooling can detect and act on, not something discovered by manually diffing output.
 2. **`.d.ts`-only fixtures.** 8 of the 55 fixture files in this corpus (`mui`, `chakra`, `mantine`, `radix`, `react-aria`) are declaration-only — real published library type definitions with no accompanying `.tsx` source. **Neither RDT nor react-docgen can run on these at all** (both need a real component implementation to parse). This tool extracts full prop tables from them today — the reason it can validate against `node_modules`-vendored third-party types, not just first-party source.
 3. **Incremental extraction with a real API** (see the perf section above) — `WatchSession::update_file` for editor/HMR integration. RDT and react-docgen have nothing playing this role; the comparison isn't "we're faster at the same operation," it's "this operation doesn't exist for them."
 4. **Cross-package monorepo import resolution** (`ImportResolutionMap`, barrel/re-export chain following, `extra_paths` workspace aliasing). RDT resolves within a single `ts.Program`'s file set — following a monorepo's package boundaries means configuring that whole program correctly. This tool's import resolution is a first-class, independently-tested layer (`import_map.rs`, `resolver/import.rs`).
@@ -203,7 +205,7 @@ Confirmed still accurate against current code during this report — see `docs/t
 
 ```bash
 # Rust-internal numbers
-cargo bench -p caliper-docgen-core                    # per-fixture cold + incremental, criterion (`just bench-criterion`)
+cargo bench -p caliper-docgen-core                    # per-fixture cold + incremental, criterion
 
 # Whole-library speed and memory, this checkout against origin/main
 just bench                                              # Mantine and Chakra, median of 9 (see measurement.md)
@@ -213,3 +215,10 @@ python3 scripts/weekly.py --bin target/release/caliper-docgen --oracle
 ```
 
 The fixture-library tables above (cold extraction of all three tools on 21 libraries, and the per-prop agreement taxonomy) came from a fixtures harness that no longer exists. Re-measure with `scripts/weekly.py`, which runs the same three tools on five pinned corpora and writes the numbers to a job summary instead of regenerated `baselines/` and `analysis.json` files.
+
+## Not measured
+
+- `ensureFresh` after a real edit, end to end: `WatchSession` re-resolving a changed file is timed above (1.7 to 2.1 ms) and `docs/performance.md` reports `ensureFresh` at 3 to 5 ms, but no benchmark times the NAPI `ensureFresh` call path from an edit to its result.
+- The Vite HMR path: no number covers an edit reaching the browser through the plugin.
+- `check`, `inspect` and `watch`: the numbers above are `extract` only.
+- The cold first run of RDT and react-docgen at whole-library scale: `docs/measurement.md` records them as a single run each (only Caliper's time is a median of five), so their numbers are first runs but carry no spread. Caliper's cold extraction is timed per fixture above.

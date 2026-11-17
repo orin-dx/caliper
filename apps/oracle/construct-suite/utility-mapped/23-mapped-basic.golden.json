@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a",
+          "b",
+          "c"
+        ],
+        "index": false,
+        "alias": "Flags"
+      }
+    ],
+    "alias": "Flags"
+  },
+  "text": "Flags | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/23-mapped-basic.tsx"
+    },
+    "order": null
+  }
+}

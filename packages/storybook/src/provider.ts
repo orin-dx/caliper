@@ -17,45 +17,21 @@ import { logger } from 'storybook/internal/node-logger'
 import type { DocgenMiddleware, DocgenPayload, IndexEntry } from 'storybook/internal/types'
 import { type ExtractArgTypes, loadExtractArgTypes, toArgTypes } from './arg-types.js'
 import type { CaliperStorybookOptions } from './index.js'
+import { type Answered, Background, settle } from './background.js'
+import { Completions } from './lifecycle.js'
+import { channel, type Link, type ToDevServer, type ToProvider } from './live.js'
 import { DocgenSession, type SessionBinding } from './session.js'
+import { ResolverFailureError, type StoryFile, noComponent, storyFor, tagLists } from './story.js'
+import { assertValidOptions } from './validate.js'
 
 type Subcomponent = NonNullable<DocgenPayload['subcomponents']>[string]
-
-interface StoryFile {
-  csf: CsfFile
-  storyPath: string
-  importPath: string
-}
-
-function identifier(name: string): object {
-  return { type: 'Identifier', name }
-}
-
-/** A component expression node for a dotted or plain name, the shape the meta-component resolver reads. */
-function expressionFor(name: string): object {
-  const [object, property] = name.split('.')
-  return property
-    ? { type: 'MemberExpression', computed: false, object: identifier(object!), property: identifier(property) }
-    : identifier(name)
-}
-
-/** caliper keeps one value per JSDoc tag; Storybook lists every value. */
-function tagLists(tags: Record<string, string>): Record<string, string[]> | undefined {
-  const entries = Object.entries(tags)
-  return entries.length > 0 ? Object.fromEntries(entries.map(([tag, value]) => [tag, [value]])) : undefined
-}
-
-/** Says there is no component `name` in `path`, and which ones the file does have. */
-function noComponent(session: DocgenSession, name: string, path: string): string {
-  const names = session.namesIn(path)
-  const choice = names.length > 0 ? `; its components are ${names.join(', ')}` : ''
-  return `caliper-docgen found no component ${name} in ${path}${choice}`
-}
 
 export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
   binding?: SessionBinding,
+  link: Link<ToDevServer, ToProvider> = channel(),
 ): DocgenMiddleware {
+  assertValidOptions(options)
   const cwd = process.cwd()
   const sessionOptions = {
     srcDirs: (options.srcDirs ?? ['src']).map((dir) => resolve(cwd, dir)),
@@ -66,20 +42,67 @@ export function createDocgenProvider(
     cache: options.cache,
     // Richer than Storybook's own docgen by default: caliper-docgen is fast enough to read the dependencies' types.
     loadDependencies: options.loadDependencies ?? true,
-    collapseInheritedProps: options.collapseInheritedProps ?? 'none',
+    // Collapse by relevance: a source too large to read as an API (DOM attribute sets, a style system) is one layer
+    // of names, not hundreds of Controls rows. `'none'` lists every inherited prop.
+    collapseInheritedProps: options.collapseInheritedProps ?? 'dependencies',
     lazy: options.lazy,
-    warmUp: options.warmUp,
-    fillAfter: options.fillAfter,
-    semanticTypes: options.semanticTypes,
-    tscPath: options.tscPath,
+    checker: options.checker,
     semanticWaitMs: options.semanticWaitMs,
+    semanticWaitEmptyMs: options.semanticWaitEmptyMs,
   }
   // The native binding loads on the first story request, not when Storybook starts the worker.
   let sessionPromise: Promise<DocgenSession> | undefined
-  const getSession = () =>
-    (sessionPromise ??= (async () =>
-      new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))())
-  const resolveMeta = createMetaComponentResolver()
+  async function getSession(): Promise<DocgenSession> {
+    sessionPromise ??= (async () =>
+      new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))()
+    const attempt = sessionPromise
+    try {
+      return await attempt
+    } catch (error) {
+      // A binding that failed to load is tried again by the next request, not remembered as failed.
+      if (sessionPromise === attempt) sessionPromise = undefined
+      throw error
+    }
+  }
+  // A session that cannot start is reported once at a level a developer sees, then every story falls back quietly.
+  let startFailureReported = false
+
+  let started = false
+  let refreshFailureReported = false
+
+  /**
+   * The session, up to date with the files. A failure before the first successful `fresh()` is a failure to start;
+   * after it, a failure is a refresh of a running session and is worded as one. Each is reported once until a
+   * `fresh()` succeeds again, and thrown for the fallback either way.
+   */
+  async function freshSession(): Promise<DocgenSession> {
+    try {
+      const session = await getSession()
+      await session.fresh()
+      started = true
+      startFailureReported = false
+      refreshFailureReported = false
+      return session
+    } catch (error) {
+      const { message } = error as Error
+      if (!started && !startFailureReported) {
+        startFailureReported = true
+        logger.warn(`[caliper-docgen] could not start: ${message}; Storybook's own docgen answers instead`)
+      } else if (started && !refreshFailureReported) {
+        refreshFailureReported = true
+        logger.warn(`[caliper-docgen] could not refresh: ${message}; Storybook's own docgen answers instead`)
+      }
+      throw error
+    }
+  }
+  const metaComponent = createMetaComponentResolver()
+  const resolveMeta = (csf: CsfFile, storyPath: string) => {
+    try {
+      return metaComponent(csf, storyPath)
+    } catch (error) {
+      throw new ResolverFailureError((error as Error).message)
+    }
+  }
   const fallback = options.fallback ?? 'degraded'
   let extractArgTypes: Promise<ExtractArgTypes> | undefined
   // A component handed on is reported once, not on every story request that names it.
@@ -92,20 +115,20 @@ export function createDocgenProvider(
   }
 
   /** The session key and file `target`'s component points at, or an error that says what the session had instead. */
-  async function locate(
-    session: DocgenSession,
-    target: CsfFile,
-    storyPath: string,
-  ): Promise<{ key: string; path: string }> {
+  function locate(session: DocgenSession, target: CsfFile, storyPath: string): { key: string; path: string } {
     const resolution = resolveMeta(target, storyPath)
     if ('component' in resolution) {
       const { path, exportName, localName } = resolution.component
       if (!path) throw new Error(`no file for the import of ${exportName}`)
-      const key = await session.resolveExport(path, exportName, localName)
+      const key = session.resolveExport(path, exportName, localName)
       if (key) return { key, path }
+      // Storybook follows `Select.Option` into the module that declares `Option` and answers with that local name, which
+      // caliper may know as `Select.Option`.
+      const member = memberComponent(session, target, storyPath)
+      if (member) return member
       throw new Error(noComponent(session, exportName, path))
     }
-    // Storybook reads `Namespace.Member` only for `import * as Namespace`; `Select.Option` of a named import is common.
+    // A member Storybook cannot follow into a module's source (`Select.Option` of a named import from a barrel).
     const member = memberComponent(session, target, storyPath)
     if (member) return member
     throw new Error(`meta.component: ${resolution.reason}`)
@@ -127,31 +150,35 @@ export function createDocgenProvider(
       | undefined
     if (node?.type !== 'MemberExpression' || node.computed) return undefined
     if (node.object?.type !== 'Identifier' || !node.object.name || !node.property?.name) return undefined
-    const owner = resolveMeta(
-      { _metaAnnotations: { component: node.object }, _file: csf._file } as unknown as CsfFile,
-      storyPath,
-    )
+    const owner = resolveMeta(storyFor(csf, storyPath, node.object.name), storyPath)
     if (!('component' in owner) || !owner.component.path) return undefined
     const { path, exportName, localName } = owner.component
-    const key = session.keyOfMember([localName, exportName], node.property.name, path)
+    const key = session.keyOfMember({ exportName, localName }, node.property.name, path)
     return key ? { key, path } : undefined
   }
 
   /**
    * The session key, file and documentation of the component `name` (default: `meta.component`) names, or why there
-   * is none. The caller has brought the session up to date for this request.
+   * is none. The caller has brought the session up to date for this request. A component answered with structural
+   * props because the checker had not answered in time goes in `answered.pending`, whether it is answered or handed on.
    */
-  async function component(
-    csf: CsfFile,
-    storyPath: string,
-    name?: string,
-  ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
-    const target = name
-      ? ({ _metaAnnotations: { component: expressionFor(name) }, _file: csf._file } as unknown as CsfFile)
-      : csf
+  async function component({
+    csf,
+    storyPath,
+    answered,
+    name,
+  }: {
+    csf: CsfFile
+    storyPath: string
+    answered: Answered
+    name?: string
+  }): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
+    const target = name ? storyFor(csf, storyPath, name) : csf
     const session = await getSession()
-    const { key, path } = await locate(session, target, storyPath)
-    const { doc, degradedBy } = session.documentation(key)
+    const { key, path } = locate(session, target, storyPath)
+    const { doc, degradedBy, awaitsChecker, revision } = session.documentation(key)
+    answered.revision = Math.max(answered.revision, revision)
+    if (awaitsChecker && !answered.pending.includes(key)) answered.pending.push(key)
     if (fallback === 'degraded' && degradedBy.length > 0) {
       const reason = degradedBy.join('; ')
       reportFallback(key, reason)
@@ -169,9 +196,10 @@ export function createDocgenProvider(
   async function subcomponent(
     { csf, storyPath, importPath }: StoryFile,
     { name, componentName }: { name: string; componentName: string },
+    answered: Answered,
   ): Promise<Subcomponent> {
     try {
-      const { path, doc } = await component(csf, storyPath, componentName)
+      const { path, doc } = await component({ csf, storyPath, answered, name: componentName })
       const { description, summary, jsDocTags } = extractComponentDescription(
         undefined,
         doc.description || undefined,
@@ -179,6 +207,7 @@ export function createDocgenProvider(
       )
       return { name, path, description, summary, jsDocTags, argTypes: await argTypes(doc) }
     } catch (error) {
+      if (error instanceof ResolverFailureError) throw error
       return {
         name,
         path: importPath,
@@ -188,27 +217,33 @@ export function createDocgenProvider(
     }
   }
 
-  async function document(entry: IndexEntry, importPath: string): Promise<DocgenPayload> {
+  async function storyFile(entry: IndexEntry, importPath: string): Promise<StoryFile> {
     const storyPath = resolve(cwd, importPath)
     const code = await readFile(storyPath, 'utf8')
     const csf = loadCsf(code, { fileName: storyPath, makeTitle: () => entry.title }).parse()
-    // One look at the files for the story and its subcomponents: they are all answered from the same moment.
-    const session = await getSession()
-    await session.fresh()
-    const { doc } = await component(csf, storyPath)
-    const { description, summary, jsDocTags } = extractComponentDescription(
-      extractDescription(csf._metaStatement) || undefined,
-      doc.description || undefined,
-      tagLists(doc.tags),
-    )
+    return { csf, storyPath, importPath }
+  }
+
+  async function document(entry: IndexEntry, importPath: string, answered: Answered): Promise<DocgenPayload> {
+    const file = await storyFile(entry, importPath)
+    const { csf, storyPath } = file
+    // One look at the files for the story and its subcomponents: they are all answered from the same moment, and that
+    // is the revision the request saw, whichever of them (or none) the session then has.
+    const session = await freshSession()
+    answered.revision = Math.max(answered.revision, session.revision)
+    // The subcomponents first: a parent handed on throws, and every component the story names must be asked of the
+    // checker (and so watched) by this request, or the refresh that replaces it would ask some for the first time.
     const declared = extractDeclaredSubcomponents(csf)
     const subcomponents = Object.fromEntries(
       await Promise.all(
-        declared.map(async (declaration) => [
-          declaration.name,
-          await subcomponent({ csf, storyPath, importPath }, declaration),
-        ]),
+        declared.map(async (declaration) => [declaration.name, await subcomponent(file, declaration, answered)]),
       ),
+    )
+    const { doc } = await component({ csf, storyPath, answered })
+    const { description, summary, jsDocTags } = extractComponentDescription(
+      extractDescription(csf._metaStatement, csf.editor) || undefined,
+      doc.description || undefined,
+      tagLists(doc.tags),
     )
     return {
       id: getComponentIdFromEntry(entry),
@@ -222,14 +257,43 @@ export function createDocgenProvider(
     }
   }
 
+  /** The keys of `meta.component` and the subcomponents `entry`'s story file names; none for a file that is no story. */
+  async function keysOf(entry: IndexEntry): Promise<string[]> {
+    const importPath = getStoryImportPathFromEntry(entry)
+    if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return []
+    const { csf, storyPath } = await storyFile(entry, importPath)
+    await freshSession()
+    const session = await getSession()
+    const names = [undefined, ...extractDeclaredSubcomponents(csf).map(({ componentName }) => componentName)]
+    return names.flatMap((name) => {
+      try {
+        return [locate(session, name ? storyFor(csf, storyPath, name) : csf, storyPath).key]
+      } catch {
+        return []
+      }
+    })
+  }
+
+  const background = new Background({ session: getSession, keysOf }, link)
+  const completions = new Completions<DocgenPayload | undefined>()
+
   return (next) => async (input) => {
     const importPath = getStoryImportPathFromEntry(input.entry)
     if (!importPath || !STORY_FILE_TEST_REGEXP.test(importPath)) return next(input)
-    try {
-      return await document(input.entry, importPath)
-    } catch (error) {
-      logger.debug(`[caliper-docgen] ${importPath}: ${(error as Error).message}; asking the next docgen provider`)
-      return next(input)
-    }
+    const id = getComponentIdFromEntry(input.entry)
+    const version = completions.start()
+    // Stamped with the revision the session has when the request starts: an answer the next provider gives, because
+    // the story file is unreadable or the files cannot be looked at, is of those files, not of none.
+    const answered: Answered = { pending: [], revision: await background.revision() }
+    // Settled before anything is announced: a fallback may finish after a newer request for the component.
+    const payload = await settle(
+      () => document(input.entry, importPath, answered),
+      () => next(input),
+      importPath,
+    )
+    // What the service stores is what this returns, so a late older completion returns the newest payload instead.
+    const kept = completions.complete(id, version, payload)
+    if (kept.announce) await background.answered({ component: id, ...answered })
+    return kept.payload
   }
 }

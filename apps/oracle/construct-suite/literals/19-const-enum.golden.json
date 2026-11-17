@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "read",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "write",
+        "of": "string"
+      }
+    ],
+    "alias": "Mode"
+  },
+  "text": "Mode | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/19-const-enum.tsx"
+    },
+    "order": null
+  }
+}

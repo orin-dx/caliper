@@ -1,0 +1,31 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "param",
+        "name": "T",
+        "constraint": {
+          "k": "prim",
+          "name": "string"
+        }
+      }
+    ]
+  },
+  "text": "T | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/01-constraint-string.tsx"
+    },
+    "order": null
+  }
+}

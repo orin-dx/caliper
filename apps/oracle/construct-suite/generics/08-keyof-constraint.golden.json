@@ -1,0 +1,44 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "param",
+        "name": "K",
+        "constraint": {
+          "k": "union",
+          "members": [
+            {
+              "k": "prim",
+              "name": "string"
+            },
+            {
+              "k": "prim",
+              "name": "number"
+            },
+            {
+              "k": "prim",
+              "name": "symbol"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "text": "K | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/08-keyof-constraint.tsx"
+    },
+    "order": null
+  }
+}

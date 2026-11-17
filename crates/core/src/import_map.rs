@@ -152,11 +152,7 @@ impl ImportResolutionMap {
             }
         }
 
-        if !wildcard_specifiers.is_empty() {
-            Some(ReExportStep::Wildcards(wildcard_specifiers))
-        } else {
-            None
-        }
+        if !wildcard_specifiers.is_empty() { Some(ReExportStep::Wildcards(wildcard_specifiers)) } else { None }
     }
 }
 

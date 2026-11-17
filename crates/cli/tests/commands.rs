@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 mod common;
-use common::strip_ansi;
+use common::{install_stub_typescript, strip_ansi};
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_caliper-docgen")).args(args).output().expect("failed to spawn the real binary")
@@ -23,6 +23,7 @@ fn run(args: &[&str]) -> Output {
 /// A source directory holding one clean `Widget` component.
 fn widget_dir() -> TempDir {
     let dir = TempDir::new().unwrap();
+    install_stub_typescript(dir.path());
     std::fs::write(
         dir.path().join("Widget.tsx"),
         "export function Widget(props: { label: string }) { return null; }\n",
@@ -40,7 +41,21 @@ fn stdout_of(output: &Output) -> String {
 fn check_on_a_clean_tree_prints_no_diagnostics_and_exits_0() {
     let dir = widget_dir();
     let output = run(&["check", "--json", "--src", dir.path().to_str().unwrap()]);
-    assert_eq!(stdout_of(&output), "[]\n");
+    // The one diagnostic is the checker's note of which components it answered.
+    let diagnostics: serde_json::Value = serde_json::from_str(&stdout_of(&output)).unwrap();
+    assert_eq!(
+        diagnostics,
+        serde_json::json!([{
+            "severity": "info",
+            "message": "1 component(s) resolved by the TypeScript checker",
+            "file": null, "line": null, "column": null, "help": null,
+            "code": "SEMANTIC_BACKEND",
+            "affects": ["Widget"],
+        }])
+    );
+
+    let structural = run(&["check", "--json", "--no-checker", "--src", dir.path().to_str().unwrap()]);
+    assert_eq!(stdout_of(&structural), "[]\n");
 }
 
 #[test]
@@ -100,6 +115,40 @@ fn extract_rdt_format_emits_react_docgen_typescript_props() {
     let label = &parsed["Widget"]["props"]["label"];
     assert_eq!(label["type"], serde_json::json!({ "name": "string" }));
     assert_eq!(label["required"], true);
+}
+
+/// A tree whose `made` prop has a type only the checker evaluates: the structural resolver keeps
+/// `ReturnType<typeof make>` as written.
+fn dir_with_a_computed_type() -> TempDir {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("Widget.tsx"),
+        "const make = () => ({ size: 1 });\nexport function Widget(props: { made: ReturnType<typeof make> }) { return \
+         null; }\n",
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn extract_and_inspect_take_the_checkers_types_unless_no_checker() {
+    let dir = dir_with_a_computed_type();
+    let src = dir.path().to_str().unwrap();
+    let made = |extra: &[&str]| {
+        let args = [&["--quiet", "extract", "--format", "rdt", "--src", src][..], extra].concat();
+        let parsed: serde_json::Value = serde_json::from_str(&stdout_of(&run(&args))).unwrap();
+        parsed["Widget"]["props"]["made"]["type"]["name"].clone()
+    };
+
+    assert_eq!(made(&[]), "{ size: number }", "the checker answers by default");
+    assert_eq!(made(&["--no-checker"]), "ReturnType<typeof make>", "--no-checker keeps the structural type");
+
+    let inspect = |extra: &[&str]| {
+        let args = [&["inspect", "Widget", "--src", src][..], extra].concat();
+        strip_ansi(&stdout_of(&run(&args)))
+    };
+    assert!(inspect(&[]).contains("{ size: number }"), "{}", inspect(&[]));
+    assert!(inspect(&["--no-checker"]).contains("ReturnType<typeof make>"), "{}", inspect(&["--no-checker"]));
 }
 
 #[test]
@@ -225,6 +274,41 @@ fn out_is_staged_next_to_the_target_not_in_the_current_directory() {
     assert!(written["components"]["Widget"].is_object());
 }
 
+/// `extract` keeps the checker's answer in the cache directory and a rerun over the same files writes the same bytes
+/// from it; `--no-cache` neither reads nor writes it, and `check` does not keep one.
+#[test]
+fn extract_keeps_the_checker_answer_and_a_rerun_writes_the_same_bytes() {
+    let (src, caches) = (widget_dir(), TempDir::new().unwrap());
+    let src_arg = src.path().to_str().unwrap();
+    let cache = |name: &str| caches.path().join(name);
+    let extract = |extra: &[&str]| {
+        let mut args = vec!["extract", "--json", "--src", src_arg];
+        args.extend_from_slice(extra);
+        stdout_of(&run(&args))
+    };
+    let kept = cache("kept");
+    let kept_arg = kept.to_str().unwrap();
+
+    let first = extract(&["--cache-dir", kept_arg]);
+    let rerun = extract(&["--cache-dir", kept_arg]);
+    let bypassed = cache("bypassed");
+    let without = extract(&["--no-cache", "--cache-dir", bypassed.to_str().unwrap()]);
+    // `check` has no `--cache-dir`: its cache is the default one, under the source's `node_modules`.
+    stdout_of(&run(&["check", "--json", "--src", src_arg]));
+    let checked = src.path().join("node_modules/.cache/caliper-docgen");
+
+    let without_stats = |text: &str| {
+        let mut value: serde_json::Value = serde_json::from_str(text).unwrap();
+        value.as_object_mut().unwrap().remove("stats");
+        value.to_string()
+    };
+    assert!(kept.join("checker-answers.msgpack").is_file());
+    assert_eq!(without_stats(&rerun), without_stats(&first));
+    assert_eq!(without_stats(&without), without_stats(&first));
+    assert!(!bypassed.exists());
+    assert!(!checked.join("checker-answers.msgpack").exists());
+}
+
 #[test]
 fn watch_reports_a_change_and_writes_out_what_extract_produces() {
     let src = widget_dir();
@@ -232,8 +316,15 @@ fn watch_reports_a_change_and_writes_out_what_extract_produces() {
 
     let watched = watch.edit_until_out_is_written(&src);
 
-    let extracted: serde_json::Value =
-        serde_json::from_str(&stdout_of(&run(&["extract", "--json", "--src", src.path().to_str().unwrap()]))).unwrap();
+    // `watch` is the structural resolver's, so it equals `extract` without the checker.
+    let extracted: serde_json::Value = serde_json::from_str(&stdout_of(&run(&[
+        "extract",
+        "--json",
+        "--no-checker",
+        "--src",
+        src.path().to_str().unwrap(),
+    ])))
+    .unwrap();
     assert_eq!(prop_names(&watched, "Widget"), ["label", "size"]);
     assert_eq!(watched["components"], extracted["components"], "watch and extract must agree on the same tree");
     assert_eq!(watched["props"], extracted["props"], "watch and extract must agree on the props the ids name");
@@ -266,8 +357,14 @@ fn watch_writes_out_before_any_change() {
         std::thread::sleep(Duration::from_millis(50));
     };
 
-    let extracted: serde_json::Value =
-        serde_json::from_str(&stdout_of(&run(&["extract", "--json", "--src", src.path().to_str().unwrap()]))).unwrap();
+    let extracted: serde_json::Value = serde_json::from_str(&stdout_of(&run(&[
+        "extract",
+        "--json",
+        "--no-checker",
+        "--src",
+        src.path().to_str().unwrap(),
+    ])))
+    .unwrap();
     assert_eq!(written["components"], extracted["components"]);
 }
 
@@ -285,6 +382,7 @@ fn a_quiet_watch_still_writes_out_but_prints_nothing() {
 /// A tree whose component names a type that doesn't exist, so extraction reports a warning.
 fn dir_with_an_unresolved_type() -> TempDir {
     let dir = TempDir::new().unwrap();
+    install_stub_typescript(dir.path());
     std::fs::write(dir.path().join("Widget.tsx"), "export function Widget(props: Missing) { return null; }\n").unwrap();
     dir
 }
@@ -342,8 +440,8 @@ fn extract_finds_docgen_config_ts_in_the_working_directory_and_applies_it() {
     assert_eq!(components, ["Widget"], "only the configured srcDirs are scanned");
 }
 
-/// A project whose config switches the TypeScript checker on. tsx, which evaluates the config, is only installed under
-/// apps/oracle.
+/// A project whose config names `tscPath`, the checker binary option that was removed. tsx, which evaluates the
+/// config, is only installed under apps/oracle.
 fn project_with_checker_config() -> TempDir {
     let project = TempDir::new_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/oracle")).unwrap();
     std::fs::create_dir(project.path().join("components")).unwrap();
@@ -354,73 +452,28 @@ fn project_with_checker_config() -> TempDir {
     .unwrap();
     std::fs::write(
         project.path().join("docgen.config.ts"),
-        "export default { srcDirs: ['components'], experimentalSemanticTypes: true, tscPath: '/nonexistent/tsc' };\n",
+        "export default { srcDirs: ['components'], tscPath: '/nonexistent/tsc' };\n",
     )
     .unwrap();
     project
 }
 
-fn ignored_checker_note(command: &str) -> String {
-    format!(
-        "warning: the config sets experimentalSemanticTypes and tscPath, but `{command}` never runs the TypeScript \
-         checker, so its output is the structural result. Only `extract` runs the checker."
-    )
-}
-
+/// A config that still names `tscPath` is refused, naming the key, rather than run with another checker than the one it
+/// names.
 #[test]
-fn check_and_inspect_say_when_the_config_enables_a_checker_they_never_run() {
+fn a_config_that_names_a_checker_binary_is_refused() {
     let project = project_with_checker_config();
-    let run_here = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
+
+    for args in [&["check"][..], &["inspect", "Widget"], &["extract", "--json"], &["extract", "--json", "--no-checker"]]
+    {
+        let output = Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
             .current_dir(project.path())
             .args(args)
             .output()
-            .expect("failed to spawn the real binary")
-    };
-
-    for (command, args) in [("check", &["check"][..]), ("inspect", &["inspect", "Widget"][..])] {
-        let output = run_here(args);
-        assert_eq!(output.status.code(), Some(0), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+            .expect("failed to spawn the real binary");
         let stderr = strip_ansi(&String::from_utf8(output.stderr).unwrap());
-        assert_eq!(
-            stderr.lines().filter(|line| line.contains("never runs the TypeScript checker")).collect::<Vec<_>>(),
-            [ignored_checker_note(command)],
-            "{command}: {stderr}"
-        );
-    }
-
-    let quiet = run_here(&["--quiet", "check"]);
-    assert!(quiet.stderr.is_empty(), "--quiet prints nothing: {}", String::from_utf8_lossy(&quiet.stderr));
-
-    // `extract` runs the checker (here it is missing, which `extract` reports itself), so it has nothing to warn about.
-    let extract = run_here(&["extract", "--json"]);
-    let stderr = String::from_utf8(extract.stderr).unwrap();
-    assert!(!stderr.contains("never runs the TypeScript checker"), "{stderr}");
-}
-
-#[test]
-fn watch_says_when_the_config_enables_a_checker_it_never_runs() {
-    let project = project_with_checker_config();
-    let stderr_log = project.path().join("stderr.log");
-    let _watch = KillOnDrop(
-        Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
-            .current_dir(project.path())
-            .arg("watch")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(std::fs::File::create(&stderr_log).unwrap())
-            .spawn()
-            .expect("failed to spawn the real binary"),
-    );
-
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        let logged = strip_ansi(&std::fs::read_to_string(&stderr_log).unwrap());
-        if logged.lines().any(|line| line == ignored_checker_note("watch")) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "watch never said the checker is ignored: {logged}");
-        std::thread::sleep(Duration::from_millis(100));
+        assert_ne!(output.status.code(), Some(0), "{args:?}: {stderr}");
+        assert!(stderr.contains("tscPath"), "{args:?}: {stderr}");
     }
 }
 

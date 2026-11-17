@@ -12,7 +12,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-#[allow(unused_imports)]
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
@@ -38,12 +37,13 @@ mod named;
 mod precedence;
 mod primitives;
 mod react;
+pub(crate) mod relevance_inputs;
 mod substitute;
 mod template;
 
+pub(crate) use import::{ModuleResolution, resolve_module_with};
 #[cfg(test)]
 pub(crate) use import::{follow_reexports_call_count, reset_follow_reexports_call_count};
-pub(crate) use import::{resolve_module_with, ModuleResolution};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -95,11 +95,7 @@ pub(super) fn unresolved_location_note(
     canonical_name: &str,
 ) -> String {
     let resolved_elsewhere = canonical_file != consuming_file || canonical_name != original_name;
-    if resolved_elsewhere {
-        format!(" (resolved to '{canonical_name}' in '{canonical_file}')")
-    } else {
-        String::new()
-    }
+    if resolved_elsewhere { format!(" (resolved to '{canonical_name}' in '{canonical_file}')") } else { String::new() }
 }
 
 /// The help for an unresolvable type: why the dependency loader found no declaration for it, when it tried, or
@@ -123,6 +119,15 @@ pub(super) fn unresolved_type_help(
     });
     match reason {
         Some(reason) => format!("Dependency types are loaded, but for '{type_name}' {}.", reason.describe()),
+        // A global is declared by TypeScript's lib files; with none found, installing a package would not help. An unbound
+        // name is not known to be a global, and the lib files are missing for more than one reason, so the run's own
+        // warning about TypeScript says which.
+        None if ctx.ambient_global_files.is_empty() && name_binding(type_name, file, ctx) == NameBinding::Unbound => {
+            format!(
+                "'{type_name}' is not declared or imported in this file. If it is a TypeScript global type, TypeScript's \
+                 lib files were not found; the warning about TypeScript for this run says what to install."
+            )
+        }
         None => otherwise.to_owned(),
     }
 }
@@ -155,9 +160,7 @@ pub(super) fn name_binding(name: &str, file: &Utf8Path, ctx: &ResolutionContext)
 pub(super) fn may_be_react_builtin(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
     match name_binding(name, file, ctx) {
         NameBinding::Local => false,
-        NameBinding::Imported(specifier) => {
-            specifier == "react" || specifier.starts_with("react/") || specifier == "@types/react"
-        }
+        NameBinding::Imported(specifier) => crate::react_types::is_react_module(&specifier),
         NameBinding::Unbound => true,
     }
 }
@@ -285,6 +288,8 @@ pub struct ResolutionContext {
     /// Positions in `global.component_mappings` by component name (`component_mapping`), built on first use and shared
     /// by the contexts derived from this one, which have the same `global`.
     mapping_index: Arc<std::sync::OnceLock<FxHashMap<CompactString, Vec<usize>>>>,
+    /// Every component's call-site counts (ADR 0028), built on first use and shared like `mapping_index`.
+    pub(crate) relevance_sites: Arc<std::sync::OnceLock<Arc<relevance_inputs::ProjectSites>>>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
     /// `resolve_cva_variant_props` (VariantProps<typeof X>) can do an O(1)
@@ -320,6 +325,9 @@ pub struct ResolutionContext {
     /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
     pub(crate) react_types: Option<Arc<crate::named_type_index::NamedTypeIndex>>,
     pub(crate) collapse_inherited_props: crate::types::options::CollapseInheritedProps,
+    /// Whether the project declares a source of more than `LARGE_API_SOURCE` props, which the default mode collapses
+    /// with no dependency loaded (`can_collapse`). Read once from `global`.
+    pub(crate) large_project_source: bool,
 }
 
 impl ResolutionContext {
@@ -381,6 +389,7 @@ impl ResolutionContext {
                 .or_insert_with(|| CompactString::from(key.as_str()));
         }
 
+        let large_project_source = declares_large_source(&global);
         Self {
             import_map: Arc::new(ImportResolutionMap::build(&global)),
             named_types,
@@ -390,6 +399,7 @@ impl ResolutionContext {
             tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
             mapping_index: Default::default(),
+            relevance_sites: Default::default(),
             enum_bare_index: Arc::new(enum_bare_index),
             const_array_bare_index: Arc::new(const_array_bare_index),
             html_attributes: options.html_attributes,
@@ -406,6 +416,7 @@ impl ResolutionContext {
             dependencies: None,
             react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
+            large_project_source,
         }
     }
 
@@ -457,7 +468,7 @@ impl ResolutionContext {
         let index = self.mapping_index.get_or_init(|| {
             let mut index: FxHashMap<CompactString, Vec<usize>> = FxHashMap::default();
             for (position, mapping) in self.global.component_mappings.iter().enumerate() {
-                index.entry(CompactString::from(mapping.component_name.as_str())).or_default().push(position);
+                index.entry(CompactString::from(mapping.binding_name())).or_default().push(position);
             }
             index
         });
@@ -475,10 +486,10 @@ impl ResolutionContext {
         prop.structural_hash(&mut hasher);
         let key = hasher.finish();
         // Nearly every call finds the prop already built, so look under the shard's shared lock first.
-        if let Some(bucket) = self.shared_props.get(&key) {
-            if let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
-                return Arc::clone(found);
-            }
+        if let Some(bucket) = self.shared_props.get(&key)
+            && let Some(found) = bucket.iter().find(|shared| ***shared == prop)
+        {
+            return Arc::clone(found);
         }
         let mut bucket = self.shared_props.entry(key).or_default();
         // Another thread may have added it between the two locks.
@@ -551,6 +562,7 @@ impl ResolutionContext {
             props_reads: Default::default(),
             extra_builtins: self.extra_builtins.clone(),
             mapping_index: self.mapping_index.clone(),
+            relevance_sites: self.relevance_sites.clone(),
             enum_bare_index: self.enum_bare_index.clone(),
             const_array_bare_index: self.const_array_bare_index.clone(),
             html_attributes: self.html_attributes,
@@ -563,6 +575,7 @@ impl ResolutionContext {
             dependencies: layer,
             react_types: self.react_types.clone(),
             collapse_inherited_props: self.collapse_inherited_props,
+            large_project_source: self.large_project_source,
         }
     }
 
@@ -571,36 +584,75 @@ impl ResolutionContext {
         self.dependencies.as_ref().is_some_and(|layer| layer.is_dependency_file(file))
     }
 
-    /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains.
+    /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains. In the
+    /// default mode that is a loaded dependency, or a project source past `LARGE_API_SOURCE` props.
     pub(crate) fn can_collapse(&self) -> bool {
         use crate::types::options::CollapseInheritedProps;
         match self.collapse_inherited_props {
-            CollapseInheritedProps::Dependencies => self.dependencies.is_some(),
+            CollapseInheritedProps::Dependencies => self.dependencies.is_some() || self.large_project_source,
             CollapseInheritedProps::All => true,
             CollapseInheritedProps::None => false,
         }
     }
 
-    /// Whether a source declaring `declared` props in `file`, reached at `depth`, is recorded as a layer instead of
-    /// expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own declarations stay
-    /// with `html_attributes` even under `All`.
-    pub(crate) fn collapses(&self, file: &Utf8Path, declared: usize, depth: u8, state: &ResolveState) -> bool {
-        use crate::types::options::CollapseInheritedProps;
-        depth > 0
-            && declared > COLLAPSE_THRESHOLD
-            && !state.expand_all
-            && match self.collapse_inherited_props {
-                CollapseInheritedProps::Dependencies => self.is_dependency_file(file),
-                CollapseInheritedProps::All => {
-                    self.is_dependency_file(file) || !file.as_str().contains("/node_modules/")
-                }
-                CollapseInheritedProps::None => false,
-            }
+    /// Whether a source of type `type_name` declaring `members` in `file`, reached at `depth`, is recorded as a
+    /// layer instead of expanded (collapse). Depth 0 is the component's own props type. The rule is
+    /// [`CollapseInheritedProps::collapses`](crate::types::options::CollapseInheritedProps::collapses), with a loaded dependency file as the dependency; React's and TypeScript's own declarations
+    /// (in `node_modules`, not loaded as a dependency) stay with `html_attributes`.
+    pub(crate) fn collapses<'a>(
+        &self,
+        file: &Utf8Path,
+        type_name: &str,
+        members: impl Iterator<Item = &'a str>,
+        depth: u8,
+        state: &ResolveState,
+    ) -> bool {
+        if depth == 0 || state.expand_all {
+            return false;
+        }
+        let reaching = match &state.omitted {
+            Some(omitted) => members.filter(|name| !omitted.contains(*name)).count(),
+            None => members.count(),
+        };
+        self.collapse_inherited_props.collapses(self.is_dependency_file(file), file.as_str(), type_name, reaching)
     }
 }
 
-/// Storybook's react-component-meta hides a dependency source contributing more than this many props.
-pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
+/// `layers` with each collapsed source once: a source reached through two paths (`Big & Omit<Big, "a">`) holds the
+/// members that reach through either, and omits only what every path omits. A member counts once, as the collapse
+/// decision counts it (`CollapseInheritedProps::collapses`).
+fn one_layer_per_collapsed_source(layers: Vec<InheritedLayer>) -> Vec<InheritedLayer> {
+    let mut merged: Vec<InheritedLayer> = Vec::with_capacity(layers.len());
+    for layer in layers {
+        let same = merged.iter_mut().find(|seen| {
+            !seen.members.is_empty() && seen.type_name == layer.type_name && seen.file_name == layer.file_name
+        });
+        match same {
+            Some(seen) if !layer.members.is_empty() => {
+                for member in layer.members {
+                    if !seen.members.contains(&member) {
+                        seen.members.push(member);
+                    }
+                }
+                seen.omitted.retain(|key| layer.omitted.contains(key) && !seen.members.contains(key));
+                seen.total_props = u32::try_from(seen.members.len()).unwrap_or(u32::MAX);
+            }
+            _ => merged.push(layer),
+        }
+    }
+    merged
+}
+
+/// Whether `global` declares an interface, or an object-literal alias, of more than `LARGE_API_SOURCE` members: a
+/// project source the default mode collapses.
+fn declares_large_source(global: &GlobalSourceData) -> bool {
+    use crate::types::options::LARGE_API_SOURCE;
+    global.interfaces.values().any(|interface| interface.props.len() > LARGE_API_SOURCE)
+        || global.type_aliases.values().any(|alias| {
+            matches!(alias, CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. }
+                if fields.len() > LARGE_API_SOURCE)
+        })
+}
 
 /// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
 /// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index.
@@ -628,8 +680,7 @@ pub fn compute_ambient_global_files(options: &PipelineOptions) -> Vec<Utf8PathBu
     options
         .src_dirs
         .first()
-        .and_then(|dir| std::fs::canonicalize(dir).ok())
-        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+        .and_then(|dir| crate::canonical_path::canonicalize(dir).ok())
         .map(|from_dir| resolve_ts_lib_paths(&from_dir).paths.into_iter().map(Utf8PathBuf::from).collect())
         .unwrap_or_default()
 }
@@ -707,7 +758,7 @@ fn governing_tsconfig(options: &PipelineOptions) -> Option<Utf8PathBuf> {
     if let Some(path) = &options.tsconfig_path {
         return Some(path.clone());
     }
-    let first = Utf8PathBuf::from_path_buf(std::fs::canonicalize(options.src_dirs.first()?).ok()?).ok()?;
+    let first = crate::canonical_path::canonicalize(options.src_dirs.first()?).ok()?;
     first.ancestors().map(|dir| dir.join("tsconfig.json")).find(|candidate| candidate.is_file())
 }
 
@@ -757,7 +808,8 @@ fn read_tsconfig_json(path: &Utf8Path) -> Option<serde_json::Value> {
 #[derive(Debug, Default, PartialEq)]
 pub struct TsLibs {
     pub paths: Vec<String>,
-    /// Set when `typescript` is installed but lacks a lib file. Only the pipeline reports it, not the other callers.
+    /// Set when `typescript` is not installed, or is installed but lacks a lib file. Only the pipeline reports it,
+    /// not the other callers.
     pub diagnostic: Option<Diagnostic>,
 }
 
@@ -771,11 +823,11 @@ const TS_OPTIONAL_LIB_FILES: [&str; 3] =
 /// Locate `lib.es5.d.ts`/`lib.dom.d.ts`, which declare the ambient globals (`Date`, `Element`, ...). TS ≤6 keeps them
 /// in `typescript/lib`; TS 7 moves them into an optional `@typescript/typescript-<platform>` package whose `exports`
 /// hide `lib/`, so they're read off disk. They're identical across platforms, so the first installed package (by name)
-/// with a file serves. No `typescript` is silent; one lacking a lib file sets `diagnostic`.
+/// with a file serves. Both a missing `typescript` and one lacking a lib file set `diagnostic`.
 pub fn resolve_ts_lib_paths(from_dir: &camino::Utf8Path) -> TsLibs {
     let resolver = Resolver::new(ResolveOptions::default());
     let Ok(manifest) = resolver.resolve(from_dir.as_std_path(), "typescript/package.json") else {
-        return TsLibs::default();
+        return TsLibs { paths: Vec::new(), diagnostic: Some(missing_typescript_diagnostic(from_dir)) };
     };
     let Some(ts_dir) = manifest.path().parent() else {
         return TsLibs::default();
@@ -832,6 +884,24 @@ fn installed_platform_package_dirs(resolver: &Resolver, ts_dir: &std::path::Path
     )
 }
 
+fn missing_typescript_diagnostic(from_dir: &Utf8Path) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Warning,
+        message: format!(
+            "The 'typescript' package is not installed in or above '{from_dir}' — native and DOM globals (Date, \
+             HTMLElement, Promise, …) will appear as unexpanded named references"
+        ),
+        file: None,
+        line: None,
+        column: None,
+        help: Some(
+            "Install typescript as a dependency of the project (for example `npm install -D typescript`).".into(),
+        ),
+        code: DiagnosticCode::MissingTypeLibrary,
+        affects: Vec::new(),
+    }
+}
+
 fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Warning,
@@ -861,10 +931,18 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
 pub(crate) fn resolve_component_tracked(
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
-) -> (ComponentEntry, ResolvedDiagnostics, Dependencies) {
-    let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component_shared(mapping, ctx));
+) -> (ComponentEntry, ResolvedDiagnostics, Dependencies, Option<Arc<crate::relevance::Inputs>>) {
+    let ((entry, mut diagnostics, evidence), mut deps) = deps::recording(|| {
+        let (entry, diagnostics) = resolve_component_shared(mapping, ctx);
+        // The evidence reads other files (the props type's declarations, a forwarding target's props), so it is read
+        // while the answer's dependencies are recorded. A panic gathering it leaves it unknown, never the answer lost.
+        let label = format!("relevance:{}", mapping.component_name);
+        let evidence = crate::panic_guard::contain_panic(&label, || relevance_inputs::evidence(mapping, ctx, &entry));
+        (entry, diagnostics, evidence)
+    });
     deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
-    (entry, diagnostics, deps)
+    let evidence = evidence.map_err(|diagnostic| diagnostics.own.push(diagnostic)).ok();
+    (entry, diagnostics, deps, evidence)
 }
 
 /// Resolve a `ComponentMapping` to a complete `ComponentEntry`.
@@ -879,6 +957,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
 /// The entry of a candidate with nothing to document: no props and no layers, which the output leaves out.
 fn unpublished_entry(mapping: &ComponentMapping) -> ComponentEntry {
     ComponentEntry {
+        relevance: None,
         display_name: mapping.component_name.clone(),
         file_path: mapping.file_path.clone(),
         description: mapping.description.clone(),
@@ -890,7 +969,8 @@ fn unpublished_entry(mapping: &ComponentMapping) -> ComponentEntry {
         tags: mapping.tags.clone(),
         methods: vec![],
         detected_by: mapping.rule,
-        exported: mapping.exported,
+        exported: mapping.exported(),
+        exports: mapping.exports.clone(),
     }
 }
 
@@ -928,17 +1008,23 @@ pub(crate) fn resolve_component_shared(
     if aliases_project_component(mapping, ctx) {
         return (unpublished_entry(mapping), ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
     }
-    let mut state = ResolveState::default();
-    state.add_type_params(mapping.type_params.iter());
+    let mut state = ResolveState { scope: TypeScope::new(mapping.type_params.iter()), ..ResolveState::default() };
 
     // A component a generic call builds has the props its callee's result type declares; the props type the extractor
     // selected is for a callee whose result isn't known.
+    // The factory's own props resolve beside the main chain, not inside it: a type both reach is shared, not a cycle.
+    // The render function's own type parameters are in scope for these props only, not for the callee's result.
+    let mut factory_state = mapping.factory_props.as_ref().map(|_| {
+        let mut branch = state.branch();
+        branch.scope = TypeScope::new(mapping.type_params.iter().chain(&mapping.factory_type_params));
+        branch
+    });
     let result = callee::result_chain(mapping, ctx, &mut state);
     // A call to a function whose result is no component is no component: nothing to document, nothing to report.
     if result.is_none() && mapping.rule == DetectionRule::FactoryResult {
         return (unpublished_entry(mapping), ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
     }
-    let chain = result.unwrap_or_else(|| {
+    let mut chain = result.unwrap_or_else(|| {
         chain::resolve_props_chain(
             mapping.props_type_name.as_str(),
             &mapping.props_type_args,
@@ -949,6 +1035,20 @@ pub(crate) fn resolve_component_shared(
             0,
         )
     });
+    // The props a factory call's own arguments give the component, which the props type read above can lack: the
+    // variant keys of its style recipe, or the annotated props of its render function (`extractor::factory_props`).
+    if let (Some(own), Some(mut branch)) = (&mapping.factory_props, factory_state.take()) {
+        // A named props type is the root of the callback's props, as a function component's is: depth 0, so a large
+        // interface of its own is not collapsed (its inherited sources still can).
+        let own = match own {
+            CollectedType::Named { name, args } => {
+                chain::resolve_props_chain(name.as_str(), args, &mapping.file_path, mapping, ctx, &mut branch, 0)
+            }
+            _ => alias::resolve_base_as_chain(own, &mapping.file_path, mapping, ctx, &mut branch, 0),
+        };
+        state.absorb(branch);
+        chain.add_absent(own);
+    }
 
     // Build props BTreeMap — own props win over inherited props with same name.
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
@@ -1023,33 +1123,38 @@ pub(crate) fn resolve_component_shared(
             );
         }
     }
-    // A collapsed source's notable props (collapse); the only non-HTML layers.
+    // A collapsed source's notable props (collapse); the only non-HTML layers. Each is the component's prop as one it
+    // lists is, so a destructuring default reaches it too (`Box({ className = "base" }: BoxProps)`).
+    let mut collapsed_notable: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for prop in &chain.notable {
         if !props.contains_key(&prop.name) && !notable_inherited.contains_key(&prop.name) {
-            notable_inherited.insert(prop.name.clone(), prop.clone());
+            collapsed_notable.entry(prop.name.clone()).or_insert_with(|| prop.clone());
         }
     }
+    apply_param_defaults(mapping, &mut collapsed_notable, ctx);
+    notable_inherited.extend(collapsed_notable);
 
     // Detect discriminated union if applicable.
     let discriminant_prop = chain.discriminant_prop;
 
-    (
-        ComponentEntry {
-            display_name: mapping.component_name.clone(),
-            file_path: mapping.file_path.clone(),
-            description: mapping.description.clone(),
-            props,
-            inheritance: chain.inheritance,
-            notable_inherited,
-            discriminant_prop,
-            composes: chain.composes,
-            tags: mapping.tags.clone(),
-            methods: vec![],
-            detected_by: mapping.rule,
-            exported: mapping.exported,
-        },
-        ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics },
-    )
+    let mut entry = ComponentEntry {
+        relevance: None,
+        display_name: mapping.component_name.clone(),
+        file_path: mapping.file_path.clone(),
+        description: mapping.description.clone(),
+        props,
+        inheritance: one_layer_per_collapsed_source(chain.inheritance),
+        notable_inherited,
+        discriminant_prop,
+        composes: chain.composes,
+        tags: mapping.tags.clone(),
+        methods: vec![],
+        detected_by: mapping.rule,
+        exported: mapping.exported(),
+        exports: mapping.exports.clone(),
+    };
+    crate::types::semantic::listed_props_leave_layers(&mut entry, false);
+    (entry, ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics })
 }
 
 /// A destructuring default is the component's default for that prop wherever the prop's type was declared, as
@@ -1155,6 +1260,35 @@ impl ResolvedChain {
         // being merged into.
         if self.discriminant_prop.is_none() {
             self.discriminant_prop = parent.discriminant_prop;
+        }
+    }
+
+    /// Add what `other` has and self lacks: props and notable props by name, inheritance layers by declaration. Self's
+    /// answer wins wherever both have one, so nothing self lists changes; `other`'s unresolved names are not added.
+    fn add_absent(&mut self, other: ResolvedChain) {
+        let mut known: FxHashSet<String> = self.props.iter().map(|p| p.name.clone()).collect();
+        for prop in other.props {
+            if known.insert(prop.name.clone()) {
+                self.props.push(prop);
+            }
+        }
+        for layer in other.inheritance {
+            let present = self
+                .inheritance
+                .iter()
+                .any(|mine| mine.type_name == layer.type_name && mine.file_name == layer.file_name);
+            if !present {
+                self.inheritance.push(layer);
+            }
+        }
+        let notable: FxHashSet<String> = self.notable.iter().map(|p| p.name.clone()).collect();
+        self.notable.extend(other.notable.into_iter().filter(|p| !notable.contains(&p.name)));
+        for (name, prop) in other.inherited_by_name {
+            self.inherited_by_name.entry(name).or_insert(prop);
+        }
+        // The props `other` adds come with the discriminant that tells them apart (`Props = A | B`), unless self has one.
+        if self.discriminant_prop.is_none() {
+            self.discriminant_prop = other.discriminant_prop;
         }
     }
 

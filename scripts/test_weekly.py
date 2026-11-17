@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Tests for the weekly record's helpers, on small fixtures. Run: python3 scripts/test_weekly.py"""
+import io
+import json
 import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import corpora
@@ -66,6 +71,7 @@ FILES = {
     'src/col/index.tsx': "// import directly from the old path.\nimport { Col } from '../grid';\n\nexport default Col;\n",
     'src/qr/index.tsx': "export { default } from './qr-code';\n",
     'src/qr/qr-code.tsx': "export default function QRCode() {}\n",
+    'src/card/Card.tsx': "const CardRoot = () => null;\nexport { CardRoot as Card };\n",
     'src/other/index.tsx': "import X from 'some-package';\nexport default X;\n",
 }
 
@@ -121,6 +127,13 @@ class Pairing(unittest.TestCase):
         self.assertEqual((stats['rdt_with_props'], stats['excluded'], stats['reference']),
                          (3, {'hook': 1, 'lib_members': 1}, 1))
         self.assertEqual([i['keys'] for i in items], [[('src/grid/col.tsx', 'col')]])
+
+    def test_aliased_export_pairs_under_its_export_name(self):
+        # Caliper names `export { CardRoot as Card }` by `Card`, RDT by the declaration `CardRoot`.
+        found = {('src/card/Card.tsx', 'card'): {'span'}}
+        items, stats = weekly.reference([self.entry('CardRoot', 'src/card/Card.tsx')], found, self.root)
+        self.assertEqual(stats['paired'], {'export_alias': 1})
+        self.assertEqual(items[0]['keys'], [('src/card/Card.tsx', 'cardroot'), ('src/card/Card.tsx', 'card')])
 
     def test_declaring_file_pairs_when_no_export_chain_does(self):
         found = {('src/grid/col.tsx', 'dropdown'): {'span'}}
@@ -197,6 +210,194 @@ class Recall(unittest.TestCase):
                                                     'own_layers': [0, 0], 'react_layers': [0, 0]})
 
 
+def score(listed=3, universe=10, agree=0.4, **more):
+    return {'universe': universe, 'listed': listed, 'agree_universe': agree, 'agree_listed': 0.8, 'wrong_listed': 0.05,
+            'missing_by_stratum': {'same_file': 4, 'other_project_file': 1, 'dependency': 2, 'unknown': 0},
+            'missing_by_reason': {'component': 5, 'failed_file': 0, 'prop': 2, 'collapsed': 0}, 'examples': {}, **more}
+
+
+EXCLUDED = {'components': 4, 'props': 9, 'by_reason': {'hook': {'components': 4, 'props': 9}}}
+
+
+class OracleTools(unittest.TestCase):
+    def test_the_oracle_gets_both_dumps_and_the_record_keeps_caliper_numbers_and_the_tool_scores(self):
+        with tempfile.TemporaryDirectory() as work:
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+                if '--out' in command:
+                    with open(command[command.index('--out') + 1], 'w') as f:
+                        f.write(json.dumps({'props_shared': 10, 'verdicts': {'identical': 6, 'spelled': 2, 'wrong': 1},
+                                            'tools': {'caliper': score(), 'rdt': score(listed=9)},
+                                            'tools_all_functions': {'caliper': score(universe=14), 'rdt': score(universe=14)},
+                                            'universe_excluded': EXCLUDED}))
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch.object(weekly.subprocess, 'run', side_effect=fake_run):
+                out = weekly.oracle('bin', 'antd', os.path.join(work, 'src'), work, work, '/w/rdt.json', '/w/rdg.json')
+        oracle_call = next(c for c in calls if '--out' in c)
+        self.assertEqual(oracle_call[oracle_call.index('--rdt') + 1], '/w/rdt.json')
+        self.assertEqual(oracle_call[oracle_call.index('--rdg') + 1], '/w/rdg.json')
+        self.assertEqual((out['shared_props'], out['agree'], out['wrong']), (10, 0.8, 0.1))
+        self.assertEqual(sorted(out['tools']), ['caliper', 'rdt'])
+        self.assertNotIn('examples', out['tools']['rdt'])
+        self.assertEqual(out['tools']['rdt']['listed'], 9)
+
+    def test_a_prop_the_oracle_did_not_judge_is_shared_but_neither_agrees_nor_is_wrong(self):
+        with tempfile.TemporaryDirectory() as work:
+            def fake_run(command, **kwargs):
+                if '--out' in command:
+                    with open(command[command.index('--out') + 1], 'w') as f:
+                        f.write(json.dumps({'props_shared': 16,
+                                            'verdicts': {'identical': 6, 'spelled': 2, 'less precise': 4, 'wrong': 1,
+                                                         'checker any/error': 1, 'not judged': 2},
+                                            'tools': {'caliper': score()}, 'tools_all_functions': {'caliper': score()},
+                                            'universe_excluded': EXCLUDED}))
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch.object(weekly.subprocess, 'run', side_effect=fake_run):
+                out = weekly.oracle('bin', 'antd', os.path.join(work, 'src'), work, work, '/w/rdt.json', '/w/rdg.json')
+        self.assertEqual((out['shared_props'], out['agree'], out['wrong']), (16, 0.5, 1 / 16))
+
+    def test_the_record_keeps_the_universe_before_the_shape_rules_beside_the_one_after_them(self):
+        with tempfile.TemporaryDirectory() as work:
+            def fake_run(command, **kwargs):
+                if '--out' in command:
+                    with open(command[command.index('--out') + 1], 'w') as f:
+                        f.write(json.dumps({'props_shared': 10, 'verdicts': {'identical': 6, 'spelled': 2, 'wrong': 1},
+                                            'tools': {'caliper': score()},
+                                            'tools_all_functions': {'caliper': score(universe=14, examples={'wrong': []})},
+                                            'universe_excluded': EXCLUDED}))
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch.object(weekly.subprocess, 'run', side_effect=fake_run):
+                out = weekly.oracle('bin', 'antd', os.path.join(work, 'src'), work, work, '/w/rdt.json', '/w/rdg.json')
+        self.assertEqual(out['universe_version'], weekly.UNIVERSE_VERSION)
+        self.assertEqual((out['tools']['caliper']['universe'], out['tools_all_functions']['caliper']['universe']), (10, 14))
+        self.assertNotIn('examples', out['tools_all_functions']['caliper'])
+        self.assertEqual(out['universe_excluded'], EXCLUDED)
+
+    def test_the_excluded_line_names_the_rules_and_the_figure_before_them(self):
+        entry = {'universe_excluded': {'components': 22, 'props': 741, 'by_reason': {
+                     'lib_members': {'components': 18, 'props': 730}, 'hook': {'components': 4, 'props': 11}}},
+                 'tools_all_functions': {'caliper': score(agree=0.307), 'rdt': score(agree=0.425)}}
+        self.assertEqual(weekly.excluded_line('spectrum', entry),
+                         '- spectrum: 22 functions with 741 props left out (730 a lib type, 11 a hook); over every function: '
+                         'Caliper 30.7%, RDT 42.5%')
+        self.assertEqual(weekly.excluded_line('antd', {'universe_excluded': {'components': 0, 'props': 0, 'by_reason': {}}}),
+                         '- antd: 0 functions with 0 props left out')
+
+    def test_a_tool_line_says_what_it_agrees_on_and_what_it_omits(self):
+        self.assertEqual(
+            weekly.tool_line('antd', 'rdt', score(universe=7199, listed=3442, agree=0.4484)),
+            "- antd, RDT: agrees on 44.8% of the 7,199 props the checker finds (80.0% of the 3,442 it lists, 5.00% of those "
+            "wrong); omits 7 (4 declared in the component's file, 1 in other project files, 2 in dependencies, 0 unknown)")
+
+    def test_collapsed_layers_and_thrown_files_are_their_own_clauses(self):
+        line = weekly.tool_line('shadcn', 'react_docgen', score(failed_files=265, missing_by_reason={
+            'component': 0, 'failed_file': 13077, 'prop': 2, 'collapsed': 5510}))
+        self.assertTrue(line.endswith('; 5,510 more sit in collapsed layers; threw on 265 files, 13,077 of the omitted props'))
+        self.assertIn('- shadcn, react-docgen: ', line)
+
+    def test_the_summary_lists_each_tool_after_the_oracle_table(self):
+        corpus = {'caliper': {'ms': 1, 'rss_mib': 1, 'json_mb': 1}, 'rdt': {'ms': 1, 'rss_mib': 1},
+                  'react_docgen': {'ms': 1, 'rss_mib': 1},
+                  'reference': {'rdt_with_props': 1, 'excluded_total': 0, 'merged': 0, 'reference': 1, 'exact': 1,
+                                'paired': {}, 'unpaired': 0},
+                  'recall': {'caliper': {k: [1, 1] for k in ('components', 'own', 'react', 'own_layers', 'react_layers')},
+                             'react_docgen': {k: [1, 1] for k in ('components', 'own', 'react')}},
+                  'oracle': {'shared_props': 10, 'agree': 0.8, 'wrong': 0.0,
+                             'tools': {'caliper': score(), 'rdt': score(), 'react_docgen': score()},
+                             'tools_all_functions': {'caliper': score(agree=0.3), 'rdt': score(agree=0.4)},
+                             'universe_excluded': EXCLUDED}}
+        text = weekly.markdown({'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {'antd': corpus}}, [])
+        order = [text.index(f'- antd, {label}: ') for label in ('Caliper', 'RDT', 'react-docgen')]
+        self.assertEqual(order, sorted(order))
+        self.assertLess(text.index("### TypeScript 7.1's checker"), order[0])
+        self.assertIn('exported candidate component', text)
+        self.assertIn('- antd: 4 functions with 9 props left out (9 a hook); over every function: Caliper 30.0%, RDT 40.0%', text)
+        self.assertLess(order[-1], text.index('- antd: 4 functions'))
+
+
+class Baseline(unittest.TestCase):
+    def previous_file(self, text):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, 'weekly.json')
+        with open(path, 'w') as f:
+            f.write(text)
+        return path
+
+    def test_a_corrupt_previous_stops_the_run_naming_the_file(self):
+        path = self.previous_file('{"corpora": ')
+        with self.assertRaises(SystemExit) as raised:
+            weekly.load_previous(path)
+        self.assertTrue(str(raised.exception).startswith(f'--previous {path} is not a readable record: '))
+
+    def test_a_previous_with_a_renamed_corpora_key_stops_the_run(self):
+        path = self.previous_file('{"corpus": {}}')
+        with self.assertRaises(SystemExit) as raised:
+            weekly.load_previous(path)
+        self.assertEqual(str(raised.exception), f'--previous {path} is not a weekly record: it has no "corpora" object')
+
+    def test_a_missing_previous_is_no_baseline_and_the_summary_says_so(self):
+        self.assertEqual(weekly.load_previous('/nonexistent/weekly.json'), {})
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        self.assertIn('No baseline: there was no earlier record', weekly.markdown(now, [], baseline=False))
+        self.assertNotIn('No baseline', weekly.markdown(now, []))
+
+    def test_a_failed_baseline_download_is_not_called_a_missing_baseline(self):
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        table = weekly.markdown(now, [], baseline=False, baseline_failed=True)
+        self.assertIn("The baseline download failed, so this run was not compared with last week's record.", table)
+        self.assertNotIn('No baseline', table)
+
+    def test_the_header_states_the_warm_versus_cold_measurement(self):
+        now = {'caliper': 'x', 'runs': 5, 'reference_version': 2, 'corpora': {}}
+        header = next(l for l in weekly.markdown(now, []).splitlines() if l.startswith('Caliper x,'))
+        self.assertEqual(header, 'Caliper x, time the median of 5 runs (after one warm-up run) and memory the largest peak '
+                                 'of them; RDT and react-docgen one cold run each, so the comparison favours Caliper. '
+                                 'Whole process, Node start included. Each Caliper run asks the checker everything; Rerun '
+                                 "is a run over unchanged files, which reuses the checker's kept answer.")
+
+    def test_each_timed_caliper_run_asks_the_checker_and_the_reruns_find_its_kept_answer(self):
+        kept_before = []
+
+        def run_once(command, **kwargs):
+            cache = command[command.index('--cache-dir') + 1]
+            kept = os.path.join(cache, 'checker-answers.msgpack')
+            kept_before.append(os.path.exists(kept))
+            open(kept, 'w').close()
+            return 1.0, 10
+
+        with mock.patch.object(weekly, 'run_once', run_once):
+            result = weekly.caliper_run('/bin/caliper-docgen', '/src', 2)
+        # The warm-up, two timed runs that find no kept answer, two reruns that find it.
+        self.assertEqual(kept_before, [False, False, False, True, True])
+        self.assertEqual(result['rerun_ms'], 1000)
+
+    def test_an_oracle_error_is_an_issue_line(self):
+        record = {'corpora': {'chakra': {'oracle': {'error': 'the comparison is empty'}, 'agent_eval': {'recall': 1}}}}
+        self.assertEqual(weekly.errors(record), ['chakra, oracle: the comparison is empty'])
+
+
+class AddonConfiguration(unittest.TestCase):
+    def test_the_timed_command_is_the_addons_default_collapse_with_dependencies(self):
+        commands = []
+
+        def run_once(command, **kwargs):
+            commands.append(command)
+            return 1.0, 10
+
+        with mock.patch.object(weekly, 'run_once', run_once):
+            weekly.caliper_run('/bin/caliper-docgen', '/src', 1)
+        command = commands[-1]
+        self.assertIn('--load-dependencies', command)
+        # The addon's configuration, pinned: `collapseInheritedProps` 'dependencies' (its default), not left implicit.
+        self.assertEqual(command[command.index('--collapse-inherited-props') + 1], 'dependencies')
+
+
 class PeakRss(unittest.TestCase):
     def test_units(self):
         self.assertEqual(corpora.rss_mib(5 * 2**20, 'darwin'), 5)
@@ -219,6 +420,86 @@ class PeakRss(unittest.TestCase):
     def test_failure_is_an_error(self):
         with self.assertRaises(RuntimeError):
             corpora.run_once([sys.executable, '-c', 'raise SystemExit(3)'])
+
+
+
+class FailedCorpora(unittest.TestCase):
+    """A child that exits non-zero, dies of a signal or hangs fails its corpus, not the run: the record (--out) is written
+    after every corpus, the failure keeps the exit status and the end of the stderr, and the next corpus still runs."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+
+    def fake(self, name, body):
+        path = os.path.join(self.dir.name, name)
+        with open(path, 'w') as f:
+            f.write('#!/bin/sh\n' + body + '\n')
+        os.chmod(path, 0o755)
+        return path
+
+    def test_a_child_that_exits_137_is_a_step_failure_with_its_stderr_tail(self):
+        binary = self.fake('oom', 'i=1; while [ $i -le 30 ]; do echo "line $i" >&2; i=$((i + 1)); done; exit 137')
+        with self.assertRaises(weekly.StepFailed) as raised:
+            weekly.step('mantine Caliper run 1', [binary])
+        self.assertEqual((raised.exception.step, raised.exception.code), ('mantine Caliper run 1', 137))
+        self.assertEqual(raised.exception.tail.splitlines(), [f'line {i}' for i in range(11, 31)])
+
+    def test_a_child_killed_by_a_signal_has_a_negative_exit_status(self):
+        binary = self.fake('killed', 'kill -9 $$')
+        with self.assertRaises(weekly.StepFailed) as raised:
+            weekly.step('antd Caliper run 1', [binary])
+        self.assertEqual(raised.exception.code, -9)
+
+    def test_a_child_that_sleeps_past_the_timeout_is_killed(self):
+        binary = self.fake('sleeper', 'sleep 60')
+        start = time.monotonic()
+        with self.assertRaises(weekly.StepFailed) as raised:
+            weekly.step('chakra Caliper run 1', [binary], timeout=0.5)
+        self.assertLess(time.monotonic() - start, 20)
+        self.assertIsNone(raised.exception.code)
+        self.assertIn('timeout', str(raised.exception))
+
+    def test_every_step_logs_its_exit_status_and_wall_time(self):
+        with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+            weekly.step('antd Caliper run 1', [sys.executable, '-c', 'pass'])
+            with self.assertRaises(weekly.StepFailed):
+                weekly.step('antd Caliper run 2', [sys.executable, '-c', 'raise SystemExit(3)'])
+        self.assertRegex(err.getvalue(), r'antd Caliper run 1: exit 0 after \d+\.\d s')
+        self.assertRegex(err.getvalue(), r'antd Caliper run 2: exit 3 after \d+\.\d s')
+
+    def test_a_failed_corpus_is_recorded_the_run_goes_on_and_the_record_is_written_after_each(self):
+        binaries = {'mantine': self.fake('bad', 'echo boom >&2; exit 137'), 'antd': self.fake('good', 'exit 0')}
+        out = os.path.join(self.dir.name, 'weekly.json')
+        on_disk = {}
+
+        def measure(args, corpus, work):
+            name = corpus['name']
+            if os.path.exists(out):
+                with open(out) as f:
+                    on_disk[name] = json.load(f)
+            weekly.step(f'{name} Caliper', [binaries[name]])
+            return {'caliper': {'ms': 1, 'rss_mib': 1}}
+
+        args = mock.Mock(corpus=['mantine', 'antd'], out=out, runs=1)
+        with mock.patch.object(weekly, 'measure', measure):
+            record = weekly.measure_all(args, self.dir.name, 'caliper 0')
+        self.assertEqual(list(record['corpora']), ['antd'])
+        failed = record['failed']['mantine']
+        self.assertEqual((failed['step'], failed['exit'], failed['stderr_tail']), ('mantine Caliper', 137, ['boom']))
+        # Before the second corpus ran, the file already held the first one's failure.
+        self.assertEqual(list(on_disk['antd']['failed']), ['mantine'])
+        with open(out) as f:
+            self.assertEqual(json.load(f), record)
+        self.assertEqual(len(weekly.failures(record)), 1)
+        self.assertIn('mantine: failed at mantine Caliper, exit 137', weekly.failures(record)[0])
+
+    def test_a_budget_breach_names_the_corpus_the_metric_the_value_and_the_limit(self):
+        record = {'corpora': {'antd': {'caliper': {'ms': 900, 'rss_mib': 40}}, 'mantine': {'caliper': {'ms': 1, 'rss_mib': 1}}}}
+        tiny = {'antd': {'ms': 100, 'rss_mib': 50}, 'mantine': {'ms': 100, 'rss_mib': 50}}
+        self.assertEqual(weekly.budget_breaches(record, tiny),
+                         ["antd: a whole run's time is 900 ms, over the 100 ms budget"])
+        self.assertEqual(weekly.budget_breaches(record), [])
 
 
 if __name__ == '__main__':

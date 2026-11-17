@@ -5,7 +5,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 
 use super::WatchSession;
-use crate::pipeline::{extract, ComponentAnswer, PipelineOptions};
+use crate::pipeline::{ComponentAnswer, PipelineOptions, extract};
 use crate::types::Diagnostic;
 
 fn project(files: &[(&str, &str)]) -> (tempfile::TempDir, Utf8PathBuf) {
@@ -28,6 +28,8 @@ fn options(root: &Utf8Path, load_dependencies: bool) -> PipelineOptions {
         src_dirs: vec![root.join("src")],
         cache_dir: Some(root.join("cache")),
         load_dependencies,
+        // The expanded view (ADR 0028 relevance 'all'): every resolved prop is a row.
+        collapse_inherited_props: crate::pipeline::CollapseInheritedProps::None,
         ..Default::default()
     }
 }
@@ -384,4 +386,33 @@ fn requests_that_race_the_background_load_answer_as_a_batch_run_does() {
         assert_matches_batch(&session, &options);
         session.wait_for_dependency_load();
     }
+}
+
+/// A panic in the dependency loader is run-wide, as in a batch run: no component is named as the one it affects.
+#[test]
+fn a_dependency_loader_panic_is_reported_run_wide_on_every_answer() {
+    let (_tmp, root) = project(&[
+        ("node_modules/ui-kit/package.json", r#"{ "name": "ui-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/ui-kit/index.d.ts", "export type Tone = 'a' | 'b';\n"),
+        (
+            "src/Badge.tsx",
+            "import type { __DEPENDENCY_PANIC_TEST__ } from 'ui-kit';\n\
+             export function Badge(props: { tone?: __DEPENDENCY_PANIC_TEST__ }) { return null; }\n",
+        ),
+        ("src/Card.tsx", CARD),
+    ]);
+    let session = WatchSession::lazy(options(&root, true));
+    drop(session.initialize());
+
+    session.component("Badge");
+    session.wait_for_dependency_load();
+    let card = session.component("Card").unwrap();
+
+    let panic_affects: Vec<Vec<String>> = card
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == crate::types::DiagnosticCode::InternalPanic)
+        .map(|d| d.affects.clone())
+        .collect();
+    assert_eq!(panic_affects, vec![Vec::<String>::new()]);
 }

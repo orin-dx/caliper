@@ -1,0 +1,4398 @@
+[
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "accessibility",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "adaptiveHeight",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "afterChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "appendDots",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "arrows",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "asNavFor",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "autoplaySpeed",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "beforeChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "centerMode",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "centerPadding",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "cssEase",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "customPaging",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "dotsClass",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "draggable",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "easing",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "edgeFriction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "fade",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "focusOnSelect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "infinite",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "initialSlide",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "lazyLoad",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "nextArrow",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "onEdge",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "onInit",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "onLazyLoad",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "onReInit",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "onSwipe",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "pauseOnDotsHover",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "pauseOnFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "pauseOnHover",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "prevArrow",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "responsive",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "rows",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "rtl",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "slide",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "slidesPerRow",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "slidesToScroll",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "slidesToShow",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "speed",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "swipe",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "swipeEvent",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "swipeToSlide",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "touchMove",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "touchThreshold",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "useCSS",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "useTransform",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "variableWidth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "vertical",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@ant-design/react-slick/types.d.ts",
+    "type": "Settings",
+    "prop": "verticalSwiping",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "children",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "defaultInputValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "defaultOpen",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "disabled",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "fillInputOnItemPress",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "filter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "filteredItems",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "form",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "formAutoComplete",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "grid",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "inline",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "inputRef",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "inputValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "items",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "keepHighlight",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "limit",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "locale",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "loopFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "modal",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "name",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "onOpenChangeComplete",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "open",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "openOnInputClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "readOnly",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "required",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "submitOnItemClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@base-ui/react/combobox/root/AriaCombobox.d.mts",
+    "type": "ComboboxRootProps",
+    "prop": "virtualized",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "afterClose",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "afterOpenChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "animation",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "bodyProps",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "bodyStyle",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "children",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "closable",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "closeIcon",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "destroyOnHidden",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "focusTrap",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "focusTriggerAfterClose",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "forceRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "getContainer",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "height",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "keyboard",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "mask",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "maskAnimation",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "maskClosable",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "maskProps",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "maskStyle",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "maskTransitionName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "modalRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "mousePosition",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "onClose",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "panelRef",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "rootClassName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "rootStyle",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "scrollLock",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "title",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "transitionName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "visible",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "width",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "wrapClassName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "wrapProps",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "wrapStyle",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/dialog/lib/IDialogPropTypes.d.ts",
+    "type": "IDialogPropTypes",
+    "prop": "zIndex",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "autoFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "drawerRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "focusTrap",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "forceRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "inline",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "keyboard",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "maskClassName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "maskMotion",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "motion",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "placement",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "push",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "rootClassName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "rootStyle",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/drawer/lib/DrawerPopup.d.ts",
+    "type": "DrawerPopupProps",
+    "prop": "zIndex",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "changeOnBlur",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "changeOnWheel",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "decimalSeparator",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "defaultValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "downHandler",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "formatter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "keyboard",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "mode",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "onChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "onInput",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "onPressEnter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "onStep",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "parser",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "precision",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "stringMode",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "upHandler",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/input-number/es/InputNumber.d.ts",
+    "type": "InputNumberProps",
+    "prop": "value",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "_internalComponents",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "_internalRenderMenuItem",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "_internalRenderSubMenuItem",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "activeKey",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "builtinPlacements",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "defaultActiveFirst",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "defaultMotions",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "defaultOpenKeys",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "defaultSelectedKeys",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "direction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "disabled",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "disabledOverflow",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "expandIcon",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "forceSubMenuRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "getPopupContainer",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "inlineCollapsed",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "itemIcon",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "mode",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "motion",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "multiple",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "onDeselect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "onOpenChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "onSelect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "openKeys",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "overflowedIndicator",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "overflowedIndicatorPopupClassName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "popupRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "prefixCls",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "rootClassName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "selectable",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "selectedKeys",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "subMenuCloseDelay",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "subMenuOpenDelay",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/menu/es/Menu.d.ts",
+    "type": "MenuProps",
+    "prop": "triggerSubMenuAction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "allowClear",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "builtinPlacements",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "cellRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "changeOnBlur",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "clearIcon",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "components",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "dateRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "defaultOpen",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "defaultOpenValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "direction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "disabledDate",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "format",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "generateConfig",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "getPopupContainer",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "inputReadOnly",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "inputRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "maxDate",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "minDate",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "monthCellRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "needConfirm",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "onClear",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "onKeyDown",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "onOpenChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "open",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "order",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "panelRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "picker",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "popupAlign",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "prefix",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "prefixCls",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "preserveInvalidOnBlur",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "previewValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "renderExtraFooter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "showTime",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "showToday",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "showWeek",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "suffixIcon",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/picker/es/interface.d.ts",
+    "type": "SharedPickerProps",
+    "prop": "transitionName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "allowClear",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "animation",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "autoFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "builtinPlacements",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "choiceTransitionName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "clearIcon",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "components",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "defaultOpen",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "direction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "getInputElement",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "getPopupContainer",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "getRawInputElement",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "loading",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "maxCount",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "maxLength",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "maxTagCount",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "maxTagPlaceholder",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "maxTagTextLength",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "mode",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "notFoundContent",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onClear",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onInputKeyDown",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onKeyDown",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onKeyUp",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onMouseDown",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onMouseEnter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onMouseLeave",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onPopupScroll",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "onPopupVisibleChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "open",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "placeholder",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "placement",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "popupAlign",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "popupMatchSelectWidth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "popupStyle",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "prefix",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "removeIcon",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "showAction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "showScrollBar",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "suffix",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "tagRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "title",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "tokenSeparators",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/BaseSelect/index.d.ts",
+    "type": "BaseSelectProps",
+    "prop": "transitionName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "autoClearSearchValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "backfill",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "children",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "defaultActiveFirstOption",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "defaultValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "direction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "fieldNames",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "filterOption",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "filterSort",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "labelInValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "labelRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "listHeight",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "listItemHeight",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "maxCount",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "menuItemSelectedIcon",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "mode",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "onActive",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "onChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "onDeselect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "onSearch",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "onSelect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "optionFilterProp",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "optionLabelProp",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "optionRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "options",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "prefixCls",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "searchValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "value",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/select/es/Select.d.ts",
+    "type": "SelectProps",
+    "prop": "virtual",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "caption",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "children",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "components",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "data",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "direction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "emptyText",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "expandable",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "footer",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "getContainerWidth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "internalHooks",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "internalRefs",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "measureRowRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "onHeaderRow",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "onRow",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "onScroll",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "prefixCls",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "rowClassName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "rowHoverable",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "rowKey",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "showHeader",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "sticky",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "summary",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "tableLayout",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "tailor",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/table/es/Table.d.ts",
+    "type": "TableProps",
+    "prop": "transformColumns",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "activeKey",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "allowDrop",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "direction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "dropIndicatorRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "expandAction",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "fieldNames",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "filterTreeNode",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "focusable",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "height",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "itemHeight",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "itemScrollOffset",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "loadData",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "motion",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onActiveChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onCheck",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onContextMenu",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onDoubleClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onDragEnd",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onDragEnter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onDragLeave",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onDragOver",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onDragStart",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onDrop",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onExpand",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onKeyDown",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onLoad",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onMouseDown",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onMouseEnter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onMouseLeave",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onRightClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onScroll",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "onSelect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "rootClassName",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "scrollWidth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "titleRender",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "treeData",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@rc-component/tree/es/Tree.d.ts",
+    "type": "TreeProps",
+    "prop": "virtual",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onAnimationEnd",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onAnimationEndCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onAnimationIteration",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onAnimationIterationCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onAnimationStart",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onAnimationStartCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onAuxClick",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onAuxClickCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onClickCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onContextMenu",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onContextMenuCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onDoubleClick",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onDoubleClickCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onGotPointerCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onGotPointerCaptureCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onLostPointerCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onLostPointerCaptureCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseDown",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseDownCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseEnter",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseLeave",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseMove",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseMoveCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseOut",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseOutCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseOver",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseOverCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseUp",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onMouseUpCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerCancel",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerCancelCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerDown",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerDownCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerEnter",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerLeave",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerMove",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerMoveCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerOut",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerOutCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerOver",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerOverCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerUp",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onPointerUpCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onScroll",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onScrollCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTouchCancel",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTouchCancelCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTouchEnd",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTouchEndCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTouchMove",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTouchMoveCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTouchStart",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTouchStartCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTransitionCancel",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTransitionCancelCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTransitionEnd",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTransitionEndCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTransitionRun",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTransitionRunCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTransitionStart",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onTransitionStartCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onWheel",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onWheelCapture",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "allowCustomValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "alwaysSubmitOnEnter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "autoFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "closeOnSelect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "composite",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "defaultHighlightedValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "defaultInputValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "defaultOpen",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "defaultValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "disabled",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "disableLayer",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "form",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "highlightedValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "ids",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "inputBehavior",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "inputValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "invalid",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "loopFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "multiple",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "name",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "navigate",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "onHighlightChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "onInputValueChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "onOpenChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "onSelect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "onValueChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "open",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "openOnChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "openOnClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "openOnKeyPress",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "placeholder",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "positioning",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "readOnly",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "required",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "scrollToIndexFn",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "selectionBehavior",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "translations",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/combobox/dist/combobox.types.d.mts",
+    "type": "ComboboxProps",
+    "prop": "value",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "closeOnSelect",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "createCalendar",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "defaultFocusedValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "defaultOpen",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "defaultValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "defaultView",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "disabled",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "fixedWeeks",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "focusedValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "format",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "ids",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "inline",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "invalid",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "isDateUnavailable",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "locale",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "max",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "maxSelectedDates",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "maxView",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "min",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "minView",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "name",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "numOfMonths",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "onFocusChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "onOpenChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "onValueChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "onViewChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "onVisibleRangeChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "open",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "openOnClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "outsideDaySelectable",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "parse",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "placeholder",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "positioning",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "readOnly",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "required",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "selectionMode",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "showWeekNumbers",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "startOfWeek",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "timeZone",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "translations",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "value",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@zag-js/date-picker/dist/date-picker.types.d.mts",
+    "type": "DatePickerProps",
+    "prop": "view",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "animate",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "autoFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "broadcastCalendar",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "captionLayout",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "classNames",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "components",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "dateLib",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "defaultMonth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "dir",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "disableNavigation",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "endMonth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "firstWeekContainsDate",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "fixedWeeks",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "footer",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "formatters",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "fromDate",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "fromMonth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "fromYear",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "hidden",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "hideNavigation",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "hideWeekdays",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "initialFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "ISOWeek",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "labels",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "lang",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "locale",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "modifiers",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "modifiersClassNames",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "modifiersStyles",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "month",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "navLayout",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "nonce",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "numberOfMonths",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "numerals",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayBlur",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayFocus",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayKeyDown",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayKeyPress",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayKeyUp",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayMouseEnter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayMouseLeave",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayPointerEnter",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayPointerLeave",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayTouchCancel",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayTouchEnd",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayTouchMove",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onDayTouchStart",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onMonthChange",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onNextClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onPrevClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "onWeekNumberClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "pagedNavigation",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "reverseMonths",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "role",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "showOutsideDays",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "showWeekNumber",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "startMonth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "styles",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "timeZone",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "title",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "toDate",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "today",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "toMonth",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "toYear",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "useAdditionalDayOfYearTokens",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "useAdditionalWeekYearTokens",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/react-day-picker/dist/esm/types/props.d.ts",
+    "type": "PropsBase",
+    "prop": "weekStartsOn",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/@types/react/index.d.ts",
+    "type": "Anything",
+    "prop": "foo",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onClick",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.mts",
+    "type": "Other",
+    "prop": "x",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/dom.d.cts",
+    "type": "Other",
+    "prop": "x",
+    "kind": "ambient",
+    "why": "dom file"
+  },
+  {
+    "file": "/p/node_modules/@react-types/shared/src/events.d.ts",
+    "type": "KeyboardEvents",
+    "prop": "onKeyDown",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "GlobalDOMEvents",
+    "prop": "onClick",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DOMAttributes",
+    "prop": "onClick",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "AriaAttributes",
+    "prop": "onClick",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "AllHTMLAttributes",
+    "prop": "onClick",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "SVGAttributes",
+    "prop": "onClick",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "HTMLAttributes",
+    "prop": "onClick",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "ButtonHTMLAttributes",
+    "prop": "foo",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "AriaLabelingAttributes",
+    "prop": "foo",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "Aria_Attributes",
+    "prop": "foo",
+    "kind": "ambient",
+    "why": "dom type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "AriaAttributesExtra",
+    "prop": "foo",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "Aria-Attributes",
+    "prop": "foo",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "AriaAttributes2",
+    "prop": "foo",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "StyleProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "JsxStyleProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "ViewStyleProp",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "SystemProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "SpaceProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "LayoutProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "ColorProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "TypographyProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "BorderProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "FlexProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "GridProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "PositionProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "ShadowProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "BackgroundProps",
+    "prop": "m",
+    "kind": "ambient",
+    "why": "style type"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "Props",
+    "prop": "m",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "ColorsProps",
+    "prop": "m",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "StylePropsExtra",
+    "prop": "m",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "MyStyle",
+    "prop": "m",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "m",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "className",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "style",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "id",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "title",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "lang",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "dir",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "hidden",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "tabIndex",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "role",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "slot",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "accessKey",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "draggable",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "contentEditable",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "spellCheck",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "translate",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "inputMode",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "nonce",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "aria-label",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "aria-hidden",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "data-testid",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "data-",
+    "kind": "ambient",
+    "why": "global attribute"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "value",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "defaultValue",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "type",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "name",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "disabled",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "Aria-label",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "ariaLabel",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "dataTestid",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "onClick",
+    "kind": "api",
+    "why": "dependency api"
+  },
+  {
+    "file": "/p/node_modules/x/index.d.ts",
+    "type": "DialogProps",
+    "prop": "mode",
+    "kind": "api",
+    "why": "dependency api"
+  }
+]

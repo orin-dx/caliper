@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "aria-hidden",
+          "aria-label",
+          "aria-live",
+          "data-testid",
+          "role"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ \"aria-label\"?: string | undefined; \"aria-hidden\"?: \"false\" | \"true\" | boolean | undefined; \"aria-live\"?: \"assertive\" | \"off\" | \"polite\" | undefined; \"data-testid\"?: string | undefined; role?: AriaRole | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/26-aria-data-props.tsx"
+    },
+    "order": null
+  }
+}

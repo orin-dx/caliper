@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a",
+          "b"
+        ],
+        "index": false,
+        "alias": "Mutable"
+      }
+    ],
+    "alias": "Mutable"
+  },
+  "text": "Mutable<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/26-mapped-minus-modifiers.tsx"
+    },
+    "order": null
+  }
+}

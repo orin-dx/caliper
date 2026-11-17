@@ -3,16 +3,16 @@
 use camino::Utf8Path;
 use compact_str::CompactString;
 
-use crate::known::{push_known_opaque_diagnostic, resolve_known, KnownPatternResult};
+use crate::known::{KnownPatternResult, push_known_opaque_diagnostic, resolve_known};
 use crate::react_types;
 use crate::types::*;
 
 use super::alias::resolve_type_alias_type;
 use super::collected::resolve_collected_type;
-use super::import::{lookup_ambient_global, AmbientGlobalLookup};
+use super::import::{AmbientGlobalLookup, lookup_ambient_global};
 use super::precedence::Declared;
 use super::react::react_type_to_prop_type;
-use super::{ResolutionContext, MAX_NAMED_NESTING};
+use super::{MAX_NAMED_NESTING, ResolutionContext};
 
 /// Cycle-detecting entry point — see `ResolveState::named_in_progress`'s doc
 /// comment for why this can't reuse chain.rs's permanent `visited` set or
@@ -34,13 +34,26 @@ pub(super) fn resolve_named(
         use std::hash::Hasher;
         let mut hasher = rustc_hash::FxHasher::default();
         args.iter().for_each(|arg| arg.structural_hash(&mut hasher));
-        format!("{}:{}<{:x}>", consuming_file, name, hasher.finish()).into()
+        let site = state.declared_in.as_deref().and_then(DeclarationScope::local_key_suffix).unwrap_or_default();
+        format!("{}:{}<{:x}>{site}", consuming_file, name, hasher.finish()).into()
     };
 
     // The same reference resolves the same way in any state that answers the reads it made (`resolver::memo`), and
     // Chakra's style props name a few thousand distinct ones a million times.
     ctx.named_results.get_or_resolve(&visit_key, depth, state, None, |state| {
         if !state.enter_named(&visit_key) {
+            // The same reference, being resolved: the type it names encloses this one.
+            return PropType::Recursive {
+                name: unmarked(name).into(),
+                args: args.iter().map(super::func::as_written).collect(),
+            };
+        }
+
+        let result = resolve_named_uncycled(name, args, consuming_file, ctx, state, depth);
+        state.leave_named(&visit_key);
+        // TypeScript defers a recursive reference only inside an object, array or tuple: `type Loop = Loop` or
+        // `type A = A | string` is an error ("circularly references itself"), not a recursive type.
+        if refers_to_itself_directly(&result, unmarked(name)) {
             state.diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Info,
                 message: format!(
@@ -54,13 +67,20 @@ pub(super) fn resolve_named(
                 code: DiagnosticCode::CircularReference,
                 affects: Vec::new(),
             });
+            #[allow(clippy::disallowed_methods, reason = "the diagnostic above is the one for this reason")]
             return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
         }
-
-        let result = resolve_named_uncycled(name, args, consuming_file, ctx, state, depth);
-        state.leave_named(&visit_key);
         result
     })
+}
+
+/// Whether `ty` is a recursive reference to `name`, or a union or intersection with one as a member.
+fn refers_to_itself_directly(ty: &PropType, name: &str) -> bool {
+    let is_self = |member: &PropType| matches!(member, PropType::Recursive { name: own, .. } if own == name);
+    if let PropType::Union(members) | PropType::Intersection(members) = ty {
+        return members.iter().any(is_self);
+    }
+    is_self(ty)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -78,6 +98,21 @@ fn resolve_named_uncycled(
     if super::past_max_depth(state, depth) || state.named_in_progress.len() > MAX_NAMED_NESTING {
         let diag = super::max_depth_diagnostic(&format!("named type '{}'", name), consuming_file);
         return OpaqueDetail::give_up(state, name.to_string(), OpaqueReason::DepthExceeded, diag);
+    }
+
+    // A reference marked as a declaration's is looked up as one, whatever type parameter is in scope under its name.
+    let declared_name;
+    let (name, as_declaration) = match name.strip_suffix(DECLARATION_MARK) {
+        Some(bare) => {
+            declared_name = CompactString::from(bare);
+            (&declared_name, true)
+        }
+        None => (name, false),
+    };
+
+    // ── 0. A type parameter in scope shadows any declaration of the same name ──
+    if !as_declaration && args.is_empty() && state.has_type_param(name) {
+        return PropType::Named { name: unmarked(name).into(), args: Vec::new() };
     }
 
     // ── 1. React builtin check ────────────────────────────────────────────────
@@ -117,17 +152,29 @@ fn resolve_named_uncycled(
             let params = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
             let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &matched_key);
             let outer_named_unevaluated = std::mem::take(&mut state.named_unevaluated);
+            let caller_site = super::precedence::enter_alias_site(ctx, state, &canonical_file, &matched_key);
+            // The alias's body is read under its own parameters that nothing replaces, never under the caller's: the
+            // supplied arguments are the caller's names (`Id<Value>` over `type Value`), not the alias's parameters.
             let expanded = match params {
                 Some(params) if !args.is_empty() || defaults.is_some() => {
-                    state.add_type_params(params.iter());
                     expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, 0)
                 }
                 Some(params) => {
-                    state.add_type_params(params.iter());
-                    resolve_type_alias_type(&alias, ctx, state, depth)
+                    let alias =
+                        super::substitute::substitute_alias(&alias, &super::substitute::unfilled_substitution(params));
+                    let caller = state.enter_scope(TypeScope::default());
+                    let expanded = resolve_type_alias_type(&alias, ctx, state, depth);
+                    state.leave_scope(caller);
+                    expanded
                 }
-                None => resolve_type_alias_type(&alias, ctx, state, 0),
+                None => {
+                    let caller = state.enter_scope(TypeScope::default());
+                    let expanded = resolve_type_alias_type(&alias, ctx, state, 0);
+                    state.leave_scope(caller);
+                    expanded
+                }
             };
+            state.leave_declared_in(caller_site);
             let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
             state.named_unevaluated = outer_named_unevaluated || unevaluated;
             // Printed as its name when it can't be evaluated, or when a generic instantiation expands to a long union, as
@@ -172,6 +219,11 @@ fn resolve_named_uncycled(
         None => {}
     }
 
+    // `Size.Small`: a member of an `enum` declaration, as a type.
+    if let Some(member) = enum_member(name, consuming_file, ctx) {
+        return member;
+    }
+
     // A builtin name bound elsewhere whose binding didn't resolve (a re-export of React's type, a package not
     // installed): React's meaning is then a reported guess.
     if react_types::is_react_builtin(lookup_name, &ctx.extra_builtins) {
@@ -185,10 +237,10 @@ fn resolve_named_uncycled(
     // cannot be expanded without a type-checker. Return Named silently.
     let bare = name.strip_prefix("React.").unwrap_or(name.as_str());
     // A lib alias that evaluates (`Exclude`, `Extract`, `NonNullable`) is read from TypeScript's own definition.
-    if !args.is_empty() {
-        if let Some(evaluated) = evaluate_lib_alias(bare, args, consuming_file, ctx, state, depth) {
-            return evaluated;
-        }
+    if !args.is_empty()
+        && let Some(evaluated) = evaluate_lib_alias(bare, args, consuming_file, ctx, state, depth)
+    {
+        return evaluated;
     }
     if super::is_ts_utility_type(bare)
         || matches!(
@@ -220,8 +272,8 @@ fn resolve_named_uncycled(
     }
 
     // ── 6.5 Enclosing generic's own type parameter — expected, not unresolvable ─
-    if state.has_type_param(bare) {
-        return PropType::Named { name: name.clone(), args: resolved_args };
+    if !as_declaration && state.has_type_param(bare) {
+        return PropType::Named { name: unmarked(name).into(), args: resolved_args };
     }
 
     // ── 6.7 TypeScript's own ambient globals (Date, RegExp, Element, ...) ────
@@ -296,21 +348,32 @@ fn expand_alias(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    let subst = super::substitute::bind_args(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
-    if let Some(param) = super::evaluate::distributive_param(alias) {
-        if let Some(bound) = subst.get(param) {
-            let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
-            if members.len() != 1 {
-                let results = members.into_iter().map(|(member, member_file)| {
+    let args = &*super::substitute::mark_args(ctx, state, args_file, args);
+    let subst =
+        super::substitute::bind_declared(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
+    if let Some(param) = super::evaluate::distributive_param(alias)
+        && let Some(bound) = subst.get(param)
+    {
+        let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
+        if members.len() != 1 {
+            let caller = state.enter_scope(TypeScope::default());
+            let results: Vec<PropType> = members
+                .into_iter()
+                .map(|(member, member_file)| {
                     let mut one = subst.clone();
-                    one.insert(param, CollectedType::AtFile { file: member_file, inner: Box::new(member) });
+                    let member = CollectedType::AtFile { file: member_file, inner: Box::new(member) };
+                    one.insert(param, member);
                     resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
-                });
-                return super::primitives::union_of(results.collect::<Vec<_>>());
-            }
+                })
+                .collect();
+            state.leave_scope(caller);
+            return super::primitives::union_of(results);
         }
     }
-    resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth)
+    let caller = state.enter_scope(TypeScope::default());
+    let expanded = resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth);
+    state.leave_scope(caller);
+    expanded
 }
 
 /// `members` with each one that is not already a literal or primitive resolved (`(typeof SIZES)[number]`, a template
@@ -460,6 +523,9 @@ fn can_hold_nullish(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext
         | CollectedType::Boolean
         | CollectedType::BigInt
         | CollectedType::Symbol
+        | CollectedType::UniqueSymbol
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::Callable { .. }
         | CollectedType::Never
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
@@ -531,6 +597,24 @@ fn displayed_arg(
     }
 }
 
+/// `Enum.Member` as the member's type, when `Enum` is an `enum` declaration (not a variant bag, which shares the
+/// table) with a string or number member of that name.
+fn enum_member(name: &str, consuming_file: &Utf8Path, ctx: &ResolutionContext) -> Option<PropType> {
+    let (enum_name, member) = name.rsplit_once('.')?;
+    super::deps::record_bare_name(enum_name);
+    let key = ctx.enum_key_for(enum_name, consuming_file)?;
+    if !ctx.global.enum_declarations.contains_key(&key) {
+        return None;
+    }
+    let entry = ctx.global.enums.get(&key)?.iter().find(|entry| entry.name == member)?;
+    let value = match &entry.value {
+        EnumValue::String(s) => EnumMemberValue::String(s.clone()),
+        EnumValue::Number(n) => EnumMemberValue::Number(*n),
+        EnumValue::Bool(_) | EnumValue::Spread { .. } => return None,
+    };
+    Some(PropType::EnumMember { enum_name: unmarked(enum_name).into(), member: member.into(), value })
+}
+
 /// The most nodes a generic alias's expansion may have to be shown instead of its name (`ConditionalValue<…>` over
 /// csstype's keyword unions has hundreds). Its arguments say as much, and a copy of the union for every style prop of
 /// every component is most of a large design system's memory.
@@ -544,17 +628,47 @@ fn exceeds_expanded_size(ty: &PropType) -> bool {
         }
         *budget -= 1;
         match ty {
-            PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
+            PropType::Union(members) | PropType::Intersection(members) => {
                 members.iter().any(|member| count(member, budget))
             }
+            PropType::Tuple(elements) => elements.iter().any(|element| count(&element.element_type, budget)),
             PropType::LiteralUnion { members, .. } => {
                 *budget = budget.saturating_sub(members.len());
                 *budget == 0
             }
             PropType::Array(inner) | PropType::Readonly(inner) => count(inner, budget),
-            PropType::Object(fields) => fields.iter().any(|field| count(&field.prop_type, budget)),
-            PropType::Named { args, .. } => args.iter().any(|arg| count(arg, budget)),
-            _ => false,
+            PropType::Object(fields) | PropType::Callable { fields, .. } => {
+                fields.iter().any(|field| count(&field.prop_type, budget))
+            }
+            PropType::Named { args, .. } | PropType::Recursive { args, .. } => {
+                args.iter().any(|arg| count(arg, budget))
+            }
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::BigInt
+            | PropType::StringLiteral(_)
+            | PropType::NumberLiteral(_)
+            | PropType::BoolLiteral(_)
+            | PropType::BigIntLiteral(_)
+            | PropType::UniqueSymbol { .. }
+            | PropType::EnumMember { .. }
+            | PropType::TemplateLiteral(_)
+            | PropType::Truncated { .. }
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::Function { .. }
+            | PropType::Ref { .. }
+            | PropType::ElementType
+            | PropType::HtmlAttributes { .. }
+            | PropType::SxProps
+            | PropType::Opaque(_) => false,
         }
     }
     count(ty, &mut MAX_EXPANDED_NODES.clone())

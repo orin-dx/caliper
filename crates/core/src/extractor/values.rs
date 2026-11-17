@@ -8,7 +8,7 @@ use oxc_ast::ast::*;
 
 use crate::types::{CollectedObjectField, CollectedType, CollectedTypeAlias};
 
-use super::{js_text, SourceDataCollector};
+use super::{SourceDataCollector, js_text};
 
 /// Objects with more keys than this are not a lookup table a prop's type is likely to name.
 const MAX_KEYS: usize = 128;
@@ -65,6 +65,7 @@ fn static_fields(object: &ObjectExpression<'_>) -> Option<Vec<CollectedObjectFie
                 description: String::new(),
                 readonly: false,
                 index_key: None,
+                tags: Default::default(),
             })
         })
         .collect()

@@ -1,0 +1,19 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "base",
+    "of": "string"
+  },
+  "text": "\"base\"",
+  "facts": {
+    "description": "The tone, declared in another file.",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "BaseProps",
+      "file": "cross-file/shared.ts"
+    },
+    "order": null
+  }
+}

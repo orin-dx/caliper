@@ -1,0 +1,114 @@
+[
+  {
+    "why": "a file of the project is none of the three",
+    "path": "/r/src/Button/Button.tsx",
+    "dependency": false,
+    "reactTypes": false,
+    "libFile": false
+  },
+  {
+    "why": "a package under node_modules is a dependency",
+    "path": "/r/node_modules/@radix-ui/react-slot/dist/index.d.ts",
+    "dependency": true,
+    "reactTypes": false,
+    "libFile": false
+  },
+  {
+    "why": "@types/react is a dependency and React's own",
+    "path": "/r/node_modules/@types/react/index.d.ts",
+    "dependency": true,
+    "reactTypes": true,
+    "libFile": false
+  },
+  {
+    "why": "pnpm's virtual store keeps @types/react under its own node_modules",
+    "path": "/r/node_modules/.pnpm/@types+react@19.3.0/node_modules/@types/react/index.d.ts",
+    "dependency": true,
+    "reactTypes": true,
+    "libFile": false
+  },
+  {
+    "why": "another @types package is a dependency, not React's",
+    "path": "/r/node_modules/@types/react-dom/index.d.ts",
+    "dependency": true,
+    "reactTypes": false,
+    "libFile": false
+  },
+  {
+    "why": "a lib file of the typescript package is a dependency and a lib file",
+    "path": "/r/node_modules/typescript/lib/lib.es5.d.ts",
+    "dependency": true,
+    "reactTypes": false,
+    "libFile": true
+  },
+  {
+    "why": "a lib file of the native compiler's platform package is a lib file",
+    "path": "/r/node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+    "dependency": true,
+    "reactTypes": false,
+    "libFile": true
+  },
+  {
+    "why": "a lib file outside node_modules is a lib file and not a dependency",
+    "path": "/usr/lib/typescript/lib/lib.es2015.core.d.ts",
+    "dependency": false,
+    "reactTypes": false,
+    "libFile": true
+  },
+  {
+    "why": "a file that only looks like a lib file is a project file",
+    "path": "/r/src/typescript/lib/library.d.ts",
+    "dependency": false,
+    "reactTypes": false,
+    "libFile": false
+  },
+  {
+    "why": "a path without a leading separator is read the same (RDT reports paths relative to its cwd)",
+    "path": "node_modules/@types/react/index.d.ts",
+    "dependency": true,
+    "reactTypes": true,
+    "libFile": false
+  },
+  {
+    "why": "Windows separators are separators",
+    "path": "C:\\r\\node_modules\\@types\\react\\index.d.ts",
+    "dependency": true,
+    "reactTypes": true,
+    "libFile": false
+  },
+  {
+    "why": "a Windows lib file is a lib file",
+    "path": "C:\\r\\node_modules\\typescript\\lib\\lib.es5.d.ts",
+    "dependency": true,
+    "reactTypes": false,
+    "libFile": true
+  },
+  {
+    "why": "a directory that only ends in node_modules is not node_modules",
+    "path": "/r/src/my_node_modules/@types/react/index.d.ts",
+    "dependency": false,
+    "reactTypes": false,
+    "libFile": false
+  },
+  {
+    "why": "a file named node_modules is not a directory of that name",
+    "path": "/r/src/node_modules.ts",
+    "dependency": false,
+    "reactTypes": false,
+    "libFile": false
+  },
+  {
+    "why": "an @types/react directory outside node_modules is the project's own",
+    "path": "/r/src/@types/react/index.d.ts",
+    "dependency": false,
+    "reactTypes": false,
+    "libFile": false
+  },
+  {
+    "why": "no path is none of the three",
+    "path": "",
+    "dependency": false,
+    "reactTypes": false,
+    "libFile": false
+  }
+]

@@ -1,0 +1,48 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "ReactElement"
+      }
+    ]
+  },
+  "text": "ReactElement<unknown, string | JSXElementConstructor<any>> | null",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "react/35-reactelement-or-null.tsx"
+    },
+    "order": [
+      {
+        "k": "object",
+        "fields": [
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "ReactElement"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      }
+    ]
+  }
+}
