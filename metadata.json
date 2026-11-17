@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7KPZDJSMS0Q4XKV02K6C950",
+  "strategy": "manual-commit",
+  "branch": "fix/list-rule-patterns",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/core/src/react_types.rs",
+    "crates/core/src/relevance/mod.rs",
+    "crates/core/src/relevance/props_type.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/examples/gate_harness.rs",
+    "crates/semantic/tests/relevance_model.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 68879,
+    "cache_read_tokens": 1653301,
+    "output_tokens": 11091,
+    "api_call_count": 20
+  },
+  "redaction": {
+    "replacements": 2,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 2,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

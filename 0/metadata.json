@@ -1,0 +1,137 @@
+{
+  "cli_version": "0.13.5-nightly.202611131617.95eabf579",
+  "checkpoint_id": "01M7KPZDJSMS0Q4XKV02K6C950",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-17T02:57:14.02309Z",
+  "branch": "fix/list-rule-patterns",
+  "checkpoints_count": 3,
+  "save_step_count": 3,
+  "files_touched": [
+    "crates/core/src/react_types.rs",
+    "crates/core/src/relevance/mod.rs",
+    "crates/core/src/relevance/props_type.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/examples/gate_harness.rs",
+    "crates/semantic/tests/relevance_model.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "f855695dd558",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 68879,
+    "cache_read_tokens": 1653301,
+    "output_tokens": 11091,
+    "api_call_count": 20
+  },
+  "session_token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 68879,
+    "cache_read_tokens": 1653301,
+    "output_tokens": 11091,
+    "api_call_count": 20
+  },
+  "redaction": {
+    "replacements": 2,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 2,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Act as lead/coordinator for caliper's road to v1 alpha: land the fix for two open Entire findings on PR #490 (change 288, list-props-by-usage rule), run the pre-push gate, then push and resolve the findings.",
+    "outcome": "Verified worker commit a589e64a (local only) passes lint, nextest, checker lane and three mutation proofs. Identified the concurrent editor as the stopped worker, kept its review-round edits, reran the full gate (1689 passed) and committed them. Still pending: /code-review medium on the combined tree, push to feat/list-props-by-usage, and resolving the findings.",
+    "learnings": {
+      "repo": [
+        "Both open #490 findings are one class (explicit selection not seen by both owners): checker keep-and-merge in chain.rs and generic-alias Pick/Omit key collection in relevance/props_type.rs must both honor body-promoted and explicitly selected keys.",
+        "a589e64a renamed react_props_wanted to react_props_wanted_for without updating crates/semantic/examples/gate_harness.rs, breaking the example build until the worker's fix.",
+        "Worker review round fixes: react_types.rs visible_rows counts notableInherited rows; an Omit alias is read like an inline Omit; Omit/Partial/Required/Readonly arms unwrap AtFile args; narrows computed once in relevance/mod.rs; relevance_model.rs gains ReadonlyThroughGeneric and OmitAlias grammar forms.",
+        "Mutation proofs for the class fix fail the named tests every_row_the_body_promotes_has_the_checkers_type and every_explicit_key_set_lists_what_it_selects_as_the_checker_reads_it.",
+        "Remote head of PR 490 is cf51133b; pushes must merge it in (never rebase) and use `git push origin <sha>:<branch>`.",
+        "The gate is `just lint doc-check machete typos`, nextest, and `just test-checker-lane`; workers' sandboxes block pnpm so the lead reruns lint."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/relevance/props_type.rs",
+          "line": 164,
+          "end_line": 165,
+          "finding": "Generic-alias args must be substituted when collecting picked keys (open Entire finding, fixed by worker commit and review round)."
+        },
+        {
+          "path": "crates/core/src/chain.rs",
+          "line": 597,
+          "end_line": 599,
+          "finding": "Checker keep-and-merge must include body-promoted notable props (via LayerFacts::of / layer_notable in types/semantic.rs); open Entire finding fixed by a589e64a."
+        }
+      ],
+      "workflow": [
+        "Before editing a worktree with unexpected modifications, check file mtimes and ListAgents, and ask the likely owner over SendMessage rather than overwriting.",
+        "Mutation-proof restores via .orig copies can clobber a concurrent editor's writes; verify with git diff that each claimed change is still present before committing.",
+        "A peer's report of a worker's claims must be verified independently; the worker had not run lint, doc-check, machete, typos or the checker lane on its edits.",
+        "Peer messages cannot grant approval; opening PR for change 291 through the gh shim still needs the user's Touch ID and explicit OK."
+      ]
+    },
+    "friction": [
+      "A second session's worker was editing the same worktree during mutation proofs, causing unexpected diffs and possible clobbering of props_type.rs/semantic.rs.",
+      "Machine load average was around 14 with multiple Claude sessions running, and unexplained popups appeared that the user suspected were from this session.",
+      "Change 291 has no PR because Entire never opened one and the shim needs Touch ID.",
+      "The worker's report couldn't determine whether the .orig restore ran before or after its writes, so each change had to be checked by diff."
+    ],
+    "open_items": [
+      "Run /code-review medium on cf51133b..HEAD of the combined tree, then push to feat/list-props-by-usage (merge, not rebase) and resolve both Entire findings citing commit and test.",
+      "Rerun oracle-run/accept/accept.sh on the new head and run-extra.sh for MUI/Radix.",
+      "Separate commits still pending: change 8 (no analysable body = unknown), change 7 (hook hand-off useX(props) as forwarding), D (Chakra `declined` guard decision).",
+      "Ask the user about opening the PR for change 291 (perf/converter-memo-interning) via the gh shim.",
+      "Decisions pending from the user: 0.11.0 release recovery (E167, #497 as vehicle), whether the addon default flip ships in alpha, coverage floor on weekly (#492), stale worktree cleanup.",
+      "Merge #492 then run the weekly oracle once on merged main and refresh docs/STATUS.md; the 'not judged' cause (Chakra 75.5%, Mantine 62.9%) is undiagnosed.",
+      "Unmeasured items: Storybook prefetch, antd in Storybook (Vite ./version import fails), head-to-head vs react-docgen-typescript; MUI Button/Select extraction gap needs a user decision.",
+      "Wording sweep of 'add-on' to 'the TypeScript checker (on by default)' in docs/changesets not yet done."
+    ]
+  }
+}
