@@ -434,7 +434,7 @@ fn push_inner<'a>(ty: &'a PropType, pending: &mut Vec<&'a PropType>) {
     }
 }
 
-/// The types of `fields` for [`past_size_budget`]: each field's, and an index signature's key type.
+/// The types of `fields` for [`past_size_budget`] and [`fingerprint`]: each field's, and an index signature's key type.
 fn push_fields<'a>(fields: &'a [ObjectField], pending: &mut Vec<&'a PropType>) {
     for field in fields {
         pending.push(&field.prop_type);
@@ -446,8 +446,9 @@ fn push_fields<'a>(fields: &'a [ObjectField], pending: &mut Vec<&'a PropType>) {
 
 /// A hash of everything in `ty` that tells most types apart: each type's kind, how many types it holds directly, and its
 /// names, texts and values. What it leaves out (a field's flags, a tuple's labels) only puts more types in one bucket of
-/// [`Trees`], which tells them apart by equality.
-fn fingerprint(ty: &PropType) -> u64 {
+/// [`Trees`], which tells them apart by equality. `None` for a type holding a number that equality cannot vouch for:
+/// NaN equals nothing, and `-0` equals `0` but is written apart.
+fn fingerprint(ty: &PropType) -> Option<u64> {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
     let mut pending = vec![ty];
@@ -481,7 +482,7 @@ fn fingerprint(ty: &PropType) -> u64 {
             | PropType::Function { .. } => {}
             PropType::StringLiteral(text) => text.hash(&mut hasher),
             PropType::UniqueSymbol { name } => name.hash(&mut hasher),
-            PropType::NumberLiteral(number) => number.to_bits().hash(&mut hasher),
+            PropType::NumberLiteral(number) => vouched(*number)?.hash(&mut hasher),
             PropType::BoolLiteral(value) => value.hash(&mut hasher),
             PropType::BigIntLiteral(value) => value.as_str().hash(&mut hasher),
             PropType::EnumMember { enum_name, member, value } => {
@@ -489,7 +490,7 @@ fn fingerprint(ty: &PropType) -> u64 {
                 member.hash(&mut hasher);
                 match value {
                     EnumMemberValue::String(text) => text.hash(&mut hasher),
-                    EnumMemberValue::Number(number) => number.to_bits().hash(&mut hasher),
+                    EnumMemberValue::Number(number) => vouched(*number)?.hash(&mut hasher),
                 }
             }
             PropType::Truncated { text, .. } => text.hash(&mut hasher),
@@ -502,7 +503,12 @@ fn fingerprint(ty: &PropType) -> u64 {
         push_inner(ty, &mut pending);
         (pending.len() - before).hash(&mut hasher);
     }
-    hasher.finish()
+    Some(hasher.finish())
+}
+
+/// The bits of `number` when equality tells it from every number written otherwise: not NaN, and not `-0`.
+fn vouched(number: f64) -> Option<u64> {
+    (!number.is_nan() && !(number == 0.0 && number.is_sign_negative())).then(|| number.to_bits())
 }
 
 /// The converted types of a session's memos, each held once however many entries of however many lanes convert to it:
@@ -514,10 +520,12 @@ pub(crate) struct Trees {
 }
 
 impl Trees {
-    /// The tree equal to `converted` held before, or a copy of it, held from now on.
+    /// The tree equal to `converted` held before, or a copy of it, held from now on. A copy of its own, not held, for a
+    /// tree that cannot be [fingerprinted](fingerprint).
     fn share(&self, converted: &PropType) -> Arc<PropType> {
+        let Some(fingerprint) = fingerprint(converted) else { return Arc::new(converted.clone()) };
         let mut trees = self.by_fingerprint.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let bucket = trees.entry(fingerprint(converted)).or_default();
+        let bucket = trees.entry(fingerprint).or_default();
         if let Some(held) = bucket.iter().find(|held| ***held == *converted) {
             return held.clone();
         }
@@ -2045,6 +2053,11 @@ mod tests {
         let zero = trees.share(&conditions(true, PropType::NumberLiteral(0.0)));
         let negative = trees.share(&conditions(true, PropType::NumberLiteral(-0.0)));
         assert!(!Arc::ptr_eq(&zero, &negative));
+        // Neither `-0` nor NaN is held, so no later tree is matched against them by an equality that cannot tell.
+        assert_eq!(fingerprint(&negative), None);
+        assert_eq!(fingerprint(&conditions(true, PropType::NumberLiteral(f64::NAN))), None);
+        let held: usize = trees.by_fingerprint.lock().unwrap().values().map(Vec::len).sum();
+        assert_eq!(held, 3);
         assert_eq!(
             serde_json::to_string(&*negative).unwrap(),
             serde_json::to_string(&conditions(true, PropType::NumberLiteral(-0.0))).unwrap()
