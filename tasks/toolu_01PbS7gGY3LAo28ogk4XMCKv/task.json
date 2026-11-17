@@ -1,0 +1,31 @@
+{
+  "tool_use_id": "toolu_01PbS7gGY3LAo28ogk4XMCKv",
+  "agent_id": "a6e45c6b7af78f83d",
+  "subagent_type": "general-purpose",
+  "task_description": "Reproduce and fix enum member value finding (named.rs)",
+  "files": [
+    ".changeset/enum-unknown-member-values.md",
+    "crates/core/src/cache.rs",
+    "crates/core/src/extractor/enum_fold.rs",
+    "crates/core/src/extractor/interface.rs",
+    "crates/core/src/extractor/mod.rs",
+    "crates/core/src/extractor/visit.rs",
+    "crates/core/src/known.rs",
+    "crates/core/src/resolver/named.rs",
+    "crates/core/src/resolver/primitives.rs",
+    "crates/core/src/types/collected.rs",
+    "crates/core/tests/enum_member_values.rs",
+    "crates/core/tests/enum_props.rs",
+    "crates/semantic/tests/enum_member_values.rs",
+    "packages/napi/index.d.ts"
+  ],
+  "token_usage": {
+    "input_tokens": 134,
+    "cache_creation_tokens": 174412,
+    "cache_read_tokens": 7786220,
+    "output_tokens": 57167,
+    "api_call_count": 67
+  },
+  "started_at": "2026-11-17T13:01:53.243288-08:00",
+  "completed_at": "2026-11-17T13:13:03.566107-08:00"
+}
