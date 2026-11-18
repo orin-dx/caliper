@@ -1,0 +1,16 @@
+{
+  "tool_use_id": "toolu_01N5UBa89GEvLoHi2Ao4CWGi",
+  "agent_id": "a954055f3c3bebee6",
+  "subagent_type": "general-purpose",
+  "task_description": "Survey leftover worktrees read-only",
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 63566,
+    "cache_read_tokens": 769464,
+    "output_tokens": 11507,
+    "api_call_count": 15
+  },
+  "started_at": "2026-11-17T17:23:34.464807-08:00",
+  "completed_at": "2026-11-17T17:25:23.130533-08:00",
+  "transcript_unavailable_reason": "transcript unreadable"
+}

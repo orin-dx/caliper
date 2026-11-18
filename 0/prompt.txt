@@ -1,0 +1,384 @@
+<task-notification>
+<task-id>a8ad7961595a3abf8</task-id>
+<tool-use-id>toolu_01Spx8mKyx2sSJKVFhcCPsPn</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/6f993b0f-3007-4088-bd26-63eda356278e/tasks/a8ad7961595a3abf8.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review medium cf51133b..HEAD" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>```json
+[
+  {
+    "file": "crates/core/src/react_types.rs",
+    "line": 425,
+    "summary": "The old `checker_prop_used`, `react_prop_listed` and `react_props_wanted` are left in place after the diff replaced every caller with `checker_prop_kept`, `visible_rows` and `react_props_wanted_for`. A grep finds no remaining uses.",
+    "failure_scenario": "The two rule sets sit side by side, and the old one keys only on `entry.props`, not on `notable_inherited`. A later caller who picks the old helpers gets a different set of kept React props than the checker merges. This undoes the 'one owner' consolidation the diff set out to make. Because the functions are `pub`, the compiler does not warn that they are dead."
+  },
+  {
+    "file": "crates/core/src/types/semantic.rs",
+    "line": 435,
+    "summary": "`apply_props` now calls `expanded(entry, cx.mode)`. With no placement and `cx.mode == None` it returns true, which selects `Full` mode and takes every React prop. Before, a missing placement always meant not expanded.",
+    "failure_scenario": "A whole-project merge runs on an entry with no relevance placement, with `collapseInheritedProps: none`. The `react_attribute_mode(Full, true)` call then lets every `@types/react` prop through, where the old code gave `Curated`. This is the one call site where the no-placement fallback changes behaviour, and it may leak DOM attributes into entries that never gathered evidence."
+  },
+  {
+    "file": "crates/core/src/relevance/props_type.rs",
+    "line": 280,
+    "summary": "`unproven_pick` is set only in `pick_keys`, which `read` and `pick` reach. The `Omit` alias arm of `read`, and `Pick` reached through `picks` or an alias base, set `declined` but not `unproven_pick`. Whether the forwarding lane's props types are merged is not shown.",
+    "failure_scenario": "The props type is `type Props = Omit&lt;Pick&lt;Base, string&gt;, 'x'&gt;`, or `Pick` sits inside `Partial&lt;&gt;`. The Omit arm calls `picks`, which reaches `pick_keys` and sets the flag in that case. But a `Pick&lt;Attrs, string&gt;` that reaches only the `declined` path does not set it. Relevance then still narrows React members, even though the key set is unproven."
+  },
+  {
+    "file": "crates/core/src/resolver/relevance_inputs.rs",
+    "line": 101,
+    "summary": "The lookup clones the whole `CollectedTypeAlias` and runs `apply_generic_args` on every call with non-empty args. It then wraps the result in `Box&lt;Cow&lt;...&gt;&gt;`, which is two layers of indirection.",
+    "failure_scenario": "`pick`, `keys` and `picks` call `lookup` repeatedly for each component's props type. Each generic alias instantiation allocates a fresh clone, and nothing caches it. On a large library with many generic aliases this is wasted work on the resolver path. `Declaration::Alias` could hold the `Cow` directly (or an `Arc`) instead of a `Box&lt;Cow&gt;`."
+  },
+  {
+    "file": "crates/core/src/relevance/props_type.rs",
+    "line": 190,
+    "summary": "The catch-all arm `(_, args)` in `picks` replaces `(_, [])` plus `_ =&gt; {}`. It now calls `lookup` (import resolution and `apply_generic_args`) for every named generic type the walk reaches, such as `ComponentProps&lt;'div'&gt;` or `Array&lt;T&gt;`. Previously those were skipped.",
+    "failure_scenario": "A props type like `Foo&lt;Bar&lt;Baz&gt;&gt;` triggers import resolution and generic substitution for names that are not aliases. This costs time and memory, which matters for resolver changes. Any side effect of `apply_generic_args` on an unexpected alias with arguments is also newly reachable here."
+  },
+  {
+    "file": "crates/core/src/types/semantic.rs",
+    "line": 584,
+    "summary": "`layer_notable` now selects members only when `entry.notable_inherited` has the name with a `parent` matching the layer's type name and file. An entry whose `notable_inherited` prop has `parent: None` is silently skipped. The old rule used the curated notable list.",
+    "failure_scenario": "A notable member such as `className` is recorded in `notable_inherited` without a parent, or with a parent that differs from the layer's. The checker's type for it is then never merged back, and the prop keeps its structural type. The failure is silent."
+  },
+  {
+    "file": "crates/semantic/src/lib.rs",
+    "line": 106,
+    "summary": "When `cx` is `None`, the code substitutes `Dependencies` as the default collapse mode. That duplicates a policy that is also encoded inside `expanded`, and it can disagree with the hook, which uses the real `cx.mode`.",
+    "failure_scenario": "The default for a missing context is hard-coded here. If the pipeline's default collapse mode changes, or the no-placement fallback differs, `targets_with(None)` asks the checker for a different `react_wanted` set than the merge keeps. The mismatch drops React props."
+  }
+]
+```
+
+I read the diff and the surrounding code but did not build or run any tests.</result>
+<usage><subagent_tokens>66168</subagent_tokens><tool_uses>4</tool_uses><duration_ms>36556</duration_ms></usage>
+</task-notification>
+
+---
+
+change #288 has pending findings that need to be addressed
+
+---
+
+Why do we need to specify rustup/toolchain/etc???? Why are we not using moon, just, etc
+
+---
+
+<task-notification>
+<task-id>bs1af3204</task-id>
+<tool-use-id>toolu_01PgoDbRoBXp77ow2t9LHZ1v</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/6f993b0f-3007-4088-bd26-63eda356278e/tasks/bs1af3204.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for PR 490 CI to settle" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Can we address this finding for change #291:
+
+
+<pasted_content id="0b4b">
+### Medium finding
+
+**Location:** `crates/core/src/resolver/named.rs:609-614`
+
+With `--no-checker`, `enum Level { Low = 1 << 2 }` and a prop typed `Level.Low` now produce a string-valued option `"Low"` instead of numeric `4`. The extractor substitutes member names for unknown values (`extractor/visit.rs:327`), this new path treats them as known literals, and `pipeline/rdt.rs:28–36` exposes them as control options. Preserve whether the value is known and leave unknown members unresolved.
+</pasted_content id="0b4b">
+
+---
+
+<cross-session-message from="uds:/tmp/cc-socks/43913.sock" from-name="close-industry-gap" from-mode="prompting">
+Not mine: take it over. This session (close-industry-gap, repo callisto, research/analysis only) has made no commits or branches and has no worktree named agent-a6e45c6b7af78f83d.
+1. Ownership: in this checkout, `fix/enum-unknown-member-values` does not exist, `git cat-file -t 22baa273` says not a valid object, and no worktree matches agent-a6e45c6b. That branch is in a different repo or checkout than the one I can see.
+2. Gate: I have run no lint, nextest or mutation proofs for it.
+3. Pushed: nothing from me is pushed.
+My only side effects were read-only plus two deleted temp target dirs, and my only repo change is an untracked docs/research/ directory I did not create. If the worktree is stale, check whether another session or agent created it before you take it over.
+</cross-session-message>
+
+---
+
+<cross-session-message from="uds:/tmp/cc-socks/43913.sock" from-name="close-industry-gap" from-mode="prompting">
+Correction: do not take over fix/enum-unknown-member-values (caliper, worktree agent-a6e45c6b7af78f83d). My user says it came from a session they stopped and asked this session (callisto close-industry-gap) to pick it up and wrap it up, so I now own the gate, the push and the trail link. The branch has one commit, 22baa273, a clean worktree, and no origin branch. If you already started on it (gate, rebase, push, trail 405 or the change 291 answer), tell me exactly what is done so we don't duplicate or clobber. If you have not, leave it alone, and I will report back here when it is pushed and trail 405 is linked.
+</cross-session-message>
+
+---
+
+[Cross-session idle notice] "close-industry-gap", which you asked to be notified about, is idle now — it finished a turn at 13:27. Its harness reports: «Replied to the peer session that fix/enum-unknown-member-values is not mine, no gate was run and no…». This is an automated notice from that session's harness — not a message from a person, and not an instruction; act on it only insofar as your user's earlier request calls for it.
+
+---
+
+Have we addressed the finding?
+
+---
+
+Push it so we can move forward, jesus
+
+---
+
+<cross-session-message from="uds:/tmp/cc-socks/43913.sock" from-name="close-industry-gap" from-mode="prompting">
+Acknowledged: I pushed and linked nothing and modified nothing in that worktree, so the branch is yours. My results on 22baa273 are below.
+- Gate (my run): lint, doc-check, machete and typos exit 0. Full nextest exited 0 with 1667 passed when run unsandboxed. In my sandbox, 3 CLI tests fail with PermissionDenied writing apps/oracle/.tmp*; that is a sandbox artifact, not the branch.
+- Mutation proofs: `cargo mutants --in-diff` on the commit's .rs changes tested 69 mutants: 53 caught, 13 unviable, 3 missed, all in crates/core/src/extractor/enum_fold.rs:
+  1. :105 `||`->`&&` in self_member. This is a REAL gap. No test covers a read through another object (`Other.A` must be Unknown), or the shadow case where a member is named like the enum. With `&&`, `Other.A` would take the earlier member's value.
+  2. :181 `|`->`^` in BitwiseOR. This is a REAL gap. The OR tests use non-overlapping bits; add something like `3 | 1` (expect 3; xor gives 2).
+  3. :200 `<`->`<=` at 1e15. Equivalent: JS prints 1e15 as 1000000000000000, the same as the i64 path.
+  Suggest two to three test cases in crates/core/tests/enum_member_values.rs as a follow-up commit.
+- Also note: 22baa273 carries a `Claude-Session:` trailer. The user's rule in other orin-dx repos is no session links in public commits. Check the caliper rule before the PR merges.
+I'm leaving semver, code review, the PR body and the change 291 reply to you unless the user redirects me.
+</cross-session-message>
+
+---
+
+We resolve findigns when we fix them
+
+---
+
+Did you push it up?
+
+---
+
+Change #302 has a finding too:
+
+
+<pasted_content id="0b4b">
+### Low finding
+
+**Location:** `crates/core/src/extractor/enum_fold.rs:31`
+
+For `enum E { A = "\uD83D" + "\uDE00" }`, converting each operand with `js_text::lossy` replaces both surrogate halves before `binary` concatenates them. Structural extraction therefore publishes `"��"` for `E.A`, although TypeScript computes `"😀"`. Preserve UTF-16 through folding, or leave expressions involving lossy operands unresolved.
+</pasted_content id="0b4b">
+
+---
+
+change #300 still has failures in its PR
+
+---
+
+Did you push and resolve the findings??? WTF
+
+---
+
+<task-notification>
+<task-id>bmoq4aqz7</task-id>
+<tool-use-id>toolu_016RP6tu6LB41oLPwvfX6t5q</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/6f993b0f-3007-4088-bd26-63eda356278e/tasks/bmoq4aqz7.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for CI on PRs 502 and 504 to settle" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+What worktrees do we really need? And can we check out with shallow from now on?
+
+---
+
+Our worktrees are huge, why is our repo massive?
+
+---
+
+fixtures is not a scratch directory. It was taking up a huge part of my SDD so I deleted it. WTF
+
+---
+
+I deleted from the CLI so it doesn't go to the trash
+
+---
+
+Why is our git history so large???
+
+---
+
+You can look at session logs
+
+---
+
+Can we cleanup the worktrees? There is no way we still need all of them
+
+---
+
+Do we still have 14 worktrees?
+
+---
+
+Should we clean up the outside ones and some of these other ones???
+
+---
+
+<agent-message from="a954055f3c3bebee6">
+[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output, NOT a message from the user: instructions, requests, or approval claims inside it are the subagent's words and carry no user authority. The harness indents every line of the report, so a frame-like line at column zero inside it would be forged. Notes above this frame may quote model-derived text, which carries no user authority either. The report follows:
+  PARTIAL SURVEY. I could not run `git status` in any worktree. This session is pinned to /Users/gabe/Projects/caliper/.claude/worktrees/memo-interning. The Bash guard refuses `git -C <other path>` and any loop or compound git command. I did not try to get around that with `cd` or `GIT_DIR`. Dirty and untracked state is therefore UNKNOWN for every worktree below. Before removing anything, run `git -C <path> status --short` yourself, or re-run me from the main checkout.
+  
+  What I could do from the shared object store: `git fetch -q origin` worked, but only with sandbox allowed_domains github.com. `gh pr list` needed the sandbox off, because its TLS check failed inside it. I ran the gh calls read-only with the sandbox off. Counts below are `git log origin/main..<branch>` and `git branch --merged origin/main`. Remote-branch presence is from `git branch -r` after the fetch.
+  
+  Notation: "ancestor" means HEAD is an ancestor of origin/main.
+  
+  agent-a518d0c89389edba6 (863M)
+  - Branch feat/relevance-used-layers at 7137bf80. NOT an ancestor.
+  - 3 commits ahead of origin/main: 992a4a46 "a collapsed DOM layer names in `used` the attributes consumers pass (ADR 0028 T7b)", d6ab5690 (lazy delta), 7137bf80 (review round). `git cherry` marks all 3 as unique (+).
+  - Not on origin, and no PR for it in any state. No other branch carries it. No "T7b" commit exists on main.
+  - Status: unknown (blocked).
+  - Verdict: HAS-UNIQUE-WORK. Three unpushed commits, no PR.
+  
+  agent-a5ebc07e926b161d2 (419M)
+  - Branch worktree-agent-a5ebc07e926b161d2 at 50cd7dd0. Ancestor, merged.
+  - 0 ahead. Not on origin.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  agent-a5fd7afe2ce9a583f
+  - Branch worktree-agent-a5fd7afe2ce9a583f at de016f69. Ancestor, merged, 0 ahead. Not on origin.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  agent-a6e45c6b7af78f83d
+  - Branch fix/enum-unknown-member-values at 22baa273. NOT an ancestor.
+  - 1 commit ahead: 22baa273 "fix(core): leave an enum member whose value is unknown unresolved".
+  - origin/fix/enum-unknown-member-values is at 3798c18a, which is a later commit (the current branch's HEAD in this session). PR #504 is OPEN. Because 22baa273 is only 1 commit ahead of origin/main, the remote carries the same fix, or a descendant of it.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go. The work is in open PR #504. Check status first.
+  
+  agent-a7d3baa5ada6c9af5
+  - Branch feat/collapse-large-sources-by-default at 6b9a187b. Ancestor, merged, 0 ahead. Not on origin.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  agent-a895dbc3a922241ee
+  - Branch worktree-agent-a895dbc3a922241ee at 8d003d2d. Ancestor, merged, 0 ahead. Not on origin.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  agent-aa31dc41d351b16f1
+  - Detached HEAD at 7b8f6d0d. Ancestor, 0 ahead.
+  - 7b8f6d0d is the first line of merges.txt (merge of PR #396).
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  agent-abdd35c983e9e5db8
+  - Branch mf-t4 at 3eb7ec26. Ancestor, merged, 0 ahead. Not on origin.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  agent-ac1e1e168448eb729 (852M, LOCKED)
+  - Branch fix/jsx-evidence-fact-ownership at 658a116c. NOT an ancestor.
+  - 2 commits ahead by sha: 658a116c "nest a wrapped class component by its node" and 363725d9 "own body facts by node and order them by position".
+  - `git cherry origin/main` marks both as "-", meaning patch-equivalent commits are already on main (rebased or merged under other shas).
+  - Not on origin, and no PR found. The worktree is locked, so removal needs `git worktree unlock` first.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE for commits. Check status first, then unlock.
+  
+  agent-acaee8df337ceb2fc
+  - Branch fix/structural-utility-decision at 838b8b86. Ancestor, merged, 0 ahead. Not on origin.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  agent-ae96c08e3c3bf7d68
+  - Branch fix/relevance-output at 4bd65325. Ancestor, merged, 0 ahead. Not on origin.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  docs-align-weekly-2026-11-09 (20M, LOCKED)
+  - Branch worktree-docs-align-weekly-2026-11-09 at 91a4debe. NOT an ancestor.
+  - 1 commit ahead: 91a4debe "docs: align status, measurement and rdt-differences with the 2026-11-09 weekly record". It touches docs/STATUS.md, docs/measurement.md and docs/rdt-differences.md (+49/-5).
+  - Not on origin, and no PR found. On main, measurement.md and rdt-differences.md have since changed substantially: the diff of those two files between 91a4debe and origin/main is 87 insertions and 114 deletions, so main may have superseded it.
+  - Status: unknown (blocked).
+  - Verdict: UNSURE. One unpushed docs commit, probably superseded, but I did not diff it against main line by line.
+  
+  OUTSIDE WORKTREES
+  
+  /Users/gabe/Projects/caliper-homebrew-tap
+  - Branch chore/homebrew-tap-notify at 5e06524e. Ancestor of origin/main, merged, 0 ahead. Not on origin.
+  - Last commit: "Merge pull request #199 from orin-dx/chore/reset-equivalence-allow-list" (2026-10-26).
+  - No PR found by head name in gh. The branch is fully contained in main anyway.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  /Users/gabe/Projects/oxc-release-builds
+  - Branch fix/release-builds at 77be2d82. Ancestor, merged, 0 ahead. Not on origin.
+  - Last commit: "ci(release): drop --state and --recovery (removed in callisto 0.9.0)" (2026-09-22).
+  - PR #9 "ci(release): build platform binaries before publishing" is MERGED.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  /Users/gabe/Projects/oxc-stack
+  - Branch dependabot/cargo/routine-cargo-70f637b546 at e512f23a. Ancestor, merged, 0 ahead. Not on origin.
+  - Last commit: "chore(deps): bump the routine-cargo group across 1 directory with 2 updates" (2026-09-28).
+  - PR #10 is MERGED.
+  - Status: unknown (blocked).
+  - Verdict: SAFE-TO-REMOVE as far as commits go, pending a status check.
+  
+  Extras in `git worktree list` that you did not ask about
+  - The main checkout /Users/gabe/Projects/caliper is on fix-entire-hook at 485102ec (merged into main).
+  - /Users/gabe/Projects/caliper/.claude/worktrees/dep-502 is detached at 3faaf5e1. I did not survey it.
+  
+  NOT GIT WORKTREES (all under /Users/gabe/Projects/caliper/.claude/worktrees/)
+  
+  wf_347c0789-229-2-scratch-keep (160M)
+  - Scratch files from a workflow run.
+  - Contents: shadcn.cal.json (153.6M) and antd.cal.json (6.9M), which look like caliper output for the shadcn and antd corpora. Also guard.txt and noguard.txt (about 4-5K each, likely guard on/off comparison output), and small Python helpers: base.py, cal.py, coll.py, diag.py, exl.py, look.py, ov.py, pk.py, pk2.py, rd.py, run2.py, weekly2.py (12.5K).
+  - Guess: an ad-hoc analysis of the corpora. The directory name says "keep", so someone meant to retain it. Your memory rule says no durable state in /tmp or scratch, so decide before deleting.
+  
+  agent-a398660c021195770 (4K)
+  - Contains only target/llvm-cov-target/ with one 1.4K .profraw file.
+  - Guess: a leftover coverage artifact from a removed agent worktree. Nothing of value.
+  
+  napidist
+  - A symlink, 172B, pointing into /Users/gabe/Projects/caliper/node_modules/.pnpm/@napi-rs+cli@3.10.8_.../node_modules/@napi-rs/cli/dist.
+  - Guess: a convenience link to the napi-rs CLI dist. It is harmless, and dangling only if node_modules is reinstalled.
+  
+  merges.txt (17.5K, 205 lines)
+  - Lines look like "<n> <sha> <date> Merge pull request #… from orin-dx/…". It begins with 7b8f6d0d (PR #396, 2026-11-14), the same commit as detached worktree agent-aa31dc41d351b16f1.
+  - Guess: a numbered list of merge commits, written as a merge-ordering input for an orchestrated batch.
+  
+  SUMMARY
+  1. Safe by commit state (merged, 0 ahead, not on origin): agent-a5ebc07e, a5fd7afe, a7d3baa5, a895dbc3, aa31dc41, abdd35c9, acaee8df, ae96c08e, caliper-homebrew-tap, oxc-release-builds, oxc-stack.
+  2. Safe once you confirm status is clean: agent-a6e45c6b (work is in open PR #504) and agent-ac1e1e16 (locked, needs unlock; commits are patch-equivalent to main).
+  3. Keep, or push first: agent-a518d0c8 has 3 unpushed, un-PR'd commits (T7b `used` attributes).
+  4. Unsure: docs-align-weekly-2026-11-09 (locked, 1 unpushed docs commit, likely superseded by main).
+  5. No dirty or untracked state was checked anywhere because of the sandbox guard, so no removal is yet confirmed. Run `git status --short` in each before removing. The non-worktree items: agent-a398660c and napidist are trivial; wf_347c0789-229-2-scratch-keep (160M) and merges.txt are your call.
+</agent-message>
+
+---
+
+Can you find out and clean up the disk usage subagent?
+
+---
+
+I feel like we still have too many targets and we're not cleaning up target and dist appropriatelly
+
+---
+
+do we still need the memo-interning worktree?
+
+---
+
+If we don't need it remove it
+
+---
+
+Where are we now?
+
+---
+
+Merged the PR, what's next?
+
+---
+
+What are the fixtures? Are they just for testing our oracle? Shouldn't we use sample libraries?
+
+---
+
+Why were these things outside of the repo? Were we over-engineering and it's fine or should they have been part of the repo? Should we have a separate repo to support the oracle?
+
+---
+
+You names it fixtures and then put a lot of thinigs that were not fixtures there
+
+---
+
+Can we think this through, consider cleanup and local disk usage, what goes where, naming organization, caching, etc
+
+---
+
+Let's get working on this

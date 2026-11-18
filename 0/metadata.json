@@ -1,0 +1,148 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7QWVJ1TQHVHSM0222X7YEES",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-18T17:56:59.891538Z",
+  "branch": "worktree-docs-worker-contract",
+  "checkpoints_count": 19,
+  "files_touched": [
+    "CONTRIBUTING.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "d2f288548b71",
+  "checkpoint_transcript_start": 2280,
+  "transcript_lines_at_start": 2280,
+  "compact_transcript_start": 209,
+  "token_usage": {
+    "input_tokens": 204,
+    "cache_creation_tokens": 1314270,
+    "cache_read_tokens": 33698009,
+    "output_tokens": 78905,
+    "api_call_count": 101,
+    "subagent_tokens": {
+      "input_tokens": 30,
+      "cache_creation_tokens": 63566,
+      "cache_read_tokens": 769464,
+      "output_tokens": 11507,
+      "api_call_count": 15
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 596,
+    "cache_creation_tokens": 1684296,
+    "cache_read_tokens": 69534429,
+    "output_tokens": 172607,
+    "api_call_count": 290,
+    "subagent_tokens": {
+      "input_tokens": 40,
+      "cache_creation_tokens": 127297,
+      "cache_read_tokens": 981460,
+      "output_tokens": 15618,
+      "api_call_count": 20
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 20,
+    "layers": {
+      "betterleaks": 2,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 18,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 33
+  },
+  "summary": {
+    "intent": "Reduce disk usage and clutter in the caliper repo and surrounding projects (stale worktrees, huge .git, build targets), then design a sane plan for what lives where, naming, caching and cleanup.",
+    "outcome": "Worktrees under .claude/worktrees were cut from 68 to about 7 (65 GB to under 2 GB), about 60 GB of finished-job scratch and several GB of dormant target dirs were deleted, and #504 was merged. The .git size cause was diagnosed as Entire session logs, and a by-lifetime storage plan was proposed but not yet approved or implemented.",
+    "learnings": {
+      "repo": [
+        "Worktrees share one object store, so shallow or sparse checkout saves nothing; the disk cost is per-worktree `target/` (about 4-5 GB each, full debug info) and `node_modules` (about 400 MB, partly shared via pnpm).",
+        "The .git directory is 811 MB: 449 MB of objects plus a 296 MB `entire-redact-cache`. Of 266 MiB of blob data, 256 MiB is Entire session transcripts under refs/entire/checkpoints (2,585 refs), pushed to the public GitHub origin.",
+        "The largest transcripts are dominated by base64 screenshots, extracted PDF text and API request blobs. One contains reads of personal Desktop PDFs, which is a privacy concern on a public repo.",
+        "`entire clean` only touches session state and shadow branches; `entire checkpoint delete <id> --dry-run` removes a checkpoint locally and from checkpoint remotes.",
+        "Agent worktrees were locked by dead processes (pid 40549 and 44130), so they needed `git worktree unlock` before non-force `git worktree remove`. Non-force removal refuses worktrees with modified or untracked files, which acts as a safety net.",
+        "oxc-release-builds and oxc-stack are standalone clones with their own .git, not worktrees, so git cannot remove them. caliper-homebrew-tap was refused for dirty files.",
+        "Real corpora are fetched by `scripts/corpora.py setup` into `.corpora/repos` (gitignored); `weekly.py --corpora DIR` can override. In-repo `fixtures/` holds 23 small sample libraries (404 KB). Neither depends on the deleted caliper-fixtures directory.",
+        "`just test-checker-lane` hard-wires `$PWD/target/release`, which blocks a shared CARGO_TARGET_DIR.",
+        "Entire Gates showed 'Mergeable: no' on #504 solely because of the approvals gate, with all CI and findings gates passing.",
+        "Entire's outgoing checkpoints should be flushed (a no-op push worked) before removing a worktree."
+      ],
+      "code": [],
+      "workflow": [
+        "Delegated subagents are pinned to their worktree and the Bash guard refuses `git -C <other path>` and compound git commands, so cross-worktree status surveys cannot run from them; run them from the main checkout.",
+        "Deleting from the CLI bypasses Trash, and APFS local snapshots then hold the freed space (df unchanged) until they expire or are thinned.",
+        "Use `$TMPDIR` for scratch, not a named directory outside the repo; a location should hold only what its name says (saved to memory as fixtures-is-not-scratch).",
+        "Remove a worktree and its `target` as soon as its PR merges; a documented cleanup routine fits the user's no-new-scripts rule.",
+        "Measure before proposing changes such as `debug = \"line-tables-only\"` or sccache."
+      ]
+    },
+    "friction": [
+      "The caliper-fixtures directory was deleted via CLI mid-session, losing accept.sh, oracle reports, pattern-eval.md (the spec for changes 8, 7 and D) and corpora; only the worker contract was reconstructed to memory.",
+      "The subagent survey could not check dirty state because of the Bash guard, so removal decisions for eight dirty worktrees remained unresolved.",
+      "I miscounted worktrees (said 15, actually 14) and had to correct it.",
+      "Deleted data was still held by 22 Time Machine snapshots, so df showed no freed space.",
+      "Worker contract told every worker to dump build output into caliper-fixtures, creating around 90 per-task directories and GB of misnamed content.",
+      "gh needed the sandbox off because of a TLS check failure."
+    ],
+    "open_items": [
+      "Decide whether to force-remove the eight dirty merged worktrees (a5ebc07, a5fd7af, a7d3baa, a895dbc, aa31dc4, abdd35c, acaee8d, ae96c08) after inspecting them.",
+      "Push feat/relevance-used-layers (3 unpushed commits, 'T7b') from agent-a518d0c8 before removing it; decide on docs-align-weekly-2026-11-09.",
+      "Delete the standalone oxc-* clones and stray leftovers (wf_347c0789-229-2-scratch-keep, agent-a398660c, napidist, merges.txt) once approved.",
+      "Decide whether to restore small files from the local snapshot (`sudo tmutil` restore) and whether to purge snapshots with `tmutil thinlocalsnapshots`.",
+      "Decide how to handle the checkpoint holding personal Desktop PDFs on the public origin, and whether the Entire checkpoint remote is meant to be the public GitHub repo.",
+      "Move the worker contract into docs/ and the acceptance harness into apps/oracle in a docs and harness PR (recommended first); CONTRIBUTING.md was the only file modified.",
+      "Move corpora to a shared ~/.cache/caliper/corpora (small change to corpora.py and weekly.py); verify whether ROOT is the checkout, and whether .corpora size is a problem.",
+      "Measure and possibly adopt `debug = \"line-tables-only\"` and sccache; fix the test-checker-lane recipe if sharing a target dir.",
+      "Clean stale target dirs in callisto, monokl, gix, panda and michi after checking for live sessions; the other repos' finished job scratch is also untouched.",
+      "Delete the 76 merged local branches and run `entire clean` per the proposed routine.",
+      "Product work not started: changes 8, 7 and D (Chakra declined guard), the weekly oracle run on merged main, MUI Button/Select extraction gap, and Storybook/antd/react-docgen-typescript measurements.",
+      "Decide on the 0.11.0 release recovery and #497, whether the collapse default ships in the first alpha, and whether the weekly coverage floor stays.",
+      "Compare duplicated moon and just fmt/lint/typos tasks."
+    ]
+  }
+}
