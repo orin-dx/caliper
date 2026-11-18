@@ -260,6 +260,15 @@ fn both_lanes(
     files: &[(&str, String)],
     collapse: CollapseInheritedProps,
 ) -> (tempfile::TempDir, [caliper_docgen_core::types::ExtractionOutput; 2]) {
+    both_lanes_loading(files, collapse, false)
+}
+
+/// [`both_lanes`] with `loadDependencies` as given: a source in `node_modules` collapses only when it is on.
+fn both_lanes_loading(
+    files: &[(&str, String)],
+    collapse: CollapseInheritedProps,
+    load_dependencies: bool,
+) -> (tempfile::TempDir, [caliper_docgen_core::types::ExtractionOutput; 2]) {
     let dir = tempfile::Builder::new().prefix("RelevanceProbe").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     std::fs::write(
@@ -283,6 +292,7 @@ fn both_lanes(
         use_cache: false,
         collapse_inherited_props: collapse,
         html_attributes: HtmlAttributeMode::Full,
+        load_dependencies,
         ..PipelineOptions::default()
     };
     let structural = extract(&options);
@@ -556,4 +566,31 @@ fn every_row_the_body_promotes_has_the_checkers_type() {
         assert_eq!(listed.prop_type, expanded.prop_type, "{name}: the checker's type");
         assert!(row(&structural.components["Reads"], name).is_some(), "{name} is a structural row");
     }
+}
+
+#[test]
+fn a_source_only_a_react_type_reaches_collapses_like_any_other_large_source() {
+    // The Chakra fixture's `Button`: its props type is a project alias intersecting `Omit<…>` with a style type built on
+    // `React.CSSProperties`, which extends csstype's `Properties`, made of interfaces of hundreds of members. Only the
+    // checker reads them. They reach the component whole through React's type, so the large ones are layers as they are
+    // when a project type extends them directly, not hundreds of rows ("never hide on silence" holds only where the
+    // walk could not prove the reach).
+    let files = [("Button.d.ts", include_str!("../../../fixtures/chakra/Button.d.ts").to_owned())];
+    let (_dir, [_, checker]) = both_lanes_loading(&files, CollapseInheritedProps::Dependencies, true);
+    let styled = &checker.components["Button"];
+    // Each is a layer of names. The few of their members React's own attribute interfaces declare too (`color`,
+    // `display`) stay rows: a prop of the same name another source declares is not the layer's.
+    let large = ["StandardLonghandProperties", "VendorLonghandProperties"];
+    let layers: Vec<(&str, usize)> =
+        styled.inheritance.iter().map(|layer| (layer.type_name.as_str(), layer.members.len())).collect();
+    for source in large {
+        let layer = styled.inheritance.iter().find(|layer| layer.type_name == source);
+        assert!(layer.is_some_and(|layer| layer.members.len() > 200), "{source} is a layer of names: {layers:?}");
+    }
+    let rows_of = |source: &str| {
+        styled.props.values().filter(|prop| prop.parent.as_ref().is_some_and(|parent| parent.name == source)).count()
+    };
+    assert!(rows_of("StandardLonghandProperties") < 100, "rows {}", rows_of("StandardLonghandProperties"));
+    assert_eq!(rows_of("VendorLonghandProperties"), 0);
+    assert!(styled.props.contains_key("isLoading"), "the props type's own member is a row");
 }
