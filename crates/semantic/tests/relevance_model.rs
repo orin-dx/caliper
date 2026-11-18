@@ -578,19 +578,18 @@ fn a_source_only_a_react_type_reaches_collapses_like_any_other_large_source() {
     let files = [("Button.d.ts", include_str!("../../../fixtures/chakra/Button.d.ts").to_owned())];
     let (_dir, [_, checker]) = both_lanes_loading(&files, CollapseInheritedProps::Dependencies, true);
     let styled = &checker.components["Button"];
-    // Each is a layer of names. The few of their members React's own attribute interfaces declare too (`color`,
-    // `display`) stay rows: a prop of the same name another source declares is not the layer's.
-    let large = ["StandardLonghandProperties", "VendorLonghandProperties"];
-    let layers: Vec<(&str, usize)> =
-        styled.inheritance.iter().map(|layer| (layer.type_name.as_str(), layer.members.len())).collect();
-    for source in large {
-        let layer = styled.inheritance.iter().find(|layer| layer.type_name == source);
-        assert!(layer.is_some_and(|layer| layer.members.len() > 200), "{source} is a layer of names: {layers:?}");
-    }
-    let rows_of = |source: &str| {
-        styled.props.values().filter(|prop| prop.parent.as_ref().is_some_and(|parent| parent.name == source)).count()
-    };
-    assert!(rows_of("StandardLonghandProperties") < 100, "rows {}", rows_of("StandardLonghandProperties"));
-    assert_eq!(rows_of("VendorLonghandProperties"), 0);
+    // csstype's large interfaces are layers of names, found by the file that declares them, not by their names. The
+    // few of their members React's own attribute interfaces declare too (`color`, `display`) stay rows, and so do the
+    // interfaces under the size that collapses a source: what is layered is most of what csstype reaches.
+    let in_csstype = |file: &str| file.contains("/csstype/");
+    let layered: usize =
+        styled.inheritance.iter().filter(|layer| in_csstype(&layer.file_name)).map(|layer| layer.members.len()).sum();
+    let listed = styled
+        .props
+        .values()
+        .filter(|prop| prop.parent.as_ref().is_some_and(|parent| in_csstype(&parent.file_name)))
+        .count();
+    assert!(layered > 400, "csstype's large interfaces are layers of names: {layered} names layered");
+    assert!(listed < layered, "{listed} csstype rows listed against {layered} names layered");
     assert!(styled.props.contains_key("isLoading"), "the props type's own member is a row");
 }

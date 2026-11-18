@@ -841,12 +841,12 @@ impl Converter {
     /// members, a class's or interface's bases (a generic one's through its target), and the lib's own `Partial`,
     /// `Required`, `Readonly` and `Omit` (named by the lib's alias: `Omit` only removes keys, and the members left are
     /// the answer's props). A lib `Pick` selects: what it applies to is reached, but not whole, and stays so however
-    /// else it is reached. A React type's bases are walked on the same edges, so a source outside React that only a React
-    /// type reaches (csstype's, through `CSSProperties`) is reached whole when every edge to it is. Any other type is not
-    /// looked into: a mapped type, a project alias of one (TypeScript names
-    /// the type by the outermost alias, and the lib writes `Omit` as a `Pick`, so under a project alias the two cannot
-    /// be told apart), a conditional, a union. What it holds is not proven to reach whole, and the merge does not
-    /// collapse it (`SemanticComponent::whole`).
+    /// else it is reached. A React type's bases are walked on the same edges, so a source outside React that only a
+    /// React type reaches (csstype's, through `CSSProperties`) is reached whole when every edge to it is; a React type
+    /// whose bases the checker cannot be asked for proves none, so what lies beneath it is listed. Any other type is not
+    /// looked into: a mapped type, a project alias of one (TypeScript names the type by the outermost alias, and the lib
+    /// writes `Omit` as a `Pick`, so under a project alias the two cannot be told apart), a conditional, a union. What it
+    /// holds is not proven to reach whole, and the merge does not collapse it (`SemanticComponent::whole`).
     pub(crate) async fn composes(
         &self,
         props_type: &TypeInfo,
@@ -905,8 +905,11 @@ impl Converter {
                 self.parts(info.id, Parts::Members).await?
             } else {
                 let Some(bases) = self.named_bases(&info).await? else {
-                    // What lies below a React type names none of the props type's own: its sources are left unproven.
-                    known &= below_react;
+                    // What lies below a React type names none of the props type's own, so the names stay known; its
+                    // sources are left unproven.
+                    if !below_react {
+                        known = false;
+                    }
                     continue;
                 };
                 bases
