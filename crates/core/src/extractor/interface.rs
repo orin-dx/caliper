@@ -237,25 +237,30 @@ impl<'src> SourceDataCollector<'src> {
         self.ambient_depth > 0 || [".d.ts", ".d.mts", ".d.cts"].iter().any(|suffix| path.ends_with(suffix))
     }
 
-    /// The value of each member of `node` as TypeScript reads it: an initializer that is a literal is that literal, and a
-    /// member with none counts up from the previous number, starting at 0. `None` where the value is not known: an
-    /// initializer that is not a literal, a member after one that is not a number, and a member with no initializer of
-    /// a non-const ambient enum, whose values only the declaration's implementation knows.
-    pub(super) fn enum_member_values(&self, node: &TSEnumDeclaration<'_>) -> Vec<Option<EnumValue>> {
+    /// The value of each member of `node` as TypeScript reads it: an initializer it folds (`enum_fold`) is that value,
+    /// and a member with none counts up from the previous number, starting at 0. [`EnumValue::Unknown`] where the value
+    /// is not known: an initializer the structural lane does not fold, a member after one that is not a number, and a
+    /// member with no initializer of a non-const ambient enum, whose values only the declaration's implementation knows.
+    pub(super) fn enum_member_values(&self, node: &TSEnumDeclaration<'_>) -> Vec<EnumValue> {
         let counts_up = !(node.declare || self.in_ambient_context()) || node.r#const;
+        let enum_name = node.id.name.as_str();
         let mut next = Some(0.0_f64);
+        let mut earlier = super::enum_fold::EarlierMembers::default();
         node.body
             .members
             .iter()
             .map(|member| {
                 let value = match &member.initializer {
-                    Some(init) => self.expression_to_enum_value(init),
-                    None => next.filter(|_| counts_up).map(EnumValue::Number),
+                    Some(init) => super::enum_fold::fold(init, enum_name, &earlier),
+                    None => next.filter(|_| counts_up).map_or(EnumValue::Unknown, EnumValue::Number),
                 };
                 next = match value {
-                    Some(EnumValue::Number(n)) => Some(n + 1.0),
-                    _ => None,
+                    EnumValue::Number(n) => Some(n + 1.0),
+                    EnumValue::String(_) | EnumValue::Bool(_) | EnumValue::Spread { .. } | EnumValue::Unknown => None,
                 };
+                if let Some(name) = super::enum_fold::readable_name(&member.id) {
+                    earlier.insert(name, value.clone());
+                }
                 value
             })
             .collect()
@@ -263,15 +268,15 @@ impl<'src> SourceDataCollector<'src> {
 
     /// A prop typed with the enum is the union of its values, over every declaration that merges into it. One declaration
     /// with a value that is not known leaves the enum without a union, never a partial one.
-    pub(super) fn record_enum_union(&mut self, key: &str, values: &[Option<EnumValue>]) {
+    pub(super) fn record_enum_union(&mut self, key: &str, values: &[EnumValue]) {
         use crate::types::CollectedType;
         let previous = self.enum_unions.remove(key);
         let contribution: Option<Vec<CollectedType>> = values
             .iter()
             .map(|value| match value {
-                Some(EnumValue::String(s)) => Some(CollectedType::StringLiteral(s.as_str().into())),
-                Some(EnumValue::Number(n)) => Some(CollectedType::NumberLiteral(*n)),
-                _ => None,
+                EnumValue::String(s) => Some(CollectedType::StringLiteral(s.as_str().into())),
+                EnumValue::Number(n) => Some(CollectedType::NumberLiteral(*n)),
+                EnumValue::Bool(_) | EnumValue::Spread { .. } | EnumValue::Unknown => None,
             })
             .collect();
         let merged = match (&previous, contribution) {

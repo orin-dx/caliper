@@ -398,7 +398,7 @@ fn collect_const_array_members(
     reading.push(name.to_owned());
     for value in values {
         let EnumValue::Spread { spread } = value else {
-            let display = value.to_display_string();
+            let Some(display) = value.to_display_string() else { continue };
             if !members.contains(&display) {
                 members.push(display);
             }

@@ -28,6 +28,7 @@ mod asserted;
 mod body_facts;
 mod component;
 mod defaults;
+mod enum_fold;
 mod evidence;
 mod factory_props;
 mod interface;

@@ -60,7 +60,9 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 ///     longer sets `BodyFacts::handed_on`.
 /// 43: `ComponentMapping::factory_type_params`: the type parameters of a factory call's render function.
 /// 44: a JSX element's children pass `children`: a `Named("children")` attribute after its others.
-const CACHE_SCHEMA_VERSION: u32 = 45;
+/// 45 → 46: an enum member whose value the extractor does not know is `EnumValue::Unknown` (`null`), not its own name,
+///     and more initializers are folded.
+const CACHE_SCHEMA_VERSION: u32 = 46;
 
 const DATA_FILE: &str = "dts.msgpack";
 

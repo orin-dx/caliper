@@ -1013,6 +1013,9 @@ pub enum EnumValue {
         /// The name of the spread array (`NAME`).
         spread: std::string::String,
     },
+    /// A TypeScript enum member whose value the structural lane does not know (an initializer it does not fold, or a
+    /// member counting up from one). Serialized as `null`; never a literal, so no type is built from it.
+    Unknown,
 }
 
 impl Serialize for EnumValue {
@@ -1027,6 +1030,7 @@ impl Serialize for EnumValue {
                 seq.serialize_element(spread)?;
                 seq.end()
             }
+            EnumValue::Unknown => serializer.serialize_unit(),
         }
     }
 }
@@ -1068,6 +1072,14 @@ impl<'de> Deserialize<'de> for EnumValue {
                 Ok(EnumValue::Bool(v))
             }
 
+            fn visit_unit<E: serde::de::Error>(self) -> Result<EnumValue, E> {
+                Ok(EnumValue::Unknown)
+            }
+
+            fn visit_none<E: serde::de::Error>(self) -> Result<EnumValue, E> {
+                Ok(EnumValue::Unknown)
+            }
+
             fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<EnumValue, A::Error> {
                 let spread: std::string::String =
                     seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
@@ -1080,14 +1092,15 @@ impl<'de> Deserialize<'de> for EnumValue {
 }
 
 impl EnumValue {
-    /// Render as the string a `LiteralUnion` member expects — every variant
-    /// display-formatted, regardless of its original JS type.
-    pub fn to_display_string(&self) -> std::string::String {
+    /// Render as the string a `LiteralUnion` member expects — every known variant
+    /// display-formatted, regardless of its original JS type. `None` for [`EnumValue::Unknown`], which has no text.
+    pub fn to_display_string(&self) -> Option<std::string::String> {
         match self {
-            EnumValue::String(s) => s.clone(),
-            EnumValue::Number(n) => n.to_string(),
-            EnumValue::Bool(b) => b.to_string(),
-            EnumValue::Spread { spread } => format!("...{spread}"),
+            EnumValue::String(s) => Some(s.clone()),
+            EnumValue::Number(n) => Some(n.to_string()),
+            EnumValue::Bool(b) => Some(b.to_string()),
+            EnumValue::Spread { spread } => Some(format!("...{spread}")),
+            EnumValue::Unknown => None,
         }
     }
 }

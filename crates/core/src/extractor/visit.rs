@@ -5,8 +5,8 @@ use oxc_ast_visit::{Visit, walk};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
-    CollectedInterface, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef,
-    ImportBinding, LexedExport, RawProp, ScopeKind, TypeName,
+    CollectedInterface, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, ExtendsRef, ImportBinding,
+    LexedExport, RawProp, ScopeKind, TypeName,
 };
 
 use super::component::Binding;
@@ -318,15 +318,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             .iter()
             .zip(&values)
             .filter_map(|(member, value)| {
-                let name = match &member.id {
-                    TSEnumMemberName::Identifier(id) => id.name.as_str().to_owned(),
-                    TSEnumMemberName::String(s) => js_text::lossy(s.value).into_owned(),
-                    TSEnumMemberName::ComputedString(s) => js_text::lossy(s.value).into_owned(),
-                    TSEnumMemberName::ComputedTemplateString(_) => return None,
-                };
-                let value = value.clone().unwrap_or_else(|| EnumValue::String(name.clone()));
+                let name = super::enum_fold::member_name(&member.id)?;
                 let description = self.find_jsdoc(member.span.start);
-                Some(EnumEntry { name, value, description })
+                Some(EnumEntry { name, value: value.clone(), description })
             })
             .collect();
 

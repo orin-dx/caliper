@@ -227,7 +227,8 @@ export type DetectionRule =
 
 export interface EnumEntry {
   name: string
-  value: string | number | boolean
+  /** `null` for a TypeScript enum member whose value is not known without the type checker. */
+  value: string | number | boolean | null
   description: string
 }
 
