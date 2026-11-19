@@ -1,0 +1,161 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7TKZH720XV47ZH5YXBHV86D",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-19T19:19:31.651199Z",
+  "branch": "docs/known-limit-body-evidence",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "packages/storybook/README.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "619056fb0300",
+  "checkpoint_transcript_start": 5895,
+  "transcript_lines_at_start": 5895,
+  "compact_transcript_start": 505,
+  "token_usage": {
+    "input_tokens": 78,
+    "cache_creation_tokens": 580312,
+    "cache_read_tokens": 20751705,
+    "output_tokens": 20006,
+    "api_call_count": 38
+  },
+  "session_token_usage": {
+    "input_tokens": 1006,
+    "cache_creation_tokens": 2881910,
+    "cache_read_tokens": 164152411,
+    "output_tokens": 286247,
+    "api_call_count": 492,
+    "subagent_tokens": {
+      "input_tokens": 50,
+      "cache_creation_tokens": 184265,
+      "cache_read_tokens": 1187586,
+      "output_tokens": 18805,
+      "api_call_count": 25
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 40,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 34,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 42
+  },
+  "summary": {
+    "intent": "Act on recommendations for three pending items in the caliper project: decide how to handle body-less components (change 8), clone real-library corpora (Chakra, react-spectrum), and validate PRs #505 and #506 with real-corpus measurements before merge. The user then asked to proceed autonomously and token-efficiently.",
+    "outcome": "Cloned Chakra and react-spectrum into a shared cache, measured #506 against main on real Chakra (629 components, no row changes, 1.24 vs 1.30 GiB, 5.4 vs 5.1 s) and added the result to the PR body. Sized change 7 on react-spectrum, verified hook hand-off behavior, and committed a 'Known limits (alpha)' README bullet on a new branch.",
+    "learnings": {
+      "repo": [
+        "Corpora are set up via corpora.py setup with --corpora pointing to a shared cache (~/.cache/caliper/corpora), so worktrees don't re-clone; the cache is re-creatable and safe to delete.",
+        "Product rule: ambient attributes like className/style stay as names unless the component body uses them. Body-less .d.ts components therefore don't show className/style in Controls, which affects most real design-system libraries.",
+        "Resolver/checker-walk changes require checking peak memory and time on Chakra (project rule), not only fixture numbers.",
+        "packages/storybook/README.md has a 'Known limits (alpha)' section, the established place for plain statements of what's missing.",
+        "Chakra corpus is about 4.2 GB when cloned and installed with pnpm, at a pinned commit.",
+        "CI on #505 and #506 was green except Entire Gates, which waits on approval."
+      ],
+      "code": [
+        {
+          "path": "packages/storybook/README.md",
+          "finding": "Added a bullet under 'Known limits (alpha)' documenting that when a component body hands props to a hook (useX(props)), className/style are not detected as used. Verified with a temporary fixture before writing."
+        }
+      ],
+      "workflow": [
+        "Interleave baseline and candidate runs, and check main is deterministic against itself, before attributing output diffs to a PR.",
+        "Build the baseline by archiving origin/main into a separate directory and building it in the background while other work (clones) proceeds, then measure only when the machine is quiet.",
+        "Verify actual behavior with a temporary fixture (then delete it) before documenting a limitation.",
+        "Run the lint gate on docs changes before committing."
+      ]
+    },
+    "friction": [
+      "The measurement had to wait for the clone and baseline build to finish so the machine was quiet enough for meaningful timing/memory numbers.",
+      "Entire Gates CI check blocks on approval, so it can't be cleared autonomously.",
+      "The temporary fixture was written inside a worktree (fixtures/_tmp_hook) and had to be cleaned up afterward."
+    ],
+    "open_items": [
+      "Add a note in output that the component body wasn't analysed for .d.ts (body-less) components, so the className/style gap is stated rather than silent (change 8 follow-up).",
+      "User still needs to review and merge #505 (docs only) and #506 (now with real Chakra numbers).",
+      "Change 7 sizing on react-spectrum: scan7.py was run, but results are not reported in the transcript and the decision isn't recorded.",
+      "The docs-bullet commit is on a new branch off main; push/PR not yet done.",
+      "The other three corpora and the oracle run are deferred until after the merged batch.",
+      "Whether to add className to Controls for all components remains a separate rule-change decision."
+    ]
+  }
+}
