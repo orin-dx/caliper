@@ -761,7 +761,33 @@ impl Rpc {
     }
 
     pub(crate) async fn types_of_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getTypesOfSymbols", Asking::Symbols { symbols }).await
+        if self.recording.is_some() {
+            return self.scoped("getTypesOfSymbols", Asking::Symbols { symbols }).await;
+        }
+        let refs = symbols
+            .iter()
+            .map(|symbol| crate::direct::tree_of(symbol.text()))
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|error| CallError::Fatal(format!("a symbol reference that is not JSON: {error}")))?;
+        self.direct("getTypesOfSymbols", vec![("symbols", tsrs_core::json::Value::Array(refs))]).await
+    }
+
+    /// Spike: a checker-lane request asked through `tsrs_api::checker::dispatch::handle` directly, its parameters and
+    /// answer trees ([`crate::direct`]); counted and budgeted as [`Rpc::call`] counts and budgets one.
+    async fn direct<T: DeserializeOwned>(
+        &self,
+        method: &'static str,
+        fields: Vec<(&'static str, tsrs_core::json::Value)>,
+    ) -> Result<T, CallError> {
+        crate::heap::step()?;
+        if let Ok(mut calls) = self.calls.lock() {
+            *calls.entry(method).or_default() += 1;
+        }
+        REQUESTS.try_with(|count| count.fetch_add(1, std::sync::atomic::Ordering::Relaxed)).ok();
+        let params = crate::direct::scoped(&self.project, self.snapshot, fields);
+        let answer = self.client.request_tree(method, params, self.deadline).await.map_err(classify)?;
+        crate::direct::decode(&answer)
+            .map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
     }
 
     /// The call signatures of a type, or with `SignatureKind::Construct` its construct signatures.
@@ -864,7 +890,12 @@ impl Rpc {
     }
 
     pub(crate) async fn properties(&self, type_id: u64) -> Result<Vec<SymbolInfo>, CallError> {
-        self.scoped("getPropertiesOfType", Asking::Type { type_id }).await
+        if self.recording.is_some() {
+            return self.scoped("getPropertiesOfType", Asking::Type { type_id }).await;
+        }
+        #[expect(clippy::cast_precision_loss, reason = "type handles are small counters")]
+        let type_id = tsrs_core::json::Value::Number(type_id as f64);
+        self.direct("getPropertiesOfType", vec![("type", type_id)]).await
     }
 
     /// The members of a union, intersection or template literal, as the text the checker answered (a list of types).

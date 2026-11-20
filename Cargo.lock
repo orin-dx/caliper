@@ -292,7 +292,10 @@ dependencies = [
  "tokio",
  "tracing",
  "tsrs_api",
+ "tsrs_ast",
+ "tsrs_compiler",
  "tsrs_core",
+ "tsrs_project",
  "tsrs_vfs",
  "xxhash-rust",
 ]

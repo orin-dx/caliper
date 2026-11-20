@@ -39,6 +39,7 @@ use serde_json::Value;
 use serde_json::value::RawValue;
 use tokio::sync::oneshot;
 use tsrs_api::{ErrorKind, Handler, Response, Session, SessionOptions};
+use tsrs_core::json::Value as Tree;
 use tsrs_vfs::{FS, bundled, osvfs, wrapvfs};
 
 use crate::kept::{Reads, Recording};
@@ -239,6 +240,8 @@ impl Progress {
 /// the requests of its queue.
 trait Ask: Send + Sync {
     fn ask(&self, method: &'static str, params: &[u8]) -> Result<String, RequestError>;
+    /// [`Ask::ask`] with the parameters and the answer as trees ([`crate::direct`]).
+    fn ask_tree(&self, method: &'static str, params: &Tree) -> Result<Tree, RequestError>;
     /// The thread the work runs on: a request from any other goes through the lane's queue.
     fn thread(&self) -> ThreadId;
 }
@@ -254,8 +257,20 @@ impl Drop for Abandon {
 
 struct Asked {
     method: &'static str,
-    params: Vec<u8>,
-    reply: oneshot::Sender<Result<String, String>>,
+    params: Payload,
+    reply: oneshot::Sender<Result<Answered, String>>,
+}
+
+/// A request's parameters: JSON text for `Session::handle_request`, or a tree for a direct call ([`crate::direct`]).
+enum Payload {
+    Text(Vec<u8>),
+    Tree(Tree),
+}
+
+/// An answer, in the form its request was sent in.
+enum Answered {
+    Text(String),
+    Tree(Tree),
 }
 
 /// A handle that sends requests to a running checker: the sending ends of its queues, one per thread, and the one this
@@ -336,7 +351,7 @@ impl Client {
                 .map_err(|_invalid| RequestError::Malformed(format!("{method} answered with text that is not JSON")));
         }
         let (reply, answer) = oneshot::channel();
-        let asked = Asked { method, params, reply };
+        let asked = Asked { method, params: Payload::Text(params), reply };
         let Some(jobs) = self.lanes.get(self.lane % self.lanes.len().max(1)) else {
             return Err(RequestError::Closed);
         };
@@ -350,8 +365,46 @@ impl Client {
             Err(_elapsed) => return Err(RequestError::Timeout { method: method.to_string(), after: deadline }),
         };
         match answered {
-            Ok(text) => RawValue::from_string(text)
+            Ok(Answered::Text(text)) => RawValue::from_string(text)
                 .map_err(|_invalid| RequestError::Malformed(format!("{method} answered with text that is not JSON"))),
+            Ok(Answered::Tree(_)) => {
+                Err(RequestError::Malformed(format!("{method} answered a text request with a tree")))
+            }
+            Err(message) => Err(RequestError::Rejected(message)),
+        }
+    }
+
+    /// [`Client::request_raw`] for a checker-lane method asked directly ([`crate::direct`]): the parameters and the
+    /// answer are trees, and no JSON text is written or read on either side.
+    pub(crate) async fn request_tree(
+        &self,
+        method: &'static str,
+        params: Tree,
+        deadline: Duration,
+    ) -> Result<Tree, RequestError> {
+        if let Some(in_place) =
+            self.in_place.as_ref().filter(|in_place| in_place.thread() == std::thread::current().id())
+        {
+            return in_place.ask_tree(method, &params);
+        }
+        let (reply, answer) = oneshot::channel();
+        let asked = Asked { method, params: Payload::Tree(params), reply };
+        let Some(jobs) = self.lanes.get(self.lane % self.lanes.len().max(1)) else {
+            return Err(RequestError::Closed);
+        };
+        if jobs.send(Job::Request(asked)).is_err() {
+            return Err(RequestError::Closed);
+        }
+        let answered = match tokio::time::timeout(deadline, answer).await {
+            Ok(Ok(answered)) => answered,
+            Ok(Err(_dropped)) => return Err(RequestError::Closed),
+            Err(_elapsed) => return Err(RequestError::Timeout { method: method.to_string(), after: deadline }),
+        };
+        match answered {
+            Ok(Answered::Tree(tree)) => Ok(tree),
+            Ok(Answered::Text(_)) => {
+                Err(RequestError::Malformed(format!("{method} answered a tree request with text")))
+            }
             Err(message) => Err(RequestError::Rejected(message)),
         }
     }
@@ -375,6 +428,10 @@ pub(crate) struct Failure {
 pub(crate) trait Served {
     /// Answers one request with its JSON text.
     fn handle(&self, method: &str, params: &[u8]) -> Result<String, Failure>;
+    /// A checker-lane request asked directly, its parameters and answer trees ([`crate::direct`]).
+    fn handle_tree(&self, method: &str, _params: &Tree) -> Result<Tree, Failure> {
+        Err(Failure { message: format!("{method} cannot be asked directly here"), panicked: false })
+    }
     /// Releases the snapshot an answer of `method` made, when that answer will not reach the caller, who could then
     /// never release it.
     fn discard(&self, method: &str, answer: &str);
@@ -487,6 +544,20 @@ impl Served for TsrsSession {
         }
     }
 
+    fn handle_tree(&self, method: &str, params: &Tree) -> Result<Tree, Failure> {
+        // As `answer` for a request that builds no snapshot: beside the others, failed by a refusal it sees.
+        let _beside = self.building.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let answered = crate::direct::ask(&self.session, method, params);
+        if let Some((file, depth)) = self.refused().first().cloned() {
+            let message = format!(
+                "{file} nests brackets {depth} deep, more than the {MAX_NESTING} the built-in checker reads without \
+                 risking a stack overflow; its components keep their structural answer"
+            );
+            return Err(Failure { message, panicked: false });
+        }
+        answered.map_err(|unanswered| Failure { message: unanswered.message, panicked: unanswered.panicked })
+    }
+
     fn discard(&self, method: &str, answer: &str) {
         if let Some(snapshot) = snapshot_made(method, answer) {
             let params = serde_json::json!({ "snapshot": snapshot }).to_string();
@@ -536,7 +607,12 @@ const STOPPED: &str = "the built-in checker stopped: a panic unwound through its
 
 /// One request to the session, a panic caught as a failure that says so.
 fn handled<S: Served>(session: &S, method: &'static str, params: &[u8]) -> Result<String, Failure> {
-    catch_unwind(AssertUnwindSafe(|| session.handle(method, params))).unwrap_or_else(|panic| {
+    caught(|| session.handle(method, params))
+}
+
+/// `answer()`, a panic caught as a failure that says so.
+fn caught<T>(answer: impl FnOnce() -> Result<T, Failure>) -> Result<T, Failure> {
+    catch_unwind(AssertUnwindSafe(answer)).unwrap_or_else(|panic| {
         let text = panic
             .downcast_ref::<String>()
             .map(String::as_str)
@@ -583,6 +659,27 @@ impl<S: Served + Send + Sync> Ask for InPlace<S> {
         }
     }
 
+    fn ask_tree(&self, method: &'static str, params: &Tree) -> Result<Tree, RequestError> {
+        if self.left.load(Ordering::Acquire) || self.progress.cancelled.load(Ordering::Acquire) {
+            return Err(RequestError::Closed);
+        }
+        if self.ended.load(Ordering::Acquire) {
+            self.left.store(true, Ordering::Release);
+            return Err(RequestError::Rejected(STOPPED.to_string()));
+        }
+        self.progress.set(Some((Instant::now(), method)));
+        let answered = caught(|| self.session.handle_tree(method, params));
+        self.progress.set(None);
+        answered.map_err(|Failure { message, panicked }| {
+            if panicked {
+                tracing::warn!(method, %message, "the built-in checker panicked; it is replaced");
+                self.ended.store(true, Ordering::Release);
+                self.left.store(true, Ordering::Release);
+            }
+            RequestError::Rejected(message)
+        })
+    }
+
     fn thread(&self) -> ThreadId {
         self.thread
     }
@@ -627,12 +724,15 @@ impl<S: Served + Send + Sync + 'static> Lane<S> {
                 continue;
             }
             let session = &self.session;
-            let answered = handled(&**session, asked.method, &asked.params);
+            let answered = match &asked.params {
+                Payload::Text(params) => handled(&**session, asked.method, params).map(Answered::Text),
+                Payload::Tree(params) => caught(|| session.handle_tree(asked.method, params)).map(Answered::Tree),
+            };
             match answered {
-                Ok(text) => {
+                Ok(answer) => {
                     // A caller that stopped waiting meanwhile (its deadline passed) never learns of a snapshot this
                     // made.
-                    if let Err(Ok(unread)) = asked.reply.send(Ok(text)) {
+                    if let Err(Ok(Answered::Text(unread))) = asked.reply.send(Ok(answer)) {
                         session.discard(asked.method, &unread);
                     }
                 }

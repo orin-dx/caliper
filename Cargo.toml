@@ -57,6 +57,10 @@ oxc_resolver      = "11"
 tsrs_api          = "=0.24.0"
 tsrs_vfs          = "=0.24.0"
 tsrs_core         = "=0.24.0"
+# Spike (direct dispatch): the types `tsrs_api::checker::CheckerHost` names in its signatures.
+tsrs_ast          = "=0.24.0"
+tsrs_compiler     = "=0.24.0"
+tsrs_project      = "=0.24.0"
 
 # Core data
 compact_str       = { version = "0.10", features = ["serde"] }

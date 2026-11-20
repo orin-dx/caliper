@@ -17,6 +17,7 @@ mod checker;
 mod component;
 mod convert;
 mod declared;
+mod direct;
 mod heap;
 mod instantiate;
 mod kept;
