@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Bi9MFdJPUNPxJywi1MpWG4",
+  "agent_id": "a6d25c53ac2698c8d",
+  "subagent_type": "general-purpose",
+  "task_description": "Spike: direct checker calls",
+  "token_usage": {
+    "input_tokens": 92,
+    "cache_creation_tokens": 140414,
+    "cache_read_tokens": 4732113,
+    "output_tokens": 24799,
+    "api_call_count": 45
+  },
+  "started_at": "2026-11-20T14:59:12.036922-08:00",
+  "completed_at": "2026-11-20T15:05:10.287375-08:00"
+}

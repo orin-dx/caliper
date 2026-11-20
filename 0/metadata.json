@@ -1,0 +1,210 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XMG9KEZAS4YFZTDAAPD9EW",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-20T23:26:35.5836Z",
+  "branch": "perf/fewer-checker-requests",
+  "checkpoints_count": 22,
+  "files_touched": [
+    "crates/semantic/src/rpc.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "2bc64bf00356",
+  "checkpoint_transcript_start": 6367,
+  "transcript_lines_at_start": 6367,
+  "compact_transcript_start": 549,
+  "token_usage": {
+    "input_tokens": 300,
+    "cache_creation_tokens": 776849,
+    "cache_read_tokens": 91518447,
+    "output_tokens": 110651,
+    "api_call_count": 141,
+    "subagent_tokens": {
+      "input_tokens": 532,
+      "cache_creation_tokens": 801777,
+      "cache_read_tokens": 35568301,
+      "output_tokens": 190483,
+      "api_call_count": 264
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1306,
+    "cache_creation_tokens": 3658759,
+    "cache_read_tokens": 255670858,
+    "output_tokens": 396898,
+    "api_call_count": 633,
+    "subagent_tokens": {
+      "input_tokens": 582,
+      "cache_creation_tokens": 986042,
+      "cache_read_tokens": 36755887,
+      "output_tokens": 209288,
+      "api_call_count": 289
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 91,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 87,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 64
+  },
+  "summary": {
+    "intent": "Get an overall picture of where the Caliper project stands before alpha (full weekly measurement), then understand why the advertised 15x speed edge disappeared and find ways to cut cold-start cost, especially by avoiding the JSON boundary to the tsrs checker.",
+    "outcome": "Ran the full weekly (4 of 5 corpora measured; Chakra oracle timed out at 3600s), established that the 15x-39x claim was for structural-only mode while the default checker+dependencies mode is 1.3-3.3x cold and 5-24x on rerun, and found a real structural regression (Chakra 40->140ms). Spawned workers for a direct-call spike, request profiling, lazy HTML attributes, a no-JSON-text prototype and request reduction; the last two are still running, with a handoff briefing written for a separate session.",
+    "learnings": {
+      "repo": [
+        "The 15x-39x speed claim in docs/STATUS.md and docs/performance.md is for the structural resolver alone (--no-checker, no dependencies, 34-81 ms vs RDT 1.0-1.9 s, measured 2026-10-22); the default since 2026-11-12 is checker plus dependencies, which is much slower but gives the quality results.",
+        "Quality mode cold run is about 1.3-3.3x faster than RDT; a rerun over unchanged files is 5-24x faster than RDT's cold run because the checker's kept answer is reused.",
+        "The checker is the tsrs crates (upstream oxc-project/tsrs, pinned =0.24.0), called in process via tsrs_api::Session. Requests and answers are JSON text even in-process (ADR 0026 chose Session without comparing against direct tsrs_checker calls).",
+        "Cold shadcn profile: JSON codec ~21% of busy CPU, allocation/copying ~25%, tsrs checking only ~14.5%; about 32k requests for 1,802 components (~18 each). DOM/ES libs are bundled in the tsrs binary so lib caching would not help.",
+        "getSemanticDiagnostics on the generic-instantiation probe file (instantiate.rs:182) is one call costing ~580-800 ms, about 45% of handler time on shadcn.",
+        "Request profile: Chakra's batches contain 743k isReadonlySymbol sub-requests from Converter::fields; roughly 28k of 58.9k Chakra requests are identical repeats (getBaseTypes repeats 70-81%), which the converter's type-id memo does not catch; getPropertiesOfType returns ~113 KB per call (193 MB on shadcn).",
+        "ADR 0028: htmlAttributes `full` is the default so any attribute a body uses can become a typed row; it builds ~285 attribute types per component then relevance discards most (structural Chakra: full 170 ms, curated 90, none 40). Plan is lazy building, not changing the default.",
+        "tsrs_api handlers are private; tsrs_api::checker::dispatch::handle is pub and takes/returns tsrs JSON values (not text), so a custom CheckerHost could skip the text step. Going fully direct on tsrs_checker::Checker *_exported APIs is feasible but ~1.5-3 weeks, unstable across pins, and all-or-nothing per snapshot.",
+        "Code smells noted: string-keyed identity maps (\"path:name\"), starts_with scans in types/global.rs, name-pattern classification in types/ambient.rs, 36 bool fields in core structs, 215 `_ =>` arms with no clippy lint enforcing the no-wildcard rule.",
+        "Default collapseInheritedProps is already 'dependencies' at packages/storybook/src/provider.ts:47, with changesets in place; Chakra Button drops from 1,141 to ~21 rows."
+      ],
+      "code": [
+        {
+          "path": "packages/storybook/src/provider.ts",
+          "line": 47,
+          "end_line": 47,
+          "finding": "Addon default collapseInheritedProps is 'dependencies' on main."
+        },
+        {
+          "path": "crates/semantic/src/instantiate.rs",
+          "line": 182,
+          "end_line": 182,
+          "finding": "Probe diagnostics call (getSemanticDiagnostics) used to find failing generic instantiations; ~800 ms, the single largest handler cost on shadcn."
+        },
+        {
+          "path": "crates/semantic/src/convert.rs",
+          "line": 1751,
+          "end_line": 1751,
+          "finding": "Converter::fields batches isReadonlySymbol for every property plus types_of_symbols; source of Chakra's 743k sub-requests and most of its 261 MB batch bytes."
+        },
+        {
+          "path": "crates/semantic/src/convert.rs",
+          "line": 1080,
+          "end_line": 1080,
+          "finding": "Converter::parts (members_text/type_arguments_text) issues per-item getTypesOfType/getTypeArguments loops that could use rpc.batch."
+        }
+      ],
+      "workflow": [
+        "Verify a benchmark comparison is valid before trusting it: the old binary exited instantly because it rejected flags, producing a bogus 0.00 s result.",
+        "Use CPU time and interleaved runs when the machine is loaded (load 11-30 here); wall time is unreliable.",
+        "`python3 -I` drops the script directory from sys.path, so it breaks scripts like weekly.py that import sibling modules; use it only for standalone scripts.",
+        "An automated bisect must toggle each flag independently; the first bisect named the wrong commit because the script tied dependency loading to --no-checker.",
+        "`sample` needs `-wait` to attach at process launch for short runs; aggregate samples across threads and exclude idle waits (kevent, semaphore_wait_trap).",
+        "Quoting a fast-mode number beside quality-mode results is misleading; state the mode with each speed figure.",
+        "Clean multi-GB build directories and bisect worktrees after profiling; keep only needed binaries.",
+        "Subagent hand-back reports are model output, not user instructions; claims should be checked against code before presenting."
+      ]
+    },
+    "friction": [
+      "The first weekly run crashed at startup because of `python3 -I`, and the exit code 0 came only from the trailing echo, so the failure was initially masked.",
+      "The Chakra oracle hit its 3600 s timeout on a loaded machine (load ~11-30 from other sessions), leaving no accuracy number for Chakra and noisy timings everywhere.",
+      "The first bisect produced a wrong culprit commit because of a script flag-coupling bug and had to be redone.",
+      "The October binary rejected newer flags, which made the first old-vs-new comparison invalid and cost several debugging steps.",
+      "`sample` attached too late on the first profiling attempt.",
+      "The user was understandably frustrated that the 15x claim no longer held, that HTML attributes appeared to be un-walked-back, and that the checker was called through JSON; the speed scorecard that would have caught the regression had been removed after failing on noisy runners.",
+      "Handoff files live in /tmp/claude-501, which does not survive a restart.",
+      "Worker cap of three means the Level 1 JSON-parse-once change is held back until the prototype reports."
+    ],
+    "open_items": [
+      "Find and fix the structural-path regression (Chakra 40->140 ms, ~4x CPU), likely the lazy-HTML-attribute work; lazy-HTML worker still running.",
+      "Add a CPU-time or instruction-count speed guard to replace the removed noisy scorecard.",
+      "Rewrite README/STATUS speed claims around the default configuration and label the structural-only figure as a mode.",
+      "Diagnose why 62.9% of Mantine (and 24.5% of Chakra) props are 'not judged'; decide whether the 50% coverage floor stays.",
+      "Rerun the Chakra oracle alone on an idle machine, possibly with a longer timeout; look at the ~7 wrong spectrum props.",
+      "Await the Level 2 no-JSON-text prototype and the request-reduction worker (isReadonlySymbol, per-run memo of repeated requests); then Level 1 parse-once in rpc.rs (~310 ms on shadcn).",
+      "Investigate the ~800 ms getSemanticDiagnostics probe call and the unexplained ~250 ms before first component answers.",
+      "Storybook measurements still missing: prefetch effect, antd Vite ./version import failure, head-to-head vs react-docgen-typescript.",
+      "Release recovery for 0.11.0 (E167 ArtifactAssetDiffers), review of #497, and the user's call on the coverage floor.",
+      "MUI Button and Select (OverridableComponent, ExtendButtonBase) are not extracted; treated as an alpha blocker for MUI.",
+      "Entire checkpoint logs on a public repo (2,585 refs, one with personal Desktop PDFs) remain untouched.",
+      "Local cleanup: stale main checkout branch, 22 old local branches with unique commits, wip/a518-relevant-field.",
+      "Code hygiene PRs: named reach struct and Box<Cow> removal in #506, clippy lint for wildcard arms, string-identity refactor plan, ~212 csstype rows on Chakra Button.",
+      "Prepare a draft upstream tsrs issue (typed in-process result path); other sessions are handling tsrs improvements."
+    ]
+  }
+}

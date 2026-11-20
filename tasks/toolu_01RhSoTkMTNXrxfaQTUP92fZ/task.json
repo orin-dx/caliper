@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01RhSoTkMTNXrxfaQTUP92fZ",
+  "agent_id": "a34a7f61ad236e3a5",
+  "subagent_type": "general-purpose",
+  "task_description": "Checker request profile by method",
+  "token_usage": {
+    "input_tokens": 80,
+    "cache_creation_tokens": 102466,
+    "cache_read_tokens": 2889272,
+    "output_tokens": 22415,
+    "api_call_count": 40
+  },
+  "started_at": "2026-11-20T14:59:11.993779-08:00",
+  "completed_at": "2026-11-20T15:07:52.765138-08:00"
+}
