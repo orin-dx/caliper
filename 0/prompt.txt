@@ -127,3 +127,41 @@ I mean caliper work
 <status>completed</status>
 <summary>Background command "Format notes and rerun the full gate" completed (exit code 0)</summary>
 </task-notification>
+
+---
+
+Preliminary results from codex:
+
+
+
+<pasted_content id="95b3">
+Saved the report and tables (.claude/worktrees/tsrs-checker-investigation/docs/research/tsrs-checker-session/report.md) and upstream issue draft (.claude/worktrees/tsrs-checker-investigation/docs/research/tsrs-checker-session/upstream-issue-draft.md), incorporating the updated worker ownership and priorities.
+
+The retained fix sends files: [probe] instead of ignored file. Shadcn’s best CPU time fell from 6.48 to 6.03 seconds, with identical normalized output.
+
+Changes remain uncommitted on perf/probe-file-diagnostics. All required gates passed, including 1,673 Rust tests and checker parity. Build output was deleted. Nothing was pushed, merged, or submitted upstream.
+  Worked for 31m 47s • 3:41 PM
+
+Give me a rundown
+
+One change is measured and ready locally. The next priorities are readonly queries and request memoization; the JSON-boundary prototype remains with the other worker.
+
+- Diagnostics fix: caliper sent file, but tsrs expects files. That accidentally checked the whole program instead of just the generated probe file. Correcting it reduced shadcn’s diagnostics call from about 803 ms to 2.35 ms, while preserving output and fallback explanations.
+
+| Corpus | Best CPU before → after | Saving |
+|---|---|---|
+| shadcn | 6.48 → 6.03 s | 6.9% |
+| Mantine | 3.47 → 3.18 s | 8.4% |
+| Chakra | 12.57 → 11.87 s | 5.6% |
+
+The machine was loaded. Degraded Chakra runs were excluded.
+
+- Readonly is a strong local target: Chakra made 745,088 readonly queries, but only 210,012 were distinct within their snapshot. Symbol flags alone cannot reliably replace them. Memoization could eliminate roughly 535,000 queries. Readonly-only batches account for about 134 MB sent and 34 MB received; the earlier 261 MB response figure includes other work.
+- Repeated requests mostly cross components: Chakra repeated 20,911 calls across the five proposed memo methods. A shared, snapshot-scoped memo is promising. Its runtime benefit and response-invalidation rules still need verification.
+- Avoiding JSON text looks feasible through existing APIs: public checker::dispatch::handle retains the real handlers and takes/returns JSON values through a custom CheckerHost. The session registry is publicly accessible. Private file-cache and node helpers still need careful handling. The other worker’s prototype should establish compatibility and net savings; 450 ms is an inherited codec estimate, not a demonstrated speedup.
+- Lower-priority findings: field trimming alone saves about 23% of shadcn’s property bytes and 8% of Chakra’s. Resolver memos and indexed lookups already exist. The fixed 250 ms startup gap was not reproduced.
+
+The diagnostics fix is uncommitted on perf/probe-file-diagnostics. All required gates passed: 1,673 Rust tests, checker parity, lint and documentation checks. Build output was deleted; nothing was pushed or submitted upstream.
+
+The full report (.claude/worktrees/tsrs-checker-investigation/docs/research/tsrs-checker-session/report.md) records the requested order: 0 → 0b → 1, with item 1 already completed here.
+</pasted_content id="95b3">
