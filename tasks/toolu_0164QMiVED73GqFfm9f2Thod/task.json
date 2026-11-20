@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_0164QMiVED73GqFfm9f2Thod",
+  "agent_id": "aa92cab9bf7fc5673",
+  "subagent_type": "general-purpose",
+  "task_description": "Prototype: call tsrs dispatch without JSON text",
+  "started_at": "2026-11-20T15:16:53.979574-08:00"
+}
