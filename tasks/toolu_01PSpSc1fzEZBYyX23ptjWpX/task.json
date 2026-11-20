@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01PSpSc1fzEZBYyX23ptjWpX",
+  "agent_id": "ad4198dd953b3a217",
+  "subagent_type": "general-purpose",
+  "task_description": "Lazy HTML attribute materialization",
+  "token_usage": {
+    "input_tokens": 304,
+    "cache_creation_tokens": 344264,
+    "cache_read_tokens": 34640071,
+    "output_tokens": 119347,
+    "api_call_count": 151
+  },
+  "started_at": "2026-11-20T14:59:11.989071-08:00",
+  "completed_at": "2026-11-20T15:43:54.942905-08:00"
+}

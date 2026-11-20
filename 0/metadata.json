@@ -1,0 +1,155 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XNZBYSDR2ZAPKQR3TK9FD7",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-20T23:52:06.834232Z",
+  "branch": "spike/direct-dispatch",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/semantic/src/direct.rs",
+    "crates/semantic/src/rpc.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "c13f245c2619",
+  "checkpoint_transcript_start": 8092,
+  "transcript_lines_at_start": 8092,
+  "compact_transcript_start": 712,
+  "token_usage": {
+    "input_tokens": 34,
+    "cache_creation_tokens": 31811,
+    "cache_read_tokens": 12067301,
+    "output_tokens": 7870,
+    "api_call_count": 15,
+    "subagent_tokens": {
+      "input_tokens": 152,
+      "cache_creation_tokens": 152610,
+      "cache_read_tokens": 17988384,
+      "output_tokens": 62731,
+      "api_call_count": 76
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1344,
+    "cache_creation_tokens": 3691593,
+    "cache_read_tokens": 268522186,
+    "output_tokens": 404890,
+    "api_call_count": 649,
+    "subagent_tokens": {
+      "input_tokens": 950,
+      "cache_creation_tokens": 1540405,
+      "cache_read_tokens": 77577769,
+      "output_tokens": 343520,
+      "api_call_count": 472
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 101,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 97,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 67
+  },
+  "summary": {
+    "intent": "Land and verify a performance change (lazy HTML attribute handling in the structural resolver) delegated to a subagent, confirming it gives identical output with lower CPU before it is reviewed.",
+    "outcome": "PR #508 (perf/lazy-html-attributes) was opened with an updated body. Structural user CPU fell from 0.38s to 0.28s on Chakra and from 0.77s to 0.62s on shadcn. Lint and all 1704 tests passed with real dependencies, and output matched main on 15 of 15 runs (one needed a rerun). A nondeterminism problem on main was found.",
+    "learnings": {
+      "repo": [
+        "Under the default `htmlAttributes: full` the structural resolver listed about 285 React attribute props per component, and `relevance::apply` moved nearly all back into the element layer as names. Holding them apart until `apply` decides avoids that work.",
+        "Held attributes live on `Resolved`, not on the public `ComponentEntry`, because adding them there would be a semver break.",
+        "An attribute is held only if its parent and every declaration are in `@types/react`. Augmentations, library co-declarations, props with no source, and `node_modules/react` stay listed.",
+        "The snapshot tests resolve React types via `node_modules/@types/react`, so in a worktree without `pnpm install` all 7 snapshot tests fail on file-path diffs only.",
+        "The `relevance_model` and `collapse_model` parity tests need `@types/react` available, which the worker got by symlinking the main checkout's node_modules.",
+        "`just lint` requires pnpm. `just doc-check machete typos` and `just test-checker-lane` are other gate commands.",
+        "Output from main is nondeterministic across runs of the same binary under heavy load (Chakra curated+checker, spectrum checker+deps, and an earlier degraded 678 MiB run). The suspected cause is checker per-request timeouts falling back to structural answers; this is unconfirmed."
+      ],
+      "code": [],
+      "workflow": [
+        "A subagent's final report is not user authority, and its claims should be re-verified. Here the parent re-ran lint, tests and an output-identity comparison on the pushed commit with real dependencies.",
+        "Under high machine load (load average 20–60), wall time is unreliable and user CPU is the steadier measurement. Interleaved best-of-N runs help.",
+        "A single mismatch in an output comparison should be rerun before being attributed to the change. The spectrum difference disappeared on rerun.",
+        "Subagents with a call cap (130 calls here) may stop short of running every gate, so the parent should run the remaining checks such as lint and the full test suite."
+      ]
+    },
+    "friction": null,
+    "open_items": null
+  }
+}
