@@ -283,18 +283,26 @@ fn written_at<'t>(ty: &'t CollectedType, from: &Utf8Path) -> (&'t CollectedType,
 ///
 /// A member is own when the props type writes it, and overrides when, besides, a base declares it: its `parent` or a
 /// declaration is not the props type, or a collapsed layer holds it.
-pub(crate) fn members<'a>(
+///
+/// Except for the quiet rows: a row `quiet_candidate` takes whose member, as its declaration and the props type give
+/// it, [`decide`](super::decide) does not list without use ([`super::listed_by_declaration`]). The caller has checked
+/// that no evidence of use names it, so it is left out as its member would be; it is returned apart, by name and
+/// whether it is ambient, and no [`Member`] is built for it. It still counts toward its source's reach and holds its
+/// name against a layer's member of the same name.
+pub(crate) fn members_but_quiet<'a>(
     props_type: &PropsType,
     rows: impl IntoIterator<Item = &'a ParsedProp>,
     layers: &[InheritedLayer],
     private: &BTreeMap<String, BTreeSet<String>>,
-) -> Vec<Member> {
+    quiet_candidate: impl Fn(&ParsedProp) -> bool,
+) -> (Vec<Member>, Vec<(&'a str, bool)>) {
     let ambient = |type_name: &str, file: &str| {
         crate::origin::declaration_origin(file).is_ambient()
             || private.get(file).is_some_and(|names| names.contains(type_name))
     };
-    let layered: BTreeSet<&str> = layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
-    let mut listed = BTreeSet::new();
+    let layered: rustc_hash::FxHashSet<&str> =
+        layers.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
+    let mut listed = rustc_hash::FxHashSet::default();
     let rows: Vec<&ParsedProp> = rows.into_iter().filter(|prop| listed.insert(prop.name.as_str())).collect();
     // Each source's reach over the listed props.
     let mut reach: BTreeMap<(&str, &str), usize> = BTreeMap::new();
@@ -315,12 +323,18 @@ pub(crate) fn members<'a>(
                 .is_some_and(|reaching| *reaching > LARGE_API_SOURCE)
     };
     let mut members = Vec::new();
+    let mut quiet = Vec::new();
     for prop in rows {
         let own = props_type.own.contains(&prop.name) || prop.parent.as_ref().is_some_and(|p| props_type.declares(p));
         let based = layered.contains(prop.name.as_str())
             || prop.parent.iter().chain(&prop.declarations).any(|parent| !props_type.declares(parent));
-        let given = member(props_type, &prop.name);
-        members.push(Member {
+        // Named once it is known to be a member: a quiet row allocates nothing.
+        let given = Member {
+            picked: props_type.picked.contains(&prop.name),
+            default_tag: props_type.defaulted.contains(&prop.name),
+            ..Member::default()
+        };
+        let row = Member {
             own,
             overrides: own && based,
             required: prop.required,
@@ -334,7 +348,12 @@ pub(crate) fn members<'a>(
                 && prop.parent.iter().chain(&prop.declarations).all(|parent| ambient(&parent.name, &parent.file_name)),
             large: prop.copied_from_large_keys || prop.parent.as_ref().is_some_and(large),
             ..given
-        });
+        };
+        if quiet_candidate(prop) && !super::listed_by_declaration(&row) {
+            quiet.push((prop.name.as_str(), row.ambient));
+        } else {
+            members.push(Member { name: prop.name.clone(), ..row });
+        }
     }
     for layer in layers {
         let layer_ambient = ambient(&layer.type_name, &layer.file_name);
@@ -349,7 +368,7 @@ pub(crate) fn members<'a>(
             });
         }
     }
-    members
+    (members, quiet)
 }
 
 /// The evidence the props type gives `name` whatever the lane says: picked, defaulted by the signature.
@@ -451,6 +470,16 @@ mod tests {
     }
 
     /// What `decide` makes of the props type's evidence alone, the body known to read nothing.
+    /// Every member the rows and layers reach, none left out as quiet.
+    fn members<'a>(
+        props_type: &PropsType,
+        rows: impl IntoIterator<Item = &'a ParsedProp>,
+        layers: &[InheritedLayer],
+        private: &BTreeMap<String, BTreeSet<String>>,
+    ) -> Vec<Member> {
+        members_but_quiet(props_type, rows, layers, private, |_| false).0
+    }
+
     fn decided(members: Vec<Member>) -> Shown {
         let call_sites = &crate::relevance::NO_CALL_SITES;
         decide(&Evidence { members: &members, body: Some(&Body::default()), call_sites })
@@ -641,7 +670,8 @@ mod tests {
             None,
             vec![react],
         );
-        assert!(super::members(&PropsType::default(), [&handler], &[], &BTreeMap::new())[0].ambient);
+        let handler = members_but_quiet(&PropsType::default(), [&handler], &[], &BTreeMap::new(), |_| false).0;
+        assert!(handler[0].ambient);
     }
 
     /// Two files: the component's, and one declaring its props type and what that type names.

@@ -18,6 +18,7 @@ use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions,
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::import_map::ImportResolutionMap;
+use crate::relevance::Attributes;
 use crate::types::options::PipelineOptions;
 use crate::types::*;
 
@@ -317,7 +318,7 @@ pub struct ResolutionContext {
     /// Named types resolved once per run (`resolve_named`), shared by every component that names them.
     pub(crate) named_results: memo::NamedResults,
     /// An HTML element's attribute declarations (`html::react_attribute`), read once per element and name.
-    pub(crate) attribute_reads: memo::Memo<Option<ParsedProp>>,
+    pub(crate) attribute_reads: memo::Memo<Option<Arc<ParsedProp>>>,
     /// The attribute names an HTML layer lists for an element and mode (`html::layer_attributes`), computed once.
     pub(crate) attribute_names: dashmap::DashMap<String, Arc<[String]>, rustc_hash::FxBuildHasher>,
     /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
@@ -926,23 +927,25 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
+/// One component's resolution: its answer, diagnostics, what it depended on, the relevance evidence read with it, and
+/// React's attributes it holds apart until relevance decides which it lists.
+pub(crate) type Resolution =
+    (ComponentEntry, ResolvedDiagnostics, Dependencies, Option<Arc<crate::relevance::Inputs>>, Attributes);
+
 /// `resolve_component`, plus what its resolution depended on. Watch mode re-resolves a component when one of those
 /// changes.
-pub(crate) fn resolve_component_tracked(
-    mapping: &ComponentMapping,
-    ctx: &ResolutionContext,
-) -> (ComponentEntry, ResolvedDiagnostics, Dependencies, Option<Arc<crate::relevance::Inputs>>) {
-    let ((entry, mut diagnostics, evidence), mut deps) = deps::recording(|| {
-        let (entry, diagnostics) = resolve_component_shared(mapping, ctx);
+pub(crate) fn resolve_component_tracked(mapping: &ComponentMapping, ctx: &ResolutionContext) -> Resolution {
+    let ((entry, attributes, mut diagnostics, evidence), mut deps) = deps::recording(|| {
+        let (entry, attributes, diagnostics) = resolve_component_shared(mapping, ctx);
         // The evidence reads other files (the props type's declarations, a forwarding target's props), so it is read
         // while the answer's dependencies are recorded. A panic gathering it leaves it unknown, never the answer lost.
         let label = format!("relevance:{}", mapping.component_name);
         let evidence = crate::panic_guard::contain_panic(&label, || relevance_inputs::evidence(mapping, ctx, &entry));
-        (entry, diagnostics, evidence)
+        (entry, attributes, diagnostics, evidence)
     });
     deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
     let evidence = evidence.map_err(|diagnostic| diagnostics.own.push(diagnostic)).ok();
-    (entry, diagnostics, deps, evidence)
+    (entry, diagnostics, deps, evidence, attributes)
 }
 
 /// Resolve a `ComponentMapping` to a complete `ComponentEntry`.
@@ -950,7 +953,8 @@ pub(crate) fn resolve_component_tracked(
 /// Called in parallel via rayon — must be `Send + Sync` (all data is owned/Arc'd).
 #[cfg(test)]
 pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) -> (ComponentEntry, Vec<Diagnostic>) {
-    let (entry, diagnostics) = resolve_component_shared(mapping, ctx);
+    let (mut entry, attributes, diagnostics) = resolve_component_shared(mapping, ctx);
+    attributes.list_all(&mut entry);
     (entry, diagnostics.flatten())
 }
 
@@ -998,15 +1002,21 @@ fn aliases_project_component(mapping: &ComponentMapping, ctx: &ResolutionContext
     }
 }
 
-/// `resolve_component`, with the diagnostics of replayed interface chains shared rather than copied.
+/// `resolve_component`, with the diagnostics of replayed interface chains shared rather than copied, and React's
+/// attributes of its HTML element layers under `htmlAttributes: full` held apart from the listing until relevance
+/// decides which it lists ([`Attributes`]).
 pub(crate) fn resolve_component_shared(
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
-) -> (ComponentEntry, ResolvedDiagnostics) {
+) -> (ComponentEntry, Attributes, ResolvedDiagnostics) {
     // The component the project already declares under this name, not a second one: nothing to document here, so
     // the entry is left empty and goes unpublished like an alias whose package isn't loaded.
     if aliases_project_component(mapping, ctx) {
-        return (unpublished_entry(mapping), ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
+        return (
+            unpublished_entry(mapping),
+            Attributes::default(),
+            ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() },
+        );
     }
     let mut state = ResolveState { scope: TypeScope::new(mapping.type_params.iter()), ..ResolveState::default() };
 
@@ -1022,7 +1032,11 @@ pub(crate) fn resolve_component_shared(
     let result = callee::result_chain(mapping, ctx, &mut state);
     // A call to a function whose result is no component is no component: nothing to document, nothing to report.
     if result.is_none() && mapping.rule == DetectionRule::FactoryResult {
-        return (unpublished_entry(mapping), ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
+        return (
+            unpublished_entry(mapping),
+            Attributes::default(),
+            ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() },
+        );
     }
     let mut chain = result.unwrap_or_else(|| {
         chain::resolve_props_chain(
@@ -1059,8 +1073,11 @@ pub(crate) fn resolve_component_shared(
 
     // Populate notable_inherited from HTML element layers and non-HTML inherited layers. Curated mode lists the
     // curated attributes there; Full mode lists all of them in `props`, except for a layer whose attributes the
-    // interface chain already merged (`total_props`); None mode lists none.
+    // interface chain already merged (`total_props`); None mode lists none. Full mode holds those only React declares
+    // apart (`attributes`): relevance lists the ones it keeps. Each is still read here, so the answer records what
+    // reading it depends on and reports.
     let mut notable_inherited: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
+    let mut attributes = Attributes::default();
     for layer in &chain.inheritance {
         if layer.html_element.is_none() {
             continue;
@@ -1069,10 +1086,12 @@ pub(crate) fn resolve_component_shared(
             crate::types::options::HtmlAttributeMode::None => {}
             crate::types::options::HtmlAttributeMode::Full => {
                 if layer.total_props == 0 {
-                    let added =
-                        html::layer_attributes(layer, true, |name| props.contains_key(name), ctx, &mut state, 0);
+                    let has = |name: &str| props.contains_key(name) || attributes.contains(name);
+                    let added = html::layer_attributes(layer, true, has, ctx, &mut state, 0);
                     for prop in added {
-                        props.entry(prop.name.clone()).or_insert(prop);
+                        if let Some(prop) = attributes.hold(prop) {
+                            props.entry(prop.name.clone()).or_insert(prop);
+                        }
                     }
                 }
             }
@@ -1100,7 +1119,7 @@ pub(crate) fn resolve_component_shared(
         } else {
             &mut notable_inherited
         };
-        if !target.contains_key("ref") {
+        if !target.contains_key("ref") && !attributes.contains("ref") {
             let ref_type = PropType::Named {
                 name: "Ref".into(),
                 args: vec![PropType::Named { name: "unknown".into(), args: vec![] }],
@@ -1127,7 +1146,10 @@ pub(crate) fn resolve_component_shared(
     // lists is, so a destructuring default reaches it too (`Box({ className = "base" }: BoxProps)`).
     let mut collapsed_notable: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for prop in &chain.notable {
-        if !props.contains_key(&prop.name) && !notable_inherited.contains_key(&prop.name) {
+        if !props.contains_key(&prop.name)
+            && !attributes.contains(&prop.name)
+            && !notable_inherited.contains_key(&prop.name)
+        {
             collapsed_notable.entry(prop.name.clone()).or_insert_with(|| prop.clone());
         }
     }
@@ -1154,7 +1176,7 @@ pub(crate) fn resolve_component_shared(
         exports: mapping.exports.clone(),
     };
     crate::types::semantic::listed_props_leave_layers(&mut entry, false);
-    (entry, ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics })
+    (entry, attributes, ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics })
 }
 
 /// A destructuring default is the component's default for that prop wherever the prop's type was declared, as
