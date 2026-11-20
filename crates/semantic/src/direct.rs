@@ -125,6 +125,13 @@ pub(crate) fn ask(session: &Session, method: &str, params: &Value) -> Result<Val
     }
 }
 
+/// Spike measurement switch: `CALIPER_SPIKE_TEXT` set sends the routed methods down the JSON text path again, so one
+/// binary can be sampled both ways.
+pub(crate) fn text_forced() -> bool {
+    static FORCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FORCED.get_or_init(|| std::env::var_os("CALIPER_SPIKE_TEXT").is_some())
+}
+
 /// A request's parameters: the project and snapshot, then `fields`.
 pub(crate) fn scoped(project: &str, snapshot: u64, fields: Vec<(&'static str, Value)>) -> Value {
     let mut map = JsonMap::with_capacity(2 + fields.len());

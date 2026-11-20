@@ -761,7 +761,7 @@ impl Rpc {
     }
 
     pub(crate) async fn types_of_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<TypeInfo>, CallError> {
-        if self.recording.is_some() {
+        if self.recording.is_some() || crate::direct::text_forced() {
             return self.scoped("getTypesOfSymbols", Asking::Symbols { symbols }).await;
         }
         let refs = symbols
@@ -890,7 +890,7 @@ impl Rpc {
     }
 
     pub(crate) async fn properties(&self, type_id: u64) -> Result<Vec<SymbolInfo>, CallError> {
-        if self.recording.is_some() {
+        if self.recording.is_some() || crate::direct::text_forced() {
             return self.scoped("getPropertiesOfType", Asking::Type { type_id }).await;
         }
         #[expect(clippy::cast_precision_loss, reason = "type handles are small counters")]
