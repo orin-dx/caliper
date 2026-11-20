@@ -1,0 +1,60 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XKEHQN30J6K46TYFDV09BD",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".changeset/enum-unknown-member-values.md",
+    "crates/core/src/cache.rs",
+    "crates/core/src/extractor/enum_fold.rs",
+    "crates/core/src/extractor/interface.rs",
+    "crates/core/src/extractor/mod.rs",
+    "crates/core/src/extractor/visit.rs",
+    "crates/core/src/known.rs",
+    "crates/core/src/resolver/named.rs",
+    "crates/core/src/resolver/primitives.rs",
+    "crates/core/src/types/collected.rs",
+    "crates/core/tests/enum_member_values.rs",
+    "crates/core/tests/enum_props.rs",
+    "crates/semantic/tests/enum_member_values.rs",
+    "packages/napi/index.d.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4,
+    "cache_creation_tokens": 1569,
+    "cache_read_tokens": 643616,
+    "output_tokens": 686,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 16,
+      "cache_creation_tokens": 2906,
+      "cache_read_tokens": 1381100,
+      "output_tokens": 1942,
+      "api_call_count": 8
+    }
+  },
+  "redaction": {
+    "replacements": 87,
+    "layers": {
+      "betterleaks": 46,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 41,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
