@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_0164QMiVED73GqFfm9f2Thod",
+  "agent_id": "aa92cab9bf7fc5673",
+  "subagent_type": "general-purpose",
+  "task_description": "Prototype: call tsrs dispatch without JSON text",
+  "token_usage": {
+    "input_tokens": 108,
+    "cache_creation_tokens": 311219,
+    "cache_read_tokens": 6418042,
+    "output_tokens": 35097,
+    "api_call_count": 53
+  },
+  "started_at": "2026-11-20T15:16:53.979574-08:00",
+  "completed_at": "2026-11-20T15:30:16.713127-08:00"
+}

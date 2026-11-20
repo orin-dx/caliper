@@ -1,0 +1,156 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XN4V2Q55C3QYHH9XM6EVZP",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-20T23:37:34.596499Z",
+  "branch": "perf/lazy-html-attributes",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/core/src/pipeline/mod.rs",
+    "crates/core/src/pipeline/revision.rs",
+    "crates/core/src/pipeline/revision/lazy.rs",
+    "crates/core/src/relevance/mod.rs",
+    "crates/core/src/relevance/props_type.rs",
+    "crates/core/src/resolver/alias.rs",
+    "crates/core/src/resolver/html.rs",
+    "crates/core/src/resolver/mod.rs",
+    "crates/core/src/resolver/tests.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "1c5113cba993",
+  "checkpoint_transcript_start": 8056,
+  "transcript_lines_at_start": 8056,
+  "compact_transcript_start": 707,
+  "token_usage": {
+    "input_tokens": 4,
+    "cache_creation_tokens": 1023,
+    "cache_read_tokens": 784027,
+    "output_tokens": 122,
+    "api_call_count": 1,
+    "subagent_tokens": {
+      "input_tokens": 112,
+      "cache_creation_tokens": 249892,
+      "cache_read_tokens": 12702427,
+      "output_tokens": 42447,
+      "api_call_count": 55
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1310,
+    "cache_creation_tokens": 3659782,
+    "cache_read_tokens": 256454885,
+    "output_tokens": 397020,
+    "api_call_count": 634,
+    "subagent_tokens": {
+      "input_tokens": 742,
+      "cache_creation_tokens": 1257619,
+      "cache_read_tokens": 55329549,
+      "output_tokens": 265927,
+      "api_call_count": 368
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 91,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 87,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 65
+  },
+  "summary": {
+    "intent": "Coordinate several parallel background worker agents on the caliper project: a prototype (Level 2) calling the tsrs dispatch without JSON text, a request-reduction worker, and a lazy-HTML-attributes worker.",
+    "outcome": "The prototype worker only sent interim notices saying it is waiting on its own background work, with no final report yet. The assistant held off and avoided touching rpc.rs, convert.rs, or the resolver so nothing overlapped. Changes were made to files in the pipeline, relevance, and resolver modules, but the transcript does not say whether they work.",
+    "learnings": {
+      "repo": [
+        "Caliper is a Rust workspace with core code under crates/core/src, split into pipeline, relevance, and resolver modules.",
+        "Files rpc.rs, convert.rs, and the resolver are shared hot spots that the parallel workers could collide on, so the coordinator avoids editing them while workers run.",
+        "Each background agent runs in its own git worktree under .claude/worktrees/agent-<id> on a branch named worktree-agent-<id>."
+      ],
+      "code": [],
+      "workflow": [
+        "A task-notification with status 'completed' can still be interim: when an agent is waiting on its own background work, it will report later via SubagentHandback and the same task-id notifies again.",
+        "Running parallel workers in separate worktrees, while the coordinator stays out of the files they own, avoids merge conflicts."
+      ]
+    },
+    "friction": null,
+    "open_items": null
+  }
+}
