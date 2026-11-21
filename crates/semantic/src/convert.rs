@@ -1933,7 +1933,8 @@ impl Converter {
 }
 
 /// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
-/// `[brand]`. The id is the checker's and does not belong in an answer.
+/// `[brand]`. An ES-private member is `__#<symbol id>@#<name>`; the source writes `#<name>`. The id is the checker's
+/// and does not belong in an answer.
 fn property_name(name: &str) -> String {
     const WELL_KNOWN: [&str; 15] = [
         "iterator",
@@ -1952,6 +1953,12 @@ fn property_name(name: &str) -> String {
         "dispose",
         "asyncDispose",
     ];
+    if let Some((id, private)) = name.strip_prefix("__#").and_then(|rest| rest.split_once("@#"))
+        && !id.is_empty()
+        && id.chars().all(|c| c.is_ascii_digit())
+    {
+        return format!("#{private}");
+    }
     let Some((symbol, _id)) = name.strip_prefix("__@").and_then(|rest| rest.rsplit_once('@')) else {
         return name.to_string();
     };
@@ -2031,6 +2038,18 @@ pub(crate) fn without_undefined(prop_type: PropType, optional: bool) -> PropType
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The checker keys an ES-private member `__#<symbol id>@#<name>`, and the id depends on the order the checker was
+    /// asked: the name an answer carries is the one the source writes.
+    #[test]
+    fn a_property_name_carries_no_checker_id() {
+        assert_eq!(property_name("__#8@#type"), "#type");
+        assert_eq!(property_name("__#10@#type"), "#type");
+        assert_eq!(property_name("__@iterator@17"), "[Symbol.iterator]");
+        assert_eq!(property_name("__@brand@3"), "[brand]");
+        assert_eq!(property_name("size"), "size");
+        assert_eq!(property_name("__#nothing"), "__#nothing");
+    }
 
     fn type_of(flags: u64, object_flags: u64) -> TypeInfo {
         serde_json::from_value(serde_json::json!({ "id": 1, "flags": flags, "objectFlags": object_flags })).unwrap()
