@@ -1,87 +1,59 @@
-# Pinned to callisto 0.20.0 in .github/workflows/callisto-release.yml.
+# Pinned to callisto 0.22.0 in .github/workflows/callisto-release.yml.
 # Callisto checks build attestations against that exact workflow filename; do not rename it.
 
 # `match` is a package name ("<ecosystem>/<name>"), never a directory path.
 # Root package.json is `caliper-docgen-workspace` so bare `caliper-docgen` stays unambiguous.
 
-[changesets]
-dir = ".changeset"
+# Defaults are left out: changesets in `.changeset`, `release-trigger = "changeset"`, and the
+# cascade `mode = "out-of-range"`, `bump-severity = "patch"` and `preserve-npm-ranges = true`.
+# `publish-to` stays explicit, so a manifest edit cannot start or stop a publish.
 
+# 0.22 defaults this to false. Kept true so an out-of-range peer bump still releases the dependent as a major.
 [cascade]
-mode = "out-of-range"
-bump-severity = "patch"
 peer-escalation = true
-preserve-npm-ranges = true
 
 # The CLI binaries ship as assets of the one GitHub Release for the product package.
 # The npm `bin` of `npm/caliper-docgen` cannot be a product, so the product is the Cargo crate.
-# `target` matches the build matrix in callisto-release.yml; `asset-name` is the exact file name.
+# `targets` match the build matrix in callisto-release.yml; `asset-name` names each one.
 [release]
 product-package = "cargo/caliper-docgen"
-forge-repository = "orin-dx/caliper"
-
-[[release.artifact]]
-package = "cargo/caliper-docgen"
-target = "aarch64-apple-darwin"
-asset-name = "caliper-docgen-aarch64-apple-darwin.tar.gz"
-
-[[release.artifact]]
-package = "cargo/caliper-docgen"
-target = "x86_64-apple-darwin"
-asset-name = "caliper-docgen-x86_64-apple-darwin.tar.gz"
-
-[[release.artifact]]
-package = "cargo/caliper-docgen"
-target = "x86_64-unknown-linux-gnu"
-asset-name = "caliper-docgen-x86_64-unknown-linux-gnu.tar.gz"
-
-[[release.artifact]]
-package = "cargo/caliper-docgen"
-target = "aarch64-unknown-linux-gnu"
-asset-name = "caliper-docgen-aarch64-unknown-linux-gnu.tar.gz"
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+asset-name = "caliper-docgen-{target}.tar.gz"
 
 [[package]]
 match = "cargo/caliper-docgen-core"
 publish-to = ["crates-io"]
-release-trigger = "changeset"
 
 [[package]]
 match = "cargo/caliper-docgen-semantic"
 publish-to = ["crates-io"]
-release-trigger = "changeset"
 
 # The CLI is the product: each version gets one GitHub Release, with the
 # `## <version>` section of crates/cli/CHANGELOG.md as its notes.
 [[package]]
 match = "cargo/caliper-docgen"
 publish-to = ["crates-io", "github-release"]
-release-trigger = "changeset"
 
 [[package]]
 match = "npm/caliper-docgen"
 publish-to = ["npm"]
-release-trigger = "changeset"
 
 # FFI shim: versioned with its npm wrapper, never published to crates.io.
 [[package]]
 match = "cargo/caliper-docgen-napi"
 publish-to = []
-release-trigger = "changeset"
 
 [[package]]
 match = "npm/caliper-docgen-napi"
 publish-to = ["npm"]
-release-trigger = "changeset"
 
 [[package]]
 match = "npm/caliper-docgen-vite-plugin"
 publish-to = ["npm"]
-release-trigger = "changeset"
 
 [[package]]
 match = "npm/caliper-docgen-storybook"
 publish-to = ["npm"]
-release-trigger = "changeset"
 
 # The npm wrapper is meaningless without a matching binding build. The Vite plugin and the
 # Storybook addon depend on the binding at an exact version (`workspace:*` publishes as an

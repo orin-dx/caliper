@@ -1,6 +1,6 @@
 # Releasing
 
-How a change becomes a published release, and what to check afterwards. Callisto 0.20.0 drives it (`callisto.toml`, `.github/workflows/callisto-release.yml`); its own guide is `docs/releasing.md` in `orin-dx/callisto`.
+How a change becomes a published release, and what to check afterwards. Callisto 0.22.0 drives it (`callisto.toml`, `.github/workflows/callisto-release.yml`); its own guide is `docs/releasing.md` in `orin-dx/callisto`.
 
 ## Flow
 
@@ -10,17 +10,20 @@ How a change becomes a published release, and what to check afterwards. Callisto
 
 | Job | What it does | Credentials |
 | --- | --- | --- |
-| `plan` | Derives the release from the merged commit; records whether it has CLI assets | none |
-| `build` | Builds the napi addons and CLI binary for each of five targets; archives, attests and uploads the CLI asset | `id-token`, `attestations: write` |
-| `assemble` | Writes the artifact manifest that binds the assets to the plan | none |
-| `execute` | Publishes crates and npm packages, tags, uploads the assets and publishes the GitHub Release; verifies every attestation first | registry tokens |
+| `plan` | Derives the release from the merged commit; records whether it has crates, npm packages and CLI assets | none |
+| `package-cargo` | Compiles every crate of the release, because `execute` publishes crates with `--no-verify` | none |
+| `build` | Builds the napi addons and CLI binary for each of four targets; archives and uploads the CLI asset | none |
+| `attest` | Attests the exact asset bytes; has no checkout and runs no command | `id-token`, `attestations: write` |
+| `pack-npm` | Places the platform binaries, builds the Vite plugin and Storybook addon, and packs every npm package | none |
+| `assemble` | Writes the artifact manifest that binds the assets to the plan and seals the npm tarballs | none |
+| `execute` | Publishes crates and the sealed npm tarballs, tags, uploads the assets and publishes the GitHub Release; verifies every attestation first | registry tokens |
 | `drain` | Starts the next unfinished release, if any, once `execute` succeeds | `actions: write` |
 
-`execute` is the only job with registry credentials. `assemble` is skipped when the plan declares no assets (`has_artifacts` is false).
+`execute` is the only job with registry credentials. `execute` publishes npm tarballs with `--ignore-scripts`, so `prepublishOnly` never runs: `pack-npm` builds the Vite plugin and the Storybook addon (`pnpm build`) before it packs. `package-cargo`, `attest` and `pack-npm` are skipped when the plan has no crate, no asset or no npm package, and `assemble` when it has no asset and no npm package.
 
 The workflow runs on every push to `main`, daily at 05:23 UTC, and on manual dispatch. Every run first asks `callisto release pending` for the oldest merged release commit whose tags or GitHub Release are missing, and finishes that one before anything newer. When none is unfinished, a push to a release commit releases it and any other run refreshes the release pull request.
 
-The workflow file must stay named `callisto-release.yml`. Callisto verifies each asset's attestation against that exact workflow path (`gh attestation verify --signer-workflow <repo>/.github/workflows/callisto-release.yml`), and the path is fixed in Callisto 0.20.0.
+The workflow file must stay named `callisto-release.yml`. Callisto verifies each asset's attestation against that exact workflow path (`gh attestation verify --signer-workflow <repo>/.github/workflows/callisto-release.yml`), and the path is fixed in Callisto 0.22.0.
 
 ## What a release produces
 
@@ -34,14 +37,14 @@ The workflow file must stay named `callisto-release.yml`. Callisto verifies each
 
 Tag names do not change. The Homebrew tap reads the `npm/caliper-docgen@x.y.z` tag (`CONTRIBUTING.md`, Releases).
 
-The build matrix in `callisto-release.yml` and the `[[release.artifact]]` entries in `callisto.toml` list the same five targets and asset names. Change both together.
+The build matrix in `callisto-release.yml` and `targets` and `asset-name` under `[release]` in `callisto.toml` list the same four targets and asset names. Change both together.
 
 ## Check a release
 
 A green run is not proof of publication. After each release:
 
 1. Open the run's `release-receipt-attempt-N` artifact, or the receipt in the job summary, and confirm every operation succeeded.
-2. `gh release view cargo/caliper-docgen@x.y.z` shows the published Release, its notes and five assets.
+2. `gh release view cargo/caliper-docgen@x.y.z` shows the published Release, its notes and four assets.
 3. `gh attestation verify <asset> --repo orin-dx/caliper --signer-workflow orin-dx/caliper/.github/workflows/callisto-release.yml` passes for a downloaded asset.
 4. `cargo info caliper-docgen` and `npm view caliper-docgen version` show the new version.
 
@@ -57,7 +60,7 @@ callisto release pending --from 2daef9276b234fcc04d8994d91210eeccd88d7e8
 
 `--from` is the `RELEASE_PENDING_FROM` value in `callisto-release.yml`. Without it, `release pending` reads the committed decision of the 10 newest release commits and stops with E166 on one whose decision no longer decodes. The pin is the 0.9.0 release commit (`2daef927`).
 
-0.9.0 was published before GitHub Releases were enabled, so `release pending` lists it as missing its GitHub Release. The first run after this flow lands finishes it: the build matrix rebuilds 0.9.0 from its release commit and Callisto creates the GitHub Release with five attested assets. Callisto adopts the crates, npm packages and tags that already landed (`docs/releasing.md` in `orin-dx/callisto`, "Publication checks"); this path has not been run, so watch that run.
+0.9.0 was published before GitHub Releases were enabled, so `release pending` lists it as missing its GitHub Release. The first run after this flow lands finishes it: the build matrix rebuilds 0.9.0 from its release commit and Callisto creates the GitHub Release with four attested assets. Callisto adopts the crates, npm packages and tags that already landed (`docs/releasing.md` in `orin-dx/callisto`, "Publication checks"); this path has not been run, so watch that run.
 
 - **A job failed:** "Re-run failed jobs". Callisto adopts the effects that already landed and does the rest.
 - **A release cannot finish:** dispatch it by hand with its release commit, `gh workflow run callisto-release.yml --ref main -f release_source_sha=<merged release commit>`. If it will never finish, skip it by moving `RELEASE_PENDING_FROM` to a newer release commit.
@@ -77,7 +80,7 @@ callisto release pending --from 2daef9276b234fcc04d8994d91210eeccd88d7e8
 Nothing in CI exercises the release path before a real release, so rehearse before merging a change to `callisto-release.yml` or the `[release]` section of `callisto.toml`:
 
 1. Fork the repository, or create a scratch one, and enable Actions. Use the same file name for the workflow.
-2. Set `forge-repository` in `callisto.toml` to the scratch repository; Callisto stops with E187 when it differs from `origin`. The scratch repository has no registry tokens, so expect `execute` to stop at its first publish. The point is that `plan`, `build` and `assemble` pass.
-3. Add a changeset, merge the release pull request, and check that `build` produced five attested assets and `assemble` wrote `manifest.json`.
+2. Leave `callisto.toml` as it is: `[release]` has no `forge-repository`, so Callisto releases to `origin`, the scratch repository (a `forge-repository` that differs from `origin` stops with E187). The scratch repository has no registry tokens, so expect `execute` to stop at its first publish. The point is that `plan`, `package-cargo`, `build`, `attest`, `pack-npm` and `assemble` pass.
+3. Add a changeset, merge the release pull request, and check that `build` produced four assets, `attest` attested them, `pack-npm` packed every npm package and `assemble` wrote `manifest.json`.
 4. Read `callisto release --dry-run --format text` on the release commit to see the operations `execute` will run.
 5. Confirm the first real release from the receipt and the providers, as in "Check a release".
