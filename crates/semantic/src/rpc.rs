@@ -705,6 +705,8 @@ impl Rpc {
     }
 
     /// Requests sent so far, by method.
+    /// The requests inside a batch count under their own methods and in all as `inBatches`, and the batch once as
+    /// `batchRequests`.
     pub(crate) fn calls(&self) -> BTreeMap<&'static str, u64> {
         self.calls.lock().map(|calls| calls.clone()).unwrap_or_default()
     }
@@ -826,6 +828,12 @@ impl Rpc {
         requests: Vec<(&'static str, Asking<'_>)>,
     ) -> Result<Vec<Box<RawValue>>, CallError> {
         let wanted = requests.len();
+        if let Ok(mut calls) = self.calls.lock() {
+            for (method, _) in &requests {
+                *calls.entry(method).or_default() += 1;
+            }
+            *calls.entry("inBatches").or_default() += wanted as u64;
+        }
         let scoped: Vec<Batched<'_, Asking<'_>>> = requests
             .into_iter()
             .map(|(method, extra)| Batched {

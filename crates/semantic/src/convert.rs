@@ -24,6 +24,7 @@
 //! [`PropType::Truncated`], never the checker's text standing in as a name. The width of an object counts only the
 //! members the project did not declare: its own are listed whole.
 
+use std::borrow::Borrow;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -37,6 +38,7 @@ use caliper_docgen_core::types::{
 };
 use rustc_hash::FxHashMap;
 
+use crate::asked::Answers;
 use crate::declared::Declared;
 use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
 use crate::rpc::{
@@ -368,8 +370,19 @@ pub(crate) fn declared_in(declaration: &str) -> &str {
 /// Whether `converted` holds more than `budget` types, itself and every type inside it counted. Counted on the tree,
 /// not by serializing it, and only as far as the budget: the walk stops at the first type past it.
 fn past_size_budget(converted: &PropType, budget: usize) -> bool {
-    let mut count = 0usize;
-    let mut pending = vec![converted];
+    past_budget(vec![converted], 0, budget)
+}
+
+/// Whether an object of `fields` holds more than `budget` types, as [`past_size_budget`] counts them.
+fn fields_past_size_budget(fields: &[ObjectField], budget: usize) -> bool {
+    let mut pending = Vec::new();
+    push_fields(fields, &mut pending);
+    past_budget(pending, 1, budget)
+}
+
+/// Whether `counted` types, and those in `pending` with every type inside them, are more than `budget`.
+fn past_budget(mut pending: Vec<&PropType>, counted: usize, budget: usize) -> bool {
+    let mut count = counted;
     while let Some(ty) = pending.pop() {
         count += 1;
         if count > budget {
@@ -557,10 +570,6 @@ impl Entry {
 
 type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 
-/// The parts of each type asked about so far, by (type handle, which parts), as the text the checker answered: read
-/// again on each use, which costs a fraction of the round trip, and is several times smaller than the read lists.
-type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<RawValue>>>;
-
 /// The props answered so far, by the hash of their [`PropKey`] and then the key itself, owned.
 type KeptProps = Mutex<FxHashMap<u64, Vec<(KeptKey, Arc<SemanticProp>)>>>;
 
@@ -658,6 +667,15 @@ enum Parts {
     Arguments,
 }
 
+/// Which of an object type's properties [`Converter::fields`] lists: all of them, or only the project's own (see
+/// [`Converter::over_budget`]). With the type's handle it names the same symbols every time, since an object type's
+/// properties are the checker's answer about the type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Listing {
+    All,
+    Own,
+}
+
 /// The type arguments a reference names, without the `this` type the checker appends to a class's or interface's.
 fn without_this(arguments: &[TypeInfo]) -> &[TypeInfo] {
     let named = arguments.iter().rposition(|argument| !argument.is_this_type).map_or(0, |last| last + 1);
@@ -681,15 +699,30 @@ struct State {
     /// it. Entries that hold in a context all agree, so which of them is found first, and so the order in which
     /// types were first reached, cannot show in the output.
     memo: Memo,
-    origins: Mutex<FxHashMap<(bool, CompactSymbol), Option<Origin>>>,
+    // What follows is the checker's answers about types and symbols, fixed inside the snapshot, while the memo converts
+    // a type again at another depth or under other instantiations: kept, that conversion asks for none of them again.
+    // Kept for the whole snapshot, since components of one library share most of their types: kept per component, a
+    // program of every Chakra component answered 16 at a time held 16 copies of the same style props' members. Each is
+    // asked once even by conversions running at once ([`Answers`]).
+    origins: Answers<(bool, CompactSymbol), Option<Origin>>,
     /// By (type handle, whether printed expanded: see [`Rpc::type_to_string_expanded`]).
-    printed: Mutex<FxHashMap<(u64, bool), String>>,
-    /// The parts of a type by its handle (see [`Parts`]). They are the checker's answer about the type, fixed inside the
-    /// snapshot, while the memo converts a type again at another depth or under other instantiations: kept, that
-    /// conversion asks for none of them again. Kept for the whole snapshot, since components of one library share
-    /// most of their types: kept per component, a program of every Chakra component answered 16 at a time held 16
-    /// copies of the same style props' members.
-    parts: PartsSeen,
+    printed: Answers<(u64, bool), String>,
+    /// The parts of a type by its handle (see [`Parts`]), as the text the checker answered: read again on each use,
+    /// which costs a fraction of the round trip, and is several times smaller than the read lists.
+    parts: Answers<(u64, Parts), Arc<RawValue>>,
+    /// Whether an object type has call signatures, by its handle.
+    callable: Answers<u64, bool>,
+    /// An alias's type arguments by the aliased type's handle.
+    alias_arguments: Answers<u64, Arc<[TypeInfo]>>,
+    /// A class's or interface's base types by its handle.
+    bases: Answers<u64, Arc<[TypeInfo]>>,
+    /// The generic type a reference instantiates, by the reference's handle.
+    targets: Answers<u64, Arc<TypeInfo>>,
+    /// The types of the properties [`Converter::fields`] lists, by the object type's handle and [`Listing`].
+    field_types: Answers<(u64, Listing), Arc<[Arc<TypeInfo>]>>,
+    /// Whether each of those properties is `readonly`, asked only for fields the size budget does not cut (see
+    /// [`Converter::fields`]).
+    readonly: Answers<(u64, Listing), Arc<[bool]>>,
     /// Where props are declared ([`crate::declared`]), kept for the snapshot like the rest.
     declared: crate::declared::Memo,
     /// A map's property count by [`MapKey`]: a map without `as` has one property per key of its constraint and a cut reads
@@ -778,16 +811,23 @@ impl Converter {
     }
 
     /// Every type converted, in the order of `infos`, though when `reverse` is set the checker is asked last to first.
-    async fn convert_all(&self, infos: &[TypeInfo], cx: &Cx) -> Result<Vec<PropType>, CallError> {
+    async fn convert_all<T: Borrow<TypeInfo> + Sync>(&self, infos: &[T], cx: &Cx) -> Result<Vec<PropType>, CallError> {
         let mut slots: Vec<Option<PropType>> = vec![None; infos.len()];
         let order: Box<dyn Iterator<Item = usize> + Send> =
             if self.reverse { Box::new((0..infos.len()).rev()) } else { Box::new(0..infos.len()) };
         for index in order {
             if let (Some(info), Some(slot)) = (infos.get(index), slots.get_mut(index)) {
-                *slot = Some(self.convert(info, cx).await?);
+                *slot = Some(self.convert(info.borrow(), cx).await?);
             }
         }
         Ok(slots.into_iter().flatten().collect())
+    }
+
+    /// Each of `answered` as the type held for its handle, held from now on when none was: an object's properties
+    /// often share a type (Chakra's condition objects: 130 properties of one value type).
+    fn shared_types(&self, answered: Vec<TypeInfo>) -> Arc<[Arc<TypeInfo>]> {
+        let mut known = self.state.symbol_types.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        answered.into_iter().map(|info| known.by_id.entry(info.id).or_insert_with(|| Arc::new(info)).clone()).collect()
     }
 
     /// The prop made earlier in this snapshot from what `key` names, if one was.
@@ -870,8 +910,8 @@ impl Converter {
                 }
                 if origin.alias && origin.in_lib() && UTILITIES.contains(&origin.name.as_str()) {
                     let keeps = whole && origin.name != "Pick";
-                    let applied = self.rpc.alias_type_arguments(info.id).await?.into_iter().take(1);
-                    pending.extend(applied.map(|base| (base, keeps)));
+                    let applied = self.alias_arguments(info.id).await?;
+                    pending.extend(applied.iter().take(1).map(|base| (base.clone(), keeps)));
                     continue;
                 }
             }
@@ -909,11 +949,11 @@ impl Converter {
     /// `HTMLAttributes<T>` is not `HTMLAttributes<HTMLDivElement>`, and tests [`states_bases`] of the type itself.
     async fn named_bases(&self, info: &TypeInfo) -> Result<Option<Vec<TypeInfo>>, CallError> {
         match BasesOf::of(info) {
-            BasesOf::Itself => Ok(Some(self.rpc.base_types(info.id).await?)),
+            BasesOf::Itself => Ok(Some(self.bases(info.id).await?.to_vec())),
             BasesOf::Generic => {
-                let target = self.rpc.target_of_type(info.id).await?;
+                let target = self.target(info.id).await?;
                 match BasesOf::of(&target) {
-                    BasesOf::Itself => Ok(Some(self.rpc.base_types(target.id).await?)),
+                    BasesOf::Itself => Ok(Some(self.bases(target.id).await?.to_vec())),
                     _ => Ok(info.is_tuple_type.then(Vec::new)),
                 }
             }
@@ -977,7 +1017,7 @@ impl Converter {
     /// their properties where their `T` does, a dependency's in one and the project's in the other. When the
     /// declaration cannot be read, the map is not.
     async fn invariant(&self, info: &TypeInfo) -> bool {
-        match self.rpc.target_of_type(info.id).await {
+        match self.target(info.id).await {
             Ok(target) => target.constraint_type.is_some() && target.constraint_type == info.constraint_type,
             Err(_) => false,
         }
@@ -1057,37 +1097,51 @@ impl Converter {
     }
 
     async fn printed(&self, id: u64, expanded: bool) -> Result<String, CallError> {
-        let key = (id, expanded);
-        if let Some(text) = self.state.printed.lock().ok().and_then(|printed| printed.get(&key).cloned()) {
-            return Ok(text);
-        }
-        let text =
-            if expanded { self.rpc.type_to_string_expanded(id).await? } else { self.rpc.type_to_string(id).await? };
-        if let Ok(mut printed) = self.state.printed.lock() {
-            printed.insert(key, text.clone());
-        }
-        Ok(text)
+        self.state
+            .printed
+            .get((id, expanded), || async {
+                if expanded { self.rpc.type_to_string_expanded(id).await } else { self.rpc.type_to_string(id).await }
+            })
+            .await
     }
 
     /// The members or type arguments of a type, asked once per type however many conversions read them.
     async fn parts(&self, id: u64, kind: Parts) -> Result<Vec<TypeInfo>, CallError> {
-        let key = (id, kind);
-        let known = self.state.parts.lock().ok().and_then(|parts| parts.get(&key).cloned());
-        let text = match known {
-            Some(text) => text,
-            None => {
-                let fetched: Arc<RawValue> = match kind {
+        let text = self
+            .state
+            .parts
+            .get((id, kind), || async {
+                let fetched = match kind {
                     Parts::Members => self.rpc.members_text(id).await?,
                     Parts::Arguments => self.rpc.type_arguments_text(id).await?,
-                }
-                .into();
-                if let Ok(mut parts) = self.state.parts.lock() {
-                    parts.insert(key, fetched.clone());
-                }
-                fetched
-            }
-        };
+                };
+                Ok(Arc::from(fetched))
+            })
+            .await?;
         decode(&text)
+    }
+
+    /// Whether a type has call signatures, asked once per type.
+    async fn callable(&self, id: u64) -> Result<bool, CallError> {
+        self.state
+            .callable
+            .get(id, || async { Ok(!self.rpc.signatures(id, SignatureKind::Call).await?.is_empty()) })
+            .await
+    }
+
+    /// An alias's type arguments, asked once per type.
+    async fn alias_arguments(&self, id: u64) -> Result<Arc<[TypeInfo]>, CallError> {
+        self.state.alias_arguments.get(id, || async { Ok(Arc::from(self.rpc.alias_type_arguments(id).await?)) }).await
+    }
+
+    /// A class's or interface's base types, asked once per type.
+    async fn bases(&self, id: u64) -> Result<Arc<[TypeInfo]>, CallError> {
+        self.state.bases.get(id, || async { Ok(Arc::from(self.rpc.base_types(id).await?)) }).await
+    }
+
+    /// The generic type a reference instantiates, asked once per type.
+    async fn target(&self, id: u64) -> Result<Arc<TypeInfo>, CallError> {
+        self.state.targets.get(id, || async { Ok(Arc::new(self.rpc.target_of_type(id).await?)) }).await
     }
 
     /// The alias a type was written through, when it has one.
@@ -1119,18 +1173,18 @@ impl Converter {
 
     /// The declaration behind a symbol, asked once per symbol however many types refer to it.
     async fn origin_of(&self, symbol: &CompactSymbol, alias: bool, type_id: u64) -> Result<Option<Origin>, CallError> {
-        let key = (alias, symbol.clone());
-        if let Some(known) = self.state.origins.lock().ok().and_then(|origins| origins.get(&key).cloned()) {
-            return Ok(known);
-        }
-        let found =
-            if alias { self.rpc.alias_symbol(type_id).await? } else { self.rpc.symbol_of_type(type_id).await? };
-        // `__type` and `__object` are the checker's names for a type that has none.
-        let found = found.map(|symbol| Origin::of(&symbol, alias)).filter(|origin| !origin.name.starts_with("__"));
-        if let Ok(mut origins) = self.state.origins.lock() {
-            origins.insert(key, found.clone());
-        }
-        Ok(found)
+        self.state
+            .origins
+            .get((alias, symbol.clone()), || async {
+                let found = if alias {
+                    self.rpc.alias_symbol(type_id).await?
+                } else {
+                    self.rpc.symbol_of_type(type_id).await?
+                };
+                // `__type` and `__object` are the checker's names for a type that has none.
+                Ok(found.map(|symbol| Origin::of(&symbol, alias)).filter(|origin| !origin.name.starts_with("__")))
+            })
+            .await
     }
 
     async fn type_parameter(&self, info: &TypeInfo) -> Result<PropType, CallError> {
@@ -1227,7 +1281,7 @@ impl Converter {
             if info.alias_type_arguments.is_empty() {
                 return Ok(Vec::new());
             }
-            let arguments = self.rpc.alias_type_arguments(info.id).await?;
+            let arguments = self.alias_arguments(info.id).await?;
             return self.convert_all(&arguments, &cx.argument()).await;
         }
         if info.object_flags & flag::OBJECT_REFERENCE == 0 {
@@ -1468,7 +1522,7 @@ impl Converter {
         let boundary = origin.as_ref().filter(|origin| origin.is_boundary());
         // A dependency's interface is a name unless it is callable; its properties are not asked for.
         if let Some(origin) = boundary
-            && self.rpc.signatures(info.id, SignatureKind::Call).await?.is_empty()
+            && !self.callable(info.id).await?
         {
             return self.named_type(info, origin, cx).await;
         }
@@ -1527,7 +1581,7 @@ impl Converter {
             let CallSignature { type_params, params, return_type, .. } = signatures.swap_remove(0);
             return Ok(PropType::Function { type_params, params, return_type: Box::new(return_type) });
         }
-        let fields = self.fields(&properties, &indexes, &inner).await?;
+        let fields = self.fields((info.id, Listing::All), &properties, &indexes, &inner).await?;
         if signatures.is_empty() {
             return Ok(PropType::Object(fields));
         }
@@ -1567,7 +1621,7 @@ impl Converter {
         };
         let mut parts = Vec::new();
         if !own.is_empty() || !indexes.is_empty() {
-            parts.push(PropType::Object(self.fields(&own, &indexes, inner).await?));
+            parts.push(PropType::Object(self.fields((info.id, Listing::Own), &own, &indexes, inner).await?));
         }
         match layers {
             Some(layers) => parts.extend(layers),
@@ -1581,7 +1635,7 @@ impl Converter {
     /// when a base is neither.
     async fn base_layers(&self, info: &TypeInfo, cx: &Cx) -> Result<Option<Vec<PropType>>, CallError> {
         let mut layers: Vec<PropType> = Vec::new();
-        let mut pending: Vec<TypeInfo> = self.rpc.base_types(info.id).await?;
+        let mut pending: Vec<TypeInfo> = self.bases(info.id).await?.to_vec();
         pending.reverse();
         while let Some(base) = pending.pop() {
             if let Some(layer) = self.layer(&base, cx).await? {
@@ -1600,7 +1654,7 @@ impl Converter {
             if !declared_here || !states_bases(&base) {
                 return Ok(None);
             }
-            let mut inherited = self.rpc.base_types(base.id).await?;
+            let mut inherited = self.bases(base.id).await?.to_vec();
             inherited.reverse();
             pending.extend(inherited);
         }
@@ -1614,7 +1668,7 @@ impl Converter {
         if !origin.in_lib() || !UTILITIES.contains(&origin.name.as_str()) || info.alias_type_arguments.is_empty() {
             return Ok(None);
         }
-        let arguments = self.rpc.alias_type_arguments(info.id).await?;
+        let arguments = self.alias_arguments(info.id).await?;
         let Some((first, keys)) = arguments.split_first() else { return Ok(None) };
         let Some(applied) = Box::pin(self.layer(first, cx)).await? else { return Ok(None) };
         let mut args = vec![applied];
@@ -1655,7 +1709,7 @@ impl Converter {
             if origin.name != "DetailedHTMLProps" || info.alias_type_arguments.is_empty() {
                 return Ok(None);
             }
-            let arguments = self.rpc.alias_type_arguments(info.id).await?;
+            let arguments = self.alias_arguments(info.id).await?;
             let Some(attributes) = arguments.first() else { return Ok(None) };
             return match self.origin(attributes).await? {
                 Some(inner) if !inner.alias => Box::pin(self.html_family(attributes, &inner)).await,
@@ -1702,7 +1756,7 @@ impl Converter {
             .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
                 // The reference carries the arguments; the tuple type it instantiates carries how each element is declared.
                 let arguments = self.parts(info.id, Parts::Arguments).await?;
-                let target = self.rpc.target_of_type(info.id).await?;
+                let target = self.target(info.id).await?;
                 let total = arguments.len();
                 Ok(((arguments, target), total))
             })
@@ -1738,26 +1792,30 @@ impl Converter {
         Ok(if target.readonly { PropType::Readonly(Box::new(tuple)) } else { tuple })
     }
 
+    /// The fields of an object type: `properties` are the ones `listed` names (the type's handle and which of its
+    /// properties), then its index signatures.
     async fn fields(
         &self,
+        listed: (u64, Listing),
         properties: &[SymbolInfo],
         indexes: &[IndexInfo],
         cx: &Cx,
     ) -> Result<Vec<ObjectField>, CallError> {
         let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
-        let (types, readonly) = if references.is_empty() {
-            (Vec::new(), Vec::new())
+        let types: Arc<[Arc<TypeInfo>]> = if references.is_empty() {
+            Arc::from([])
         } else {
-            (self.rpc.types_of_symbols(&references).await?, self.rpc.readonly_symbols(&references).await?)
+            self.state
+                .field_types
+                .get(listed, || async { Ok(self.shared_types(self.rpc.types_of_symbols(&references).await?)) })
+                .await?
         };
         let converted = self.convert_all(&types, cx).await?;
         let mut fields = Vec::with_capacity(properties.len() + indexes.len());
-        for ((property, prop_type), readonly) in properties.iter().zip(converted).zip(readonly) {
+        for (property, prop_type) in properties.iter().zip(converted) {
             let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
             let prop_type = without_undefined(prop_type, !required);
-            let mut field = ObjectField::new(property_name(&property.name), prop_type, required, String::new());
-            field.readonly = readonly;
-            fields.push(field);
+            fields.push(ObjectField::new(property_name(&property.name), prop_type, required, String::new()));
         }
         let sides: Vec<TypeInfo> =
             indexes.iter().flat_map(|index| [index.key_type.clone(), index.value_type.clone()]).collect();
@@ -1768,6 +1826,19 @@ impl Converter {
             field.readonly = index.is_readonly;
             field.index_key = Some(Box::new(key));
             fields.push(field);
+        }
+        // Fields past the size budget are cut with the object they belong to, which holds them all: the conversion of
+        // that object ([`Self::convert`]) replaces it with its name, and whether a property is `readonly` reaches
+        // nothing.
+        if !references.is_empty() && !fields_past_size_budget(&fields, MAX_SIZE) {
+            let readonly = self
+                .state
+                .readonly
+                .get(listed, || async { Ok(Arc::from(self.rpc.readonly_symbols(&references).await?)) })
+                .await?;
+            for (field, readonly) in fields.iter_mut().zip(readonly.iter()) {
+                field.readonly = *readonly;
+            }
         }
         Ok(fields)
     }
@@ -2251,5 +2322,118 @@ mod tests {
         // The DOM's `Element`, which `@types/react` declares empty for a program without the DOM lib.
         assert_eq!(react("Element", "global.d.ts", false).name(), "Element");
         assert_eq!(react("ReactElement", "index.d.ts", false).name(), "ReactElement");
+    }
+
+    /// Answers one component file on one lane of a real checker: the answer and the requests sent, by method.
+    fn answered_with_calls(
+        source: &str,
+    ) -> (caliper_docgen_core::types::semantic::SemanticOutcome, std::collections::BTreeMap<&'static str, u64>) {
+        use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+
+        use crate::checker::Backend;
+        use crate::{SemanticRequest, answer_on, root_files, targets_of};
+
+        let dir = tempfile::Builder::new().prefix("Asked").tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(root.join("C.tsx"), source).unwrap();
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let request = SemanticRequest::new(root.clone(), targets_of(&output));
+        let files = root_files(&request);
+        let checker = Backend::start(&root, 1).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let deadline = std::time::Duration::from_secs(120);
+        let answered = runtime.block_on(async {
+            let programs = Rpc::open_programs(checker.client(), deadline, None, &files, false, 1).await.unwrap();
+            let programs: Vec<Arc<Rpc>> = programs.into_iter().map(Arc::new).collect();
+            let outcome = answer_on(&programs, &request, &files).await.unwrap();
+            let calls = programs[0].calls();
+            programs[0].release().await;
+            (outcome, calls)
+        });
+        runtime.block_on(checker.shutdown());
+        answered
+    }
+
+    fn field<'a>(ty: &'a PropType, name: &str) -> &'a ObjectField {
+        let PropType::Object(fields) = ty else { panic!("not an object: {ty:?}") };
+        fields.iter().find(|field| field.name == name).unwrap()
+    }
+
+    /// An object type converted again (here at another depth, which the memo keys) has its properties' types and
+    /// whether each is `readonly` from the first conversion's answers: `Obj`'s two properties are asked about once, and
+    /// `b`'s one. On the base they were asked about again at depth 1: five `isReadonlySymbol` and three
+    /// `getTypesOfSymbols` from the fields.
+    #[test]
+    fn an_object_converted_again_asks_about_its_properties_once() {
+        let (outcome, calls) = answered_with_calls(
+            "interface Obj { x: string; readonly y: number }\n\
+             export function C(props: { a: Obj; b: { inner: Obj } }) { return null; }\n",
+        );
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let prop = |name: &str| &component.props.iter().find(|prop| prop.name == name).unwrap().prop_type;
+        let (a, inner) = (prop("a"), &field(prop("b"), "inner").prop_type);
+        assert_eq!(a, inner);
+        assert_eq!((field(a, "x").readonly, field(a, "y").readonly), (false, true));
+        assert_eq!(calls.get("isReadonlySymbol"), Some(&3), "{calls:?}");
+        // The props' own symbols (`a`, `b`) are asked about apart from the fields of the types inside them.
+        assert_eq!(calls.get("getTypesOfSymbols"), Some(&3), "{calls:?}");
+    }
+
+    /// An object whose fields hold more types than the size budget is cut by the conversion it belongs to, so whether
+    /// its properties are `readonly` is never asked: 169 properties of a union of 110 literals are 18,760 types. On the
+    /// base each of the 169 was asked about.
+    #[test]
+    fn the_fields_of_an_object_the_size_budget_cuts_are_not_asked_whether_they_are_readonly() {
+        let literals: Vec<String> = (0..110).map(|index| format!("'v{index}'")).collect();
+        let properties: Vec<String> = (0..169).map(|index| format!("p{index}: L;")).collect();
+        let source = format!(
+            "type L = {};\nexport function C(props: {{ style: {{ {} }} }}) {{ return null; }}\n",
+            literals.join(" | "),
+            properties.join(" ")
+        );
+        let (outcome, calls) = answered_with_calls(&source);
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let style = &component.props.iter().find(|prop| prop.name == "style").unwrap().prop_type;
+        assert!(matches!(style, PropType::Truncated { limit: TruncationLimit::Depth, .. }), "{style:?}");
+        assert_eq!(calls.get("isReadonlySymbol"), None, "{calls:?}");
+    }
+
+    /// One property fewer, 168 of them (18,649 types), and the object is kept and its fields are asked whether they are
+    /// `readonly`: the budget the fields are held to is the one the conversion cuts by.
+    #[test]
+    fn the_fields_of_an_object_under_the_size_budget_are_asked_whether_they_are_readonly() {
+        let literals: Vec<String> = (0..110).map(|index| format!("'v{index}'")).collect();
+        let properties: Vec<String> = (0..168).map(|index| format!("readonly p{index}: L;")).collect();
+        let source = format!(
+            "type L = {};\nexport function C(props: {{ style: {{ {} }} }}) {{ return null; }}\n",
+            literals.join(" | "),
+            properties.join(" ")
+        );
+        let (outcome, calls) = answered_with_calls(&source);
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let style = &component.props.iter().find(|prop| prop.name == "style").unwrap().prop_type;
+        assert!(field(style, "p167").readonly, "{style:?}");
+        assert_eq!(calls.get("isReadonlySymbol"), Some(&168), "{calls:?}");
+    }
+
+    /// One object type is listed whole at the top and only its own properties below it, where fewer properties from
+    /// outside the project are allowed (the lib's `String` has more than 40 and fewer than 100): the two lists are
+    /// answered apart, each with its own properties' types. The own list is asked first (`b` comes first), so a whole
+    /// list that took its answer would be short.
+    #[test]
+    fn the_whole_list_and_the_own_list_of_one_object_are_answered_apart() {
+        let (outcome, _) = answered_with_calls(
+            "interface Wide extends String { readonly own: boolean }\n\
+             export function C(props: { b: { inner: Wide }; a: Wide }) { return null; }\n",
+        );
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let prop = |name: &str| &component.props.iter().find(|prop| prop.name == name).unwrap().prop_type;
+        let whole = field(prop("a"), "own");
+        assert_eq!((&whole.prop_type, whole.readonly), (&PropType::Boolean, true));
+        assert_eq!(field(prop("a"), "length").prop_type, PropType::Number);
+        let PropType::Intersection(parts) = &field(prop("b"), "inner").prop_type else { panic!("{:?}", prop("b")) };
+        let PropType::Object(own) = &parts[0] else { panic!("{parts:?}") };
+        let Some(own) = own.first() else { panic!("{parts:?}") };
+        assert_eq!((own.name.as_str(), &own.prop_type, own.readonly), ("own", &PropType::Boolean, true));
     }
 }

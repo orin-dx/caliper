@@ -13,6 +13,7 @@
 
 #![deny(missing_docs)]
 
+mod asked;
 mod checker;
 mod component;
 mod convert;
