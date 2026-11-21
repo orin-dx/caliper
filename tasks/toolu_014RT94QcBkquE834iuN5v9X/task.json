@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_014RT94QcBkquE834iuN5v9X",
+  "agent_id": "a52cd373598d79f77",
+  "subagent_type": "general-purpose",
+  "task_description": "Spike the tsrs 7.1 beta upgrade",
+  "token_usage": {
+    "input_tokens": 142,
+    "cache_creation_tokens": 287888,
+    "cache_read_tokens": 7738046,
+    "output_tokens": 31388,
+    "api_call_count": 71
+  },
+  "started_at": "2026-11-20T19:34:10.753331-08:00",
+  "completed_at": "2026-11-20T20:09:27.344897-08:00"
+}

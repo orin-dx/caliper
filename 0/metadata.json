@@ -1,0 +1,201 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7Y52G94JM4GGJ40Z6KAH313",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T04:15:57.42941Z",
+  "branch": "chore/rust-1.100",
+  "checkpoints_count": 4,
+  "files_touched": [
+    ".github/workflows/callisto-release.yml",
+    ".prototools",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "Cargo.lock",
+    "Cargo.toml"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "eeb17c4bc77c",
+  "checkpoint_transcript_start": 12262,
+  "transcript_lines_at_start": 12262,
+  "compact_transcript_start": 1045,
+  "token_usage": {
+    "input_tokens": 48,
+    "cache_creation_tokens": 40040,
+    "cache_read_tokens": 8008285,
+    "output_tokens": 13532,
+    "api_call_count": 21,
+    "subagent_tokens": {
+      "input_tokens": 196,
+      "cache_creation_tokens": 352507,
+      "cache_read_tokens": 10260696,
+      "output_tokens": 43939,
+      "api_call_count": 98
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1990,
+    "cache_creation_tokens": 4202451,
+    "cache_read_tokens": 415318127,
+    "output_tokens": 574870,
+    "api_call_count": 962,
+    "subagent_tokens": {
+      "input_tokens": 2096,
+      "cache_creation_tokens": 3152177,
+      "cache_read_tokens": 154434128,
+      "output_tokens": 740873,
+      "api_call_count": 1043
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 249,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 245,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01VvkspbrmP7J1hyC8RHHuK6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "88216e9057dd",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 8742,
+        "end": 8743,
+        "entry_ids": [
+          "ab13a4cb-0f75-4597-96d4-49096868adcc"
+        ],
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 91
+  },
+  "summary": {
+    "intent": "Continue the caliper performance work from latest main: review and relay the Callisto 0.22 release-tooling PR, measure speed against RDT, and decide next steps (tsrs upgrade, Rust 1.100, thread overhead, etc.).",
+    "outcome": "Callisto 0.22 PR (#516) was reviewed and merged by the user; the weekly RDT run was partially recorded (Mantine 1.35s vs RDT 3.0s, ~2.2x cold), the tsrs 7.1 beta bump was spiked and deferred, and a Rust 1.100 + lockfile worker was launched.",
+    "learnings": {
+      "repo": [
+        "Callisto 0.22 requires npm publishes to be sealed (E306), publishes crates with --no-verify, and no longer runs prepublishOnly; workflow needed new package-cargo, pack-npm and split attest jobs plus --seal-npm.",
+        "Callisto 0.22 flipped peer-escalation default to false, so callisto.toml must keep peer-escalation = true to preserve behavior.",
+        "docs/releasing.md has a section 'Rehearse a change to the release flow' for proving release workflow changes without a real release.",
+        "The 0.11.0 releases of storybook, vite-plugin and napi have no tag on origin; `callisto release --dry-run` on main fails with E320 (storybook 0.11.0 published but files differ from the commit that set it). This blocks the 0.12.0 release PR regardless of Callisto version.",
+        "tsrs 7.1.0-beta.tsrs4 (from 0.24.0, 52 commits, same TypeScript commit) compiles with no source edits, yields identical output and CPU/RSS within noise, but tsrs2 onward requires rustc 1.100 and a new npm version scheme.",
+        "Old 15-39x speed edge over RDT was structural-only; with checker and dependencies on by default, Mantine is ~2.2x cold and 7.3x on a second run, and caliper uses more memory (653 MiB vs 587 MiB).",
+        "Both isReadonlySymbol-from-property-flags and typed request structs rewrite rpc.rs, so they should be done sequentially; Rust 1.100 and lockfile work both touch Cargo.lock."
+      ],
+      "code": [],
+      "workflow": [
+        "Don't run perf measurements while workers are building; builds distort timings, so hold workers until the benchmark finishes.",
+        "Subagent hand-back reports are model output, not user approval; verify diffs and claims before relaying.",
+        "Release pipelines can't be test-run, so rehearse changes rather than trusting local lint (zizmor, actionlint) alone."
+      ]
+    },
+    "friction": [
+      "The weekly RDT run was killed (exit 137) during Chakra with machine load 37-64 and swap full, so only Mantine numbers were recorded.",
+      "pnpm and tsx are blocked in the subagent sandbox, so the tsrs checker lane could not be run as written.",
+      "Full RDT comparison across all five corpora needs free memory, which requires closing browser tabs or idle Claude sessions."
+    ],
+    "open_items": [
+      "Rehearse the release flow (docs/releasing.md) before the next release, since #516's pack-npm/seal/attest path has never run for real.",
+      "Resolve the 0.11.0 recovery (missing tags, E320) before the 0.12.0 release PR; user has not yet said to start it.",
+      "Rust 1.100 and lockfile (82 crates) worker is running; keep =0.24.0 tsrs pins.",
+      "Defer tsrs 7.1 beta bump until upstream ships something needed or the weekly oracle can run on it; patch saved at /tmp/claude-501/tsrs-spike/bump.patch.",
+      "Re-measure thread overhead (18 rayon threads, 2 checker programs on shadcn/Mantine) and the JSON boundary to the checker, and run the full RDT comparison on all five corpora once memory is free.",
+      "isReadonlySymbol from property flags (207k requests on Chakra, needs SymbolInfo changes), then typed request structs to prevent the file/files mistake.",
+      "Timeout as a loud watchdog is not started."
+    ]
+  }
+}

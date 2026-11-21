@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_018VzW5bSuaMBE372o9P1nZE",
+  "agent_id": "a4ec0eec7ffe0e18c",
+  "subagent_type": "general-purpose",
+  "task_description": "Update Callisto to 0.22 simplified config",
+  "token_usage": {
+    "input_tokens": 156,
+    "cache_creation_tokens": 194618,
+    "cache_read_tokens": 10930842,
+    "output_tokens": 53735,
+    "api_call_count": 78
+  },
+  "started_at": "2026-11-20T19:04:21.854835-08:00",
+  "completed_at": "2026-11-20T19:14:25.361136-08:00"
+}
