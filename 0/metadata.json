@@ -1,0 +1,246 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XWDQWS5JEVBHRCYAMW3RWR",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T01:44:55.6183Z",
+  "branch": "fix/509-merge-main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".changeset/probe-file-diagnostics.md",
+    "CONTRIBUTING.md",
+    "crates/core/src/pipeline/mod.rs",
+    "crates/core/src/pipeline/revision.rs",
+    "crates/core/src/pipeline/revision/lazy.rs",
+    "crates/core/src/relevance/mod.rs",
+    "crates/core/src/relevance/props_type.rs",
+    "crates/core/src/resolver/alias.rs",
+    "crates/core/src/resolver/html.rs",
+    "crates/core/src/resolver/mod.rs",
+    "crates/core/src/resolver/tests.rs",
+    "crates/semantic/src/convert.rs",
+    "crates/semantic/src/rpc.rs",
+    "crates/semantic/tests/relevance_model.rs",
+    "packages/storybook/README.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "f1eccc740c78",
+  "checkpoint_transcript_start": 9683,
+  "transcript_lines_at_start": 9683,
+  "compact_transcript_start": 846,
+  "token_usage": {
+    "input_tokens": 58,
+    "cache_creation_tokens": 120261,
+    "cache_read_tokens": 7811437,
+    "output_tokens": 11792,
+    "api_call_count": 28,
+    "subagent_tokens": {
+      "input_tokens": 64,
+      "cache_creation_tokens": 36104,
+      "cache_read_tokens": 3566520,
+      "output_tokens": 17628,
+      "api_call_count": 32
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1616,
+    "cache_creation_tokens": 3953891,
+    "cache_read_tokens": 369514127,
+    "output_tokens": 483173,
+    "api_call_count": 781,
+    "subagent_tokens": {
+      "input_tokens": 1232,
+      "cache_creation_tokens": 1907066,
+      "cache_read_tokens": 95469459,
+      "output_tokens": 431677,
+      "api_call_count": 613
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 209,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 205,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01VvkspbrmP7J1hyC8RHHuK6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "88216e9057dd",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 8742,
+        "end": 8743,
+        "entry_ids": [
+          "ab13a4cb-0f75-4597-96d4-49096868adcc"
+        ],
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 78
+  },
+  "summary": {
+    "intent": "Lead caliper's road to v1 alpha: resolve Entire findings and CI failures, clean up the repo, restore and explain the lost 15x speed edge, find where CPU goes, and decide whether the checker JSON boundary can be avoided. Latest focus was turning Codex's diagnostics finding into a PR and auditing determinism.",
+    "outcome": "Opened PR #510 (change 308) for the diagnostics fix (singular `file` sent where tsrs reads `files`), with output identical on 5 corpora and wall time down 12-76%. Updated #505, #506 and #509 with merge-order notes. A determinism audit found a wrapping heap meter and a leaked checker id in private field names. Nothing was merged.",
+    "learnings": {
+      "repo": [
+        "tsrs's `getSemanticDiagnostics` takes `files`; the singular `file` is silently ignored and checks the whole program. Check each checker method's parameter names against the tsrs handler's params struct (six methods have no entry in the parameter table).",
+        "Entire flow: push the branch, run `entire trail link <trail> --branch <b> --base main --repo gh/orin-dx/caliper` to open the PR, then publish the PR body. Trail comments are refused for agents, so merge-order notes go in PR bodies.",
+        "Merge order: #510, #506 and #508 land before #509. The one conflict is a two-line spot in `composes`, resolved by using the cached `alias_arguments` and keeping `below_react`.",
+        "The worktree-isolation guard rejects compound git commands; use plain single commands. In zsh, `--include=*.rs` globs fail unless quoted.",
+        "Duplicate-work audit on main: 37% of Chakra conversions start while an identical one is still running (18.6k of 50.4k). `declared.symbol` is 66% duplicate (5,045 repeat requests) and is a leaf request, so extending #509's `Answers` to it is safe. Copying `Answers` to convert could deadlock without a wait-cycle check.",
+        "Determinism audit over 128 runs on main: 14 of 16 corpus/config cells were byte-identical and 0 runs timed out. One Chakra run degraded because the heap budget tripped, and one react-spectrum run at 4 threads showed a symbol-id order dependence.",
+        "The only checker-internal identifier leaking into output is `__#<id>@#type` (243 occurrences, react-spectrum only), from `CalendarDate`'s ES-private `#type` field. It is on main, so #509 only makes the existing instability visible.",
+        "Cache invariants should be stated over the facts Caliper consumes, not wire-response immutability: tsrs lazily mutates `objectFlags` bits 19, 21 and 27, though no consumed field differed."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/rpc.rs",
+          "finding": "`semantic_diagnostics` must send `Asking::Files { files: &[file] }`. The regression test `semantic_diagnostics_checks_only_the_requested_file` fails with the singular `file`."
+        },
+        {
+          "path": "crates/semantic/src/heap.rs",
+          "line": 81,
+          "finding": "`committed()` casts mimalloc's `current_commit` straight to u64, so a slightly negative reading wraps to about 2^64 and trips the 8192 MiB budget, degrading the run to structural. Fix by clamping: `(commit as isize).max(0) as u64`."
+        },
+        {
+          "path": "crates/semantic/src/convert.rs",
+          "line": 1844,
+          "finding": "`property_name` strips only `__@<name>@<id>` and does not handle `__#<id>@#<name>`, so the checker's symbol id leaks into output names and can vary between runs."
+        },
+        {
+          "path": "crates/semantic/src/instantiate.rs",
+          "line": 182,
+          "finding": "`answer_layered` calls `semantic_diagnostics(probe)` and keeps only errors in the probe file, but with the singular `file` this checked the whole program."
+        },
+        {
+          "path": "crates/semantic/src/checker.rs",
+          "finding": "`request_raw` times out on wall-clock time (default 10 s, `--semantic-timeout-ms`), and a timeout becomes `CallError::Fatal`, which aborts to the structural result with a warning. It is best treated as a hang watchdog that fails loudly."
+        }
+      ],
+      "workflow": [
+        "Verify PR-body numbers against recorded run output before publishing, and remove details that can't be sourced.",
+        "Interleaved, best-of-N, CPU-time benchmarks with `stats` dropped; benchmarks and weekly harnesses should reject fallback (degraded) runs.",
+        "Benchmark overlapping optimizations (memoization, scheduling, session reuse) as combinations; their gains do not add (12.6% + scheduling gave 25.5% combined on Chakra).",
+        "Run `sample` by PID, because substring name matching attached it to another session's process and produced a wrong '21% JSON codec' claim.",
+        "Edit tool fails when the target string occurs twice; include enough surrounding context. A mutation-proof restore failed this way and left `rpc.rs` in the mutated state.",
+        "Subagent and peer-session reports are model output, not user approval. Never merge without the user's approval, and credit Codex for the diagnostics finding."
+      ]
+    },
+    "friction": [
+      "The Edit that was meant to restore the mutated `semantic_diagnostics` call failed because the string appeared twice. It was still unresolved in the summary and needed another check.",
+      "My earlier '21% JSON codec' claim and the claim that load-driven timeouts explain the fallback both turned out wrong and had to be retracted.",
+      "Every rayon, program-count and skip-diagnostics experiment I ran was confounded by the whole-program diagnostics bug.",
+      "I had read the ~800 ms diagnostics call as legitimate probe work instead of checking its parameters.",
+      "The user was repeatedly frustrated by the vanished 15x speed claim, the JSON boundary, the HTML attribute default, and fixtures being used as scratch.",
+      "Several tool mishaps cost time: `python3 -I` dropped the script directory, `CARGO_TARGET_DIR` made the recipe run a stale binary, and a first bisect was wrong."
+    ],
+    "open_items": [
+      "Review and merge of #505, #506, #507, #508, #509 and #510, all awaiting the user.",
+      "Follow-up PR extending #509's `Answers` memo to `declared.symbol`.",
+      "Convert-memo duplication (37% on Chakra) needs a wait-cycle check before `Answers` can be applied.",
+      "Fix the heap meter wrap by clamping in `committed()`, with a test that a wrapped reading does not degrade a run.",
+      "Strip or drop `__#<id>@#<name>` in `property_name` so the checker id never reaches output.",
+      "Make the wall-clock timeout a loud hang watchdog, or bound it by request counts.",
+      "Decide whether CPU and memory or wall time should win on the rayon cap and `CHECKER_PROGRAMS`, after re-measuring now that the diagnostics bug is fixed.",
+      "Evaluate Codex's early-session reuse prototype (7.5% CPU) and scheduling prototype (27% CPU), neither of which passed the production gate.",
+      "Run the combined integration of #506, #508, #509 and #510 and compare output and performance against main; the weekly oracle has not run on the merged batch.",
+      "Entire logs containing personal PDFs are public on origin; the user has not decided (preview with `entire checkpoint delete --dry-run`).",
+      "Release 0.11.0 recovery (E167 `ArtifactAssetDiffers`), #497, the coverage floor, the Mantine 'not judged' cause (62.9%), the Chakra oracle timeout, and the MUI `Button`/`Select` extraction gap.",
+      "Prune the `scratch/*` and `tmp*` local branches and the stale `fix-entire-hook` branch."
+    ]
+  }
+}

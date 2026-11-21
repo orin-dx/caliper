@@ -1,0 +1,16 @@
+{
+  "tool_use_id": "toolu_01XdXgnFQ2tkEahKhjRcoA1c",
+  "agent_id": "a5bf79645af7f270e",
+  "subagent_type": "general-purpose",
+  "task_description": "Audit output determinism and order dependence",
+  "token_usage": {
+    "input_tokens": 132,
+    "cache_creation_tokens": 113831,
+    "cache_read_tokens": 5444383,
+    "output_tokens": 27120,
+    "api_call_count": 66
+  },
+  "started_at": "2026-11-20T17:10:32.609344-08:00",
+  "completed_at": "2026-11-20T17:33:03.306426-08:00",
+  "transcript_unavailable_reason": "transcript unreadable"
+}
