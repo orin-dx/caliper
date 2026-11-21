@@ -97,6 +97,9 @@ pub(crate) enum Asking<'a> {
     File {
         file: &'a str,
     },
+    Files {
+        files: &'a [&'a str],
+    },
     Nothing {},
 }
 
@@ -787,7 +790,8 @@ impl Rpc {
 
     /// The type errors in a file of the program.
     pub(crate) async fn semantic_diagnostics(&self, file: &str) -> Result<Vec<FileDiagnostic>, CallError> {
-        self.scoped("getSemanticDiagnostics", Asking::File { file }).await
+        // Diagnostics take `files`; the singular `file` is ignored and checks the whole program.
+        self.scoped("getSemanticDiagnostics", Asking::Files { files: &[file] }).await
     }
 
     /// The symbol that declares a type: the interface, class, enum member or unique symbol behind it.
@@ -948,6 +952,37 @@ mod tests {
 
     use crate::checker::{Backend, Failure, Served};
     use crate::{SemanticRequest, answer_on, root_files, targets_of};
+
+    #[test]
+    fn semantic_diagnostics_checks_only_the_requested_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let valid = root.join("valid.ts").to_string();
+        let invalid = root.join("invalid.ts").to_string();
+        let files = [
+            (valid.clone(), "export const valid: string = 'ok';".to_string()),
+            (invalid.clone(), "export const invalid: string = 1;".to_string()),
+        ];
+        let checker = Backend::start(&root, 1).unwrap();
+        let runtime = multi_thread();
+        runtime.block_on(async {
+            let deadline = Duration::from_secs(30);
+            let client = checker.client();
+            let options = Rpc::prepare(&client, deadline, None).await.unwrap();
+            let rpc = Rpc::open_in_memory(client, deadline, &options, &files).await.unwrap();
+            let diagnostics = |items: Vec<FileDiagnostic>| {
+                items.into_iter().map(|d| (d.file_name.clone(), d.start_position.line, d.message())).collect::<Vec<_>>()
+            };
+
+            assert_eq!(diagnostics(rpc.semantic_diagnostics(&valid).await.unwrap()), []);
+            assert_eq!(
+                diagnostics(rpc.semantic_diagnostics(&invalid).await.unwrap()),
+                [(invalid, 0, "Type 'number' is not assignable to type 'string'.".to_string())]
+            );
+            rpc.release().await;
+        });
+        runtime.block_on(checker.shutdown());
+    }
 
     fn multi_thread() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()

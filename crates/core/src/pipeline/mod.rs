@@ -256,12 +256,7 @@ pub(super) fn merge_parsed_dts_file(
 pub(super) fn resolve_guarded(
     mappings: &[&ComponentMapping],
     ctx: &ResolutionContext,
-) -> Vec<(
-    ComponentEntry,
-    ResolvedDiagnostics,
-    crate::resolver::Dependencies,
-    Option<std::sync::Arc<crate::relevance::Inputs>>,
-)> {
+) -> Vec<crate::resolver::Resolution> {
     mappings
         .par_iter()
         .copied()
@@ -295,7 +290,7 @@ pub(super) fn resolve_guarded(
                 // A panicked resolution re-runs on any edit to its own file.
                 let mut deps = crate::resolver::Dependencies::default();
                 deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
-                (stub, ResolvedDiagnostics { own: vec![diag], shared: Vec::new() }, deps, None)
+                (stub, ResolvedDiagnostics { own: vec![diag], shared: Vec::new() }, deps, None, Default::default())
             })
         })
         .collect()

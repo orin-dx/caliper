@@ -109,7 +109,7 @@ pub(super) fn resolve_type_alias_chain(
                     layer_attribute(layer, name, ctx, state, depth).filter(|_| layer.html_element.is_some())
                 });
                 if let Some(attribute) = attribute {
-                    chain.props.push(ctx.share(attribute));
+                    chain.props.push(attribute);
                 }
             }
             chain.inheritance.retain(|layer| layer.html_element.is_none());
@@ -654,14 +654,15 @@ fn has_element(layer: &InheritedLayer, element: &str, ctx: &ResolutionContext) -
     super::html::intrinsic_element(element, Utf8Path::new(&layer.file_name), ctx).is_some()
 }
 
-/// The declaration of attribute `name` an HTML layer's element has, unless the layer omits it.
+/// The declaration of attribute `name` an HTML layer's element has, unless the layer omits it: the run's one shared
+/// allocation of it ([`ResolutionContext::share`]), so a component reading it again copies no type.
 pub(super) fn layer_attribute(
     layer: &InheritedLayer,
     name: &str,
     ctx: &ResolutionContext,
     state: &mut ResolveState,
     depth: u8,
-) -> Option<ParsedProp> {
+) -> Option<Arc<ParsedProp>> {
     if layer.omitted.iter().any(|omitted| omitted == name) {
         return None;
     }
@@ -669,6 +670,7 @@ pub(super) fn layer_attribute(
     let key = format!("{}\0{element}\0{name}", layer.file_name);
     ctx.attribute_reads.get_or_resolve(&key, depth, state, None, |state| {
         super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
+            .map(|prop| ctx.share(prop))
     })
 }
 

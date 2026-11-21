@@ -31,6 +31,33 @@ just bench
 
 The pre-commit hook runs `cargo fmt`, `cargo clippy --all-targets -D warnings`, `typos`, and `cargo deny` on every commit. It's fast enough that skipping it isn't worth the trouble.
 
+## Local disk, caches and worktrees
+
+Each place holds one kind of thing, and its name says which.
+
+- **The repository:** code we re-run (`scripts/`, `apps/oracle`), decisions (`docs/adr/`), process (this file, `AGENTS.md`), and small test inputs (`fixtures/`). Anything a later change or a reviewer needs goes here, or in the pull request description.
+- **Caches you can delete at any time:** `target/`, `node_modules/`, and `.corpora/` (the weekly's pinned repos, gitignored; `docs/measurement.md`). Deleting one costs rebuild or download time and nothing else. A worktree's `target/` was about 5 GB and its `node_modules/` about 400 MB when this was written.
+- **Throwaway output:** logs, A/B binaries, diffs. Write them under `$TMPDIR`, which is not kept. If you need a result later, record it in the pull request or in `docs/`.
+- **Nothing outside the repository is kept for the project.** Do not create a directory under `~/Projects` for output, and do not store build output in a directory named for something else (a `fixtures` directory holds test inputs only).
+
+`just test-checker-lane` builds into `target/release` of the current checkout and reads the binary from there, so run it without `CARGO_TARGET_DIR` set.
+
+Each worktree has its own `target/`, `node_modules/` and `.corpora/`. To share one copy of the corpora between worktrees, pass `--corpora DIR` to `scripts/corpora.py` and `scripts/weekly.py`. Keep few worktrees: after a branch is merged and pushed, remove its worktree (`git worktree remove`), delete the local branch, and run `git worktree prune`.
+
+## Before you push a behavior change
+
+`just lint doc-check machete typos` must pass, plus the tests of the crates you touched. CI runs the rest. A change that decides something about types or props (relevance, resolution, merging) also needs:
+
+- **Invariants:** state them in the pull request description: unknown unless proven, by binding and not by spelling, every read recorded, one owner for each decision, wired or not defined.
+- **Allow-lists:** a guard handles a closed set of proven forms, and everything else is unknown or declined, never "complete", "none" or "exact". No `_ =>` arm in a decision over node or type kinds.
+- **Grammar sweep:** list every syntax or type form the code can receive and show each is handled or declined. Prefer a generated test over the grammar with the TypeScript checker as the oracle (`crates/semantic/tests/`) to a hand-picked list. Cover lone surrogates, computed keys, shadowing, `declare`, overloads and re-exports.
+- **Mutation proof:** remove each guard in turn; a test must fail. `cargo mutants --in-diff <diff>` finds the ones no test notices.
+- **A test that fails on `main`** for every behavior change.
+- **Output-preserving change:** diff `extract --json --quiet --no-cache` against a build of `main` on a large project and on Chakra, with `stats` removed. For resolver or checker changes, also compare peak memory and time with `just bench`, because a size regression can pass every test.
+- **A request to the checker:** a test that each parameter you send changes the answer. `tsrs` ignores keys it does not know, so a misspelled field compiles and passes (`file` for `files` made every cold run type-check the whole program).
+- **Measuring:** interleave the builds and compare CPU time as well as wall time. Drop any run that carries a checker fallback diagnostic: a timed-out request falls back to the structural answer, so that run's output differs. Benchmark a combination of changes together; estimates measured separately do not add.
+- **Findings:** when an automated or human review finds a defect, fix the class it belongs to, not only the case, and resolve the finding with the commit and test that fix it.
+
 ## Snapshot tests
 
 Snapshot tests use [insta](https://insta.rs). Each fixture (shadcn, MUI, Chakra, etc.) has a snapshot of the full extraction output. If your change touches extraction output, insta will flag it:

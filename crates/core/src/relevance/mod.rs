@@ -9,14 +9,19 @@
 //! gathered with the answer's resolution (so their reads are its dependencies) and the revision's call-site counts
 //! (counted again each revision, so an edit to a consumer reaches every component it renders). The checker's merges
 //! keep the inheritance layers, and so the `used` lists, of the structural answer.
+//!
+//! Under `htmlAttributes: full` the answer holds React's attributes of its HTML element apart ([`Attributes`]): [`apply`]
+//! decides them with the listed props and lists only those the decision keeps, so the hundreds a component never uses
+//! are never listed only to be moved into a layer again.
 
 pub(crate) mod call_sites;
 pub(crate) mod forwarding;
 pub(crate) mod props_type;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
-use crate::types::output::{ComponentEntry, InheritedLayer, PropParent};
+use crate::types::output::{ComponentEntry, InheritedLayer, ParsedProp, PropParent};
 
 /// The evidence about one component gathered with its resolution: what its props type writes and what its body does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,9 +44,28 @@ pub(crate) struct Inputs {
 /// Decides where each member of `entry`'s props goes, from `inputs`, the revision's `call_sites` of the component and
 /// the members its listed props and layers reach; keeps the decision on the entry ([`ComponentEntry::relevance`]) and
 /// lists by it ([`narrow`]).
-pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &CallSites) {
-    let rows = entry.props.values().chain(entry.notable_inherited.values()).map(AsRef::as_ref);
-    let members = props_type::members(&inputs.props_type, rows, &entry.inheritance, &inputs.private);
+///
+/// `attributes` are the answer's React attributes held apart ([`Attributes`]): decided as listed props are, and listed
+/// only where the decision keeps them.
+pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &CallSites, attributes: &Attributes) {
+    // A row no evidence of use names, and that its declaration does not list, is left out whatever else the evidence
+    // holds: it is not built as a member (most of React's attributes, each component).
+    let named = named_by_use(inputs.body.as_ref(), call_sites);
+    place(entry, inputs, call_sites, attributes, |prop| !named.contains(prop.name.as_str()));
+}
+
+/// [`apply`], building no member for a row `quiet_candidate` takes that its declaration does not list
+/// ([`props_type::members_but_quiet`]): the caller has checked no evidence of use names it.
+fn place(
+    entry: &mut ComponentEntry,
+    inputs: &Inputs,
+    call_sites: &CallSites,
+    attributes: &Attributes,
+    quiet_candidate: impl Fn(&ParsedProp) -> bool,
+) {
+    let rows = entry.props.values().chain(&attributes.0).chain(entry.notable_inherited.values()).map(AsRef::as_ref);
+    let (members, quiet) =
+        props_type::members_but_quiet(&inputs.props_type, rows, &entry.inheritance, &inputs.private, quiet_candidate);
     let shown = decide(&Evidence { members: &members, body: inputs.body.as_ref(), call_sites });
     // A row of a member the answer holds only as a name in a collapsed layer (a source the resolver collapsed past its
     // thresholds, such as Chakra's `SystemProperties`) has no type to list: it is named in the layer's `used` list
@@ -49,25 +73,75 @@ pub(crate) fn apply(entry: &mut ComponentEntry, inputs: &Inputs, call_sites: &Ca
     let used: BTreeSet<String> = shown
         .rows
         .iter()
-        .filter(|name| !entry.props.contains_key(*name) && !entry.notable_inherited.contains_key(*name))
+        .filter(|name| {
+            !entry.props.contains_key(*name)
+                && !attributes.contains(name)
+                && !entry.notable_inherited.contains_key(*name)
+        })
         .cloned()
         .collect();
     // A `Pick` or `Omit` over keys that are not a closed set of literals leaves which members of a source reach
     // unproven, so no source is narrowed into a layer that may claim a member that does not reach; React's and the
     // DOM's attributes still are, as they are never listed without evidence.
-    let ambient: BTreeSet<&str> =
-        members.iter().filter(|member| member.ambient).map(|member| member.name.as_str()).collect();
+    let ambient: BTreeSet<&str> = members
+        .iter()
+        .filter(|member| member.ambient)
+        .map(|member| member.name.as_str())
+        .chain(quiet.iter().filter(|(_, ambient)| *ambient).map(|(name, _)| *name))
+        .collect();
     let declined = inputs.props_type.declined;
     // A `Pick` whose key set is not proven selected its members deliberately: none is narrowed, React's included, and
     // the checker's merges take every React prop it finds (`Placement::expanded`).
     let narrows = inputs.narrows && !inputs.props_type.unproven_pick;
     let left = if narrows {
-        sources(entry, shown.collapsed.iter().filter(|name| !declined || ambient.contains(name.as_str())))
+        let collapsed = shown.collapsed.iter().map(String::as_str).chain(quiet.iter().map(|(name, _)| *name));
+        sources(entry, attributes, collapsed.filter(|name| !declined || ambient.contains(name)))
     } else {
         Vec::new()
     };
     entry.relevance = Some(std::sync::Arc::new(Placement { left, used, narrows }));
-    narrow(entry);
+    narrow_with(entry, attributes);
+}
+
+/// React's attributes of a component's HTML element layers under `htmlAttributes: full`, held apart from its listing
+/// until [`apply`] decides which it lists: each would be a listed prop, and the decision leaves nearly all of them out
+/// again. Only an attribute every declaration of which is React's own (`@types/react`) is held, so that holding it
+/// changes no step between resolution and [`apply`]: such a prop takes no name from a layer
+/// (`listed_props_leave_layers`), names no private source, and is ambient. Any other is listed as before. Sorted by
+/// name, each name once, never a name the listing holds.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Attributes(Vec<Arc<ParsedProp>>);
+
+impl Attributes {
+    /// Holds `prop` when every declaration of it is React's own, else gives it back to be listed. A name already held
+    /// keeps its first prop, as the listing does.
+    pub(crate) fn hold(&mut self, prop: Arc<ParsedProp>) -> Option<Arc<ParsedProp>> {
+        let react = |parent: &PropParent| parent.file_name.contains("/@types/react/");
+        if !(prop.parent.as_ref().is_some_and(react) && prop.declarations.iter().all(react)) {
+            return Some(prop);
+        }
+        let at = self.0.partition_point(|held| held.name < prop.name);
+        if self.0.get(at).is_none_or(|held| held.name != prop.name) {
+            self.0.insert(at, prop);
+        }
+        None
+    }
+
+    /// Whether an attribute named `name` is held.
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    fn get(&self, name: &str) -> Option<&Arc<ParsedProp>> {
+        self.0.binary_search_by(|held| held.name.as_str().cmp(name)).ok().and_then(|at| self.0.get(at))
+    }
+
+    /// Lists every held attribute: the answer no decision narrows (no evidence was gathered) lists every prop.
+    pub(crate) fn list_all(&self, entry: &mut ComponentEntry) {
+        for prop in &self.0 {
+            entry.props.entry(prop.name.clone()).or_insert_with(|| Arc::clone(prop));
+        }
+    }
 }
 
 /// A source by type name and file, as a prop's `parent` and a layer name it.
@@ -77,14 +151,19 @@ type Source = (String, String);
 /// and the layer of each collapsed layer holding the name. A name the answer gives no source (a listed prop with no
 /// `parent`) has no entry: its source is unknown, so no lane narrows it. The project's own sources are held too: a
 /// generated one (Chakra's `Conditions` in Chakra's own repo) is a layer there as it is when installed.
-fn sources<'n>(entry: &'n ComponentEntry, names: impl Iterator<Item = &'n String>) -> Vec<(Source, Box<[Box<str>]>)> {
+fn sources<'n>(
+    entry: &'n ComponentEntry,
+    attributes: &'n Attributes,
+    names: impl Iterator<Item = &'n str>,
+) -> Vec<(Source, Box<[Box<str>]>)> {
     let mut sourced: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
     let mut add = |name: &'n str, type_name: &'n str, file_name: &'n str| {
         sourced.entry((type_name, file_name)).or_default().insert(name);
     };
-    let names: BTreeSet<&'n str> = names.map(String::as_str).collect();
+    let names: rustc_hash::FxHashSet<&'n str> = names.collect();
     for name in &names {
-        let listed = entry.props.get(*name).or_else(|| entry.notable_inherited.get(*name));
+        let listed =
+            entry.props.get(*name).or_else(|| attributes.get(name)).or_else(|| entry.notable_inherited.get(*name));
         if let Some(parent) = listed.and_then(|prop| prop.parent.as_ref()) {
             add(name, &parent.name, &parent.file_name);
         }
@@ -154,29 +233,85 @@ impl Placement {
 /// [`apply`] and at the end of each merge of the checker's props, which may list again what the structural answer
 /// left out.
 pub(crate) fn narrow(entry: &mut ComponentEntry) {
-    let Some(placement) = entry.relevance.clone() else { return };
+    narrow_with(entry, &Attributes::default());
+}
+
+/// [`narrow`], with the held `attributes` taken as listed props: each the placement keeps is listed, and each it leaves
+/// out moves to its layer at its place in name order among the listed props left out, as it would had it been listed.
+/// Without a placement every one is listed.
+fn narrow_with(entry: &mut ComponentEntry, attributes: &Attributes) {
+    let Some(placement) = entry.relevance.clone() else {
+        attributes.list_all(entry);
+        return;
+    };
     let ComponentEntry { props, notable_inherited, inheritance, .. } = entry;
-    // The names the layers hold, read once and only when a prop is left out: it joins a layer only when none holds
-    // its name yet.
-    let mut layered: Option<BTreeSet<String>> = None;
-    for listing in [props, notable_inherited] {
-        listing.retain(|name, prop| {
-            let Some(parent) = prop.parent.as_ref() else { return true };
-            if !placement.leaves(name, parent) {
-                return true;
-            }
-            // Each name is held once: a layer already holding it keeps it (`listed_props_leave_layers`' rule).
-            let held = layered
-                .get_or_insert_with(|| inheritance.iter().flat_map(|layer| layer.members.iter().cloned()).collect());
-            if held.insert(name.clone()) {
+    let leaves =
+        |name: &str, prop: &ParsedProp| prop.parent.as_ref().is_some_and(|parent| placement.leaves(name, parent));
+    // The listed props left out, in the order they join their layers: `props` (the held attributes among them, by
+    // name), then `notableInherited`.
+    let mut left: Vec<(String, Arc<ParsedProp>)> = Vec::new();
+    props.retain(|name, prop| {
+        let leaving = leaves(name, prop);
+        if leaving {
+            left.push((name.clone(), Arc::clone(prop)));
+        }
+        !leaving
+    });
+    let (kept, held): (Vec<&Arc<ParsedProp>>, Vec<&Arc<ParsedProp>>) =
+        attributes.0.iter().partition(|prop| !leaves(&prop.name, prop));
+    props.extend(kept.into_iter().map(|prop| (prop.name.clone(), Arc::clone(prop))));
+    let mut left = merged_by_name(left, held.into_iter().map(|prop| (prop.name.clone(), Arc::clone(prop))));
+    let from_props = left.len();
+    notable_inherited.retain(|name, prop| {
+        let leaving = leaves(name, prop);
+        if leaving {
+            left.push((name.clone(), Arc::clone(prop)));
+        }
+        !leaving
+    });
+    debug_assert!(left[..from_props].is_sorted_by(|a, b| a.0 < b.0));
+    if !left.is_empty() {
+        // The names the layers hold: a prop left out joins a layer only when none holds its name yet
+        // (`listed_props_leave_layers`' rule).
+        let layered: rustc_hash::FxHashSet<&str> =
+            inheritance.iter().flat_map(|layer| layer.members.iter().map(String::as_str)).collect();
+        let mut joined: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+        let joining: Vec<usize> = (0..left.len())
+            .filter(|at| {
+                let (name, prop) = &left[*at];
+                prop.parent.is_some() && !layered.contains(name.as_str()) && joined.insert(name.as_str())
+            })
+            .collect();
+        drop((layered, joined));
+        for at in joining {
+            let (name, prop) = &left[at];
+            if let Some(parent) = prop.parent.as_ref() {
                 home(inheritance, parent).members.push(name.clone());
             }
-            false
-        });
+        }
     }
     for layer in inheritance.iter_mut() {
         layer.total_props = layer.total_props.max(u32::try_from(layer.members.len()).unwrap_or(u32::MAX));
         layer.used = layer.members.iter().filter(|name| placement.used.contains(*name)).cloned().collect();
+    }
+}
+
+/// `a` and `b`, each in name order and naming none in common, as one list in name order.
+fn merged_by_name<T>(a: Vec<(String, T)>, b: impl IntoIterator<Item = (String, T)>) -> Vec<(String, T)> {
+    let mut b = b.into_iter().peekable();
+    if b.peek().is_none() {
+        return a;
+    }
+    let mut merged = Vec::with_capacity(a.len());
+    let mut a = a.into_iter().peekable();
+    loop {
+        let from_a = match (a.peek(), b.peek()) {
+            (Some((x, _)), Some((y, _))) => x < y,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => return merged,
+        };
+        merged.extend(if from_a { a.next() } else { b.next() });
     }
 }
 
@@ -360,10 +495,8 @@ pub(crate) fn decide(evidence: &Evidence<'_>) -> Shown {
         if !placed.insert(name) {
             continue;
         }
-        let declared = member.own || member.picked || member.overrides || member.required || member.default_tag;
-        let api = !(member.ambient || member.large);
         let used = reads.contains(name) || forwarded.contains(name);
-        if declared || api || used || at_floor.contains(name) {
+        if listed_by_declaration(member) || used || at_floor.contains(name) {
             ordered_rows.push((!(member.documented || member.literal_union), member.name.clone()));
         } else {
             shown.collapsed.push(member.name.clone());
@@ -372,6 +505,26 @@ pub(crate) fn decide(evidence: &Evidence<'_>) -> Shown {
     ordered_rows.sort_by_key(|(plain, _)| *plain);
     shown.rows = ordered_rows.into_iter().map(|(_, name)| name).collect();
     shown
+}
+
+/// Whether [`decide`] lists `member` from what its declaration and the props type say alone (rule 1): declared by the
+/// props type itself, or of an API source. Any other member is listed only on evidence of use naming it (rules 2 and
+/// 4), so one that no evidence names is left out; [`apply`] leaves such a member out without building it.
+pub(crate) fn listed_by_declaration(member: &Member) -> bool {
+    let declared = member.own || member.picked || member.overrides || member.required || member.default_tag;
+    let api = !(member.ambient || member.large);
+    declared || api
+}
+
+/// Every name the evidence of use says something about: read or passed by name in the body, forwarded by a spread, or
+/// passed at any call site. A member named nowhere here is placed by [`listed_by_declaration`] alone.
+fn named_by_use<'e>(body: Option<&'e Body>, call_sites: &'e CallSites) -> rustc_hash::FxHashSet<&'e str> {
+    let mut named: rustc_hash::FxHashSet<&str> = call_sites.passed.iter().map(|(name, _)| name.as_str()).collect();
+    if let Some(body) = body {
+        named.extend(body.reads.iter().map(String::as_str));
+        named.extend(body.forwarded());
+    }
+    named
 }
 
 impl Body {
@@ -466,7 +619,7 @@ mod tests {
         .count();
         assert_eq!((found, asked), (4_000, 4_000));
         let entry = ComponentEntry { inheritance: vec![big], ..button(vec![]) };
-        let left = sources(&entry, members.iter());
+        let left = sources(&entry, &Attributes::default(), members.iter().map(String::as_str));
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].1.len(), 4_000);
     }
@@ -478,7 +631,7 @@ mod tests {
             inheritance: vec![layer("Conditions", "/p/src/conditions.ts", strings(&["_hover", "_active"]))],
             ..button(vec![])
         };
-        let left = sources(&entry, strings(&["_hover"]).iter());
+        let left = sources(&entry, &Attributes::default(), ["_hover"].into_iter());
         assert_eq!(
             left,
             vec![(("Conditions".to_owned(), "/p/src/conditions.ts".to_owned()), vec!["_hover".into()].into())]
@@ -796,7 +949,7 @@ mod tests {
             listed("title", "HTMLAttributes", REACT),
             listed("variant", "ButtonProps", OWN),
         ]);
-        let left = sources(&entry, strings(&["title", "onClick", "onBlur"]).iter());
+        let left = sources(&entry, &Attributes::default(), ["title", "onClick", "onBlur"].into_iter());
         let names = |names: &[&str]| names.iter().map(|name| Box::from(*name)).collect::<Box<[Box<str>]>>();
         assert_eq!(
             left,
@@ -821,5 +974,124 @@ mod tests {
                 ("HTMLAttributes", &strings(&["title"]), &strings(&["title"])),
             ]
         );
+    }
+
+    /// A React attribute of `type_name` in React's own types: held apart under `htmlAttributes: full`.
+    fn react_attribute(name: &str, type_name: &str, required: bool, default_tag: bool) -> Arc<ParsedProp> {
+        let tags = if default_tag { BTreeMap::from([("default".to_owned(), "x".to_owned())]) } else { BTreeMap::new() };
+        let source = parent(type_name, REACT);
+        Arc::new(ParsedProp::new(
+            name.to_owned(),
+            crate::types::output::PropType::String,
+            required,
+            None,
+            String::new(),
+            tags,
+            Some(source.clone()),
+            vec![source],
+        ))
+    }
+
+    fn sourced(name: &str, source: Option<PropParent>, declarations: Vec<PropParent>) -> Arc<ParsedProp> {
+        let prop = ParsedProp::new(
+            name.to_owned(),
+            crate::types::output::PropType::Any,
+            false,
+            None,
+            String::new(),
+            BTreeMap::new(),
+            source,
+            declarations,
+        );
+        Arc::new(prop)
+    }
+
+    #[test]
+    fn only_an_attribute_every_declaration_of_which_is_react_s_is_held() {
+        let mut held = Attributes::default();
+        assert_eq!(held.hold(react_attribute("title", "HTMLAttributes", false, false)), None);
+        let augmented = sourced("css", Some(parent("HTMLAttributes", "/p/src/augment.d.ts")), vec![]);
+        assert!(held.hold(augmented).is_some(), "an augmentation of the project is listed as before");
+        let library = parent("FocusEvents", "/p/node_modules/lib/events.d.ts");
+        let both =
+            sourced("onFocus", Some(parent("DOMAttributes", REACT)), vec![parent("DOMAttributes", REACT), library]);
+        assert!(held.hold(both).is_some(), "a member a library declares too is listed as before");
+        assert!(held.hold(sourced("id", None, vec![parent("HTMLAttributes", REACT)])).is_some(), "no source");
+        let other_react = "/p/node_modules/react/index.d.ts";
+        assert!(held.hold(sourced("key", Some(parent("Attributes", other_react)), vec![])).is_some(), "not @types");
+        assert_eq!(held.hold(react_attribute("title", "DOMAttributes", false, false)), None, "first kept");
+        assert_eq!(
+            held.0.iter().map(|prop| prop.parent.as_ref().unwrap().name.as_str()).collect::<Vec<_>>(),
+            ["HTMLAttributes"]
+        );
+        assert!(held.contains("title") && !held.contains("css"));
+    }
+
+    /// Held attributes and quiet rows change nothing a reader sees: over generated components, deciding with React's
+    /// attributes held apart, building no member for a row no use names, gives the entry that listing every attribute
+    /// and building every member gives (main's answer): rows, layers' members in order, `used` lists, and the placement
+    /// the checker's merges narrow by.
+    #[test]
+    fn holding_attributes_apart_and_leaving_quiet_rows_unbuilt_changes_no_answer() {
+        let mut seed: u64 = 7;
+        let mut below = move |n: u64| {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % n
+        };
+        let names: Vec<String> =
+            (0..40).map(|i| format!("a{i:02}")).chain(["own0".into(), "children".into()]).collect();
+        let mut left_out = 0;
+        for case in 0..400 {
+            // The answer's own rows, one of them named like an attribute could be.
+            let own: Vec<_> = (0..below(4)).map(|i| listed(&format!("own{i}"), "ButtonProps", OWN)).collect();
+            let mut entry = button(own);
+            let html = layer("ComponentProps", REACT, Vec::new());
+            entry.inheritance.push(InheritedLayer { html_element: Some("button".to_owned()), ..html });
+            if below(2) == 0 {
+                // A collapsed source holding some of the attributes' names.
+                let held: Vec<String> = names[..40].iter().filter(|_| below(4) == 0).cloned().collect();
+                entry.inheritance.push(layer("SystemProps", "/p/node_modules/lib/system.d.ts", held));
+            }
+            if below(3) == 0 {
+                // A React prop the chain listed itself, of a source the attributes come from too.
+                let (name, prop) = listed("a15z", "HTMLAttributes", REACT);
+                entry.props.insert(name, prop);
+            }
+            let mut attributes = Attributes::default();
+            for name in &names[..40] {
+                let type_name =
+                    ["HTMLAttributes", "DOMAttributes", "AriaAttributes"][usize::try_from(below(3)).unwrap()];
+                assert_eq!(attributes.hold(react_attribute(name, type_name, below(20) == 0, below(20) == 0)), None);
+            }
+            let mut pick = |odds: u64| -> Vec<String> { names.iter().filter(|_| below(odds) == 0).cloned().collect() };
+            let reads = pick(8);
+            let forwarded = pick(10);
+            let passed = pick(6);
+            let body = (below(3) != 0).then(|| Body {
+                reads,
+                elements: vec![element(
+                    Target::Component(forwarded),
+                    vec![Attribute::Spread(SpreadOf::Rest), named(&names[usize::try_from(below(40)).unwrap()])],
+                )],
+            });
+            let sites = u32::try_from(below(12)).unwrap();
+            let passed = passed.into_iter().map(|name| (name, u32::try_from(below(u64::from(sites) + 1)).unwrap()));
+            let call_sites = CallSites { sites, passed: passed.collect() };
+            let inputs = Inputs {
+                site: (OWN.into(), "Button".to_owned(), 0),
+                props_type: props_type::PropsType::default(),
+                body,
+                narrows: below(4) != 0,
+                private: BTreeMap::new(),
+            };
+            let mut held = entry.clone();
+            apply(&mut held, &inputs, &call_sites, &attributes);
+            let mut listed_all = entry.clone();
+            attributes.list_all(&mut listed_all);
+            place(&mut listed_all, &inputs, &call_sites, &Attributes::default(), |_| false);
+            assert_eq!(held, listed_all, "case {case}");
+            left_out += held.inheritance.iter().map(|layer| layer.used.len() + layer.members.len()).sum::<usize>();
+        }
+        assert!(left_out > 400 * 20, "the cases leave attributes out: {left_out}");
     }
 }

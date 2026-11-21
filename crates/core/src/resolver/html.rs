@@ -277,7 +277,7 @@ pub(super) fn layer_attributes(
         .filter(|name| (takes_ref || name != "ref") && !has(name) && !layer.omitted.contains(name))
         .filter_map(|name| {
             if loaded {
-                return super::alias::layer_attribute(layer, &name, ctx, state, depth).map(|prop| ctx.share(prop));
+                return super::alias::layer_attribute(layer, &name, ctx, state, depth);
             }
             let prop_type = if name == "ref" {
                 PropType::Named { name: "Ref".into(), args: vec![] }
@@ -360,14 +360,15 @@ pub(super) fn builtin_attributes(
         .iter()
         .filter(|name| *name != "key" && (full || crate::react_types::is_curated_html_attr(element, name)))
         .filter_map(|name| {
-            let read = |state: &mut ResolveState| attribute_from(root.clone(), name, react_file, ctx, state, depth);
-            let prop = if shared {
+            let read = |state: &mut ResolveState| {
+                attribute_from(root.clone(), name, react_file, ctx, state, depth).map(|prop| ctx.share(prop))
+            };
+            if shared {
                 let memo_key = format!("{react_file}\0{bare}\0{}\0{name}", arg_element.unwrap_or(""));
                 ctx.attribute_reads.get_or_resolve(&memo_key, depth, state, None, read)
             } else {
                 read(state)
-            };
-            prop.map(|prop| ctx.share(prop))
+            }
         })
         .collect()
 }
