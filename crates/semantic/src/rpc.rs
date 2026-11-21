@@ -706,7 +706,7 @@ impl Rpc {
 
     /// Requests sent so far, by method.
     /// The requests inside a batch count under their own methods and in all as `inBatches`, and the batch once as
-    /// `batchRequests`.
+    /// `batchRequests`. It is a profile, not a count of round trips: a batch and its requests are both in it.
     pub(crate) fn calls(&self) -> BTreeMap<&'static str, u64> {
         self.calls.lock().map(|calls| calls.clone()).unwrap_or_default()
     }

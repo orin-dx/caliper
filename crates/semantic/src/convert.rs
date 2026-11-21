@@ -1836,6 +1836,8 @@ impl Converter {
                 .readonly
                 .get(listed, || async { Ok(Arc::from(self.rpc.readonly_symbols(&references).await?)) })
                 .await?;
+            // `listed` names the same symbol list every time, so the cached flags are one per reference asked.
+            debug_assert_eq!(readonly.len(), references.len(), "the cached readonly flags are of another list");
             for (field, readonly) in fields.iter_mut().zip(readonly.iter()) {
                 field.readonly = *readonly;
             }
