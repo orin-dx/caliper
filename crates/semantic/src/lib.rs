@@ -201,8 +201,9 @@ pub fn resolve_cached(request: SemanticRequest, cache_dir: &Utf8Path) -> Semanti
     resolve_cached_early(request, cache_dir, None)
 }
 
-/// [`resolve_cached`] over the checker's program when `early` ([`start_early`]) was opened for this request (over the
-/// root files this request has, with its options); it is dropped otherwise, and when the kept answer is used.
+/// [`resolve_cached`] over the checker's session when `early` ([`start_early`]) was opened for this request's project,
+/// tsconfig and timeout, its programs rooted at the request's files, or brought to them when they were not
+/// (`updateSnapshot`); it is dropped otherwise, and when the kept answer is used.
 pub fn resolve_cached_early(
     request: SemanticRequest,
     cache_dir: &Utf8Path,
@@ -229,15 +230,15 @@ pub fn resolve_cached_early(
     outcome
 }
 
-/// [`resolve`] over the program an early start opened ([`start_early`]) when it was opened for this request, and as
-/// [`resolve`] does otherwise.
+/// [`resolve`] over the session an early start opened ([`start_early`]) when it was opened for this request's project,
+/// tsconfig and timeout, and as [`resolve`] does otherwise.
 pub fn resolve_early(request: SemanticRequest, early: Option<EarlyStart>) -> SemanticOutcome {
     // Early programs are opened without a recording.
     let early = fitting(early, &request, request.record_to.is_none());
     resolve_with(request, None, early)
 }
 
-/// `early` when `usable` and it [`fits`](EarlyStart::fits) `request`; otherwise it is stopped and there is none.
+/// `early` when `usable` and it [`fits`](EarlyStart::fits) `request`'s setup; otherwise it is stopped and there is none.
 fn fitting(early: Option<EarlyStart>, request: &SemanticRequest, usable: bool) -> Option<EarlyStart> {
     match early {
         Some(early) if usable && early.fits(request) => Some(early),
@@ -256,8 +257,10 @@ struct Opened {
 }
 
 /// The checker started, and its program opened, on a thread of its own before the structural pass is done: the
-/// program needs only the root files (the files of the exported components), the project root and the tsconfig. The run that has its
-/// request takes it with [`resolve_cached_early`] when the root files are the same, and drops it when they are not.
+/// program needs only the root files (the files of the exported components), the project root and the tsconfig. The run
+/// that has its request takes it with [`resolve_cached_early`]: as it is when the root files are the same, with its
+/// programs rooted at the request's files (`updateSnapshot`) when they differ, and rebuilt when that fails or the project,
+/// tsconfig or timeout differ.
 pub struct EarlyStart {
     handle: Option<std::thread::JoinHandle<Option<Opened>>>,
     project_root: Utf8PathBuf,
@@ -305,24 +308,19 @@ pub fn start_early(
 }
 
 impl EarlyStart {
-    /// Whether it was opened for this request: the same root files in the same order, and the same project root,
-    /// tsconfig and timeout.
+    /// Whether it was opened for this request's project root, tsconfig and timeout: what its programs were built with
+    /// and cannot be brought to. The root files are not part of it: [`reroot`] brings the programs to others.
     fn fits(&self, request: &SemanticRequest) -> bool {
-        let roots = root_files(request);
         let fits = self.handle.is_some()
             && self.project_root == request.project_root
             && self.tsconfig == request.tsconfig
-            && self.timeout == request.request_timeout
-            && self.roots == roots;
+            && self.timeout == request.request_timeout;
         if !fits {
             tracing::debug!(
                 same_root = self.project_root == request.project_root,
                 same_tsconfig = self.tsconfig == request.tsconfig,
                 same_timeout = self.timeout == request.request_timeout,
-                early_roots = self.roots.len(),
-                roots = roots.len(),
-                first_difference = ?self.roots.iter().zip(&roots).position(|(a, b)| a != b),
-                "the program opened early is not the request's; opening it again"
+                "the session opened early is not the request's; opening it again"
             );
         }
         fits
@@ -343,45 +341,165 @@ fn resolve_noting(request: SemanticRequest, reads: Option<Arc<kept::Reads>>) -> 
     resolve_with(request, reads, None)
 }
 
-/// [`resolve_noting`], over the program an early start opened when there is one (it [`fits`](EarlyStart::fits)).
+/// What a run did with the session an early start opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Taken {
+    /// Its programs were rooted at the request's files already.
+    Same,
+    /// Its programs were brought to the request's files ([`reroot`]) without starting the checker again.
+    Rooted,
+    /// There was none, or it could not be used: the checker was started again.
+    Rebuilt,
+}
+
+/// [`resolve_noting`], over the session an early start opened when there is one (it [`fits`](EarlyStart::fits)).
 fn resolve_with(
-    mut request: SemanticRequest,
+    request: SemanticRequest,
     reads: Option<Arc<kept::Reads>>,
     early: Option<EarlyStart>,
 ) -> SemanticOutcome {
+    resolve_taking(request, reads, early).0
+}
+
+/// [`resolve_with`], and what it did with the early session.
+fn resolve_taking(
+    mut request: SemanticRequest,
+    reads: Option<Arc<kept::Reads>>,
+    early: Option<EarlyStart>,
+) -> (SemanticOutcome, Taken) {
     request.heap_budget.get_or_insert_with(HeapBudget::machine);
     let teardown = request.teardown;
-    if let Some(opened) = early.and_then(|early| early.handle).and_then(|handle| handle.join().ok().flatten()) {
+    let files = root_files(&request);
+    let early = early.and_then(|early| {
+        let roots = early.roots;
+        early.handle.and_then(|handle| handle.join().ok().flatten()).map(|opened| (roots, opened))
+    });
+    if let Some((early_roots, opened)) = early {
         let Opened { runtime, checker, programs } = opened;
-        let outcome = match programs {
-            Ok(programs) => runtime.block_on(async {
-                let files = root_files(&request);
-                let answered = answer_opened(programs, &request, &files, std::time::Instant::now()).await;
-                checker.shutdown().await;
-                answered
-            }),
-            Err(unavailable) => {
-                runtime.block_on(checker.shutdown());
-                unavailable
+        let same = early_roots == files;
+        let adopted = match programs {
+            Ok(programs) if same => Some((Ok(programs), Taken::Same)),
+            Err(unavailable) if same => Some((Err(unavailable), Taken::Same)),
+            // An early start that failed to open for other files did not fail for these: they are opened again.
+            Err(_) => None,
+            Ok(programs) if files.is_empty() => {
+                drop(programs);
+                None
             }
+            Ok(programs) => match runtime.block_on(reroot(programs, &files)) {
+                Ok(programs) => Some((Ok(programs), Taken::Rooted)),
+                Err(error) => {
+                    tracing::debug!(%error, "the session opened early could not be rooted at the request's files");
+                    None
+                }
+            },
         };
-        if teardown == Teardown::OneShot {
-            std::mem::forget(runtime);
+        match adopted {
+            Some((programs, taken)) => {
+                tracing::debug!(
+                    ?taken,
+                    early_roots = early_roots.len(),
+                    roots = files.len(),
+                    "the session opened early is the request's"
+                );
+                let outcome = match programs {
+                    Ok(programs) => runtime.block_on(async {
+                        let started = std::time::Instant::now();
+                        let answered = answer_opened(programs, &request, &files, started, &Lanes::of(taken)).await;
+                        checker.shutdown().await;
+                        answered
+                    }),
+                    Err(unavailable) => {
+                        runtime.block_on(checker.shutdown());
+                        unavailable
+                    }
+                };
+                if teardown == Teardown::OneShot {
+                    std::mem::forget(runtime);
+                }
+                return (outcome, taken);
+            }
+            None => runtime.block_on(checker.shutdown()),
         }
-        return outcome;
     }
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get().min(CONVERTER_THREADS));
     let built = tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build();
     let runtime = match built {
         Ok(runtime) => runtime,
-        Err(error) => return SemanticOutcome::unavailable(format!("could not start an async runtime: {error}")),
+        Err(error) => {
+            let unavailable = SemanticOutcome::unavailable(format!("could not start an async runtime: {error}"));
+            return (unavailable, Taken::Rebuilt);
+        }
     };
     let outcome = runtime.block_on(run_noting(request, None, reads));
     if teardown == Teardown::OneShot {
         // Dropping the runtime waits for its threads to wind down.
         std::mem::forget(runtime);
     }
-    outcome
+    (outcome, Taken::Rebuilt)
+}
+
+/// `old` rooted at `files` instead of the files they were opened over: each lane's snapshot is brought to them with
+/// `updateSnapshot` (`reconfigurePrograms`), which reads every file as the snapshot holds it and parses only the roots
+/// added; the checker works the program's files, globals and ambient declarations out again from the new roots, so a
+/// file no root reaches any more declares nothing. The snapshots they replace are released, and the lanes' are the new
+/// ones' own to release ([`Lanes::Each`]). Any failure is the caller's to answer by starting the checker again: no
+/// answer is given from a partly rooted set.
+async fn reroot(old: Vec<Arc<Rpc>>, files: &[String]) -> Result<Vec<Arc<Rpc>>, CallError> {
+    let files: Arc<[String]> = files.into();
+    let mut tasks = JoinSet::new();
+    for (lane, rpc) in old.iter().enumerate() {
+        let (rpc, files) = (rpc.clone(), files.clone());
+        tasks.spawn(async move { (lane, rpc.updated(&[], &[], Some(&files)).await) });
+    }
+    let mut rooted: Vec<Option<Rpc>> = old.iter().map(|_| None).collect();
+    while let Some(joined) = tasks.join_next().await {
+        let (lane, updated) = joined.map_err(|error| CallError::Fatal(format!("a root update failed: {error}")))?;
+        if let Some(slot) = rooted.get_mut(lane) {
+            *slot = Some(updated?);
+        }
+    }
+    let rooted: Option<Vec<Arc<Rpc>>> = rooted.into_iter().map(|rpc| rpc.map(Arc::new)).collect();
+    let rooted = rooted.ok_or_else(|| CallError::Fatal("a lane was not rooted".to_string()))?;
+    if let Some(first) = old.first() {
+        first.release().await;
+    }
+    Ok(rooted)
+}
+
+/// Who releases the snapshots of the lanes beside the first.
+enum Lanes {
+    /// The first's session ([`Rpc::open_programs`]).
+    OfFirst,
+    /// Each lane's own, once ([`reroot`] made them apart); the flag says it was done.
+    Each(std::sync::atomic::AtomicBool),
+}
+
+impl Lanes {
+    fn of(taken: Taken) -> Self {
+        match taken {
+            Taken::Rooted => Self::Each(std::sync::atomic::AtomicBool::new(false)),
+            Taken::Same | Taken::Rebuilt => Self::OfFirst,
+        }
+    }
+
+    /// Releases the snapshots of the lanes beside the first, which nothing may ask after.
+    async fn release_beside(&self, programs: &[Arc<Rpc>]) {
+        match self {
+            Self::OfFirst => {
+                if let Some(first) = programs.first() {
+                    first.release_lanes().await;
+                }
+            }
+            Self::Each(released) => {
+                if !released.swap(true, Ordering::Relaxed) {
+                    for lane in programs.iter().skip(1) {
+                        lane.release().await;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The exported targets by file, in first-seen order, and an outcome that already holds a fallback for each target
@@ -452,7 +570,7 @@ async fn answer_with(checker: &Backend, request: &SemanticRequest) -> SemanticOu
         Ok(programs) => programs.into_iter().map(Arc::new).collect(),
         Err(error) => return SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")),
     };
-    answer_opened(programs, request, &files, started).await
+    answer_opened(programs, request, &files, started, &Lanes::OfFirst).await
 }
 
 /// Answers the request's targets over `programs`, opened for it at `started`, and releases them as its teardown says.
@@ -461,18 +579,20 @@ async fn answer_opened(
     request: &SemanticRequest,
     files: &[String],
     started: std::time::Instant,
+    lanes: &Lanes,
 ) -> SemanticOutcome {
     tracing::debug!(
         program_ms = started.elapsed().as_millis() as u64,
         programs = programs.len(),
         "semantic program built"
     );
-    let answered = answer_on(&programs, request, files).await;
+    let answered = answer_lanes(&programs, request, files, lanes).await;
     match request.teardown {
         Teardown::Session => {
             if let Some(first) = programs.first() {
                 first.release().await;
             }
+            lanes.release_beside(&programs).await;
         }
         // The checker's shutdown, next, takes the snapshot down with it.
         Teardown::OneShot => std::mem::forget(programs),
@@ -490,8 +610,18 @@ async fn answer_on(
     request: &SemanticRequest,
     files: &[String],
 ) -> Result<SemanticOutcome, CallError> {
+    answer_lanes(programs, request, files, &Lanes::OfFirst).await
+}
+
+/// [`answer_on`] over lanes that `lanes` says how to release.
+async fn answer_lanes(
+    programs: &[Arc<Rpc>],
+    request: &SemanticRequest,
+    files: &[String],
+    lanes: &Lanes,
+) -> Result<SemanticOutcome, CallError> {
     let (mut outcome, by_file, order) = group_by_file(request);
-    let mut answered = session(programs, request, files, &by_file, &order).await?;
+    let mut answered = session(programs, request, files, &by_file, &order, lanes).await?;
     outcome.diagnostics.append(&mut answered.diagnostics);
     outcome.components.append(&mut answered.components);
     outcome.fallbacks.append(&mut answered.fallbacks);
@@ -504,6 +634,7 @@ async fn session(
     files: &[String],
     by_file: &FxHashMap<&Utf8Path, Vec<&Target>>,
     order: &[&Utf8Path],
+    lanes: &Lanes,
 ) -> Result<SemanticOutcome, CallError> {
     let started = std::time::Instant::now();
     let Some(rpc) = programs.first() else { return Ok(SemanticOutcome::default()) };
@@ -576,7 +707,7 @@ async fn session(
         // program and converter of their own, so what the lanes built is freed before it is built, not after. This is
         // freed in a one-shot run too, where the end of the process would free it: it is the run's peak otherwise.
         drop(converters.take());
-        rpc.release_lanes().await;
+        lanes.release_beside(programs).await;
         let keys = generic.iter().map(|(target, _)| target.key.clone()).collect::<Vec<_>>();
         let instantiated = match watch.passed() {
             true => Err(CallError::OverBudget),
@@ -1037,5 +1168,248 @@ mod tests {
         assert!(bounded.diagnostics.is_empty() && bounded.fallbacks.is_empty(), "{bounded:?}");
         assert_eq!(bounded.components.len(), 12);
         assert_eq!(bounded, unbounded);
+    }
+
+    /// The request over every component `root` holds.
+    fn request_over(root: &Utf8Path) -> SemanticRequest {
+        let output = extract(&PipelineOptions { src_dirs: vec![root.to_owned()], ..PipelineOptions::default() });
+        SemanticRequest::new(root.to_owned(), targets_of(&output))
+    }
+
+    /// `files` components over shared types, a generic component, and two files no component imports that each declare
+    /// something global: a module that augments `Augmented`, and a script (`.d.ts`) that does.
+    fn ambient_project(files: usize) -> (tempfile::TempDir, Utf8PathBuf) {
+        let (dir, root) = shared_types_project(files);
+        std::fs::write(
+            root.join("Generic.tsx"),
+            "import type { Augmented } from './Ambient';\n\
+             export function Generic<T extends string>(props: { value: T; extra?: Augmented }) { return null; }\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("Ambient.ts"), "export interface Augmented { own?: number }\n").unwrap();
+        std::fs::write(
+            root.join("augment.ts"),
+            "declare global { interface Augmented { fromAugmentModule?: string } }\nexport {};\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("ambient.d.ts"), "interface Augmented { fromAmbientScript?: string }\n").unwrap();
+        (dir, root)
+    }
+
+    /// The answer a run gives when it takes `predicted` as the root files an early start opened its session over, and
+    /// what it did with that session.
+    fn answered_from_early(root: &Utf8Path, predicted: &[String]) -> (SemanticOutcome, Taken) {
+        let request = request_over(root);
+        let roots: Vec<Utf8PathBuf> = predicted.iter().map(Utf8PathBuf::from).collect();
+        let early = start_early(root.to_owned(), None, request.request_timeout, &roots, false);
+        resolve_taking(request.clone(), None, fitting(early, &request, true))
+    }
+
+    /// Every prop the components of `outcome` list, by component.
+    fn prop_names(outcome: &SemanticOutcome) -> Vec<(String, Vec<String>)> {
+        outcome
+            .components
+            .iter()
+            .map(|component| (component.key.clone(), component.props.iter().map(|prop| prop.name.clone()).collect()))
+            .collect()
+    }
+
+    /// The session an early start opened over `predicted` is rooted at the request's files, not opened again, and
+    /// answers as a session opened over them does: whichever way the two lists differ, and with one lane or two.
+    fn assert_rooted_as_fresh(files: usize, predicted: impl FnOnce(Vec<String>) -> Vec<String>) {
+        let (_dir, root) = ambient_project(files);
+        let fresh = resolve(request_over(&root));
+        assert!(fresh.diagnostics.is_empty() && fresh.fallbacks.is_empty(), "{fresh:?}");
+        let predicted = predicted(root_files(&request_over(&root)));
+        assert_ne!(predicted, root_files(&request_over(&root)));
+
+        let (outcome, taken) = answered_from_early(&root, &predicted);
+
+        assert_eq!(taken, Taken::Rooted);
+        assert_eq!(prop_names(&outcome), prop_names(&fresh));
+        assert_eq!(outcome, fresh);
+    }
+
+    /// A root the request does not have declares nothing in the answer, a module that augments a global and a script
+    /// that declares one alike: the early session had them in its program, the rooted one does not.
+    #[test]
+    fn a_session_opened_early_over_a_root_too_many_is_rooted_without_it() {
+        for files in [6, 40] {
+            assert_rooted_as_fresh(files, |mut roots| {
+                let dir = roots[0].rsplit_once('/').map(|(dir, _)| dir.to_string()).unwrap();
+                roots.push(format!("{dir}/augment.ts"));
+                roots.insert(2, format!("{dir}/ambient.d.ts"));
+                roots
+            });
+        }
+        let (_dir, root) = ambient_project(6);
+        let names: Vec<String> =
+            prop_names(&resolve(request_over(&root))).into_iter().flat_map(|(_, props)| props).collect();
+        assert!(!names.iter().any(|name| name.starts_with("fromA")), "{names:?}");
+    }
+
+    /// A root the early start did not have reaches the components, its global augmentation included.
+    #[test]
+    fn a_session_opened_early_over_a_root_too_few_is_rooted_with_it() {
+        for files in [6, 40] {
+            assert_rooted_as_fresh(files, |mut roots| {
+                roots.pop();
+                roots
+            });
+        }
+        let (_dir, root) = ambient_project(6);
+        let names: Vec<String> =
+            prop_names(&resolve(request_over(&root))).into_iter().flat_map(|(_, props)| props).collect();
+        assert!(names.iter().any(|name| name == "fromLastFile"), "{names:?}");
+    }
+
+    /// The same files in another order, and one in and one out at once.
+    #[test]
+    fn a_session_opened_early_over_the_roots_in_another_order_or_with_one_swapped_is_rooted() {
+        for files in [6, 40] {
+            assert_rooted_as_fresh(files, |mut roots| {
+                roots.reverse();
+                roots
+            });
+            assert_rooted_as_fresh(files, |mut roots| {
+                let dir = roots[0].rsplit_once('/').map(|(dir, _)| dir.to_string()).unwrap();
+                roots.remove(0);
+                roots.push(format!("{dir}/augment.ts"));
+                roots
+            });
+        }
+    }
+
+    /// The root files the request has are the ones the session was opened over: nothing is rooted or rebuilt.
+    #[test]
+    fn a_session_opened_early_over_the_roots_of_the_request_is_taken_as_it_is() {
+        let (_dir, root) = ambient_project(6);
+        let fresh = resolve(request_over(&root));
+
+        let (outcome, taken) = answered_from_early(&root, &root_files(&request_over(&root)));
+
+        assert_eq!(taken, Taken::Same);
+        assert_eq!(outcome, fresh);
+    }
+
+    /// What the session was built with cannot be rooted anew: another tsconfig is a session opened again.
+    #[test]
+    fn a_session_opened_early_for_another_tsconfig_is_opened_again() {
+        let (_dir, root) = ambient_project(6);
+        let request = request_over(&root);
+        let roots: Vec<Utf8PathBuf> = root_files(&request).into_iter().map(Utf8PathBuf::from).collect();
+        std::fs::write(root.join("tsconfig.json"), "{}").unwrap();
+        let early = start_early(root.clone(), Some(root.join("tsconfig.json")), request.request_timeout, &roots, false);
+
+        let (outcome, taken) = resolve_taking(request.clone(), None, fitting(early, &request, true));
+
+        assert_eq!(taken, Taken::Rebuilt);
+        assert_eq!(outcome, resolve(request));
+    }
+
+    /// A session whose update fails (here, its snapshot was released) is not given a partial answer: the checker is
+    /// started again and the answer is the one a run without an early start gives.
+    #[test]
+    fn a_session_that_cannot_be_rooted_is_opened_again() {
+        let (_dir, root) = ambient_project(6);
+        let request = request_over(&root);
+        let mut predicted = root_files(&request);
+        predicted.pop();
+        let (project_root, timeout, files) = (root.clone(), request.request_timeout, predicted.clone());
+        let handle = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().ok()?;
+            let checker = Backend::start_noting(&project_root, 1, None).ok()?;
+            let opened = runtime.block_on(Rpc::open_programs(checker.client(), timeout, None, &files, false, 1));
+            let programs: Vec<Arc<Rpc>> = opened.ok()?.into_iter().map(Arc::new).collect();
+            runtime.block_on(programs[0].release());
+            Some(Opened { runtime, checker, programs: Ok(programs) })
+        });
+        let early = EarlyStart {
+            handle: Some(handle),
+            project_root: root.clone(),
+            tsconfig: None,
+            timeout: request.request_timeout,
+            roots: predicted,
+            reads: None,
+        };
+
+        let (outcome, taken) = resolve_taking(request.clone(), None, Some(early));
+
+        assert_eq!(taken, Taken::Rebuilt);
+        assert_eq!(outcome, resolve(request));
+    }
+
+    /// Stands in for the checker: numbers each snapshot a `createSnapshot` or `updateSnapshot` makes, refuses every
+    /// question about them, and records which were released.
+    struct Numbering {
+        made: Arc<Mutex<Vec<u64>>>,
+        released: Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl checker::Served for Numbering {
+        fn handle(&self, method: &str, params: &[u8]) -> Result<String, checker::Failure> {
+            match method {
+                "initialize" => Ok("null".to_string()),
+                "release" => {
+                    let params: serde_json::Value = serde_json::from_slice(params).unwrap();
+                    self.released.lock().unwrap().push(params["snapshot"].as_u64().unwrap());
+                    Ok("null".to_string())
+                }
+                "createSnapshot" | "updateSnapshot" => {
+                    let params: serde_json::Value = serde_json::from_slice(params).unwrap();
+                    let created =
+                        params["changes"]["createPrograms"].as_array().or(params["createPrograms"].as_array());
+                    let count = created.map_or(1, Vec::len);
+                    let mut made = self.made.lock().unwrap();
+                    let snapshot = made.len() as u64 + 1;
+                    made.push(snapshot);
+                    let projects: Vec<_> =
+                        (0..count).map(|n| serde_json::json!({ "id": format!("p{snapshot}-{n}") })).collect();
+                    Ok(serde_json::json!({ "snapshot": snapshot, "projects": projects }).to_string())
+                }
+                _ => Err(checker::Failure { message: "refused".to_string(), panicked: false }),
+            }
+        }
+
+        fn discard(&self, _method: &str, _answer: &str) {}
+
+        fn close(&self) {}
+    }
+
+    /// Every snapshot made for a run that roots three lanes anew is released, once each, at the end of a session run
+    /// and not at the end of a one-shot one (the checker's shutdown takes them): the snapshots the lanes had before
+    /// as well as the ones that replace them.
+    #[test]
+    fn rooting_the_lanes_anew_releases_every_snapshot_once() {
+        for (teardown, released_by_run) in [(Teardown::Session, true), (Teardown::OneShot, false)] {
+            let (_dir, root) = shared_types_project(3);
+            let request = request_over(&root).with_teardown(teardown);
+            let made = Arc::new(Mutex::new(Vec::new()));
+            let released = Arc::new(Mutex::new(Vec::new()));
+            let session = Numbering { made: made.clone(), released: released.clone() };
+            let checker = Backend::spawn(3, move || session).unwrap();
+            let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+            let files = root_files(&request);
+
+            let outcome = runtime.block_on(async {
+                let timeout = request.request_timeout;
+                let opened = Rpc::open_programs(checker.client(), timeout, None, &files[..2], false, 3).await.unwrap();
+                let opened: Vec<Arc<Rpc>> = opened.into_iter().map(Arc::new).collect();
+                let rooted = reroot(opened, &files).await.unwrap();
+                let lanes = Lanes::of(Taken::Rooted);
+                answer_opened(rooted, &request, &files, std::time::Instant::now(), &lanes).await
+            });
+            runtime.block_on(checker.shutdown());
+
+            assert_eq!(outcome.fallbacks.len(), 3, "{outcome:?}");
+            let mut made = made.lock().unwrap().clone();
+            let mut released = released.lock().unwrap().clone();
+            made.sort_unstable();
+            released.sort_unstable();
+            assert_eq!(made.len(), 6, "three lanes opened, three rooted");
+            // The lanes' old snapshots are released by the rooting itself; the new ones by the session teardown.
+            let expected = if released_by_run { made } else { made[..3].to_vec() };
+            assert_eq!(released, expected);
+        }
     }
 }

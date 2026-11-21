@@ -475,8 +475,9 @@ mod tests {
         assert_eq!(early, later);
     }
 
-    /// A program opened early gives the answer a run that opens it itself gives, is kept the same way, and is left
-    /// unused (not failed on) when its root files are not the request's.
+    /// A program opened early gives the answer a run that opens it itself gives, is kept the same way, and when its
+    /// root files are not the request's it is rooted at them and gives it still; one opened for another tsconfig is
+    /// left unused (not failed on).
     #[test]
     fn an_early_start_gives_the_answer_a_run_gives_and_a_wrong_one_is_dropped() {
         let (_dir, root, cache) = project();
@@ -491,6 +492,13 @@ mod tests {
         std::fs::remove_file(cache.join(FILE)).unwrap();
         let wrong = crate::start_early(root.clone(), None, timeout, &roots[..1], true);
         assert_eq!(crate::resolve_cached_early(request(&root), &cache, wrong), fresh);
+
+        std::fs::remove_file(cache.join(FILE)).unwrap();
+        let fewer = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots[..1], true);
+        assert_eq!(crate::resolve_cached_early(request(&root), &cache, fewer), fresh);
+        assert!(kept(&root, &cache).is_some(), "the answer from a program rooted anew is kept");
+        std::fs::write(root.join("types.ts"), "export type Size = 'sm' | 'md' | 'lg';\n").unwrap();
+        assert!(kept(&root, &cache).is_none(), "and what its reads noted still discards it");
     }
 
     /// An early start that did not note what it read cannot feed the kept answer: the answer saved after it would carry
