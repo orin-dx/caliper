@@ -149,6 +149,9 @@ pub(crate) struct Cx {
     /// The conversion this context belongs to, which records which enclosing instantiations it asks about. `None` at
     /// the roots.
     frame: Option<Arc<Frame>>,
+    /// The walk the type is converted in: one per [`Converter::convert_roots`], which converts one type after another,
+    /// so a walk waits for at most one other conversion at a time ([`Flights`]).
+    walk: u64,
 }
 
 /// What one conversion has asked of the instantiations enclosing it, kept to build its memo entry (see
@@ -207,7 +210,12 @@ impl Cx {
     /// The context of what a name carries, its type arguments: one level down. Each argument is converted on its own
     /// and passes [`Converter::enter`] if it has parts.
     fn argument(&self) -> Cx {
-        Cx { depth: self.depth.saturating_add(1), enclosing: self.enclosing.clone(), frame: self.frame.clone() }
+        Cx {
+            depth: self.depth.saturating_add(1),
+            enclosing: self.enclosing.clone(),
+            frame: self.frame.clone(),
+            walk: self.walk,
+        }
     }
 
     /// The context of the parts of a type that [`Converter::enter`] has admitted. Only a named instance is kept, since
@@ -221,7 +229,7 @@ impl Cx {
             grown.push(id);
             enclosing = Arc::new(grown);
         }
-        Cx { depth: self.depth.saturating_add(1), enclosing, frame: self.frame.clone() }
+        Cx { depth: self.depth.saturating_add(1), enclosing, frame: self.frame.clone(), walk: self.walk }
     }
 
     /// Whether `id` is an instantiation being expanded around the type. The conversion in progress is recorded to have
@@ -570,6 +578,113 @@ impl Entry {
 
 type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 
+/// What makes two conversions the same: the type's handle, its depth and the instantiations enclosing it. The entry the
+/// first makes [holds](Entry::holds_in) where the second is: its `enclosed_by` is what it asked of those instantiations.
+type FlightKey = (u64, u8, Arc<Vec<u64>>);
+
+/// The conversions running now, so that one that starts while the same conversion runs in another walk waits for it
+/// and recalls what it made, instead of asking the checker everything again (Chakra: 37% of conversions started so).
+///
+/// A walk that waits holds the flights of the conversions it is inside, which others may wait for in turn. So a wait
+/// is refused, and the type converted where it is asked, when the walk it would wait for already waits, through other
+/// walks, for this one: the check and the wait are recorded under one lock, so the waits never form a cycle. Converting
+/// it there is what happens without flights, and gives the same type (see [`State::memo`]).
+#[derive(Default)]
+struct Flights {
+    table: Mutex<FlightTable>,
+}
+
+#[derive(Default)]
+struct FlightTable {
+    running: FxHashMap<FlightKey, Arc<Flight>>,
+    /// The walk each waiting walk waits for.
+    waiting: FxHashMap<u64, u64>,
+}
+
+/// One conversion running, and the walk running it.
+struct Flight {
+    walk: u64,
+    /// Closed when the conversion ends, by returning, failing or being dropped.
+    done: tokio::sync::watch::Receiver<()>,
+}
+
+/// What a conversion found in [`Flights`] when it started.
+enum Boarding<'a> {
+    /// No such conversion runs: this one does, until the guard drops.
+    Lead(Lead<'a>),
+    /// The same conversion runs in another walk: wait for its end, then recall it.
+    Wait(tokio::sync::watch::Receiver<()>, Waiting<'a>),
+    /// Waiting would close a cycle of waits: convert the type here.
+    Alone,
+}
+
+/// Ends a flight when its conversion returns, fails or is dropped; those waiting for it wake.
+struct Lead<'a> {
+    flights: &'a Flights,
+    key: FlightKey,
+    flight: Arc<Flight>,
+    _done: tokio::sync::watch::Sender<()>,
+}
+
+impl Drop for Lead<'_> {
+    fn drop(&mut self) {
+        let mut table = self.flights.lock();
+        if table.running.get(&self.key).is_some_and(|flight| Arc::ptr_eq(flight, &self.flight)) {
+            table.running.remove(&self.key);
+        }
+    }
+}
+
+/// A walk's wait, recorded until it ends or is dropped.
+struct Waiting<'a> {
+    flights: &'a Flights,
+    walk: u64,
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.flights.lock().waiting.remove(&self.walk);
+    }
+}
+
+impl Flights {
+    fn lock(&self) -> std::sync::MutexGuard<'_, FlightTable> {
+        self.table.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Starts the conversion of `key` in `walk`: leads it, waits for the walk running it, or converts it alone.
+    fn board(&self, key: FlightKey, walk: u64) -> Boarding<'_> {
+        let mut table = self.lock();
+        if let Some(flight) = table.running.get(&key) {
+            let (leader, done) = (flight.walk, flight.done.clone());
+            if table.waits_for(leader, walk) {
+                return Boarding::Alone;
+            }
+            table.waiting.insert(walk, leader);
+            return Boarding::Wait(done, Waiting { flights: self, walk });
+        }
+        let (sender, done) = tokio::sync::watch::channel(());
+        let flight = Arc::new(Flight { walk, done });
+        table.running.insert(key.clone(), flight.clone());
+        Boarding::Lead(Lead { flights: self, key, flight, _done: sender })
+    }
+}
+
+impl FlightTable {
+    /// Whether `walk` is `whom` or waits for it, through the walks it waits for. The waits form no cycle, so the chain
+    /// ends; the bound only guards that.
+    fn waits_for(&self, mut walk: u64, whom: u64) -> bool {
+        for _ in 0..=self.waiting.len() {
+            if walk == whom {
+                return true;
+            }
+            let Some(next) = self.waiting.get(&walk) else { return false };
+            walk = *next;
+        }
+        true
+    }
+}
+
 /// The props answered so far, by the hash of their [`PropKey`] and then the key itself, owned.
 type KeptProps = Mutex<FxHashMap<u64, Vec<(KeptKey, Arc<SemanticProp>)>>>;
 
@@ -699,6 +814,10 @@ struct State {
     /// it. Entries that hold in a context all agree, so which of them is found first, and so the order in which
     /// types were first reached, cannot show in the output.
     memo: Memo,
+    /// The conversions running now in the walks of this lane.
+    flights: Flights,
+    /// The last walk begun ([`Cx::walk`]).
+    walks: AtomicU64,
     // What follows is the checker's answers about types and symbols, fixed inside the snapshot, while the memo converts
     // a type again at another depth or under other instantiations: kept, that conversion asks for none of them again.
     // Kept for the whole snapshot, since components of one library share most of their types: kept per component, a
@@ -852,7 +971,8 @@ impl Converter {
 
     /// The own types of a component's props, from the top.
     pub(crate) async fn convert_roots(&self, infos: &[TypeInfo]) -> Result<Vec<PropType>, CallError> {
-        self.convert_all(infos, &Cx::default()).await
+        let walk = self.state.walks.fetch_add(1, Ordering::Relaxed) + 1;
+        self.convert_all(infos, &Cx { walk, ..Cx::default() }).await
     }
 
     /// Where each prop of `asked` is declared and what its JSDoc says ([`crate::declared`]).
@@ -986,16 +1106,28 @@ impl Converter {
         Box::pin(async move {
             // A memo hit copies the tree it recalls, and a conversion can build gigabytes of them between two requests.
             crate::heap::step()?;
-            if let Some(entry) = self.recall(info.id, cx) {
-                self.state.hits.fetch_add(1, Ordering::Relaxed);
-                if let Some(frame) = &cx.frame {
-                    frame.absorb(&entry.asked, &cx.enclosing);
-                }
-                return Ok(PropType::clone(&entry.converted));
+            if let Some(converted) = self.recalled(info.id, cx) {
+                return Ok(converted);
             }
+            // Held until the entry is in the memo, for those that wait for it.
+            let _lead = match self.state.flights.board((info.id, cx.depth, cx.enclosing.clone()), cx.walk) {
+                Boarding::Lead(lead) => Some(lead),
+                Boarding::Wait(mut done, waiting) => {
+                    // Only ever closed, never sent on: the conversion it waits for has ended.
+                    let _closed = done.changed().await;
+                    drop(waiting);
+                    if let Some(converted) = self.recalled(info.id, cx) {
+                        return Ok(converted);
+                    }
+                    // That conversion failed: this one asks again, as it would have without it.
+                    None
+                }
+                Boarding::Alone => None,
+            };
             self.state.misses.fetch_add(1, Ordering::Relaxed);
             let frame = Arc::new(Frame::new(cx.enclosing.len()));
-            let own = Cx { depth: cx.depth, enclosing: cx.enclosing.clone(), frame: Some(frame.clone()) };
+            let own =
+                Cx { depth: cx.depth, enclosing: cx.enclosing.clone(), frame: Some(frame.clone()), walk: cx.walk };
             let mut converted = self.uncached(info, &own).await?;
             if past_size_budget(&converted, MAX_SIZE) {
                 let origin = self.origin(info).await?;
@@ -1041,6 +1173,17 @@ impl Converter {
             Ok(target) => target.constraint_type.is_some() && target.constraint_type == info.constraint_type,
             Err(_) => false,
         }
+    }
+
+    /// The type the memo holds for `id` where `cx` is, counted as a hit and recorded as asked by the conversion it is
+    /// part of.
+    fn recalled(&self, id: u64, cx: &Cx) -> Option<PropType> {
+        let entry = self.recall(id, cx)?;
+        self.state.hits.fetch_add(1, Ordering::Relaxed);
+        if let Some(frame) = &cx.frame {
+            frame.absorb(&entry.asked, &cx.enclosing);
+        }
+        Some(PropType::clone(&entry.converted))
     }
 
     /// The entry for the type at this depth that holds inside the instantiations enclosing it, if there is one.
@@ -2457,5 +2600,129 @@ mod tests {
         let PropType::Object(own) = &parts[0] else { panic!("{parts:?}") };
         let Some(own) = own.first() else { panic!("{parts:?}") };
         assert_eq!((own.name.as_str(), &own.prop_type, own.readonly), ("own", &PropType::Boolean, true));
+    }
+
+    fn flight_key(id: u64) -> FlightKey {
+        (id, 1, Arc::new(vec![7]))
+    }
+
+    /// Two walks, each running a conversion the other then needs, both end: the second wait would close a cycle, so
+    /// that walk converts the type itself, and the end of its conversion wakes the first. Without the check both wait
+    /// for ever, which the timeout turns into a failure.
+    #[test]
+    fn walks_that_need_each_others_running_conversions_both_end() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        let ended = runtime.block_on(async {
+            let flights = Flights::default();
+            let (led_x, led_x_seen) = tokio::sync::oneshot::channel::<()>();
+            let (led_y, led_y_seen) = tokio::sync::oneshot::channel::<()>();
+            let (waits_y, waits_y_seen) = tokio::sync::oneshot::channel::<()>();
+            let flights = &flights;
+            let one = async move {
+                let x = flights.board(flight_key(1), 1);
+                assert!(matches!(x, Boarding::Lead(_)));
+                led_x.send(()).unwrap();
+                led_y_seen.await.unwrap();
+                let Boarding::Wait(mut done, waiting) = flights.board(flight_key(2), 1) else { panic!("Y runs") };
+                waits_y.send(()).unwrap();
+                let _closed = done.changed().await;
+                drop((waiting, x));
+            };
+            let two = async move {
+                let y = flights.board(flight_key(2), 2);
+                assert!(matches!(y, Boarding::Lead(_)));
+                led_x_seen.await.unwrap();
+                led_y.send(()).unwrap();
+                waits_y_seen.await.unwrap();
+                let alone = match flights.board(flight_key(1), 2) {
+                    Boarding::Wait(mut done, waiting) => {
+                        let _closed = done.changed().await;
+                        drop(waiting);
+                        false
+                    }
+                    Boarding::Alone => true,
+                    Boarding::Lead(_) => panic!("X runs"),
+                };
+                drop(y);
+                alone
+            };
+            tokio::time::timeout(std::time::Duration::from_secs(5), async { tokio::join!(one, two).1 }).await
+        });
+        assert_eq!(ended, Ok(true), "a walk waited for ever");
+    }
+
+    /// A wait is refused only when it would close a cycle, through any number of walks, and a wait that ended no longer
+    /// counts: walk 3 may wait for walk 1 once walk 2 stopped waiting for walk 3.
+    #[test]
+    fn a_wait_is_refused_only_while_it_would_close_a_cycle() {
+        let flights = Flights::default();
+        let lead = |id: u64, walk: u64| match flights.board(flight_key(id), walk) {
+            Boarding::Lead(lead) => lead,
+            _ => panic!("{id} runs"),
+        };
+        let wait = |id: u64, walk: u64| match flights.board(flight_key(id), walk) {
+            Boarding::Wait(_, waiting) => waiting,
+            _ => panic!("walk {walk} does not wait for {id}"),
+        };
+        let (_a, _b, _c) = (lead(1, 1), lead(2, 2), lead(3, 3));
+        // A conversion its own walk is running: waiting for it would wait for itself.
+        assert!(matches!(flights.board(flight_key(1), 1), Boarding::Alone));
+        let _one = wait(2, 1);
+        let two = wait(3, 2);
+        assert!(matches!(flights.board(flight_key(1), 3), Boarding::Alone));
+        assert!(matches!(flights.board(flight_key(4), 3), Boarding::Lead(_)));
+        drop(two);
+        let _three = wait(1, 3);
+        // Another key: its own depth.
+        assert!(matches!(flights.board((1, 2, Arc::new(vec![7])), 4), Boarding::Lead(_)));
+    }
+
+    /// Two walks that convert the same type at once send the checker one conversion's requests, and get its type: the
+    /// second waits for the first. On the base each asked for the object's members and its properties' types itself.
+    #[test]
+    fn two_walks_converting_one_type_at_once_ask_the_checker_once() {
+        use crate::checker::Backend;
+
+        let dir = tempfile::Builder::new().prefix("Flights").tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let file = root.join("shape.ts").to_string();
+        let source = "export interface Shape { a: string; b: { c: number; d: Inner }; e: Inner[] }\n\
+                      interface Inner { f: 'x' | 'y'; g?: () => void }\n";
+        let checker = Backend::start(&root, 1).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let deadline = std::time::Duration::from_secs(60);
+        let sent = |before: &std::collections::BTreeMap<&'static str, u64>, rpc: &Rpc| {
+            let mut sent = rpc.calls();
+            sent.iter_mut().for_each(|(method, count)| *count -= before.get(method).copied().unwrap_or(0));
+            sent.retain(|_, count| *count > 0);
+            sent
+        };
+        runtime.block_on(async {
+            let client = checker.client();
+            let options = Rpc::prepare(&client, deadline, None).await.unwrap();
+            let rpc = Arc::new(
+                Rpc::open_in_memory(client, deadline, &options, &[(file.clone(), source.into())]).await.unwrap(),
+            );
+            let module = rpc.source_file_symbol(&file).await.unwrap().unwrap();
+            let exports = rpc.exports_of_module(&module.reference).await.unwrap();
+            let shape = exports.iter().find(|symbol| symbol.name == "Shape").unwrap();
+            let shape = rpc.declared_type_of_symbol(&shape.reference).await.unwrap();
+
+            let before = rpc.calls();
+            let alone = Converter::new(rpc.clone(), false).convert_roots(std::slice::from_ref(&shape)).await.unwrap();
+            let one = sent(&before, &rpc);
+
+            let before = rpc.calls();
+            let converter = Converter::new(rpc.clone(), false);
+            let roots = std::slice::from_ref(&shape);
+            let (first, second) = tokio::join!(converter.convert_roots(roots), converter.convert_roots(roots));
+            let both = sent(&before, &rpc);
+
+            assert_eq!((first.unwrap(), second.unwrap()), (alone.clone(), alone));
+            assert!(one.contains_key("getTypesOfSymbols"), "{one:?}");
+            assert_eq!(both, one);
+            rpc.release().await;
+        });
+        runtime.block_on(checker.shutdown());
     }
 }
