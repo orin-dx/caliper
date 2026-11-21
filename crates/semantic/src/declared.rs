@@ -288,6 +288,7 @@ mod tests {
         SymbolInfo {
             reference: json!({ "id": 7 }).into(),
             name: "x".to_string(),
+            member: None,
             flags: 4,
             declarations: declarations.iter().map(|declaration| declaration.to_string()).collect(),
             parent: parent.map(|id| CompactSymbol { id, file: None }),

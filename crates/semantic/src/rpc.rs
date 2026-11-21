@@ -128,21 +128,89 @@ struct BatchParams<'a, 'b, E> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(from = "SymbolWire")]
 pub(crate) struct SymbolInfo {
     /// The full reference the checker wants back to name this symbol; opaque to us.
     pub reference: SymbolRef,
     /// The name the source writes: the checker's escaped name with the escaping removed (see
     /// [`unescape_leading_underscores`]).
-    #[serde(deserialize_with = "unescaped_name")]
     pub name: String,
+    /// What the source writes for a member the checker keys by an internal name (`[Symbol.iterator]`, `#type`); None
+    /// for every other. Read off the escaped name: once unescaped, the quoted member `"__#8@#type"` (`___#8@#type`)
+    /// looks like the private member `#type` (`__#8@#type`).
+    pub member: Option<String>,
     pub flags: u64,
-    #[serde(default)]
     pub declarations: Vec<String>,
     /// The symbol it is a member of: the interface or type literal that declares a property. Absent for a property a
     /// mapped type or an intersection made (`Omit<Base, "x">`, `A & B`), whose declarations still name the original.
-    #[serde(default)]
     pub parent: Option<CompactSymbol>,
+}
+
+impl SymbolInfo {
+    /// The name of this member as the source writes it.
+    pub(crate) fn member_name(&self) -> &str {
+        self.member.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// A symbol as the checker answers it, its name still escaped.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SymbolWire {
+    reference: SymbolRef,
+    name: String,
+    flags: u64,
+    #[serde(default)]
+    declarations: Vec<String>,
+    #[serde(default)]
+    parent: Option<CompactSymbol>,
+}
+
+impl From<SymbolWire> for SymbolInfo {
+    fn from(wire: SymbolWire) -> Self {
+        let member = internal_member_name(&wire.name);
+        let name = unescape_leading_underscores(&wire.name).to_string();
+        Self {
+            reference: wire.reference,
+            name,
+            member,
+            flags: wire.flags,
+            declarations: wire.declarations,
+            parent: wire.parent,
+        }
+    }
+}
+
+/// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
+/// `[brand]`. An ES-private member is `__#<symbol id>@#<name>`; the source writes `#<name>`. The id is the checker's
+/// and does not belong in an answer. Takes the escaped name: a name the source writes starting with two underscores
+/// has a third, so it never matches.
+fn internal_member_name(escaped: &str) -> Option<String> {
+    const WELL_KNOWN: [&str; 15] = [
+        "iterator",
+        "asyncIterator",
+        "hasInstance",
+        "isConcatSpreadable",
+        "match",
+        "matchAll",
+        "replace",
+        "search",
+        "species",
+        "split",
+        "toPrimitive",
+        "toStringTag",
+        "unscopables",
+        "dispose",
+        "asyncDispose",
+    ];
+    if let Some((id, private)) = escaped.strip_prefix("__#").and_then(|rest| rest.split_once("@#"))
+        && !id.is_empty()
+        && id.chars().all(|c| c.is_ascii_digit())
+    {
+        return Some(format!("#{private}"));
+    }
+    let (symbol, _id) = escaped.strip_prefix("__@").and_then(|rest| rest.rsplit_once('@'))?;
+    Some(if WELL_KNOWN.contains(&symbol) { format!("[Symbol.{symbol}]") } else { format!("[{symbol}]") })
 }
 
 /// A JSDoc tag as `getJsDocTags` renders it: `@since 2.0` is `since` and `"2.0"`.
@@ -168,14 +236,6 @@ pub(crate) struct CompactSymbol {
 /// so are the internal names, which start with exactly two.
 pub(crate) fn unescape_leading_underscores(name: &str) -> &str {
     if name.starts_with("___") { name.strip_prefix('_').unwrap_or(name) } else { name }
-}
-
-fn unescaped_name<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
-    let mut name = String::deserialize(deserializer)?;
-    if unescape_leading_underscores(&name).len() < name.len() {
-        name.remove(0);
-    }
-    Ok(name)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1228,6 +1288,35 @@ mod tests {
         for name in ["size", "_single", "__call", "__type", "default", "", "a___b"] {
             assert_eq!(unescape_leading_underscores(name), name);
         }
+    }
+
+    fn member_name_of(raw: &str) -> String {
+        let symbol: SymbolInfo = serde_json::from_value(
+            serde_json::json!({ "reference": { "kind": 1, "id": 4, "file": "7" }, "name": raw, "flags": 0 }),
+        )
+        .unwrap();
+        symbol.member_name().to_string()
+    }
+
+    /// The checker keys an ES-private member `__#<symbol id>@#<name>` and a symbol-keyed one `__@<name>@<symbol id>`,
+    /// and the id depends on the order the checker was asked: the name an answer carries is the one the source writes.
+    #[test]
+    fn a_checker_internal_member_name_is_the_one_the_source_writes() {
+        assert_eq!(member_name_of("__#8@#type"), "#type");
+        assert_eq!(member_name_of("__#10@#type"), "#type");
+        assert_eq!(member_name_of("__@iterator@17"), "[Symbol.iterator]");
+        assert_eq!(member_name_of("__@brand@3"), "[brand]");
+    }
+
+    /// A member the source writes with two leading underscores arrives with a third, so a quoted name shaped like an
+    /// internal one stays the member it is.
+    #[test]
+    fn a_quoted_member_shaped_like_an_internal_name_keeps_its_name() {
+        assert_eq!(member_name_of("___#8@#type"), "__#8@#type");
+        assert_eq!(member_name_of("___@brand@3"), "__@brand@3");
+        assert_eq!(member_name_of("size"), "size");
+        assert_eq!(member_name_of("__#nothing"), "__#nothing");
+        assert_eq!(member_name_of("__call"), "__call");
     }
 
     /// A symbol's reference goes back as the text it arrived as, inside the parameters a request or a batch writes.

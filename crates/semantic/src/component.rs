@@ -291,6 +291,7 @@ mod tests {
         SymbolInfo {
             reference: serde_json::Value::Null.into(),
             name: "x".to_string(),
+            member: None,
             flags: 4,
             declarations: vec![declaration.to_string()],
             parent: None,
