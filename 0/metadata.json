@@ -1,0 +1,213 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XYQ2A3QS2FGC4TP34KPZ82",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T02:24:52.687498Z",
+  "branch": "perf/declared-single-flight",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/semantic/src/asked.rs",
+    "crates/semantic/src/declared.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "2509b5d30a15",
+  "checkpoint_transcript_start": 10919,
+  "transcript_lines_at_start": 10919,
+  "compact_transcript_start": 941,
+  "token_usage": {
+    "input_tokens": 76,
+    "cache_creation_tokens": 43258,
+    "cache_read_tokens": 8539515,
+    "output_tokens": 19883,
+    "api_call_count": 38,
+    "subagent_tokens": {
+      "input_tokens": 90,
+      "cache_creation_tokens": 153442,
+      "cache_read_tokens": 5201446,
+      "output_tokens": 43589,
+      "api_call_count": 45
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1816,
+    "cache_creation_tokens": 4045754,
+    "cache_read_tokens": 388858617,
+    "output_tokens": 522131,
+    "api_call_count": 881,
+    "subagent_tokens": {
+      "input_tokens": 1322,
+      "cache_creation_tokens": 2060508,
+      "cache_read_tokens": 100670905,
+      "output_tokens": 475266,
+      "api_call_count": 658
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 229,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 225,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01VvkspbrmP7J1hyC8RHHuK6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "88216e9057dd",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 8742,
+        "end": 8743,
+        "entry_ids": [
+          "ab13a4cb-0f75-4597-96d4-49096868adcc"
+        ],
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 82
+  },
+  "summary": {
+    "intent": "Land the remaining performance and determinism fixes for the caliper semantic/docgen pipeline (heap-meter clamp, private-name handling, declared.symbol single-flight), measure the merged batch against the pre-batch baseline, and then assess which identified performance issues remain.",
+    "outcome": "Fixed a review finding on #512 (quoted members mistaken for private names) with a mutation-proven test and pushed it. Published PR bodies for #511 and #512. Measured the merged batch as faster on all five corpora with identical component and prop counts. A worker is still running the declared.symbol single-flight. About half the identified performance issues remain open.",
+    "learnings": {
+      "repo": [
+        "Checker private names arrive as escaped `__#N@#type`; SymbolInfo unescapes names before downstream code sees them, so private/symbol-key classification must use the raw escaped name at read time.",
+        "react-spectrum output after the private-name fix differs only by 767 renames from `__#N@#type` to `#type`.",
+        "Validation gates: `just lint doc-check machete typos`, `just test-checker-lane`, and `cargo nextest run --workspace`.",
+        "An Entire change belongs to exactly one trail, so the heap-meter change can't move off trail 405. Trails created: 468 cold-run cost, 469 determinism, 470 checker wire contract, 471 measurement honesty.",
+        "Adding a field to SymbolInfo breaks struct literals in test constructors (rpc.rs, component.rs, declared.rs).",
+        "Merged-batch medians vs c633fbc6: antd wall 1.70→0.45s and RSS 1,089→402MB; Chakra wall 4.29→3.08s; all five corpora were faster.",
+        "Remaining performance issues: convert memo duplicates (37% of Chakra conversions; needs a wait-cycle check to avoid deadlock), early checker session discarded on root mismatches (~7.5% CPU), 18 rayon threads and two checker programs on shadcn/Mantine, JSON boundary cost, 207k isReadonlySymbol requests on Chakra, wall-clock-dependent timeout fallback."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/rpc.rs",
+          "finding": "Added `member_name()` on SymbolInfo, classified from the checker's escaped name; it replaces convert.rs's `property_name`, which classified the unescaped name and misread quoted members like `\"__#8@#type\"`."
+        },
+        {
+          "path": "crates/semantic/src/convert.rs",
+          "finding": "Old `property_name` and its test were removed. Callers use `member_name()`, and tests now go through real deserialization."
+        }
+      ],
+      "workflow": [
+        "Mutation-proof new tests by reintroducing the bug (classify the unescaped name) and confirming the test fails before restoring the code.",
+        "Use a separate worktree built from the pre-batch commit plus a minimal clamp as the 'before' binary, with interleaved repeated runs and median reporting under noisy load.",
+        "Don't quote stale benchmark ratios (e.g. the 15× vs RDT figure) until they are re-measured on current code.",
+        "Resolve review findings with a citation to the fixing commit and test."
+      ]
+    },
+    "friction": [
+      "`gh` failed when a `cd` left the repo while publishing the #512 body, so it had to be re-run from inside the worktree.",
+      "Machine load of 17–30 during benchmarking made timing noisy, so interleaved runs were needed.",
+      "Earlier thread and program-count measurements ran under the whole-program bug, so those decisions rest on invalid data.",
+      "The heap-meter change can't be re-linked to a different trail because of the one-trail-per-change constraint."
+    ],
+    "open_items": [
+      "Finish declared.symbol single-flight (trail 468); a worker is in flight and its PR body will be at /tmp/claude-501/pr-declared.md.",
+      "#511 and #512 await user review and merge.",
+      "Convert-memo single-flight needs its own design with a wait-cycle check.",
+      "Re-measure thread and checker program counts on the merged result.",
+      "Run the react-docgen-typescript comparison to get a current speed ratio.",
+      "Investigate early checker session discard on small root mismatches (116 vs 113 roots on Chakra).",
+      "Re-measure the JSON boundary to the checker.",
+      "Reduce isReadonlySymbol requests by deriving readonly from property flags (needs SymbolInfo changes).",
+      "Make the timeout fallback independent of the wall clock; low priority, with 0 timeouts in 128 runs.",
+      "Measure a real Storybook first and second start.",
+      "Re-run the weekly quality oracle on the merged batch.",
+      "Full output was not diffed for the merged batch, since #506 and #508 change output by design."
+    ]
+  }
+}
