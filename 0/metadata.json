@@ -1,0 +1,179 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7Y0QPQHKRM33CJF2WYTGWTZ",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T03:00:07.307386Z",
+  "branch": "perf/convert-single-flight",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/semantic/src/convert.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3c876a6a8252",
+  "checkpoint_transcript_start": 11449,
+  "transcript_lines_at_start": 11449,
+  "compact_transcript_start": 983,
+  "session_token_usage": {
+    "input_tokens": 1824,
+    "cache_creation_tokens": 4057715,
+    "cache_read_tokens": 389602977,
+    "output_tokens": 528266,
+    "api_call_count": 884,
+    "subagent_tokens": {
+      "input_tokens": 1396,
+      "cache_creation_tokens": 2267430,
+      "cache_read_tokens": 104809172,
+      "output_tokens": 504309,
+      "api_call_count": 695
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 237,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 233,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01VvkspbrmP7J1hyC8RHHuK6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "88216e9057dd",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 8742,
+        "end": 8743,
+        "entry_ids": [
+          "ab13a4cb-0f75-4597-96d4-49096868adcc"
+        ],
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 84
+  },
+  "summary": {
+    "intent": "Review and publish a subagent's perf branch (declared single-flight) that deduplicates concurrent identical `declared` checker requests, verifying the worker's report independently rather than trusting it.",
+    "outcome": "Branch perf/declared-single-flight was verified (lint, semantic tests, output diffs) and published as PR #513 with the lead's evidence. Loaded-run evidence was added to #511 showing the heap clamp fixes degraded runs (0/24 vs 3/24). A bug in the lead's own degraded-run detector was found.",
+    "learnings": {
+      "repo": [
+        "Degraded semantic runs are signaled by a `SEMANTIC_BACKEND` diagnostic with severity other than `info`; every run carries a SEMANTIC_BACKEND diagnostic, so its presence alone is not a signal.",
+        "The degraded message starts with text like '620 component(s) kept…', so matching the text 'semantic backend' does not detect it.",
+        "Single-flight `BatchAnswers` in `asked.rs` is used by descriptions, tags, symbols and parents in `declared.rs`; it keeps one batch per call and cannot form a wait cycle because callers send held requests before waiting and failed askers release their slot.",
+        "Chakra getSymbolOfDeclarationForChecker calls drop from 7,626 to 2,552 with the change; Mantine has no overlap (480 vs 505). The win is fewer duplicate checker requests, not CPU/RSS or wall time.",
+        "Spectrum output varies run to run, probably because of private-name ids (issue #512), not confirmed.",
+        "Chakra runs degrade under load on main (3/24 at load average 75-95) and 0/24 with the heap clamp from #511."
+      ],
+      "code": [],
+      "workflow": [
+        "Independently re-verify a subagent's hand-back (rebuild release binary, rerun lint/tests, diff outputs across repo corpora) before publishing; this exposed a determinism issue and a detector bug.",
+        "Run determinism checks several times per binary, since single runs miss intermittent degradation.",
+        "Validate a diagnostic detector against a known-degraded run before relying on it for claims."
+      ]
+    },
+    "friction": [
+      "The lead's degraded-run detector was broken (matched wrong text), which weakened the batch comparison and #510's 'no run carried a fallback' claim.",
+      "Chakra output varied across runs on both the new binary and main, requiring extra investigation.",
+      "Several helper scripts (spec2.py was written twice) and detector fixes required multiple iterations.",
+      "Heavy machine load (average 75-95) made measurements noisy."
+    ],
+    "open_items": [
+      "#510 body (already merged) still contains the claim based on the broken detector and has not been corrected.",
+      "`gate_harness` and wall-clock measurements were not run for #513; CI is expected to cover gate_harness.",
+      "Spectrum's occasional differing output is unconfirmed as #512's private-name id bug.",
+      "Chakra degraded runs (~3.3k batches) on base were not investigated by the worker, and the heap clamp fix in #511 is not yet merged.",
+      "Convert-memo single-flight and early-session reuse subagent work is still in progress and needs the same review."
+    ]
+  }
+}

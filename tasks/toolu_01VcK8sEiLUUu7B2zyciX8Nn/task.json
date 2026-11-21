@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01VcK8sEiLUUu7B2zyciX8Nn",
+  "agent_id": "a743013b75c6e782a",
+  "subagent_type": "general-purpose",
+  "task_description": "Single-flight the convert memo safely",
+  "token_usage": {
+    "input_tokens": 178,
+    "cache_creation_tokens": 227870,
+    "cache_read_tokens": 14175912,
+    "output_tokens": 74296,
+    "api_call_count": 88
+  },
+  "started_at": "2026-11-20T18:26:59.35979-08:00",
+  "completed_at": "2026-11-20T18:55:00.994426-08:00"
+}
