@@ -596,7 +596,7 @@ struct Flights {
 
 #[derive(Default)]
 struct FlightTable {
-    running: FxHashMap<FlightKey, Arc<Flight>>,
+    running: FxHashMap<FlightKey, Flight>,
     /// The walk each waiting walk waits for.
     waiting: FxHashMap<u64, u64>,
 }
@@ -621,17 +621,14 @@ enum Boarding<'a> {
 /// Ends a flight when its conversion returns, fails or is dropped; those waiting for it wake.
 struct Lead<'a> {
     flights: &'a Flights,
+    /// Its key is held by no other flight while it runs: [`Flights::board`] adds a flight only where none is.
     key: FlightKey,
-    flight: Arc<Flight>,
     _done: tokio::sync::watch::Sender<()>,
 }
 
 impl Drop for Lead<'_> {
     fn drop(&mut self) {
-        let mut table = self.flights.lock();
-        if table.running.get(&self.key).is_some_and(|flight| Arc::ptr_eq(flight, &self.flight)) {
-            table.running.remove(&self.key);
-        }
+        self.flights.lock().running.remove(&self.key);
     }
 }
 
@@ -664,9 +661,8 @@ impl Flights {
             return Boarding::Wait(done, Waiting { flights: self, walk });
         }
         let (sender, done) = tokio::sync::watch::channel(());
-        let flight = Arc::new(Flight { walk, done });
-        table.running.insert(key.clone(), flight.clone());
-        Boarding::Lead(Lead { flights: self, key, flight, _done: sender })
+        table.running.insert(key.clone(), Flight { walk, done });
+        Boarding::Lead(Lead { flights: self, key, _done: sender })
     }
 }
 
@@ -1104,25 +1100,24 @@ impl Converter {
 
     fn convert<'a>(&'a self, info: &'a TypeInfo, cx: &'a Cx) -> Converted<'a> {
         Box::pin(async move {
-            // A memo hit copies the tree it recalls, and a conversion can build gigabytes of them between two requests.
-            crate::heap::step()?;
-            if let Some(converted) = self.recalled(info.id, cx) {
-                return Ok(converted);
-            }
-            // Held until the entry is in the memo, for those that wait for it.
-            let _lead = match self.state.flights.board((info.id, cx.depth, cx.enclosing.clone()), cx.walk) {
-                Boarding::Lead(lead) => Some(lead),
-                Boarding::Wait(mut done, waiting) => {
-                    // Only ever closed, never sent on: the conversion it waits for has ended.
-                    let _closed = done.changed().await;
-                    drop(waiting);
-                    if let Some(converted) = self.recalled(info.id, cx) {
-                        return Ok(converted);
-                    }
-                    // That conversion failed: this one asks again, as it would have without it.
-                    None
+            // Held until the entry is in the memo, for those that wait for it. After a wait the memo is read again, and
+            // when the conversion waited for failed, this one starts as if it had not run.
+            let _lead = loop {
+                // A memo hit copies the tree it recalls, and a conversion can build gigabytes of them between two
+                // requests (or during a wait).
+                crate::heap::step()?;
+                if let Some(converted) = self.recalled(info.id, cx) {
+                    return Ok(converted);
                 }
-                Boarding::Alone => None,
+                match self.state.flights.board((info.id, cx.depth, cx.enclosing.clone()), cx.walk) {
+                    Boarding::Lead(lead) => break Some(lead),
+                    Boarding::Wait(mut done, waiting) => {
+                        // Only ever closed, never sent on: the conversion it waits for has ended.
+                        let _closed = done.changed().await;
+                        drop(waiting);
+                    }
+                    Boarding::Alone => break None,
+                }
             };
             self.state.misses.fetch_add(1, Ordering::Relaxed);
             let frame = Arc::new(Frame::new(cx.enclosing.len()));
@@ -2675,6 +2670,11 @@ mod tests {
         let _three = wait(1, 3);
         // Another key: its own depth.
         assert!(matches!(flights.board((1, 2, Arc::new(vec![7])), 4), Boarding::Lead(_)));
+        // A conversion that ended, by failing too, runs no more: the next to ask leads it.
+        let d = lead(5, 5);
+        let _waits = wait(5, 6);
+        drop(d);
+        assert!(matches!(flights.board(flight_key(5), 6), Boarding::Lead(_)));
     }
 
     /// Two walks that convert the same type at once send the checker one conversion's requests, and get its type: the
