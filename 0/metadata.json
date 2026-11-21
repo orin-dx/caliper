@@ -1,0 +1,189 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XTTP2KW1PSM78MFZ5STWHD",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T01:16:56.810209Z",
+  "branch": "worktree-docs-worker-contract",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "CONTRIBUTING.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "a23e5b73d0a0",
+  "checkpoint_transcript_start": 9334,
+  "transcript_lines_at_start": 9334,
+  "compact_transcript_start": 814,
+  "token_usage": {
+    "input_tokens": 60,
+    "cache_creation_tokens": 36527,
+    "cache_read_tokens": 27399289,
+    "output_tokens": 18133,
+    "api_call_count": 29,
+    "subagent_tokens": {
+      "input_tokens": 150,
+      "cache_creation_tokens": 218832,
+      "cache_read_tokens": 6100004,
+      "output_tokens": 40338,
+      "api_call_count": 75
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1558,
+    "cache_creation_tokens": 3833630,
+    "cache_read_tokens": 361702690,
+    "output_tokens": 471381,
+    "api_call_count": 753,
+    "subagent_tokens": {
+      "input_tokens": 1168,
+      "cache_creation_tokens": 1870962,
+      "cache_read_tokens": 91902939,
+      "output_tokens": 414049,
+      "api_call_count": 581
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 194,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 190,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01VvkspbrmP7J1hyC8RHHuK6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "88216e9057dd",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 8742,
+        "end": 8743,
+        "entry_ids": [
+          "ab13a4cb-0f75-4597-96d4-49096868adcc"
+        ],
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 76
+  },
+  "summary": {
+    "intent": "Audit whether the checker-request bug pattern (sending fields tsrs ignores) exists elsewhere, decide on semantic changes, establish a merge order with change/PR numbers, and update the related PRs accordingly.",
+    "outcome": "Audit found the pattern isn't elsewhere in the checked request shapes; a trial merge showed only #506 vs #509 conflict in `composes`; merge order was set (diagnostics fix, #506, #508, #509). The CONTRIBUTING.md update for #505 (three lessons) was linted and committed locally; the diagnostics fix push and #506/#509 notes were not yet done, and two background audits were still running.",
+    "learnings": {
+      "repo": [
+        "tsrs_api has a paramfields.rs table of accepted parameter names per method; unknown keys are silently ignored (like Go), so a wrong field name in a checker request fails silently. This allows a mechanical audit of requests sent vs accepted.",
+        "Six checker methods have no paramfields table entry; their handlers had to be inspected directly to see which keys they read.",
+        "Pre-push bar is `just lint doc-check machete typos`, plus workspace tests (1,702 passing) and a checker lane.",
+        "With collapse off, spectrum's private-field names (e.g. `__#8@#type`) embed a checker id that varies with the number of requests; stripping it first would make #509 byte-identical across configurations.",
+        "Trail 405 maps PRs to changes: #505=caliper/303, #506=caliper/304, #507=caliper/305, #508=caliper/306, #509=caliper/307; #497 is the unrelated 0.11.0 release PR.",
+        "The #509 single-flight cache is a reusable primitive for future scheduling and session-reuse work."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/convert.rs",
+          "finding": "`composes` is the conflict site between #506 (`below_react` flag) and #509 (cached `alias_arguments`); resolution is to keep both. Exact line numbers were not given in the transcript."
+        }
+      ],
+      "workflow": [
+        "Trial-merge all pending PR branches onto a scratch branch, then abort and delete it, to find conflicts and decide merge order without changing anything.",
+        "Add a regression test asserting each request's parameters change the checker's answer, since unknown fields are ignored.",
+        "Benchmarks should reject runs with checker fallback and combine measured combinations rather than summing independent estimates.",
+        "Parallel read-and-measure sub-agents can run audits while the main thread writes up findings."
+      ]
+    },
+    "friction": null,
+    "open_items": null
+  }
+}
