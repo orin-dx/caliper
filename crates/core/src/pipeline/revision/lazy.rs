@@ -425,7 +425,7 @@ impl Revision {
         let mut asked_for: Vec<dependency_types::Demand> = Vec::new();
         loop {
             let engine = lazy.engine.load_full();
-            let (entry, diagnostics, depends_on, evidence) =
+            let (entry, diagnostics, depends_on, evidence, attributes) =
                 resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
             let missing = match &engine.layer {
                 Some(layer) => {
@@ -443,7 +443,7 @@ impl Revision {
             // A load that left the same names missing answered none of them (a demand whose load panicked stays
             // unanswered), so asking again would never end.
             if missing.is_empty() || missing == asked_for {
-                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence });
+                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes });
                 return Some(lazy.memo.entry(id.clone()).or_insert(resolved).clone());
             }
             self.grow(options, lazy, &missing);

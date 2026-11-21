@@ -107,6 +107,8 @@ pub(crate) struct Resolved {
     diagnostics: ResolvedDiagnostics,
     depends_on: Dependencies,
     evidence: Option<Arc<crate::relevance::Inputs>>,
+    /// React's attributes the answer holds apart until relevance decides which it lists.
+    attributes: crate::relevance::Attributes,
 }
 
 impl Resolved {
@@ -115,15 +117,15 @@ impl Resolved {
     /// against each revision's call sites, so an edit to a consumer reaches it without resolving it again.
     fn answer(&self, sites: &ProjectSites) -> ComponentEntry {
         let mut entry = self.entry.clone();
-        decide(self.evidence.as_deref(), &mut entry, sites);
+        decide(self.evidence.as_deref(), &self.attributes, &mut entry, sites);
         entry
     }
 
     /// [`Resolved::answer`] and the diagnostics, moved out when nothing else shares this resolution.
     fn into_parts(shared: Arc<Resolved>, sites: &ProjectSites) -> (ComponentEntry, ResolvedDiagnostics) {
         match Arc::try_unwrap(shared) {
-            Ok(Resolved { mut entry, diagnostics, evidence, .. }) => {
-                decide(evidence.as_deref(), &mut entry, sites);
+            Ok(Resolved { mut entry, diagnostics, evidence, attributes, .. }) => {
+                decide(evidence.as_deref(), &attributes, &mut entry, sites);
                 (entry, diagnostics)
             }
             Err(shared) => (shared.answer(sites), shared.diagnostics.clone()),
@@ -165,11 +167,19 @@ fn layers_differ(before: Option<&ComponentEntry>, after: Option<&ComponentEntry>
 }
 
 /// Writes the `used` lists relevance decides for `entry` from its `evidence` and the revision's `sites`; without
-/// evidence (a panic gathering it), none.
-fn decide(evidence: Option<&crate::relevance::Inputs>, entry: &mut ComponentEntry, sites: &ProjectSites) {
-    if let Some(inputs) = evidence {
-        let call_sites = sites.get(&inputs.site).unwrap_or(&crate::relevance::NO_CALL_SITES);
-        crate::relevance::apply(entry, inputs, call_sites);
+/// evidence (a panic gathering it), none, and every one of the `attributes` held apart is listed.
+fn decide(
+    evidence: Option<&crate::relevance::Inputs>,
+    attributes: &crate::relevance::Attributes,
+    entry: &mut ComponentEntry,
+    sites: &ProjectSites,
+) {
+    match evidence {
+        Some(inputs) => {
+            let call_sites = sites.get(&inputs.site).unwrap_or(&crate::relevance::NO_CALL_SITES);
+            crate::relevance::apply(entry, inputs, call_sites, attributes);
+        }
+        None => attributes.list_all(entry),
     }
 }
 
@@ -296,8 +306,8 @@ fn resolve_all(
     resolve_guarded(&borrowed, ctx)
         .into_iter()
         .zip(mappings)
-        .map(|((entry, diagnostics, depends_on, evidence), (id, _))| {
-            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, evidence }))
+        .map(|((entry, diagnostics, depends_on, evidence, attributes), (id, _))| {
+            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes }))
         })
         .collect()
 }

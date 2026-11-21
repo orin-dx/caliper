@@ -2806,7 +2806,14 @@ fn resolve_shared_with(
     let mut results = BTreeMap::new();
     for name in components {
         let fresh = parsed_ctx(dir, files, options);
-        let flat = |(entry, diagnostics, deps, _): (ComponentEntry, ResolvedDiagnostics, deps::Dependencies, _)| {
+        let flat = |(mut entry, diagnostics, deps, _, attributes): (
+            ComponentEntry,
+            ResolvedDiagnostics,
+            deps::Dependencies,
+            _,
+            crate::relevance::Attributes,
+        )| {
+            attributes.list_all(&mut entry);
             (entry, diagnostics.flatten(), deps)
         };
         let alone = flat(resolve_component_tracked(&mapping(&fresh, name), &fresh));
@@ -3224,4 +3231,25 @@ fn type_parameter_scope_answers_do_not_depend_on_the_order_components_resolve_in
     for (name, props) in expected {
         assert_eq!(by_name[name], props, "{name}");
     }
+}
+
+#[test]
+fn a_forward_ref_component_keeps_react_s_ref_in_its_element_layer_under_full() {
+    // React's `ref` is held apart with the element's other attributes (`relevance::Attributes`): the `Ref<unknown>` a
+    // `forwardRef` component takes without one must not replace it, so the unused `ref` is a name in the layer.
+    let dir = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let source = "import * as React from 'react';\n\
+        export const Button = React.forwardRef<HTMLButtonElement, React.ComponentProps<'button'>>(\n\
+            function Button(props, ref) { return null; },\n\
+        );\n";
+    std::fs::write(dir.path().join("Button.tsx"), source).unwrap();
+    let root = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+    let options =
+        PipelineOptions { src_dirs: vec![root.clone()], cache_dir: Some(root.join(".cache")), ..Default::default() };
+    let output = crate::pipeline::extract(&options);
+    let entry = &output.components["Button"];
+    assert_eq!(entry.props.keys().collect::<Vec<_>>(), Vec::<&String>::new());
+    let layer = entry.inheritance.iter().find(|layer| layer.html_element.as_deref() == Some("button")).unwrap();
+    let holds = |name: &str| layer.members.iter().any(|member| member == name);
+    assert!(holds("ref") && holds("type") && holds("onClick"), "{layer:?}");
 }
