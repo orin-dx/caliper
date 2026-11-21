@@ -1,0 +1,226 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XQ69V0ZZBE8G2TWT4FDB1B",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T00:13:25.685133Z",
+  "branch": "review-round-fewer-requests",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/semantic/src/convert.rs",
+    "crates/semantic/src/rpc.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "88216e9057dd",
+  "checkpoint_transcript_start": 8499,
+  "transcript_lines_at_start": 8499,
+  "compact_transcript_start": 743,
+  "token_usage": {
+    "input_tokens": 58,
+    "cache_creation_tokens": 44640,
+    "cache_read_tokens": 24109001,
+    "output_tokens": 19528,
+    "api_call_count": 28,
+    "subagent_tokens": {
+      "input_tokens": 30,
+      "cache_creation_tokens": 86664,
+      "cache_read_tokens": 2451019,
+      "output_tokens": 17537,
+      "api_call_count": 15
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1426,
+    "cache_creation_tokens": 3759015,
+    "cache_read_tokens": 301749782,
+    "output_tokens": 434750,
+    "api_call_count": 688,
+    "subagent_tokens": {
+      "input_tokens": 1018,
+      "cache_creation_tokens": 1652130,
+      "cache_read_tokens": 85802935,
+      "output_tokens": 373711,
+      "api_call_count": 506
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 189,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 185,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01VvkspbrmP7J1hyC8RHHuK6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "88216e9057dd",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 8742,
+        "end": 8743,
+        "entry_ids": [
+          "ab13a4cb-0f75-4597-96d4-49096868adcc"
+        ],
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 69
+  },
+  "summary": {
+    "intent": "Find where Caliper's semantic pipeline spends CPU (shadcn, Mantine, Chakra corpora), land the request-reduction branch, and triage the code-review findings on that branch.",
+    "outcome": "Found that about 40% of CPU on shadcn and Mantine is thread overhead, and that on Chakra it is real checker work cut by the request-reduction branch (perf/fewer-checker-requests). Experiment edits were reverted. Review findings were triaged, with fixes made in convert.rs and rpc.rs and committed on a local review-round branch.",
+    "learnings": {
+      "repo": [
+        "A cold run uses up to 18 rayon threads (one per core) plus two checker programs, each with its own checker. On shadcn, 1.96 s of 6.4 CPU-seconds is system time.",
+        "Capping rayon to 1 thread cuts shadcn CPU from 6.9 to 4.9 s for about 0.3 s more wall time. One checker program with rayon capped to 4 cuts CPU by 41% on shadcn and 23% on Mantine, and memory from 871 to 759 MiB. It is not better on Chakra, where wall time was 5.0 s vs 4.5 s.",
+        "On Chakra, 730k isReadonlySymbol requests came from workers walking the same types concurrently. The request-reduction branch cuts round trips from 61.6k to 31.6k, CPU from 12.4 to 10.45 s, and wall from 4.42 to 3.61 s.",
+        "The probe getSemanticDiagnostics call costs latency, not CPU. Skipping it cuts wall time on shadcn from 2.05 to 1.40 s and on Mantine from 1.32 to 0.91 s, with about 0.8 s less CPU. It is the largest single wall-time lever.",
+        "The JSON boundary is not a major cost.",
+        "An order-dependent bug in property_name moves a private field's checker id under --collapse-inherited-props none (seen on spectrum). It was left as a follow-up.",
+        "Chakra's fastest benchmark runs (1.55 s) were degraded runs where the checker timed out and silently fell back. Benchmark scripts should reject runs carrying a fallback warning.",
+        "The earlier gate docs chose two checker programs from idle-machine measurements."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/convert.rs",
+          "line": 1833,
+          "finding": "fields_past_size_budget is a pre-check that duplicates the size-budget cut rule in convert (around line 980), with nothing linking the two. It also re-walks the field tree at each nesting level, which is roughly quadratic in depth on hot paths such as Chakra style props."
+        },
+        {
+          "path": "crates/semantic/src/convert.rs",
+          "line": 1836,
+          "finding": "readonly flags and cached field_types are applied with zip, which silently truncates if the cached slice and the properties list differ in length. The cache key's 'same symbols every time' invariant is not enforced."
+        },
+        {
+          "path": "crates/semantic/src/convert.rs",
+          "line": 950,
+          "finding": "named_bases and base_layers call .bases(..).to_vec() on a cached Arc<[TypeInfo]>, deep-cloning every base TypeInfo on each cache hit."
+        },
+        {
+          "path": "crates/semantic/src/rpc.rs",
+          "line": 831,
+          "finding": "batch now counts inner requests under their own methods and adds an inBatches key, so summing calls() double-counts round trips. The calls doc comment was stale."
+        },
+        {
+          "path": "crates/semantic/src/asked.rs",
+          "line": 54,
+          "finding": "Answers keeps a OnceCell per question for the whole snapshot and never evicts, so the snapshot-wide caches grow with every distinct type handle. No peak-RSS evidence was given for the resolver change."
+        }
+      ],
+      "workflow": [
+        "Run experiment binaries with env switches or overrides, then revert the edits and confirm nothing from them is committed.",
+        "On a loaded machine (load 20-40), trust CPU time and ratios over wall time, and interleave runs.",
+        "Run /code-review medium on worker branches that skipped it, then triage each finding against the actual code before fixing.",
+        "Link the branch to its trail (405) so Entire opens the PR, and publish the PR body after review."
+      ]
+    },
+    "friction": [
+      "The machine was at load 20-40, so wall-time measurements were noisy.",
+      "Benchmark 'best' runs on Chakra were silently degraded fallback runs, which skewed results.",
+      "The first revert of the experiment edits failed and had to be redone by absolute path.",
+      "The new worktree needed its JS deps installed before formatting could be checked.",
+      "The review agent did not build or run tests, so its findings needed manual verification."
+    ],
+    "open_items": [
+      "Decide whether to cap rayon and use one checker program by default (about 40% CPU saved, but wall time worse on Mantine and Chakra). This needs an idle-machine run first.",
+      "Prototype a cheaper way to find failed instantiations than the probe getSemanticDiagnostics call.",
+      "Review and merge PRs #505-#508, and publish the PR body for perf/fewer-checker-requests after review.",
+      "Fix the order-dependent bug in property_name that shifts a private field's checker id.",
+      "Make the weekly and comparison benchmark scripts reject runs that carry a fallback warning.",
+      "Review findings possibly not addressed in the commit: the cache memory growth in asked.rs, the Borrow generic on convert_all, and the brittle exact-count tests."
+    ]
+  }
+}

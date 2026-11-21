@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01NyxEL7X8qXk7z8rLq98npf",
+  "agent_id": "ad6f607e7af29179a",
+  "subagent_type": "general-purpose",
+  "task_description": "Fewer checker requests: memo and readonly",
+  "token_usage": {
+    "input_tokens": 246,
+    "cache_creation_tokens": 309750,
+    "cache_read_tokens": 25116661,
+    "output_tokens": 109966,
+    "api_call_count": 123
+  },
+  "started_at": "2026-11-20T15:16:54.014242-08:00",
+  "completed_at": "2026-11-20T16:04:46.312443-08:00"
+}
