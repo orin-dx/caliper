@@ -831,8 +831,9 @@ impl Converter {
     /// The `@types/react` types a props type is made of, by name, in the order it names them: its bases and the members
     /// of an intersection, seen through the project's and dependencies' own types and through a lib utility (`Omit`,
     /// `Pick`) to what it applies to. A React type is found by where it is declared, as [`Origin::react_terminal`]
-    /// finds React's terminals, and is not looked into. `None` when a type on the way has bases the checker cannot be
-    /// asked for ([`Self::named_bases`]): the list would not be the answer, and an empty one would say there are none.
+    /// finds React's terminals, and names no more than itself: its bases are walked for the sources outside React they
+    /// reach (below). `None` when a type on the way has bases the checker cannot be asked for ([`Self::named_bases`]): the
+    /// list would not be the answer, and an empty one would say there are none.
     ///
     /// The same walk finds the interfaces and classes the props type reaches whole (the second of the pair), each by
     /// name and file as the checker keys it: those every member of which can reach the component. It is an allow-list.
@@ -840,10 +841,12 @@ impl Converter {
     /// members, a class's or interface's bases (a generic one's through its target), and the lib's own `Partial`,
     /// `Required`, `Readonly` and `Omit` (named by the lib's alias: `Omit` only removes keys, and the members left are
     /// the answer's props). A lib `Pick` selects: what it applies to is reached, but not whole, and stays so however
-    /// else it is reached. Any other type is not looked into: a mapped type, a project alias of one (TypeScript names
-    /// the type by the outermost alias, and the lib writes `Omit` as a `Pick`, so under a project alias the two cannot
-    /// be told apart), a conditional, a union. What it holds is not proven to reach whole, and the merge does not
-    /// collapse it (`SemanticComponent::whole`).
+    /// else it is reached. A React type's bases are walked on the same edges, so a source outside React that only a
+    /// React type reaches (csstype's, through `CSSProperties`) is reached whole when every edge to it is; a React type
+    /// whose bases the checker cannot be asked for proves none, so what lies beneath it is listed. Any other type is not
+    /// looked into: a mapped type, a project alias of one (TypeScript names the type by the outermost alias, and the lib
+    /// writes `Omit` as a `Pick`, so under a project alias the two cannot be told apart), a conditional, a union. What it
+    /// holds is not proven to reach whole, and the merge does not collapse it (`SemanticComponent::whole`).
     pub(crate) async fn composes(
         &self,
         props_type: &TypeInfo,
@@ -852,26 +855,39 @@ impl Converter {
         let mut reached: Vec<(String, String)> = Vec::new();
         let mut selected: Vec<(String, String)> = Vec::new();
         let mut known = true;
-        let mut seen: Vec<(u64, bool)> = Vec::new();
-        // Each type with whether every edge on the way to it keeps every member.
-        let mut pending = vec![(props_type.clone(), true)];
-        while let Some((info, whole)) = pending.pop() {
-            if seen.contains(&(info.id, whole)) {
+        let mut seen: Vec<(u64, bool, bool)> = Vec::new();
+        // Each type with whether every edge on the way to it keeps every member, and whether it is reached through a
+        // React type's bases (which name no React type of the props type's own).
+        let mut pending = vec![(props_type.clone(), true, false)];
+        while let Some((info, whole, below_react)) = pending.pop() {
+            if seen.contains(&(info.id, whole, below_react)) {
                 continue;
             }
-            seen.push((info.id, whole));
+            seen.push((info.id, whole, below_react));
             let origin = self.origin(&info).await?;
             if let Some(origin) = &origin {
                 if origin.in_react() {
-                    if !names.contains(&origin.name) {
+                    if !below_react && !names.contains(&origin.name) {
                         names.push(origin.name.clone());
+                    }
+                    // A React type's bases can be declared outside React (`CSSProperties` extends csstype's
+                    // `Properties`): their members reach the component through it, whole when every edge to it is. Only
+                    // sources are found this way; a base the checker cannot be asked for leaves them unproven, which
+                    // lists them (never hide on silence) and does not make the names list unknown.
+                    let parts = if info.flags & flag::INTERSECTION != 0 {
+                        Some(self.parts(info.id, Parts::Members).await?)
+                    } else {
+                        self.named_bases(&info).await?
+                    };
+                    if let Some(parts) = parts {
+                        pending.extend(parts.into_iter().rev().map(|part| (part, whole, true)));
                     }
                     continue;
                 }
                 if origin.alias && origin.in_lib() && UTILITIES.contains(&origin.name.as_str()) {
                     let keeps = whole && origin.name != "Pick";
                     let applied = self.rpc.alias_type_arguments(info.id).await?.into_iter().take(1);
-                    pending.extend(applied.map(|base| (base, keeps)));
+                    pending.extend(applied.map(|base| (base, keeps, below_react)));
                     continue;
                 }
             }
@@ -889,13 +905,17 @@ impl Converter {
                 self.parts(info.id, Parts::Members).await?
             } else {
                 let Some(bases) = self.named_bases(&info).await? else {
-                    known = false;
+                    // What lies below a React type names none of the props type's own, so the names stay known; its
+                    // sources are left unproven.
+                    if !below_react {
+                        known = false;
+                    }
                     continue;
                 };
                 bases
             };
             // Last first onto the stack, so they are taken in the order the type names them.
-            pending.extend(parts.into_iter().rev().map(|part| (part, whole)));
+            pending.extend(parts.into_iter().rev().map(|part| (part, whole, below_react)));
         }
         reached.retain(|source| !selected.contains(source));
         Ok((known.then_some(names), reached))
