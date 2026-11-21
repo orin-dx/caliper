@@ -1,0 +1,173 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XPFJPVBNS2M600PRFC6Z53",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T00:00:59.764453Z",
+  "branch": "perf/fewer-checker-requests",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/semantic/src/convert.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "a2d532debe95",
+  "checkpoint_transcript_start": 8336,
+  "transcript_lines_at_start": 8336,
+  "compact_transcript_start": 730,
+  "token_usage": {
+    "input_tokens": 24,
+    "cache_creation_tokens": 22782,
+    "cache_read_tokens": 9118595,
+    "output_tokens": 10332,
+    "api_call_count": 11,
+    "subagent_tokens": {
+      "input_tokens": 38,
+      "cache_creation_tokens": 25061,
+      "cache_read_tokens": 5774147,
+      "output_tokens": 12654,
+      "api_call_count": 19
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1368,
+    "cache_creation_tokens": 3714375,
+    "cache_read_tokens": 277640781,
+    "output_tokens": 415222,
+    "api_call_count": 660,
+    "subagent_tokens": {
+      "input_tokens": 988,
+      "cache_creation_tokens": 1565466,
+      "cache_read_tokens": 83351916,
+      "output_tokens": 356174,
+      "api_call_count": 491
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 181,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 177,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 68
+  },
+  "summary": {
+    "intent": "Decide whether to avoid the JSON boundary in the tsrs checker by dispatching directly, then (after the prototype showed little gain) find out where the ~6.5 CPU-seconds of a cold default shadcn run actually go.",
+    "outcome": "A direct-dispatch spike (`spike/direct-dispatch`) proved byte-identical but saved only ~2-4% CPU, which overturned the earlier claim that the codec was 21% of busy time. The handoff and memory were corrected. A fresh PID-based profile (thread breakdown, rayon thread-count sweep, user/sys split) was started but no result was reported.",
+    "learnings": {
+      "repo": [
+        "`CheckerHost` has nine methods; six can be built from `pub` tsrs API (`context`, `snapshot`, `node_handle`, `source_file_descriptor`, `_matches`, `source_file_node_id`). `acquire_cached_source_file` and `clone_snapshot_with_auto_imports` need private session state and can't be built externally.",
+        "A direct-dispatch prototype would add three dependencies pinned at =0.24.0 (`tsrs_ast`, `tsrs_compiler`, `tsrs_project`). It would also rely on serde_json's private `RawValue` token and skip tsrs's strict request validation.",
+        "`tsrs_core::json::Value` has no serde support, so the prototype needed a ~120-line custom `Deserializer`.",
+        "On current main the JSON codec is 2.0-4.5% of busy samples on shadcn (0.6-0.9% in tree mode), not 21%. Chakra shows no measurable difference.",
+        "Everything caliper uses is a checker-lane method except `createSnapshot`, `updateSnapshot`, `release`, `getSemanticDiagnostics`, `parseConfigFile` and `batchRequests`.",
+        "The `lint` recipe in `just` needs registry.npmjs.org access."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/direct.rs",
+          "finding": "New file holding `CaliperHost`, a `catch_unwind`-wrapped dispatch and the Value decoder. Top-level `getPropertiesOfType` (1,708 calls on shadcn) and `getTypesOfSymbols` (2,719) are routed through it."
+        },
+        {
+          "path": "crates/semantic/src/checker.rs",
+          "finding": "Gained a tree payload alongside the text one so calls still run on the 512 MiB lanes. `CALIPER_SPIKE_TEXT=1` switches back to the text path."
+        }
+      ],
+      "workflow": [
+        "macOS `sample` matches process names by substring, so it can attach to another session's process (e.g. `caliper-docgen-prof`). Profile by PID with a uniquely named binary.",
+        "Benchmarks on a loaded machine (load 40-130) need interleaved runs, paired differences and discarding degraded runs before drawing conclusions.",
+        "Verify a profiling number from a handoff before building on it. A wrong 21% figure drove a speculative rewrite and the user's frustration.",
+        "Subagent reports are not user authority. Correct any stale briefing and memory copies when a report overturns an earlier claim."
+      ]
+    },
+    "friction": [
+      "The earlier profile likely attached to the wrong process, so the 21% codec claim was wrong and led to wasted prototype work.",
+      "Heavy machine load (40-130) made CPU measurements noisy. Five runs were degraded and excluded.",
+      "The user is frustrated that a cold run costs so many CPU seconds and that the explanation given earlier was wrong."
+    ],
+    "open_items": [
+      "Find where the ~6.5 CPU-seconds of a cold shadcn run actually go. The PID-based profile, rayon thread sweep and user/sys breakdown were run but results not yet reported.",
+      "The request-reduction worker (memo, `isReadonlySymbol`) is still running.",
+      "The 797 ms `getSemanticDiagnostics` call and the unexplained ~250 ms gap are still uninvestigated.",
+      "Chakra's 743k `isReadonlySymbol` sub-requests could still pay off under direct dispatch but weren't measured.",
+      "The `spike/direct-dispatch` branch (`09015096`) stays unmerged with no PR. Full nextest, `test-checker-lane`, gate_harness and `/code-review` were not run on it.",
+      "`crates/semantic/src/convert.rs` was modified in this session and the transcript doesn't say why."
+    ]
+  }
+}
