@@ -1835,7 +1835,7 @@ impl Converter {
         for (property, prop_type) in properties.iter().zip(converted) {
             let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
             let prop_type = without_undefined(prop_type, !required);
-            fields.push(ObjectField::new(property_name(&property.name), prop_type, required, String::new()));
+            fields.push(ObjectField::new(property.member_name().to_string(), prop_type, required, String::new()));
         }
         let sides: Vec<TypeInfo> =
             indexes.iter().flat_map(|index| [index.key_type.clone(), index.value_type.clone()]).collect();
@@ -1930,32 +1930,6 @@ impl Converter {
         }
         Ok(Some((type_params, params, return_type)))
     }
-}
-
-/// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
-/// `[brand]`. The id is the checker's and does not belong in an answer.
-fn property_name(name: &str) -> String {
-    const WELL_KNOWN: [&str; 15] = [
-        "iterator",
-        "asyncIterator",
-        "hasInstance",
-        "isConcatSpreadable",
-        "match",
-        "matchAll",
-        "replace",
-        "search",
-        "species",
-        "split",
-        "toPrimitive",
-        "toStringTag",
-        "unscopables",
-        "dispose",
-        "asyncDispose",
-    ];
-    let Some((symbol, _id)) = name.strip_prefix("__@").and_then(|rest| rest.rsplit_once('@')) else {
-        return name.to_string();
-    };
-    if WELL_KNOWN.contains(&symbol) { format!("[Symbol.{symbol}]") } else { format!("[{symbol}]") }
 }
 
 fn is_destructured(name: &str) -> bool {

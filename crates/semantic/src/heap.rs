@@ -78,7 +78,13 @@ pub(crate) fn committed() -> u64 {
     unsafe {
         libmimalloc_sys::mi_process_info(null, null, null, null, null, &raw mut commit, null, null);
     }
-    commit as u64
+    commit_bytes(commit)
+}
+
+/// mimalloc's commit counter is signed inside: frees that other threads return before the allocation they match makes it
+/// read a few MiB below zero, which as a `usize` is nearly 2^64 and would put the run past any budget at once.
+fn commit_bytes(raw: usize) -> u64 {
+    u64::try_from(raw as isize).unwrap_or(0)
 }
 
 /// The machine's physical memory in bytes.
@@ -322,6 +328,15 @@ mod tests {
     const V1_COMOUNTED: &str = "30 23 0:27 / /sys/fs/cgroup/cpu,cpuacct,memory rw,nosuid,relatime shared:12 - cgroup cgroup rw,cpu,cpuacct,memory\n";
     const V1_SEPARATE: &str = "31 23 0:28 / /sys/fs/cgroup/cpu,cpuacct rw,relatime - cgroup cgroup rw,cpu,cpuacct\n\
                                32 23 0:29 / /sys/fs/cgroup/memory rw,relatime - cgroup cgroup rw,memory\n";
+
+    /// A commit counter that reads below zero (as a `usize`, nearly 2^64) is an empty heap, not one past every budget.
+    #[test]
+    fn a_commit_counter_below_zero_reads_as_an_empty_heap() {
+        assert_eq!(commit_bytes(0), 0);
+        assert_eq!(commit_bytes(5 << 20), 5 << 20);
+        assert_eq!(commit_bytes((-(27isize << 20)) as usize), 0);
+        assert_eq!(commit_bytes(usize::MAX), 0);
+    }
 
     /// A cgroup v2 process (a container, a systemd unit) reads `memory.max` in its own cgroup and every ancestor's.
     #[test]
