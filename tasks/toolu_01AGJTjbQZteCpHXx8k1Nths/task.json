@@ -1,0 +1,16 @@
+{
+  "tool_use_id": "toolu_01AGJTjbQZteCpHXx8k1Nths",
+  "agent_id": "aef05bcf1bdc7102b",
+  "subagent_type": "general-purpose",
+  "task_description": "Single-flight declared.symbol requests",
+  "token_usage": {
+    "input_tokens": 124,
+    "cache_creation_tokens": 178342,
+    "cache_read_tokens": 7986925,
+    "output_tokens": 54321,
+    "api_call_count": 62
+  },
+  "started_at": "2026-11-20T18:10:05.383798-08:00",
+  "completed_at": "2026-11-20T18:28:36.625821-08:00",
+  "transcript_unavailable_reason": "transcript unreadable"
+}

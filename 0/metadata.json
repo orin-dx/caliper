@@ -1,0 +1,193 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M7XZG3N3AVFJ6681S6C5Z3CG",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-21T02:38:29.370887Z",
+  "branch": "perf/convert-single-flight",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/semantic/src/convert.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3c876a6a8252",
+  "checkpoint_transcript_start": 11407,
+  "transcript_lines_at_start": 11407,
+  "compact_transcript_start": 980,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 11961,
+    "cache_read_tokens": 744360,
+    "output_tokens": 6135,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 74,
+      "cache_creation_tokens": 206922,
+      "cache_read_tokens": 4138267,
+      "output_tokens": 29043,
+      "api_call_count": 37
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 1824,
+    "cache_creation_tokens": 4057715,
+    "cache_read_tokens": 389602977,
+    "output_tokens": 528266,
+    "api_call_count": 884,
+    "subagent_tokens": {
+      "input_tokens": 1396,
+      "cache_creation_tokens": 2267430,
+      "cache_read_tokens": 104809172,
+      "output_tokens": 504309,
+      "api_call_count": 695
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 235,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 231,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01VvkspbrmP7J1hyC8RHHuK6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "88216e9057dd",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 8742,
+        "end": 8743,
+        "entry_ids": [
+          "ab13a4cb-0f75-4597-96d4-49096868adcc"
+        ],
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 83
+  },
+  "summary": {
+    "intent": "Determine which of several pending work items could be run in parallel without file conflicts, and launch agent workers for them in a token/cost-conscious way without human ceremony.",
+    "outcome": "Launched two new parallel workers (convert-memo single-flight, early-session reuse) alongside an already-running declared.symbol worker, reaching the cap of 3. Other items were deferred due to file overlap or machine-load concerns. No worker results have been reviewed yet; only crates/semantic/src/convert.rs is listed as modified.",
+    "learnings": {
+      "repo": [
+        "Work is partitioned by file ownership: convert.rs and asked.rs (convert memo), early-session code in lib.rs/checker.rs/kept.rs (session reuse), and declared.rs (declared.symbol single-flight) do not overlap.",
+        "Readonly-from-property-flags and typed-request-structs both rewrite rpc.rs, so they collide with #512 and with each other and must be serialized after #512 merges.",
+        "Quality gates for changes: `just lint doc-check machete typos`, the semantic nextest, and `just test-checker-lane` must exit 0; the early-session worker also runs gate_harness determinism and memory checks.",
+        "Each change requires tests that fail on main, mutation proofs, and JSON-parsed output identical to a main build on at least two corpora, with degraded runs dropped.",
+        "Thread/program re-measure and RDT comparison need a quiet machine, so they cannot run while multiple builds are active.",
+        "Convert-memo single-flight design must avoid deadlock, which is why a stronger model (Opus) was assigned."
+      ],
+      "code": [],
+      "workflow": [
+        "Cap concurrent workers at 3 and partition by file ownership to avoid collisions.",
+        "Give each worker a tool-call cap and require a 'not done, because' report if no sound result is reachable.",
+        "Assign stronger models only to subtasks with hard correctness risk (deadlock reasoning) to control cost.",
+        "Lead agent reviews each diff and re-runs gates and output diffs itself rather than trusting worker reports."
+      ]
+    },
+    "friction": [
+      "Worker cap of 3 forced the small, independent harness-rejects-degraded-runs task (trail 471) to wait.",
+      "Concurrent builds make the machine too loaded for benchmark-style measurements."
+    ],
+    "open_items": [
+      "Run readonly-from-property-flags and typed-request-structs sequentially after #512 merges.",
+      "Run thread/program re-measure and RDT comparison last on a quiet machine, or report CPU and counts if load stays high.",
+      "Start the harness-rejecting-degraded-runs task (trail 471) when a worker slot frees up.",
+      "Review each worker's diff, re-run gates and output diffs, including deadlock reasoning for the convert-memo change.",
+      "Report final numbers and a 'not verified' list as each worker finishes."
+    ]
+  }
+}
