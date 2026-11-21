@@ -46,9 +46,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
         with:
-          version: callisto@0.20.0
+          version: callisto@0.22.0
           verification: require
       - id: candidate
         shell: bash
@@ -135,12 +135,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Pinned here, not inherited from the action's default.
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
         with:
-          version: callisto@0.20.0
+          version: callisto@0.22.0
           verification: require
       - name: Compose, version, and open the release PR
-        uses: orin-dx/callisto/.github/actions/callisto-action@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
+        uses: orin-dx/callisto/.github/actions/callisto-action@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
         with:
           setup_callisto: 'false'
           branch: main
@@ -176,6 +176,9 @@ jobs:
       contents: read
     outputs:
       has_artifacts: ${{ steps.slots.outputs.has_artifacts }}
+      has_cargo: ${{ steps.slots.outputs.has_cargo }}
+      has_npm: ${{ steps.slots.outputs.has_npm }}
+      has_manifest: ${{ steps.slots.outputs.has_manifest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -183,9 +186,9 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
         with:
-          version: callisto@0.20.0
+          version: callisto@0.22.0
           verification: require
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -210,22 +213,33 @@ jobs:
             --out "$handoff_dir/release-intent.json"
           # Relative name: the consumers verify from another job's RUNNER_TEMP.
           (cd "$handoff_dir" && shasum -a 256 release-intent.json > release-intent.json.sha256)
-      # Slots exist only when the product package is in this release.
-      - name: Read declared artifact slot count
+      # Slots exist only when the product package is in this release. A manifest is needed for slots and for npm tarballs.
+      - name: Read what the release publishes
         id: slots
         run: |
           set -euo pipefail
-          # Own statement: set -e cannot see a substitution failing inside an echo argument.
+          # Own statements: set -e cannot see a substitution failing inside an echo argument.
           intent="${RUNNER_TEMP}/release-intent/release-intent.json"
           # A renamed or missing key would read as "no slots" and publish a release without binaries.
-          jq -e 'has("artifactSlots") and (.artifactSlots | type) == "array"' "$intent" > /dev/null \
-            || { echo "::error::release intent has no .artifactSlots array"; exit 1; }
+          jq -e 'has("artifactSlots") and (.artifactSlots | type) == "array" and (.operations | type) == "array"' "$intent" > /dev/null \
+            || { echo "::error::release intent has no .artifactSlots and .operations arrays"; exit 1; }
           has_artifacts=$(jq '.artifactSlots | length > 0' "$intent")
-          case "$has_artifacts" in
-            true|false) ;;
-            *) echo "::error::artifact slot probe returned '$has_artifacts'"; exit 1 ;;
-          esac
-          echo "has_artifacts=$has_artifacts" >> "$GITHUB_OUTPUT"
+          has_cargo=$(jq '[.operations[].id | select(.role.kind == "registryPublish" and (.package | startswith("cargo/")))] | length > 0' "$intent")
+          has_npm=$(jq '[.operations[].id | select(.role.kind == "platformPublish" or (.role.kind == "registryPublish" and (.package | startswith("npm/"))))] | length > 0' "$intent")
+          for probe in "$has_artifacts" "$has_cargo" "$has_npm"; do
+            case "$probe" in
+              true|false) ;;
+              *) echo "::error::release intent probe returned '$probe'"; exit 1 ;;
+            esac
+          done
+          has_manifest=false
+          if [[ "$has_artifacts" == true || "$has_npm" == true ]]; then has_manifest=true; fi
+          {
+            echo "has_artifacts=$has_artifacts"
+            echo "has_cargo=$has_cargo"
+            echo "has_npm=$has_npm"
+            echo "has_manifest=$has_manifest"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-intent
@@ -234,6 +248,46 @@ jobs:
           # Long enough to re-run `execute` after a multi-day diagnosis.
           retention-days: 7
 
+  # No registry credentials: `execute` publishes crates with --no-verify, so a job without credentials compiles every crate
+  # of the release first (build scripts, proc macros), one `cargo package` call per Cargo workspace.
+  package-cargo:
+    name: Package every crate of the release
+    needs: [release-candidate, plan]
+    if: needs.plan.outputs.has_cargo == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: never
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
+        with:
+          version: callisto@0.22.0
+          verification: require
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-candidate.outputs.release_source_sha }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-intent
+          path: ${{ runner.temp }}/release-intent
+      - name: Package the crates
+        run: |
+          set -euo pipefail
+          (cd "${RUNNER_TEMP}/release-intent" && shasum -a 256 -c release-intent.json.sha256)
+          callisto release package-cargo \
+            --source-root "$GITHUB_WORKSPACE/release-source" \
+            --intent "${RUNNER_TEMP}/release-intent/release-intent.json"
+
   build:
     name: Build ${{ matrix.platform }}
     needs: [release-candidate, plan]
@@ -241,13 +295,10 @@ jobs:
     runs-on: ${{ matrix.host }}
     permissions:
       contents: read
-      # Build provenance for the GitHub Release assets.
-      attestations: write
-      id-token: write
     strategy:
       fail-fast: true
       matrix:
-        # `target` and `asset` must match `[[release.artifact]]` in callisto.toml.
+        # `target` and `asset` must match `targets` and `asset-name` under `[release]` in callisto.toml.
         include:
           - { host: macos-latest, target: aarch64-apple-darwin, platform: darwin-arm64, bin: caliper-docgen, asset: caliper-docgen-aarch64-apple-darwin.tar.gz }
           - { host: macos-latest, target: x86_64-apple-darwin, platform: darwin-x64, bin: caliper-docgen, asset: caliper-docgen-x86_64-apple-darwin.tar.gz }
@@ -346,11 +397,6 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           tar -C "target/${TARGET}/release" -czf "release-assets/${ASSET}" "$BIN"
-      - name: Attest the exact asset bytes
-        if: needs.plan.outputs.has_artifacts == 'true'
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: release-assets/${{ matrix.asset }}
       - name: Upload the release asset
         if: needs.plan.outputs.has_artifacts == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -360,10 +406,118 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  assemble:
-    name: Assemble the attested release assets
-    needs: [release-candidate, plan, build]
+  # Holds the OIDC token, so it has no checkout and runs no command: only the attestation action sees the build output.
+  attest:
+    name: Attest the exact asset bytes
+    needs: [plan, build]
     if: needs.plan.outputs.has_artifacts == 'true'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      # Build provenance for the GitHub Release assets.
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-asset-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-assets
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/*
+
+  # No registry credentials: the packages' `prepack` and `prepare` scripts run here, and `execute` publishes these exact
+  # tarballs with --ignore-scripts, so `prepublishOnly` never runs and the TypeScript packages are built in this job.
+  pack-npm:
+    name: Pack the npm packages
+    needs: [release-candidate, plan, build]
+    if: needs.plan.outputs.has_npm == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: never
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
+        with:
+          version: callisto@0.22.0
+          verification: require
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-candidate.outputs.release_source_sha }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-intent
+          path: ${{ runner.temp }}/release-intent
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: napi-*
+          path: ${{ runner.temp }}/napi-artifacts
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: cli-*
+          path: ${{ runner.temp }}/cli-artifacts
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+          cache: false
+      - name: Install deps, place platform binaries and build the TypeScript packages
+        working-directory: release-source
+        run: |
+          set -euo pipefail
+          (cd "${RUNNER_TEMP}/release-intent" && shasum -a 256 -c release-intent.json.sha256)
+          pnpm install --frozen-lockfile
+          (cd packages/napi && pnpm napi artifacts --output-dir "${RUNNER_TEMP}/napi-artifacts")
+          for dir in "${RUNNER_TEMP}"/cli-artifacts/cli-*; do
+            platform="${dir##*/cli-}"
+            dest="packages/cli/npm/${platform}"
+            [[ -d "$dest" ]] || { echo "::error::no package dir for $platform"; exit 1; }
+            mv "$dir"/* "$dest/"
+            chmod +x "$dest"/caliper-docgen*
+          done
+          for dir in packages/napi/npm/* packages/cli/npm/*; do
+            files=$(jq -r '.files[]' "$dir/package.json")
+            for f in $files; do
+              [[ -f "$dir/$f" ]] || { echo "::error::missing $dir/$f"; exit 1; }
+            done
+          done
+          # Their `prepublishOnly` (`pnpm build`) does not run: the publish passes --ignore-scripts.
+          pnpm --filter caliper-docgen-vite-plugin --filter caliper-docgen-storybook build
+      - name: Pack the npm packages
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/npm-dist"
+          callisto release pack-npm \
+            --source-root "$GITHUB_WORKSPACE/release-source" \
+            --intent "${RUNNER_TEMP}/release-intent/release-intent.json" \
+            --artifact-dir "${RUNNER_TEMP}/npm-dist"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-dist
+          path: ${{ runner.temp }}/npm-dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: Assemble the sealed release files
+    needs: [release-candidate, plan, build, attest, pack-npm]
+    # `attest` and `pack-npm` are skipped by design when the release has no slots or no npm package;
+    # a failed or cancelled one must still block.
+    if: >-
+      !cancelled() && needs.plan.outputs.has_manifest == 'true' && needs.build.result == 'success' &&
+      (needs.attest.result == 'success' || (needs.attest.result == 'skipped' && needs.plan.outputs.has_artifacts != 'true')) &&
+      (needs.pack-npm.result == 'success' || (needs.pack-npm.result == 'skipped' && needs.plan.outputs.has_npm != 'true'))
     timeout-minutes: 15
     runs-on: ubuntu-latest
     permissions:
@@ -373,28 +527,39 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
         with:
-          version: callisto@0.20.0
+          version: callisto@0.22.0
           verification: require
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-intent
           path: ${{ runner.temp }}/release-intent
       # Every matrix target's asset, so a target added to the matrix cannot be built and then left out of the manifest.
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - if: needs.plan.outputs.has_artifacts == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-asset-*
           merge-multiple: true
           path: ${{ runner.temp }}/release-artifacts
+      - if: needs.plan.outputs.has_npm == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-dist
+          path: ${{ runner.temp }}/release-artifacts
       - name: Create the exact artifact manifest
+        env:
+          HAS_NPM: ${{ needs.plan.outputs.has_npm }}
         run: |
           set -euo pipefail
           (cd "${RUNNER_TEMP}/release-intent" && shasum -a 256 -c release-intent.json.sha256)
-          callisto release artifact-manifest \
-            --intent "${RUNNER_TEMP}/release-intent/release-intent.json" \
-            --artifact-dir "${RUNNER_TEMP}/release-artifacts" \
+          args=(
+            --intent "${RUNNER_TEMP}/release-intent/release-intent.json"
+            --artifact-dir "${RUNNER_TEMP}/release-artifacts"
             --out "${RUNNER_TEMP}/release-artifacts/manifest.json"
+          )
+          if [[ "$HAS_NPM" == true ]]; then args+=(--seal-npm); fi
+          callisto release artifact-manifest "${args[@]}"
       # One artifact holding both directories keeps the intent and the manifest from different runs from being mixed.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -407,13 +572,14 @@ jobs:
 
   execute:
     name: Execute approved release
-    needs: [release-candidate, plan, build, assemble]
-    # A release without the product package has no assets, so `assemble` is skipped by design;
-    # a failed or cancelled `build` or `assemble` must still block. `!cancelled()`, not `always()`:
+    needs: [release-candidate, plan, build, package-cargo, assemble]
+    # A release with no crate, no asset and no npm package skips `package-cargo` and `assemble` by design;
+    # a failed or cancelled `build`, `package-cargo` or `assemble` must still block. `!cancelled()`, not `always()`:
     # cancelling the run must stop the one irreversible job.
     if: >-
       !cancelled() && needs.plan.result == 'success' && needs.build.result == 'success' &&
-      (needs.plan.outputs.has_artifacts == 'false' || needs.assemble.result == 'success')
+      (needs.package-cargo.result == 'success' || (needs.package-cargo.result == 'skipped' && needs.plan.outputs.has_cargo != 'true')) &&
+      (needs.assemble.result == 'success' || (needs.assemble.result == 'skipped' && needs.plan.outputs.has_manifest != 'true'))
     timeout-minutes: 60
     concurrency:
       group: release-execute
@@ -436,9 +602,9 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
         with:
-          version: callisto@0.20.0
+          version: callisto@0.22.0
           verification: require
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -453,54 +619,22 @@ jobs:
           name: release-intent
           path: ${{ runner.temp }}/release-intent
       # Outside the checkout too: execute needs a clean release-source worktree.
-      - if: needs.plan.outputs.has_artifacts == 'true'
+      - if: needs.plan.outputs.has_manifest == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-build
           path: ${{ runner.temp }}/release-build
       - name: Verify same-run handoff before credentials
         env:
-          HAS_ARTIFACTS: ${{ needs.plan.outputs.has_artifacts }}
+          HAS_MANIFEST: ${{ needs.plan.outputs.has_manifest }}
         run: |
           set -euo pipefail
           intent_dir="${RUNNER_TEMP}/release-intent"
           build_dir="${RUNNER_TEMP}/release-build"
           (cd "$intent_dir" && shasum -a 256 -c release-intent.json.sha256)
-          if [[ "$HAS_ARTIFACTS" == true ]]; then
+          if [[ "$HAS_MANIFEST" == true ]]; then
             cmp "$intent_dir/release-intent.json" "$build_dir/release-intent/release-intent.json"
           fi
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: napi-*
-          path: ${{ runner.temp }}/napi-artifacts
-          merge-multiple: true
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: cli-*
-          path: ${{ runner.temp }}/cli-artifacts
-      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
-        with:
-          auto-install: true
-          cache: false
-      - name: Install deps and place platform binaries
-        working-directory: release-source
-        run: |
-          set -euo pipefail
-          pnpm install --frozen-lockfile
-          (cd packages/napi && pnpm napi artifacts --output-dir "${RUNNER_TEMP}/napi-artifacts")
-          for dir in "${RUNNER_TEMP}"/cli-artifacts/cli-*; do
-            platform="${dir##*/cli-}"
-            dest="packages/cli/npm/${platform}"
-            [[ -d "$dest" ]] || { echo "::error::no package dir for $platform"; exit 1; }
-            mv "$dir"/* "$dest/"
-            chmod +x "$dest"/caliper-docgen*
-          done
-          for dir in packages/napi/npm/* packages/cli/npm/*; do
-            files=$(jq -r '.files[]' "$dir/package.json")
-            for f in $files; do
-              [[ -f "$dir/$f" ]] || { echo "::error::missing $dir/$f"; exit 1; }
-            done
-          done
       - name: Require registry credentials
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -581,9 +715,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@9234c02c00f65c7b742da4f4dd8b9fdbfbb0215a # callisto@0.22.0
         with:
-          version: callisto@0.20.0
+          version: callisto@0.22.0
           verification: require
       - name: Dispatch the oldest unfinished release
         id: pending
