@@ -54,6 +54,8 @@ Each worktree has its own `target/`, `node_modules/` and `.corpora/`. To share o
 - **Mutation proof:** remove each guard in turn; a test must fail. `cargo mutants --in-diff <diff>` finds the ones no test notices.
 - **A test that fails on `main`** for every behavior change.
 - **Output-preserving change:** diff `extract --json --quiet --no-cache` against a build of `main` on a large project and on Chakra, with `stats` removed. For resolver or checker changes, also compare peak memory and time with `just bench`, because a size regression can pass every test.
+- **A request to the checker:** a test that each parameter you send changes the answer. `tsrs` ignores keys it does not know, so a misspelled field compiles and passes (`file` for `files` made every cold run type-check the whole program).
+- **Measuring:** interleave the builds and compare CPU time as well as wall time. Drop any run that carries a checker fallback diagnostic: a timed-out request falls back to the structural answer, so that run's output differs. Benchmark a combination of changes together; estimates measured separately do not add.
 - **Findings:** when an automated or human review finds a defect, fix the class it belongs to, not only the case, and resolve the finding with the commit and test that fix it.
 
 ## Snapshot tests
