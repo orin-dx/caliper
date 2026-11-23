@@ -1998,21 +1998,28 @@ impl Converter {
     }
 
     /// Whether each property of `listed` is `readonly`: what the property answer settles ([`SymbolInfo::readonly`]),
-    /// and the checker's answer for the rest. Only answers that needed the checker are kept.
+    /// and the checker's answer for the rest. Kept by (handle, listing) like every answer about a list, so a list read
+    /// again is not worked out again; a list the answer settles entirely sends nothing.
     async fn readonly(&self, listed: (u64, Listing), properties: &[SymbolInfo]) -> Result<Arc<[bool]>, CallError> {
-        if let Some(settled) = properties.iter().map(|property| property.readonly).collect::<Option<Arc<[bool]>>>() {
-            return Ok(settled);
-        }
         let readonly = self
             .state
             .readonly
             .get(listed, || async {
                 let asked: Vec<_> =
                     properties.iter().filter(|property| property.readonly.is_none()).map(|p| &p.reference).collect();
-                let mut answers = self.rpc.readonly_symbols(&asked).await?.into_iter();
+                let mut answers = if asked.is_empty() {
+                    Vec::new().into_iter()
+                } else {
+                    self.rpc.readonly_symbols(&asked).await?.into_iter()
+                };
                 let readonly: Option<Arc<[bool]>> =
                     properties.iter().map(|property| property.readonly.or_else(|| answers.next())).collect();
-                readonly.ok_or_else(|| CallError::Rejected("a short isReadonlySymbol batch".to_string()))
+                let readonly =
+                    readonly.ok_or_else(|| CallError::Rejected("a short isReadonlySymbol batch".to_string()))?;
+                if answers.next().is_some() {
+                    return Err(CallError::Rejected("a long isReadonlySymbol batch".to_string()));
+                }
+                Ok(readonly)
             })
             .await?;
         // `listed` names the same symbol list every time, so the cached flags are one per property.

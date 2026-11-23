@@ -211,14 +211,22 @@ fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, decla
         return Some(true);
     }
     let modifiers_unread = flags & flag::SYMBOL_PROPERTY != 0 && value_declaration;
+    // A declared property always has a value declaration, and the answer omits the field when there is none. One with
+    // neither a value declaration nor check flags (the checker did not make it: a mapped type's property has them) may
+    // be an answer that did not carry the field, so its `readonly` modifier is unread too.
+    let transient_unproven = flags & flag::SYMBOL_PROPERTY != 0 && !value_declaration && check_flags == 0;
     let constant_unread = flags & flag::SYMBOL_VARIABLE != 0;
     let declarations_known = declarations.iter().all(|declaration| {
         let kind = declaration.split('.').nth(1).and_then(|kind| kind.parse::<u32>().ok());
         kind.is_some_and(|kind| NO_ASSIGNMENT_DECLARATION.contains(&kind))
     });
-    (!modifiers_unread && !constant_unread && declarations_known).then_some(false)
+    (!modifiers_unread && !transient_unproven && !constant_unread && declarations_known).then_some(false)
 }
 
+/// Coupled to the tsrs version: a renumbering makes a listed kind mean something else, which
+/// `a_settled_readonly_answer_is_the_checkers` pins to real declarations (rerun it on every tsrs bump). A kind that is
+/// not listed is asked, so the list only ever errs toward the checker.
+///
 /// The syntax kinds (tsrs 0.24 numbering, as node handles carry them) of the declarations that are not an
 /// `Object.defineProperty` call: parameter, property signature and declaration, method signature and declaration, get
 /// and set accessor, property assignment, shorthand property assignment.
@@ -1128,8 +1136,8 @@ mod tests {
             export type Arr = ReadonlyArray<number>;\n\
             export enum E { A, B = 'b' }\n\
             const short = 1;\n\
-            export const ns = { lit: 1, readonly ro: 2, get gg() { return 1; }, set ss(v: number) {}, method() {}, short, \
-              ['computed']: 1, ...{ spread: 1 } };\n\
+            export const ns = { lit: 1, readonly ro: 2, get gg() { return 1; }, set ss(v: number) {}, method() {}, \
+              short, ['computed']: 1, ...{ spread: 1 } };\n\
             export const frozen = { a: 1, b: [1] } as const;\n\
             export const fn = Object.assign(() => 1, { attached: 1 });\n\
             export namespace N { export const c = 1; export let l = 2; export var v = 3; export function f() {} \
@@ -1209,7 +1217,11 @@ mod tests {
         assert_eq!(settled(mapped(8 | (1 << 21))), Some(true));
         assert_eq!(settled(mapped(1 << 21)), Some(false));
         assert_eq!(settled(serde_json::json!({ "flags": 4, "declarations": ["1.173./a.ts"] })), None);
-        let declared = serde_json::json!({ "flags": 4, "checkFlags": 0, "declarations": ["1.173./a.ts"], "valueDeclaration": "1.173./a.ts" });
+        // No value declaration and no check flags: the checker did not make it, so the field may have gone missing.
+        assert_eq!(settled(serde_json::json!({ "flags": 4, "checkFlags": 0, "declarations": ["1.173./a.ts"] })), None);
+        let declared = serde_json::json!({
+            "flags": 4, "checkFlags": 0, "declarations": ["1.173./a.ts"], "valueDeclaration": "1.173./a.ts"
+        });
         assert_eq!(settled(declared), None);
         assert_eq!(settled(serde_json::json!({ "flags": 2, "checkFlags": 0 })), None);
         assert_eq!(settled(serde_json::json!({ "flags": 32768, "checkFlags": 0 })), Some(true));
