@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01F2jSyk8M6agdqdP97FTLRh",
+  "agent_id": "ae117a1bf2eb19eee",
+  "subagent_type": "general-purpose",
+  "task_description": "Redesign #518 resolver cache sharing safely",
+  "token_usage": {
+    "input_tokens": 178,
+    "cache_creation_tokens": 201715,
+    "cache_read_tokens": 13698343,
+    "output_tokens": 79408,
+    "api_call_count": 88
+  },
+  "started_at": "2026-11-23T12:57:22.168945-08:00",
+  "completed_at": "2026-11-23T13:31:40.947945-08:00"
+}
