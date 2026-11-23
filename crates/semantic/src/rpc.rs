@@ -63,6 +63,11 @@ impl From<Value> for SymbolRef {
 /// method cannot be sent with another's parameters; `tests::every_key_sent_is_one_tsrs_reads` checks the keys of each.
 trait Request: Serialize {
     fn method(&self) -> &'static str;
+
+    /// Whether it gives memory back, so is sent past the heap budget too.
+    fn frees_memory(&self) -> bool {
+        false
+    }
 }
 
 /// Writes [`Ask`] from one list, so that each checker method and the parameter keys it is sent with are written once.
@@ -171,14 +176,9 @@ impl Request for BatchRequests<'_, '_> {
     }
 }
 
-/// Starts the session; it takes no parameters.
+/// Starts the session; it takes no parameters, written `null`.
+#[derive(Serialize)]
 struct Initialize;
-
-impl Serialize for Initialize {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_unit()
-    }
-}
 
 impl Request for Initialize {
     fn method(&self) -> &'static str {
@@ -205,6 +205,10 @@ struct Release {
 impl Request for Release {
     fn method(&self) -> &'static str {
         "release"
+    }
+
+    fn frees_memory(&self) -> bool {
+        true
     }
 }
 
@@ -919,8 +923,7 @@ impl Rpc {
     /// expects. The parameters are written straight to the text the checker reads.
     async fn call(&self, params: &impl Request) -> Result<Box<RawValue>, CallError> {
         let method = params.method();
-        // A release gives memory back, so it is sent past the heap budget too.
-        if method != "release" {
+        if !params.frees_memory() {
             crate::heap::step()?;
         }
         if let Ok(mut calls) = self.calls.lock() {
@@ -1588,9 +1591,8 @@ mod tests {
         sent.lock().unwrap().clone()
     }
 
-    /// What `main` sent before requests were typed, one request a line, from [`sent_by_every_call`] run on `main` at
-    /// 61ce2402 (the `Asking` enum and `json!` parameters). A change here changes what the checker is sent.
-    const MAIN_WIRE: &str = r#"initialize null
+    /// What [`sent_by_every_call`] sends, one request a line. A change here changes what the checker is sent.
+    const WIRE: &str = r#"initialize null
 parseConfigFile {"file":"/p/tsconfig.json"}
 createSnapshot {"createPrograms":[{"rootFiles":["/p/a.ts","/p/b.tsx"],"compilerOptions":{"strict":true}}]}
 updateSnapshot {"snapshot":1,"changes":{"createPrograms":[{"rootFiles":["/p/a.ts","/p/b.tsx"],"compilerOptions":{"strict":true}}],"ensurePrograms":true}}
@@ -1637,12 +1639,12 @@ release {"snapshot":2}
 release {"snapshot":1}
 "#;
 
-    /// Typing the requests changed no byte the checker is sent.
+    /// Every request is written byte for byte as pinned: key order, absent optional keys and `null` included.
     #[test]
-    fn every_request_is_written_as_main_wrote_it() {
+    fn every_request_writes_the_pinned_bytes() {
         let sent: String = sent_by_every_call().iter().map(|(method, params)| format!("{method} {params}\n")).collect();
 
-        assert_eq!(sent, MAIN_WIRE);
+        assert_eq!(sent, WIRE);
     }
 
     /// What tsrs reads of each request's parameters, and of the objects nested in them: the name, the keys a request
@@ -1749,18 +1751,18 @@ release {"snapshot":1}
             }
         }
         let each = |value: &'_ Value, key: &str| value.get(key).and_then(Value::as_array).cloned().unwrap_or_default();
-        // `createSnapshot` takes the changes as its parameters, `updateSnapshot` under `changes`.
+        // `createSnapshot` takes the changes as its parameters, `updateSnapshot` under `changes`; either way the
+        // objects nested in the changes are checked once, at the level that holds them.
         if let Some(changes) = object.get("changes") {
             wrong.extend(mismatches("CreateSnapshotParams", changes));
         }
-        let changes = object.get("changes").unwrap_or(params);
-        if let Some(notified) = changes.get("fileNotifications") {
+        if let Some(notified) = object.get("fileNotifications") {
             wrong.extend(mismatches("FileNotifications", notified));
         }
-        for program in each(changes, "createPrograms") {
+        for program in each(params, "createPrograms") {
             wrong.extend(mismatches("CreateSnapshotProgramParams", &program));
         }
-        for program in each(changes, "reconfigurePrograms") {
+        for program in each(params, "reconfigurePrograms") {
             wrong.extend(mismatches("ReconfigureSnapshotProgramParams", &program));
         }
         for request in each(params, "requests") {
