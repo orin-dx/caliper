@@ -32,6 +32,9 @@ type FxDashSet<K> = DashSet<K, FxBuildHasher>;
 /// The module a `(scope, specifier)` resolved to, once the first demand of the scope has resolved it.
 type ModuleCell = Arc<OnceLock<Option<Utf8PathBuf>>>;
 
+/// The resolution scope of a directory, once it is known (`Loader::scope_within`).
+type ScopeCell = Arc<OnceLock<Option<Box<str>>>>;
+
 /// `(directory of the importing file, specifier, exported name path)`.
 type DemandKey = (Box<str>, Box<str>, CompactString);
 
@@ -429,10 +432,10 @@ struct Loader<'a> {
     augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
     unresolved: FxDashMap<DemandKey, Unresolved>,
-    /// Package directory of each directory asked about, for grouping the index.
+    /// Package directory of each directory asked about or passed on the way up, for grouping the index.
     packages: FxDashMap<Box<str>, Option<Box<str>>>,
-    /// The resolution scope of each directory asked about (`resolution_scope`).
-    scopes: FxDashMap<Box<str>, Box<str>>,
+    /// The resolution scope of each directory asked about or passed on the way up (`scope_within`).
+    scopes: FxDashMap<Box<str>, ScopeCell>,
     /// What each `(scope, specifier)` of a module-only demand resolved to, when outside the project and not React's.
     module_demands: FxDashMap<(Box<str>, Box<str>), ModuleCell>,
     /// The re-exports of files that only an augmentation search passed through, which it did not parse in full.
@@ -441,6 +444,36 @@ struct Loader<'a> {
     learned: AtomicBool,
     /// The diagnostics of demands that panicked and of dependency files that could not be read.
     panics: Mutex<Vec<Diagnostic>>,
+}
+
+impl<'a> Loader<'a> {
+    fn new(
+        resolvers: &'a ModuleResolvers,
+        project_dirs: &'a [Utf8PathBuf],
+        parent: Option<&'a DependencyLayer>,
+    ) -> Self {
+        Loader {
+            resolvers,
+            project_dirs,
+            parent,
+            parsed: DashMap::default(),
+            resolutions: DashMap::default(),
+            exports: DashMap::default(),
+            claimed: DashSet::default(),
+            declaring: DashSet::default(),
+            react_files: DashSet::default(),
+            augmenters: DashMap::default(),
+            augmenter_crossed: DashMap::default(),
+            demands: DashSet::default(),
+            unresolved: DashMap::default(),
+            packages: DashMap::default(),
+            scopes: DashMap::default(),
+            module_demands: DashMap::default(),
+            re_exports: DashMap::default(),
+            learned: AtomicBool::new(false),
+            panics: Mutex::new(Vec::new()),
+        }
+    }
 }
 
 impl Loader<'_> {
@@ -465,12 +498,20 @@ impl Loader<'_> {
     }
 
     fn parse(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
+        self.parse_source(file, None)
+    }
+
+    /// `parse`, with the text of `file` when the caller has already read it.
+    fn parse_source(&self, file: &Utf8Path, source: Option<String>) -> Option<Arc<SourceData>> {
         if let Some(found) = self.parent.and_then(|parent| parent.parsed_data(file.as_str())) {
             return found.clone();
         }
         let cell = self.parsed.entry(PathKey::from(file)).or_default().clone();
         cell.get_or_init(|| {
-            let source = self.read(file)?;
+            let source = match source {
+                Some(source) => source,
+                None => self.read(file)?,
+            };
             let mut data = crate::extractor::parse_file(file, &source);
             // Problems inside a package's types are not the project's; an unresolved demand is reported instead.
             data.diagnostics.clear();
@@ -771,17 +812,20 @@ impl Loader<'_> {
     /// (its `imports`), a `tsconfig.json` or `jsconfig.json` (its `paths`) or a `node_modules`. A bare specifier
     /// resolves alike from every directory with the same scope. A directory with no such ancestor is its own.
     fn resolution_scope(&self, dir: &str) -> Box<str> {
-        if let Some(found) = self.scopes.get(dir) {
-            return found.clone();
-        }
-        let marks = ["package.json", "tsconfig.json", "jsconfig.json", "node_modules"];
-        let scope = Utf8Path::new(dir)
-            .ancestors()
-            .find(|candidate| marks.iter().any(|mark| candidate.join(mark).exists()))
-            .map_or(dir, Utf8Path::as_str);
-        let scope = Box::from(scope);
-        self.scopes.insert(Box::from(dir), Box::clone(&scope));
-        scope
+        self.scope_within(Utf8Path::new(dir)).unwrap_or_else(|| Box::from(dir))
+    }
+
+    /// The scope of `dir` if it or an ancestor has a mark. Memoised for every directory on the way up, so the files of
+    /// one tree probe each directory once rather than once per directory below it; the demands of a load start at once,
+    /// so one probe of a directory serves the threads that ask together. The wait only ever runs up the tree.
+    fn scope_within(&self, dir: &Utf8Path) -> Option<Box<str>> {
+        let cell = self.scopes.entry(Box::from(dir.as_str())).or_default().clone();
+        cell.get_or_init(|| {
+            let marks = ["package.json", "tsconfig.json", "jsconfig.json", "node_modules"];
+            let has_mark = marks.iter().any(|mark| dir.join(mark).exists());
+            if has_mark { Some(Box::from(dir.as_str())) } else { dir.parent().and_then(|up| self.scope_within(up)) }
+        })
+        .clone()
     }
 
     /// Load the files `module` leads to through its re-exports that merge declarations into React
@@ -833,7 +877,7 @@ impl Loader<'_> {
         }
         let source = self.read(file)?;
         if entry || may_declare_into_react(&source) {
-            return self.parse(file).map(|data| scan_of(&data, file));
+            return self.parse_source(file, Some(source)).map(|data| scan_of(&data, file));
         }
         let cell = self.re_exports.entry(PathKey::from(file)).or_default().clone();
         let found = cell.get_or_init(|| {
@@ -944,15 +988,17 @@ impl Loader<'_> {
         }
     }
 
+    /// The nearest directory at or above `dir` with a `package.json`, if it is inside `node_modules`. Memoised for every
+    /// directory on the way up, as `scope_within` is.
     fn package_of(&self, dir: &Utf8Path) -> Option<Box<str>> {
         if let Some(found) = self.packages.get(dir.as_str()) {
             return found.clone();
         }
-        let found = dir
-            .ancestors()
-            .find(|candidate| candidate.join("package.json").is_file())
-            .filter(|candidate| in_node_modules(candidate.as_str()))
-            .map(|candidate| Box::from(candidate.as_str()));
+        let found = if dir.join("package.json").is_file() {
+            in_node_modules(dir.as_str()).then(|| Box::from(dir.as_str()))
+        } else {
+            dir.parent().and_then(|up| self.package_of(up))
+        };
         self.packages.insert(Box::from(dir.as_str()), found.clone());
         found
     }
@@ -1043,32 +1089,22 @@ pub(crate) fn load(
     options: &PipelineOptions,
     previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
-    let resolvers = ModuleResolvers::new(options);
+    load_with(demands, options, previous, &ModuleResolvers::new(options))
+}
+
+/// `load` through `resolvers`, which a caller that resolves next with the same options passes on, so their
+/// file-system cache serves both.
+pub(crate) fn load_with(
+    demands: Vec<Demand>,
+    options: &PipelineOptions,
+    previous: Option<&Arc<DependencyLayer>>,
+    resolvers: &ModuleResolvers,
+) -> DependencyLayer {
     let project_dirs: Vec<Utf8PathBuf> =
         options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
     let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
     let flatten = previous.filter(|_| parent.is_none());
-    let loader = Loader {
-        resolvers: &resolvers,
-        project_dirs: &project_dirs,
-        parent: parent.as_deref(),
-        parsed: DashMap::default(),
-        resolutions: DashMap::default(),
-        exports: DashMap::default(),
-        claimed: DashSet::default(),
-        declaring: DashSet::default(),
-        react_files: DashSet::default(),
-        augmenters: DashMap::default(),
-        augmenter_crossed: DashMap::default(),
-        demands: DashSet::default(),
-        unresolved: DashMap::default(),
-        packages: DashMap::default(),
-        scopes: DashMap::default(),
-        module_demands: DashMap::default(),
-        re_exports: DashMap::default(),
-        learned: AtomicBool::new(false),
-        panics: Mutex::new(Vec::new()),
-    };
+    let loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
     match (previous, flatten) {

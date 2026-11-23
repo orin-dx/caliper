@@ -1494,3 +1494,57 @@ fn index_temp_files_are_unique_per_write() {
     assert_eq!(names.len(), 100);
     assert!(names.iter().all(|name| name.parent() == path.parent() && name != path));
 }
+
+/// The scope of one directory is the scope of every directory below it that has no mark of its own, so a load probes
+/// each directory once: a sibling asked after the mark is gone still gets the scope the load first saw.
+#[test]
+fn resolution_scope_probes_each_directory_once_per_load() {
+    let (_tmp, root) = project(&[("pkg/package.json", "{}"), ("pkg/a/b/c/x.ts", ""), ("pkg/a/b/d/y.ts", "")]);
+    let resolvers = ModuleResolvers::new(&options(&root, true));
+    let loader = Loader::new(&resolvers, &[], None);
+    assert_eq!(&*loader.resolution_scope(root.join("pkg/a/b/c").as_str()), root.join("pkg").as_str());
+    std::fs::remove_file(root.join("pkg/package.json")).unwrap();
+    assert_eq!(&*loader.resolution_scope(root.join("pkg/a/b/d").as_str()), root.join("pkg").as_str());
+    // A fresh load sees the directory as it is now: the nearest mark is the project root's `node_modules`.
+    let loader = Loader::new(&resolvers, &[], None);
+    assert_eq!(&*loader.resolution_scope(root.join("pkg/a/b/d").as_str()), root.as_str());
+}
+
+/// `package_of` keeps every directory it passes, as `resolution_scope` does.
+#[test]
+fn package_of_probes_each_directory_once_per_load() {
+    let (_tmp, root) = project(&[]);
+    let dist = root.join("node_modules/ui-kit/dist");
+    std::fs::create_dir_all(dist.join("a/b")).unwrap();
+    std::fs::create_dir_all(dist.join("a/c")).unwrap();
+    let resolvers = ModuleResolvers::new(&options(&root, true));
+    let loader = Loader::new(&resolvers, &[], None);
+    let package = Some(Box::from(root.join("node_modules/ui-kit").as_str()));
+    assert_eq!(loader.package_of(&dist.join("a/b")), package);
+    std::fs::remove_file(root.join("node_modules/ui-kit/package.json")).unwrap();
+    assert_eq!(loader.package_of(&dist.join("a/c")), package);
+    assert_eq!(Loader::new(&resolvers, &[], None).package_of(&dist.join("a/c")), None);
+}
+
+/// Concurrent first asks of one tree agree, and each directory on the way up is kept once.
+#[test]
+fn concurrent_resolution_scopes_agree() {
+    let leaves: Vec<String> = (0..16).map(|i| format!("pkg/a/b/{i}/x.ts")).collect();
+    let files: Vec<(&str, &str)> =
+        std::iter::once(("pkg/package.json", "{}")).chain(leaves.iter().map(|l| (l.as_str(), ""))).collect();
+    let (_tmp, root) = project(&files);
+    let resolvers = ModuleResolvers::new(&options(&root, true));
+    let loader = Loader::new(&resolvers, &[], None);
+    let scopes: Vec<Box<str>> = std::thread::scope(|threads| {
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let (loader, dir) = (&loader, root.join(format!("pkg/a/b/{i}")));
+                threads.spawn(move || loader.resolution_scope(dir.as_str()))
+            })
+            .collect();
+        handles.into_iter().map(|handle| handle.join().unwrap()).collect()
+    });
+    assert!(scopes.iter().all(|scope| &**scope == root.join("pkg").as_str()), "{scopes:?}");
+    // The 16 leaves, then `b`, `a` and `pkg`, where the walk stops.
+    assert_eq!(loader.scopes.len(), 19);
+}

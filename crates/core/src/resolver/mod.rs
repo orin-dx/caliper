@@ -335,7 +335,7 @@ impl ResolutionContext {
     #[cfg(test)]
     pub fn new(global: Arc<GlobalSourceData>, options: &PipelineOptions) -> Self {
         let named_types = Arc::new(crate::named_type_index::NamedTypeIndex::build(&global));
-        Self::build(global, options, compute_ambient_global_files(options), named_types)
+        Self::build(global, options, compute_ambient_global_files(options), named_types, ModuleResolvers::new(options))
     }
 
     /// A context over an index and ambient file list the caller already holds. A watch revision patches its
@@ -347,7 +347,19 @@ impl ResolutionContext {
         ambient_global_files: Vec<Utf8PathBuf>,
         named_types: Arc<crate::named_type_index::NamedTypeIndex>,
     ) -> Self {
-        Self::build(global, options, ambient_global_files, named_types)
+        Self::build(global, options, ambient_global_files, named_types, ModuleResolvers::new(options))
+    }
+
+    /// `new_with_cached_ambient_global_files` over `resolvers`, built from the same `options`: the ones the dependency
+    /// loader of this revision used, so their file-system cache already holds the paths it reached.
+    pub(crate) fn with_module_resolvers(
+        global: Arc<GlobalSourceData>,
+        options: &PipelineOptions,
+        ambient_global_files: Vec<Utf8PathBuf>,
+        named_types: Arc<crate::named_type_index::NamedTypeIndex>,
+        resolvers: ModuleResolvers,
+    ) -> Self {
+        Self::build(global, options, ambient_global_files, named_types, resolvers)
     }
 
     fn build(
@@ -355,8 +367,8 @@ impl ResolutionContext {
         options: &PipelineOptions,
         ambient_global_files: Vec<Utf8PathBuf>,
         named_types: Arc<crate::named_type_index::NamedTypeIndex>,
+        resolvers: ModuleResolvers,
     ) -> Self {
-        let resolvers = ModuleResolvers::new(options);
         // A tsconfig that can't be read or parsed would otherwise fail every aliased import one by one.
         let tsconfig_diagnostic = governing_tsconfig(options).and_then(|path| {
             let error = resolvers.main.resolve_tsconfig(path.as_std_path()).err()?;
@@ -716,7 +728,11 @@ impl ModuleResolvers {
         let custom = custom_conditions(options);
         let types_first =
             ResolveOptions { condition_names: std::iter::once("types".into()).chain(custom).collect(), ..main.clone() };
-        ModuleResolvers { main: Resolver::new(main), types_first: Resolver::new(types_first) }
+        // One file-system cache for both: they differ only in conditions, and each would otherwise stat and read the
+        // same `node_modules` paths again.
+        let main = Resolver::new(main);
+        let types_first = main.clone_with_options(types_first);
+        ModuleResolvers { main, types_first }
     }
 }
 

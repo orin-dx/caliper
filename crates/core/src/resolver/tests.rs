@@ -3253,3 +3253,25 @@ fn a_forward_ref_component_keeps_react_s_ref_in_its_element_layer_under_full() {
     let holds = |name: &str| layer.members.iter().any(|member| member == name);
     assert!(holds("ref") && holds("type") && holds("onClick"), "{layer:?}");
 }
+
+/// `main` and `types_first` answer from one file-system cache: what one has seen, the other does not ask the disk for.
+#[test]
+fn module_resolvers_share_one_file_system_cache() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    for (path, body) in [
+        ("node_modules/kit/package.json", r#"{ "name": "kit", "types": "index.d.ts" }"#),
+        ("node_modules/kit/index.d.ts", "export type A = string;\n"),
+    ] {
+        std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+        std::fs::write(root.join(path), body).unwrap();
+    }
+    let resolvers = ModuleResolvers::new(&PipelineOptions::default());
+    let importer = root.join("index.ts");
+    let main = resolvers.main.resolve_dts(importer.as_std_path(), "kit").unwrap();
+    std::fs::remove_dir_all(root.join("node_modules")).unwrap();
+    let types_first = resolvers.types_first.resolve_dts(importer.as_std_path(), "kit").unwrap();
+    assert_eq!(types_first.path(), main.path());
+    // A new set of resolvers reads the disk again.
+    assert!(ModuleResolvers::new(&PipelineOptions::default()).main.resolve_dts(importer.as_std_path(), "kit").is_err());
+}
