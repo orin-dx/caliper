@@ -1574,6 +1574,38 @@ fn concurrent_package_lookups_agree() {
     assert_eq!(loader.package_manifests.len(), 18);
 }
 
+/// Asking again about a directory costs one lookup, not a walk over its ancestors: a package's export lookups all ask
+/// about the one directory, and `learn` and the index write ask again for every row.
+#[test]
+fn repeated_lookups_of_one_directory_do_not_walk_its_ancestors_again() {
+    let (_tmp, root) = project(&[("pkg/package.json", "{}")]);
+    let deep = (0..40).fold(root.join("node_modules/ui-kit/dist"), |dir, _| dir.join("d"));
+    std::fs::create_dir_all(&deep).unwrap();
+    let scope_dir = (0..40).fold(root.join("pkg"), |dir, _| dir.join("d"));
+    std::fs::create_dir_all(&scope_dir).unwrap();
+    let resolvers = ModuleResolvers::new(&options(&root, true));
+    let loader = Loader::new(&resolvers, &[], None);
+    let lookups = || super::CELL_LOOKUPS.with(std::cell::Cell::get);
+    let package = Some(Box::from(root.join("node_modules/ui-kit").as_str()));
+
+    assert_eq!(loader.package_of(&deep), package);
+    let first = lookups();
+    // The walk reaches `ui-kit`: the 40 levels, `dist` and `ui-kit`.
+    assert_eq!(first, 42);
+    for _ in 0..10 {
+        assert_eq!(loader.package_of(&deep), package);
+    }
+    assert_eq!(lookups(), first);
+
+    assert_eq!(&*loader.resolution_scope(scope_dir.as_str()), root.join("pkg").as_str());
+    let first = lookups();
+    assert_eq!(first, 42 + 41);
+    for _ in 0..10 {
+        assert_eq!(&*loader.resolution_scope(scope_dir.as_str()), root.join("pkg").as_str());
+    }
+    assert_eq!(lookups(), first);
+}
+
 /// A tree deeper than any real one, with and without a mark above it, gets the answer of a plain walk up to the root.
 #[test]
 fn a_deep_tree_and_a_path_with_no_mark_get_the_plain_walk_s_answer() {

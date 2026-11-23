@@ -434,8 +434,12 @@ struct Loader<'a> {
     unresolved: FxDashMap<DemandKey, Unresolved>,
     /// Whether each directory `package_of` passed has a `package.json` file.
     package_manifests: FxDashMap<Box<str>, ProbeCell>,
+    /// What `package_of` answered for each directory it was asked about, so a repeat is one lookup, not a walk.
+    packages: FxDashMap<Box<str>, Option<Box<str>>>,
     /// Whether each directory `resolution_scope` passed has one of its marks.
     scope_marks: FxDashMap<Box<str>, ProbeCell>,
+    /// What `resolution_scope` answered for each directory it was asked about.
+    scopes: FxDashMap<Box<str>, Box<str>>,
     /// What each `(scope, specifier)` of a module-only demand resolved to, when outside the project and not React's.
     module_demands: FxDashMap<(Box<str>, Box<str>), ModuleCell>,
     /// The re-exports of files that only an augmentation search passed through, which it did not parse in full.
@@ -467,7 +471,9 @@ impl<'a> Loader<'a> {
             demands: DashSet::default(),
             unresolved: DashMap::default(),
             package_manifests: DashMap::default(),
+            packages: DashMap::default(),
             scope_marks: DashMap::default(),
+            scopes: DashMap::default(),
             module_demands: DashMap::default(),
             re_exports: DashMap::default(),
             learned: AtomicBool::new(false),
@@ -812,10 +818,15 @@ impl Loader<'_> {
     /// (its `imports`), a `tsconfig.json` or `jsconfig.json` (its `paths`) or a `node_modules`. A bare specifier
     /// resolves alike from every directory with the same scope. A directory with no such ancestor is its own.
     fn resolution_scope(&self, dir: &str) -> Box<str> {
+        if let Some(found) = self.scopes.get(dir) {
+            return found.clone();
+        }
         let marks = ["package.json", "tsconfig.json", "jsconfig.json", "node_modules"];
         let has_mark = |candidate: &Utf8Path| marks.iter().any(|mark| candidate.join(mark).exists());
         let scope = Utf8Path::new(dir).ancestors().find(|candidate| probe_once(&self.scope_marks, candidate, has_mark));
-        Box::from(scope.map_or(dir, Utf8Path::as_str))
+        let scope = Box::<str>::from(scope.map_or(dir, Utf8Path::as_str));
+        self.scopes.insert(Box::from(dir), scope.clone());
+        scope
     }
 
     /// Load the files `module` leads to through its re-exports that merge declarations into React
@@ -980,12 +991,24 @@ impl Loader<'_> {
 
     /// The nearest directory at or above `dir` with a `package.json`, if it is inside `node_modules`.
     fn package_of(&self, dir: &Utf8Path) -> Option<Box<str>> {
+        if let Some(found) = self.packages.get(dir.as_str()) {
+            return found.clone();
+        }
         let has_manifest = |candidate: &Utf8Path| candidate.join("package.json").is_file();
-        dir.ancestors()
+        let found = dir
+            .ancestors()
             .find(|candidate| probe_once(&self.package_manifests, candidate, has_manifest))
             .filter(|candidate| in_node_modules(candidate.as_str()))
-            .map(|candidate| Box::from(candidate.as_str()))
+            .map(|candidate| Box::from(candidate.as_str()));
+        self.packages.insert(Box::from(dir.as_str()), found.clone());
+        found
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many ancestor cells this thread looked up in `probe_once`.
+    static CELL_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// `probe(dir)`, asked of the disk once per load: the files of one tree share their ancestors, and a load's demands
@@ -993,6 +1016,8 @@ impl Loader<'_> {
 /// another directory's, and the callers walk the lexical ancestors in a loop, so a deep tree cannot deadlock or
 /// exhaust the stack.
 fn probe_once(memo: &FxDashMap<Box<str>, ProbeCell>, dir: &Utf8Path, probe: impl FnOnce(&Utf8Path) -> bool) -> bool {
+    #[cfg(test)]
+    CELL_LOOKUPS.with(|lookups| lookups.set(lookups.get() + 1));
     let cell = match memo.get(dir.as_str()) {
         Some(cell) => cell.clone(),
         None => memo.entry(Box::from(dir.as_str())).or_default().clone(),
