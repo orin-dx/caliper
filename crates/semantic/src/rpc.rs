@@ -59,72 +59,212 @@ impl From<Value> for SymbolRef {
     }
 }
 
-/// What a request asks about besides the snapshot and project [`Rpc`] adds: written as the fields of its parameters, a
-/// symbol's reference as the text it arrived as.
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub(crate) enum Asking<'a> {
-    Symbol {
-        symbol: &'a SymbolRef,
-    },
-    Symbols {
-        symbols: &'a [&'a SymbolRef],
-    },
-    /// A declaration, by its node handle.
-    Location {
-        location: &'a str,
-    },
-    Type {
-        #[serde(rename = "type")]
-        type_id: u64,
-    },
-    Signatures {
-        #[serde(rename = "type")]
-        type_id: u64,
-        kind: u8,
-    },
-    /// A type printed with `TypeFormatFlags`.
-    Printed {
-        #[serde(rename = "type")]
-        type_id: u64,
-        flags: u64,
-    },
-    /// A type or signature, by the handle the checker gave it.
-    Object {
-        #[serde(rename = "objectId")]
-        object_id: u64,
-    },
-    File {
-        file: &'a str,
-    },
-    Files {
-        files: &'a [&'a str],
-    },
-    Nothing {},
+/// A request [`Rpc::call`] sends: its parameters, and the method that reads them. Each type names its method once, so a
+/// method cannot be sent with another's parameters; `tests::every_key_sent_is_one_tsrs_reads` checks the keys of each.
+trait Request: Serialize {
+    fn method(&self) -> &'static str;
 }
 
-/// A request's parameters: the snapshot and project, then the fields of what it asks.
+/// Writes [`Ask`] from one list, so that each checker method and the parameter keys it is sent with are written once.
+macro_rules! asks {
+    ($($(#[$doc:meta])* $method:literal => $variant:ident { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? })*) => {
+        /// A question about a program, one variant per checker method, holding exactly the parameters that method is
+        /// sent besides the snapshot and project [`Scoped`] adds; a symbol's reference goes as the text it arrived as.
+        #[derive(Debug, Serialize)]
+        #[serde(untagged)]
+        pub(crate) enum Ask<'a> {
+            $($(#[$doc])* $variant { $($(#[$attr])* $field: $ty),* },)*
+        }
+
+        impl Ask<'_> {
+            pub(crate) fn method(&self) -> &'static str {
+                match self {
+                    $(Ask::$variant { .. } => $method,)*
+                }
+            }
+        }
+
+        /// Every method [`Ask`] sends.
+        #[cfg(test)]
+        const ASKED: &[&str] = &[$($method),*];
+    };
+}
+
+asks! {
+    "getSourceFileNames" => SourceFileNames {}
+    "getSymbolOfSourceFile" => SymbolOfSourceFile { file: &'a str }
+    "getExportsOfModule" => ExportsOfModule { symbol: &'a SymbolRef }
+    /// Only for symbols flagged `Alias`: the beta panics on a plain `default` export.
+    "getAliasedSymbol" => AliasedSymbol { symbol: &'a SymbolRef }
+    "getTypeOfSymbol" => TypeOfSymbol { symbol: &'a SymbolRef }
+    "getTypesOfSymbols" => TypesOfSymbols { symbols: &'a [&'a SymbolRef] }
+    "getDeclaredTypeOfSymbol" => DeclaredTypeOfSymbol { symbol: &'a SymbolRef }
+    "getParentOfSymbolForChecker" => ParentOfSymbol { symbol: &'a SymbolRef }
+    "isReadonlySymbol" => ReadonlySymbol { symbol: &'a SymbolRef }
+    "getDocumentationComment" => DocumentationComment { symbol: &'a SymbolRef }
+    "getJsDocTags" => JsDocTags { symbol: &'a SymbolRef }
+    /// A declaration, by its node handle.
+    "getSymbolOfDeclarationForChecker" => SymbolOfDeclaration { location: &'a str }
+    /// Diagnostics take `files`; the singular `file` is ignored and checks the whole program.
+    "getSemanticDiagnostics" => SemanticDiagnostics { files: &'a [&'a str] }
+    "getSignaturesOfType" => SignaturesOfType { #[serde(rename = "type")] type_id: u64, kind: u8 }
+    "getBaseTypes" => BaseTypes { #[serde(rename = "type")] type_id: u64 }
+    "getPropertiesOfType" => PropertiesOfType { #[serde(rename = "type")] type_id: u64 }
+    "getIndexInfosOfType" => IndexInfosOfType { #[serde(rename = "type")] type_id: u64 }
+    "getTypeArguments" => TypeArguments { #[serde(rename = "type")] type_id: u64 }
+    /// Printed with `TypeFormatFlags`, or without them as the checker prints by default.
+    "typeToString" => TypeToString {
+        #[serde(rename = "type")] type_id: u64,
+        #[serde(skip_serializing_if = "Option::is_none")] flags: Option<u64>,
+    }
+    // A type or signature, by the handle the checker gave it.
+    "getSymbolOfType" => SymbolOfType { #[serde(rename = "objectId")] object_id: u64 }
+    "getTargetOfType" => TargetOfType { #[serde(rename = "objectId")] object_id: u64 }
+    "getTypesOfType" => TypesOfType { #[serde(rename = "objectId")] object_id: u64 }
+    "getAliasSymbolOfType" => AliasSymbolOfType { #[serde(rename = "objectId")] object_id: u64 }
+    "getAliasTypeArgumentsOfType" => AliasTypeArgumentsOfType { #[serde(rename = "objectId")] object_id: u64 }
+    "getDefaultFromTypeParameter" => DefaultFromTypeParameter { #[serde(rename = "objectId")] object_id: u64 }
+    "getTypeParametersOfSignature" => TypeParametersOfSignature { #[serde(rename = "objectId")] object_id: u64 }
+    "getParametersOfSignature" => ParametersOfSignature { #[serde(rename = "objectId")] object_id: u64 }
+    "getReturnTypeOfSignature" => ReturnTypeOfSignature { #[serde(rename = "objectId")] object_id: u64 }
+}
+
+/// A question's parameters: the snapshot and project, then the fields of what it asks.
 #[derive(Serialize)]
-struct Scoped<'a, E> {
+struct Scoped<'a> {
     project: &'a str,
     snapshot: u64,
     #[serde(flatten)]
-    extra: E,
+    ask: Ask<'a>,
+}
+
+impl Request for Scoped<'_> {
+    fn method(&self) -> &'static str {
+        self.ask.method()
+    }
 }
 
 /// One request of a batch.
 #[derive(Serialize)]
-struct Batched<'a, E> {
+struct Batched<'a> {
     method: &'static str,
-    params: Scoped<'a, E>,
+    params: Scoped<'a>,
+}
+
+impl<'a> Batched<'a> {
+    fn of(params: Scoped<'a>) -> Self {
+        Batched { method: params.method(), params }
+    }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BatchParams<'a, 'b, E> {
-    requests: &'b [Batched<'a, E>],
+struct BatchRequests<'a, 'b> {
+    requests: &'b [Batched<'a>],
     #[serde(skip_serializing_if = "Option::is_none")]
     continuation_token: Option<&'b str>,
+}
+
+impl Request for BatchRequests<'_, '_> {
+    fn method(&self) -> &'static str {
+        "batchRequests"
+    }
+}
+
+/// Starts the session; it takes no parameters.
+struct Initialize;
+
+impl Serialize for Initialize {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_unit()
+    }
+}
+
+impl Request for Initialize {
+    fn method(&self) -> &'static str {
+        "initialize"
+    }
+}
+
+#[derive(Serialize)]
+struct ParseConfigFile<'a> {
+    file: &'a str,
+}
+
+impl Request for ParseConfigFile<'_> {
+    fn method(&self) -> &'static str {
+        "parseConfigFile"
+    }
+}
+
+#[derive(Serialize)]
+struct Release {
+    snapshot: u64,
+}
+
+impl Request for Release {
+    fn method(&self) -> &'static str {
+        "release"
+    }
+}
+
+/// What a new snapshot changes from the one it is made from, or, sent to `createSnapshot`, from nothing.
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Changes<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_system: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_notifications: Option<FileNotifications<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    create_programs: Option<[NewProgram<'a>; 1]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reconfigure_programs: Option<[Reconfigured<'a>; 1]>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    ensure_programs: bool,
+}
+
+#[derive(Serialize)]
+struct FileNotifications<'a> {
+    changed: &'a [String],
+    deleted: &'a [String],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NewProgram<'a> {
+    root_files: &'a [String],
+    compiler_options: &'a Value,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Reconfigured<'a> {
+    id: &'a str,
+    root_files: &'a [String],
+    compiler_options: &'a Value,
+}
+
+#[derive(Serialize)]
+#[serde(transparent)]
+struct CreateSnapshot<'a>(Changes<'a>);
+
+impl Request for CreateSnapshot<'_> {
+    fn method(&self) -> &'static str {
+        "createSnapshot"
+    }
+}
+
+#[derive(Serialize)]
+struct UpdateSnapshot<'a> {
+    snapshot: u64,
+    changes: Changes<'a>,
+}
+
+impl Request for UpdateSnapshot<'_> {
+    fn method(&self) -> &'static str {
+        "updateSnapshot"
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -483,10 +623,10 @@ impl Rpc {
             calls: Arc::default(),
             others: Mutex::default(),
         };
-        rpc.call("initialize", &Value::Null).await?;
+        rpc.call(&Initialize).await?;
         Ok(match tsconfig {
             Some(file) => {
-                let parsed: Value = decode(&rpc.call("parseConfigFile", &json!({ "file": file })).await?)?;
+                let parsed: Value = decode(&rpc.call(&ParseConfigFile { file }).await?)?;
                 parsed.get("options").cloned().unwrap_or_else(default_options)
             }
             None => default_options(),
@@ -535,12 +675,13 @@ impl Rpc {
     /// this snapshot has read and parsed, and does not go to the disk again. It shares the request counts and the
     /// recording; it is released on its own.
     async fn beside(&self, client: Client, root_files: &[String]) -> Result<Rpc, CallError> {
-        let changes = json!({
-            "createPrograms": [{ "rootFiles": root_files, "compilerOptions": self.options }],
-            "ensurePrograms": true,
-        });
+        let changes = Changes {
+            create_programs: Some([NewProgram { root_files, compiler_options: &self.options }]),
+            ensure_programs: true,
+            ..Changes::default()
+        };
         let response: SnapshotResponse =
-            decode(&self.call("updateSnapshot", &json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
+            decode(&self.call(&UpdateSnapshot { snapshot: self.snapshot, changes }).await?)?;
         let rpc = Rpc {
             client,
             deadline: self.deadline,
@@ -578,7 +719,8 @@ impl Rpc {
             calls: Arc::default(),
             others: Mutex::default(),
         };
-        rpc.created(json!({ "createPrograms": [{ "rootFiles": root_files, "compilerOptions": options }] })).await
+        let program = NewProgram { root_files, compiler_options: options };
+        rpc.created(Changes { create_programs: Some([program]), ..Changes::default() }).await
     }
 
     /// A snapshot of a program rooted at `files` alone, held in the checker's memory and never written to disk (see
@@ -599,14 +741,14 @@ impl Rpc {
             calls: Arc::default(),
             others: Mutex::default(),
         };
-        let layer = in_memory_layer(files);
-        let roots: Vec<&String> = files.iter().map(|(path, _)| path).collect();
-        session
-            .created(json!({
-                "fileSystem": layer,
-                "createPrograms": [{ "rootFiles": roots, "compilerOptions": options }],
-            }))
-            .await
+        let roots: Vec<String> = files.iter().map(|(path, _)| path.clone()).collect();
+        let program = NewProgram { root_files: &roots, compiler_options: options };
+        let changes = Changes {
+            file_system: Some(in_memory_layer(files)),
+            create_programs: Some([program]),
+            ..Changes::default()
+        };
+        session.created(changes).await
     }
 
     /// The snapshot after this one with `files` added, held in the checker's memory and never written to disk (each is
@@ -618,13 +760,15 @@ impl Rpc {
     pub(crate) async fn layered(&self, root_files: &[String], files: &[(String, String)]) -> Result<Rpc, CallError> {
         let mut roots = root_files.to_vec();
         roots.extend(files.iter().map(|(path, _)| path.clone()));
-        let changes = json!({
-            "fileSystem": in_memory_layer(files),
-            "reconfigurePrograms": [{ "id": self.project, "rootFiles": roots, "compilerOptions": self.options }],
-            "ensurePrograms": true,
-        });
+        let program = Reconfigured { id: &self.project, root_files: &roots, compiler_options: &self.options };
+        let changes = Changes {
+            file_system: Some(in_memory_layer(files)),
+            reconfigure_programs: Some([program]),
+            ensure_programs: true,
+            ..Changes::default()
+        };
         let response: SnapshotResponse =
-            decode(&self.call("updateSnapshot", &json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
+            decode(&self.call(&UpdateSnapshot { snapshot: self.snapshot, changes }).await?)?;
         // The response lists the projects the update replaced: the reconfigured one, which may keep its id.
         let mut projects = response.projects.into_iter().map(|project| project.id);
         let project = match projects.len() {
@@ -634,7 +778,7 @@ impl Rpc {
                 Some(id) => id,
                 None => {
                     // Nothing will hold this snapshot to release it later.
-                    self.call("release", &json!({ "snapshot": response.snapshot })).await.ok();
+                    self.call(&Release { snapshot: response.snapshot }).await.ok();
                     return Err(CallError::Rejected(
                         "updateSnapshot changed programs other than the one reconfigured".to_string(),
                     ));
@@ -663,19 +807,16 @@ impl Rpc {
         deleted: &[String],
         roots: Option<&[String]>,
     ) -> Result<Rpc, CallError> {
-        let mut changes = serde_json::Map::new();
-        if !changed.is_empty() || !deleted.is_empty() {
-            changes.insert("fileNotifications".to_string(), json!({ "changed": changed, "deleted": deleted }));
-        }
-        if let Some(roots) = roots {
-            changes.insert(
-                "reconfigurePrograms".to_string(),
-                json!([{ "id": self.project, "rootFiles": roots, "compilerOptions": self.options }]),
-            );
-        }
-        changes.insert("ensurePrograms".to_string(), Value::Bool(true));
+        let changes = Changes {
+            file_notifications: (!changed.is_empty() || !deleted.is_empty())
+                .then_some(FileNotifications { changed, deleted }),
+            reconfigure_programs: roots
+                .map(|root_files| [Reconfigured { id: &self.project, root_files, compiler_options: &self.options }]),
+            ensure_programs: true,
+            ..Changes::default()
+        };
         let response: SnapshotResponse =
-            decode(&self.call("updateSnapshot", &json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
+            decode(&self.call(&UpdateSnapshot { snapshot: self.snapshot, changes }).await?)?;
         // The response lists only the projects it replaced; the synthetic program keeps its id.
         let project = response.projects.into_iter().next().map_or_else(|| self.project.clone(), |project| project.id);
         Ok(Rpc {
@@ -723,12 +864,12 @@ impl Rpc {
 
     /// Every file the snapshot's program read, as the checker names them.
     pub(crate) async fn source_file_names(&self) -> Result<Vec<String>, CallError> {
-        self.scoped("getSourceFileNames", Asking::Nothing {}).await
+        self.scoped(Ask::SourceFileNames {}).await
     }
 
     /// This session bound to the snapshot `createSnapshot` makes from `params`, and to its one project.
-    async fn created(mut self, params: Value) -> Result<Rpc, CallError> {
-        let response: SnapshotResponse = decode(&self.call("createSnapshot", &params).await?)?;
+    async fn created(mut self, changes: Changes<'_>) -> Result<Rpc, CallError> {
+        let response: SnapshotResponse = decode(&self.call(&CreateSnapshot(changes)).await?)?;
         self.snapshot = response.snapshot;
         let Some(project) = response.projects.into_iter().next() else {
             // Nothing will hold this snapshot to release it later.
@@ -743,7 +884,7 @@ impl Rpc {
     pub(crate) async fn release(&self) {
         let lanes = self.take_lanes();
         for snapshot in std::iter::once(self.snapshot).chain(lanes) {
-            self.call("release", &json!({ "snapshot": snapshot })).await.ok();
+            self.call(&Release { snapshot }).await.ok();
         }
     }
 
@@ -752,7 +893,7 @@ impl Rpc {
     /// released once, here or by [`Rpc::release`], never by both. Nothing may ask a lane after.
     pub(crate) async fn release_lanes(&self) {
         for snapshot in self.take_lanes() {
-            self.call("release", &json!({ "snapshot": snapshot })).await.ok();
+            self.call(&Release { snapshot }).await.ok();
         }
     }
 
@@ -776,7 +917,8 @@ impl Rpc {
 
     /// One request, its answer as the JSON text it arrived as: [`decode`] parses it once, into the shape the caller
     /// expects. The parameters are written straight to the text the checker reads.
-    async fn call(&self, method: &'static str, params: &impl Serialize) -> Result<Box<RawValue>, CallError> {
+    async fn call(&self, params: &impl Request) -> Result<Box<RawValue>, CallError> {
+        let method = params.method();
         // A release gives memory back, so it is sent past the heap budget too.
         if method != "release" {
             crate::heap::step()?;
@@ -799,117 +941,111 @@ impl Rpc {
         Ok(answer)
     }
 
-    async fn scoped<T: DeserializeOwned>(&self, method: &'static str, extra: Asking<'_>) -> Result<T, CallError> {
-        decode(&self.scoped_text(method, extra).await?)
+    async fn scoped<T: DeserializeOwned>(&self, ask: Ask<'_>) -> Result<T, CallError> {
+        decode(&self.scoped_text(ask).await?)
     }
 
-    /// A request about this snapshot and project, its answer left as text.
-    async fn scoped_text(&self, method: &'static str, extra: Asking<'_>) -> Result<Box<RawValue>, CallError> {
-        self.call(method, &Scoped { project: &self.project, snapshot: self.snapshot, extra }).await
+    /// A question about this snapshot and project, its answer left as text.
+    async fn scoped_text(&self, ask: Ask<'_>) -> Result<Box<RawValue>, CallError> {
+        self.call(&self.about(ask)).await
+    }
+
+    fn about<'a>(&'a self, ask: Ask<'a>) -> Scoped<'a> {
+        Scoped { project: &self.project, snapshot: self.snapshot, ask }
     }
 
     pub(crate) async fn source_file_symbol(&self, file: &str) -> Result<Option<SymbolInfo>, CallError> {
-        self.scoped("getSymbolOfSourceFile", Asking::File { file }).await
+        self.scoped(Ask::SymbolOfSourceFile { file }).await
     }
 
     pub(crate) async fn exports_of_module(&self, module: &SymbolRef) -> Result<Vec<SymbolInfo>, CallError> {
-        self.scoped("getExportsOfModule", Asking::Symbol { symbol: module }).await
+        self.scoped(Ask::ExportsOfModule { symbol: module }).await
     }
 
-    /// Only for symbols flagged `Alias`: the beta panics on a plain `default` export.
+    /// See [`Ask::AliasedSymbol`].
     pub(crate) async fn aliased_symbol(&self, symbol: &SymbolRef) -> Result<SymbolInfo, CallError> {
-        self.scoped("getAliasedSymbol", Asking::Symbol { symbol }).await
+        self.scoped(Ask::AliasedSymbol { symbol }).await
     }
 
     pub(crate) async fn type_of_symbol(&self, symbol: &SymbolRef) -> Result<TypeInfo, CallError> {
-        self.scoped("getTypeOfSymbol", Asking::Symbol { symbol }).await
+        self.scoped(Ask::TypeOfSymbol { symbol }).await
     }
 
     pub(crate) async fn types_of_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getTypesOfSymbols", Asking::Symbols { symbols }).await
+        self.scoped(Ask::TypesOfSymbols { symbols }).await
     }
 
     /// The call signatures of a type, or with `SignatureKind::Construct` its construct signatures.
     pub(crate) async fn signatures(&self, type_id: u64, kind: SignatureKind) -> Result<Vec<SignatureInfo>, CallError> {
-        self.scoped("getSignaturesOfType", Asking::Signatures { type_id, kind: kind as u8 }).await
+        self.scoped(Ask::SignaturesOfType { type_id, kind: kind as u8 }).await
     }
 
     pub(crate) async fn type_parameters(&self, signature: u64) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getTypeParametersOfSignature", Asking::Object { object_id: signature }).await
+        self.scoped(Ask::TypeParametersOfSignature { object_id: signature }).await
     }
 
     /// The type a type parameter defaults to (`"div"` in `E extends ElementType = "div"`); none when it declares none.
     pub(crate) async fn default_of_type_parameter(&self, type_id: u64) -> Result<Option<TypeInfo>, CallError> {
-        self.scoped("getDefaultFromTypeParameter", Asking::Object { object_id: type_id }).await
+        self.scoped(Ask::DefaultFromTypeParameter { object_id: type_id }).await
     }
 
     /// The type a type alias or interface declares, `T` in `type A = T`.
     pub(crate) async fn declared_type_of_symbol(&self, symbol: &SymbolRef) -> Result<TypeInfo, CallError> {
-        self.scoped("getDeclaredTypeOfSymbol", Asking::Symbol { symbol }).await
+        self.scoped(Ask::DeclaredTypeOfSymbol { symbol }).await
     }
 
     /// The type errors in a file of the program.
     pub(crate) async fn semantic_diagnostics(&self, file: &str) -> Result<Vec<FileDiagnostic>, CallError> {
-        // Diagnostics take `files`; the singular `file` is ignored and checks the whole program.
-        self.scoped("getSemanticDiagnostics", Asking::Files { files: &[file] }).await
+        self.scoped(Ask::SemanticDiagnostics { files: &[file] }).await
     }
 
     /// The symbol that declares a type: the interface, class, enum member or unique symbol behind it.
     pub(crate) async fn symbol_of_type(&self, type_id: u64) -> Result<Option<SymbolInfo>, CallError> {
-        self.scoped("getSymbolOfType", Asking::Object { object_id: type_id }).await
+        self.scoped(Ask::SymbolOfType { object_id: type_id }).await
     }
 
     /// The types a class or interface extends, instantiated as it names them (`Omit<HTMLAttributes<HTMLDivElement>, "color">`);
     /// none for a type that is not a class or interface.
     pub(crate) async fn base_types(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
-        let bases: Option<Vec<TypeInfo>> = self.scoped("getBaseTypes", Asking::Type { type_id }).await?;
+        let bases: Option<Vec<TypeInfo>> = self.scoped(Ask::BaseTypes { type_id }).await?;
         Ok(bases.unwrap_or_default())
     }
 
     pub(crate) async fn alias_type_arguments(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getAliasTypeArgumentsOfType", Asking::Object { object_id: type_id }).await
+        self.scoped(Ask::AliasTypeArgumentsOfType { object_id: type_id }).await
     }
 
     /// The generic type a reference instantiates; for a tuple reference, the tuple type that holds its element flags.
     pub(crate) async fn target_of_type(&self, type_id: u64) -> Result<TypeInfo, CallError> {
-        self.scoped("getTargetOfType", Asking::Object { object_id: type_id }).await
+        self.scoped(Ask::TargetOfType { object_id: type_id }).await
     }
 
     pub(crate) async fn parent_of_symbol(&self, symbol: &SymbolRef) -> Result<Option<SymbolInfo>, CallError> {
-        self.scoped("getParentOfSymbolForChecker", Asking::Symbol { symbol }).await
+        self.scoped(Ask::ParentOfSymbol { symbol }).await
     }
 
     /// Whether each property is declared `readonly`, in one round trip.
     pub(crate) async fn readonly_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<bool>, CallError> {
-        let requests = symbols.iter().map(|symbol| ("isReadonlySymbol", Asking::Symbol { symbol })).collect();
+        let requests = symbols.iter().map(|symbol| Ask::ReadonlySymbol { symbol }).collect();
         self.batch(requests).await?.iter().map(|answer| decode(answer)).collect()
     }
 
     /// Several requests in one round trip. A request the checker rejects fails the batch: nothing here asks for one
     /// that may legitimately fail.
-    pub(crate) async fn batch(
-        &self,
-        requests: Vec<(&'static str, Asking<'_>)>,
-    ) -> Result<Vec<Box<RawValue>>, CallError> {
+    pub(crate) async fn batch(&self, requests: Vec<Ask<'_>>) -> Result<Vec<Box<RawValue>>, CallError> {
         let wanted = requests.len();
         if let Ok(mut calls) = self.calls.lock() {
-            for (method, _) in &requests {
-                *calls.entry(method).or_default() += 1;
+            for ask in &requests {
+                *calls.entry(ask.method()).or_default() += 1;
             }
             *calls.entry("inBatches").or_default() += wanted as u64;
         }
-        let scoped: Vec<Batched<'_, Asking<'_>>> = requests
-            .into_iter()
-            .map(|(method, extra)| Batched {
-                method,
-                params: Scoped { project: &self.project, snapshot: self.snapshot, extra },
-            })
-            .collect();
+        let scoped: Vec<Batched<'_>> = requests.into_iter().map(|ask| Batched::of(self.about(ask))).collect();
         let mut answers = Vec::with_capacity(wanted);
         let mut token: Option<String> = None;
         loop {
-            let params = BatchParams { requests: &scoped, continuation_token: token.as_deref() };
-            let page: BatchPage = decode(&self.call("batchRequests", &params).await?)?;
+            let params = BatchRequests { requests: &scoped, continuation_token: token.as_deref() };
+            let page: BatchPage = decode(&self.call(&params).await?)?;
             for response in page.responses {
                 if let Some(error) = response.error {
                     return Err(CallError::Rejected(error));
@@ -928,34 +1064,34 @@ impl Rpc {
     }
 
     pub(crate) async fn parameters(&self, signature: u64) -> Result<Vec<SymbolInfo>, CallError> {
-        self.scoped("getParametersOfSignature", Asking::Object { object_id: signature }).await
+        self.scoped(Ask::ParametersOfSignature { object_id: signature }).await
     }
 
     pub(crate) async fn return_type(&self, signature: u64) -> Result<TypeInfo, CallError> {
-        self.scoped("getReturnTypeOfSignature", Asking::Object { object_id: signature }).await
+        self.scoped(Ask::ReturnTypeOfSignature { object_id: signature }).await
     }
 
     pub(crate) async fn properties(&self, type_id: u64) -> Result<Vec<SymbolInfo>, CallError> {
-        self.scoped("getPropertiesOfType", Asking::Type { type_id }).await
+        self.scoped(Ask::PropertiesOfType { type_id }).await
     }
 
     /// The members of a union, intersection or template literal, as the text the checker answered (a list of types).
     pub(crate) async fn members_text(&self, type_id: u64) -> Result<Box<RawValue>, CallError> {
-        self.scoped_text("getTypesOfType", Asking::Object { object_id: type_id }).await
+        self.scoped_text(Ask::TypesOfType { object_id: type_id }).await
     }
 
     /// The type arguments of a reference, as the text the checker answered (a list of types).
     pub(crate) async fn type_arguments_text(&self, type_id: u64) -> Result<Box<RawValue>, CallError> {
-        self.scoped_text("getTypeArguments", Asking::Type { type_id }).await
+        self.scoped_text(Ask::TypeArguments { type_id }).await
     }
 
     /// The call and construct signatures, the properties and the index signatures of a type, in one round trip.
     pub(crate) async fn object_members(&self, type_id: u64) -> Result<ObjectMembers, CallError> {
         let requests = vec![
-            ("getSignaturesOfType", Asking::Signatures { type_id, kind: SignatureKind::Call as u8 }),
-            ("getSignaturesOfType", Asking::Signatures { type_id, kind: SignatureKind::Construct as u8 }),
-            ("getPropertiesOfType", Asking::Type { type_id }),
-            ("getIndexInfosOfType", Asking::Type { type_id }),
+            Ask::SignaturesOfType { type_id, kind: SignatureKind::Call as u8 },
+            Ask::SignaturesOfType { type_id, kind: SignatureKind::Construct as u8 },
+            Ask::PropertiesOfType { type_id },
+            Ask::IndexInfosOfType { type_id },
         ];
         let mut answers = self.batch(requests).await?.into_iter();
         let mut next = || answers.next().ok_or_else(|| CallError::Rejected("a short batch".to_string()));
@@ -968,17 +1104,17 @@ impl Rpc {
     }
 
     pub(crate) async fn alias_symbol(&self, type_id: u64) -> Result<Option<SymbolInfo>, CallError> {
-        self.scoped("getAliasSymbolOfType", Asking::Object { object_id: type_id }).await
+        self.scoped(Ask::AliasSymbolOfType { object_id: type_id }).await
     }
 
     pub(crate) async fn type_to_string(&self, type_id: u64) -> Result<String, CallError> {
-        self.scoped("typeToString", Asking::Type { type_id }).await
+        self.scoped(Ask::TypeToString { type_id, flags: None }).await
     }
 
     /// The type as written inside a type alias declaration, and never cut short: an alias at the top is printed as what
     /// it stands for (`(value?: string) => void`, not `Handler`), and a long type is printed to its end.
     pub(crate) async fn type_to_string_expanded(&self, type_id: u64) -> Result<String, CallError> {
-        self.scoped("typeToString", Asking::Printed { type_id, flags: flag::PRINT_EXPANDED }).await
+        self.scoped(Ask::TypeToString { type_id, flags: Some(flag::PRINT_EXPANDED) }).await
     }
 }
 
@@ -1324,16 +1460,17 @@ mod tests {
     fn a_reference_is_written_back_as_it_arrived() {
         let symbol: SymbolInfo =
             serde_json::from_str(r#"{"reference":{"kind":1,"id":4,"file":"7"},"name":"a","flags":0}"#).unwrap();
-        let scoped = |extra| Scoped { project: "p0", snapshot: 3, extra };
+        let scoped = |ask| Scoped { project: "p0", snapshot: 3, ask };
 
-        let one = serde_json::to_string(&scoped(Asking::Symbol { symbol: &symbol.reference })).unwrap();
+        let one = serde_json::to_string(&scoped(Ask::TypeOfSymbol { symbol: &symbol.reference })).unwrap();
         let both = [&symbol.reference, &symbol.reference];
-        let many = serde_json::to_string(&scoped(Asking::Symbols { symbols: &both })).unwrap();
+        let many = serde_json::to_string(&scoped(Ask::TypesOfSymbols { symbols: &both })).unwrap();
         let requests = [
-            Batched { method: "isReadonlySymbol", params: scoped(Asking::Symbol { symbol: &symbol.reference }) },
-            Batched { method: "getTypesOfType", params: scoped(Asking::Object { object_id: 12 }) },
+            Batched::of(scoped(Ask::ReadonlySymbol { symbol: &symbol.reference })),
+            Batched::of(scoped(Ask::TypesOfType { object_id: 12 })),
         ];
-        let page = serde_json::to_string(&BatchParams { requests: &requests, continuation_token: Some("t") }).unwrap();
+        let page =
+            serde_json::to_string(&BatchRequests { requests: &requests, continuation_token: Some("t") }).unwrap();
 
         assert_eq!(symbol.reference.text(), r#"{"kind":1,"id":4,"file":"7"}"#);
         assert_eq!(one, r#"{"project":"p0","snapshot":3,"symbol":{"kind":1,"id":4,"file":"7"}}"#);
@@ -1345,7 +1482,368 @@ mod tests {
             page,
             r#"{"requests":[{"method":"isReadonlySymbol","params":{"project":"p0","snapshot":3,"symbol":{"kind":1,"id":4,"file":"7"}}},{"method":"getTypesOfType","params":{"project":"p0","snapshot":3,"objectId":12}}],"continuationToken":"t"}"#
         );
-        assert_eq!(serde_json::to_string(&scoped(Asking::Nothing {})).unwrap(), r#"{"project":"p0","snapshot":3}"#);
+        assert_eq!(
+            serde_json::to_string(&scoped(Ask::SourceFileNames {})).unwrap(),
+            r#"{"project":"p0","snapshot":3}"#
+        );
+    }
+
+    /// Stands in for a session: answers what a session needs to go on (a snapshot, compiler options, a batch's page),
+    /// `null` to every question, and records each request as its method and the text of its parameters.
+    struct Wire {
+        sent: Arc<Mutex<Vec<(String, String)>>>,
+        snapshots: std::sync::atomic::AtomicU64,
+    }
+
+    impl Served for Wire {
+        fn handle(&self, method: &str, params: &[u8]) -> Result<String, Failure> {
+            let text = String::from_utf8(params.to_vec()).unwrap();
+            self.sent.lock().unwrap().push((method.to_string(), text.clone()));
+            Ok(match method {
+                "parseConfigFile" => r#"{"options":{"strict":true}}"#.to_string(),
+                "createSnapshot" | "updateSnapshot" => {
+                    let n = self.snapshots.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    json!({ "snapshot": n, "projects": [{ "id": format!("p{n}") }] }).to_string()
+                }
+                "batchRequests" => {
+                    let params: Value = serde_json::from_str(&text).unwrap();
+                    let count = params["requests"].as_array().unwrap().len();
+                    json!({ "responses": vec![json!({ "result": null }); count] }).to_string()
+                }
+                _ => "null".to_string(),
+            })
+        }
+
+        fn discard(&self, _method: &str, _answer: &str) {}
+
+        fn close(&self) {}
+    }
+
+    /// Every request a session sends, in order, as its method and the text of its parameters: each method of [`Rpc`]
+    /// called once with fixed values (twice where its parameters vary), the batches [`crate::declared`] sends included.
+    fn sent_by_every_call() -> Vec<(String, String)> {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let session = Wire { sent: sent.clone(), snapshots: std::sync::atomic::AtomicU64::new(1) };
+        let checker = Backend::spawn(2, move || session).unwrap();
+        let runtime = multi_thread();
+        let deadline = Duration::from_secs(5);
+        runtime.block_on(async {
+            let roots = ["/p/a.ts".to_string(), "/p/b.tsx".to_string()];
+            let probe = [("/p/probe.ts".to_string(), "export {};".to_string())];
+            let lanes = Rpc::open_programs(checker.client(), deadline, Some("/p/tsconfig.json"), &roots, false, 2)
+                .await
+                .unwrap();
+            let rpc = &lanes[0];
+            let symbol: SymbolRef = serde_json::from_str(r#"{"kind":1,"id":4,"file":"7"}"#).unwrap();
+            let other: SymbolRef = serde_json::from_str(r#"{"kind":1,"id":5}"#).unwrap();
+            rpc.source_file_names().await.ok();
+            rpc.source_file_symbol("/p/a.ts").await.ok();
+            rpc.exports_of_module(&symbol).await.ok();
+            rpc.aliased_symbol(&symbol).await.ok();
+            rpc.type_of_symbol(&symbol).await.ok();
+            rpc.types_of_symbols(&[&symbol, &other]).await.ok();
+            rpc.signatures(11, SignatureKind::Call).await.ok();
+            rpc.signatures(11, SignatureKind::Construct).await.ok();
+            rpc.type_parameters(12).await.ok();
+            rpc.default_of_type_parameter(13).await.ok();
+            rpc.declared_type_of_symbol(&symbol).await.ok();
+            rpc.semantic_diagnostics("/p/b.tsx").await.ok();
+            rpc.symbol_of_type(14).await.ok();
+            rpc.base_types(15).await.ok();
+            rpc.alias_type_arguments(16).await.ok();
+            rpc.target_of_type(17).await.ok();
+            rpc.parent_of_symbol(&symbol).await.ok();
+            rpc.readonly_symbols(&[&symbol, &other]).await.ok();
+            rpc.batch(vec![
+                Ask::DocumentationComment { symbol: &symbol },
+                Ask::JsDocTags { symbol: &symbol },
+                Ask::SymbolOfDeclaration { location: "12.171./p/b.tsx" },
+            ])
+            .await
+            .ok();
+            rpc.batch(vec![Ask::ParentOfSymbol { symbol: &other }]).await.ok();
+            rpc.parameters(18).await.ok();
+            rpc.return_type(19).await.ok();
+            rpc.properties(20).await.ok();
+            rpc.members_text(21).await.ok();
+            rpc.type_arguments_text(22).await.ok();
+            rpc.object_members(23).await.ok();
+            rpc.alias_symbol(24).await.ok();
+            rpc.type_to_string(25).await.ok();
+            rpc.type_to_string_expanded(26).await.ok();
+            let layered = rpc.layered(&roots, &probe).await.unwrap();
+            layered.release().await;
+            let memory =
+                Rpc::open_in_memory(checker.client(), deadline, &json!({ "strict": true }), &probe).await.unwrap();
+            memory.release().await;
+            let changed = ["/p/a.ts".to_string()];
+            let deleted = ["/p/gone.ts".to_string()];
+            rpc.updated(&changed, &deleted, Some(&roots)).await.unwrap().release().await;
+            rpc.updated(&changed, &[], None).await.unwrap().release().await;
+            rpc.updated(&[], &[], Some(&roots[..1])).await.unwrap().release().await;
+            rpc.release_lanes().await;
+            rpc.release().await;
+        });
+        runtime.block_on(checker.shutdown_within(Duration::from_secs(5)));
+        sent.lock().unwrap().clone()
+    }
+
+    /// What `main` sent before requests were typed, one request a line, from [`sent_by_every_call`] run on `main` at
+    /// 61ce2402 (the `Asking` enum and `json!` parameters). A change here changes what the checker is sent.
+    const MAIN_WIRE: &str = r#"initialize null
+parseConfigFile {"file":"/p/tsconfig.json"}
+createSnapshot {"createPrograms":[{"rootFiles":["/p/a.ts","/p/b.tsx"],"compilerOptions":{"strict":true}}]}
+updateSnapshot {"snapshot":1,"changes":{"createPrograms":[{"rootFiles":["/p/a.ts","/p/b.tsx"],"compilerOptions":{"strict":true}}],"ensurePrograms":true}}
+getSourceFileNames {"project":"p1","snapshot":1}
+getSymbolOfSourceFile {"project":"p1","snapshot":1,"file":"/p/a.ts"}
+getExportsOfModule {"project":"p1","snapshot":1,"symbol":{"kind":1,"id":4,"file":"7"}}
+getAliasedSymbol {"project":"p1","snapshot":1,"symbol":{"kind":1,"id":4,"file":"7"}}
+getTypeOfSymbol {"project":"p1","snapshot":1,"symbol":{"kind":1,"id":4,"file":"7"}}
+getTypesOfSymbols {"project":"p1","snapshot":1,"symbols":[{"kind":1,"id":4,"file":"7"},{"kind":1,"id":5}]}
+getSignaturesOfType {"project":"p1","snapshot":1,"type":11,"kind":0}
+getSignaturesOfType {"project":"p1","snapshot":1,"type":11,"kind":1}
+getTypeParametersOfSignature {"project":"p1","snapshot":1,"objectId":12}
+getDefaultFromTypeParameter {"project":"p1","snapshot":1,"objectId":13}
+getDeclaredTypeOfSymbol {"project":"p1","snapshot":1,"symbol":{"kind":1,"id":4,"file":"7"}}
+getSemanticDiagnostics {"project":"p1","snapshot":1,"files":["/p/b.tsx"]}
+getSymbolOfType {"project":"p1","snapshot":1,"objectId":14}
+getBaseTypes {"project":"p1","snapshot":1,"type":15}
+getAliasTypeArgumentsOfType {"project":"p1","snapshot":1,"objectId":16}
+getTargetOfType {"project":"p1","snapshot":1,"objectId":17}
+getParentOfSymbolForChecker {"project":"p1","snapshot":1,"symbol":{"kind":1,"id":4,"file":"7"}}
+batchRequests {"requests":[{"method":"isReadonlySymbol","params":{"project":"p1","snapshot":1,"symbol":{"kind":1,"id":4,"file":"7"}}},{"method":"isReadonlySymbol","params":{"project":"p1","snapshot":1,"symbol":{"kind":1,"id":5}}}]}
+batchRequests {"requests":[{"method":"getDocumentationComment","params":{"project":"p1","snapshot":1,"symbol":{"kind":1,"id":4,"file":"7"}}},{"method":"getJsDocTags","params":{"project":"p1","snapshot":1,"symbol":{"kind":1,"id":4,"file":"7"}}},{"method":"getSymbolOfDeclarationForChecker","params":{"project":"p1","snapshot":1,"location":"12.171./p/b.tsx"}}]}
+batchRequests {"requests":[{"method":"getParentOfSymbolForChecker","params":{"project":"p1","snapshot":1,"symbol":{"kind":1,"id":5}}}]}
+getParametersOfSignature {"project":"p1","snapshot":1,"objectId":18}
+getReturnTypeOfSignature {"project":"p1","snapshot":1,"objectId":19}
+getPropertiesOfType {"project":"p1","snapshot":1,"type":20}
+getTypesOfType {"project":"p1","snapshot":1,"objectId":21}
+getTypeArguments {"project":"p1","snapshot":1,"type":22}
+batchRequests {"requests":[{"method":"getSignaturesOfType","params":{"project":"p1","snapshot":1,"type":23,"kind":0}},{"method":"getSignaturesOfType","params":{"project":"p1","snapshot":1,"type":23,"kind":1}},{"method":"getPropertiesOfType","params":{"project":"p1","snapshot":1,"type":23}},{"method":"getIndexInfosOfType","params":{"project":"p1","snapshot":1,"type":23}}]}
+getAliasSymbolOfType {"project":"p1","snapshot":1,"objectId":24}
+typeToString {"project":"p1","snapshot":1,"type":25}
+typeToString {"project":"p1","snapshot":1,"type":26,"flags":9453569}
+updateSnapshot {"snapshot":1,"changes":{"fileSystem":{"kind":"layer","files":{"/p/probe.ts":"export {};"}},"reconfigurePrograms":[{"id":"p1","rootFiles":["/p/a.ts","/p/b.tsx","/p/probe.ts"],"compilerOptions":{"strict":true}}],"ensurePrograms":true}}
+release {"snapshot":3}
+createSnapshot {"fileSystem":{"kind":"layer","files":{"/p/probe.ts":"export {};"}},"createPrograms":[{"rootFiles":["/p/probe.ts"],"compilerOptions":{"strict":true}}]}
+release {"snapshot":4}
+updateSnapshot {"snapshot":1,"changes":{"fileNotifications":{"changed":["/p/a.ts"],"deleted":["/p/gone.ts"]},"reconfigurePrograms":[{"id":"p1","rootFiles":["/p/a.ts","/p/b.tsx"],"compilerOptions":{"strict":true}}],"ensurePrograms":true}}
+release {"snapshot":5}
+updateSnapshot {"snapshot":1,"changes":{"fileNotifications":{"changed":["/p/a.ts"],"deleted":[]},"ensurePrograms":true}}
+release {"snapshot":6}
+updateSnapshot {"snapshot":1,"changes":{"reconfigurePrograms":[{"id":"p1","rootFiles":["/p/a.ts"],"compilerOptions":{"strict":true}}],"ensurePrograms":true}}
+release {"snapshot":7}
+release {"snapshot":2}
+release {"snapshot":1}
+"#;
+
+    /// Typing the requests changed no byte the checker is sent.
+    #[test]
+    fn every_request_is_written_as_main_wrote_it() {
+        let sent: String = sent_by_every_call().iter().map(|(method, params)| format!("{method} {params}\n")).collect();
+
+        assert_eq!(sent, MAIN_WIRE);
+    }
+
+    /// What tsrs reads of each request's parameters, and of the objects nested in them: the name, the keys a request
+    /// must send for its answer to be the one asked, and the keys it may leave out. tsrs reads a missing key as its zero
+    /// value and ignores one it does not know, so neither a misspelled key nor a missing one fails a request.
+    ///
+    /// Copied from `params_fields` in `tsrs_api` 0.24.0 (`src/paramfields.rs`, `pub(crate)`, so not importable): each
+    /// method's arm, then the nested structs by Go name. `getSymbolOfDeclarationForChecker` and
+    /// `getParentOfSymbolForChecker` have no arm; their keys are what their handlers read (`src/checker/dispatch.rs`
+    /// names them, `handlers_symbols.rs` reads `location` or `symbol` and, in `setup`, `snapshot` and `project`). To
+    /// refresh on a tsrs upgrade, read each method's arm in the new version's file and copy its `name`s; a method sent
+    /// that is missing here fails [`every_key_sent_is_one_tsrs_reads`].
+    const TSRS_READS: &[(&str, &[&str], &[&str])] = &[
+        ("initialize", &[], &[]),
+        ("parseConfigFile", &["file"], &[]),
+        (
+            "createSnapshot",
+            &["createPrograms"],
+            &[
+                "openProjects",
+                "closeProjects",
+                "openFiles",
+                "closeFiles",
+                "reconfigurePrograms",
+                "removePrograms",
+                "ensurePrograms",
+                "fileNotifications",
+                "fileSystem",
+            ],
+        ),
+        ("updateSnapshot", &["snapshot", "changes"], &[]),
+        ("release", &["snapshot"], &[]),
+        ("batchRequests", &["requests"], &["continuationToken", "maxResponseBytesPerPage"]),
+        ("getSourceFileNames", &["snapshot", "project"], &[]),
+        ("getSymbolOfSourceFile", &["snapshot", "project", "file"], &[]),
+        ("getSemanticDiagnostics", &["snapshot", "project", "files"], &[]),
+        ("getTypeOfSymbol", &["snapshot", "project", "symbol"], &[]),
+        ("getDeclaredTypeOfSymbol", &["snapshot", "project", "symbol"], &[]),
+        ("getAliasedSymbol", &["snapshot", "project", "symbol"], &[]),
+        ("getExportsOfModule", &["snapshot", "project", "symbol"], &[]),
+        ("getJsDocTags", &["snapshot", "project", "symbol"], &[]),
+        ("getDocumentationComment", &["snapshot", "project", "symbol"], &[]),
+        ("isReadonlySymbol", &["snapshot", "project", "symbol"], &[]),
+        ("getTypesOfSymbols", &["snapshot", "project", "symbols"], &[]),
+        ("getSignaturesOfType", &["snapshot", "project", "type", "kind"], &[]),
+        ("typeToString", &["snapshot", "project", "type"], &["location", "flags"]),
+        ("getSymbolOfType", &["snapshot", "project", "objectId"], &[]),
+        ("getTargetOfType", &["snapshot", "project", "objectId"], &[]),
+        ("getTypesOfType", &["snapshot", "project", "objectId"], &[]),
+        ("getAliasTypeArgumentsOfType", &["snapshot", "project", "objectId"], &[]),
+        ("getAliasSymbolOfType", &["snapshot", "project", "objectId"], &[]),
+        ("getDefaultFromTypeParameter", &["snapshot", "project", "objectId"], &[]),
+        ("getTypeParametersOfSignature", &["snapshot", "project", "objectId"], &[]),
+        ("getParametersOfSignature", &["snapshot", "project", "objectId"], &[]),
+        ("getReturnTypeOfSignature", &["snapshot", "project", "objectId"], &[]),
+        ("getBaseTypes", &["snapshot", "project", "type"], &[]),
+        ("getPropertiesOfType", &["snapshot", "project", "type"], &[]),
+        ("getIndexInfosOfType", &["snapshot", "project", "type"], &[]),
+        ("getTypeArguments", &["snapshot", "project", "type"], &[]),
+        ("getSymbolOfDeclarationForChecker", &["snapshot", "project", "location"], &[]),
+        ("getParentOfSymbolForChecker", &["snapshot", "project", "symbol"], &[]),
+        ("BatchRequest", &["method", "params"], &[]),
+        (
+            "CreateSnapshotParams",
+            &[],
+            &[
+                "openProjects",
+                "closeProjects",
+                "openFiles",
+                "closeFiles",
+                "createPrograms",
+                "reconfigurePrograms",
+                "removePrograms",
+                "ensurePrograms",
+                "userPreferences",
+                "prepareAutoImports",
+                "fileNotifications",
+                "fileSystem",
+            ],
+        ),
+        ("CreateSnapshotProgramParams", &["rootFiles", "compilerOptions"], &["options"]),
+        ("ReconfigureSnapshotProgramParams", &["id", "rootFiles", "compilerOptions"], &["options"]),
+        ("FileNotifications", &[], &["invalidateAll", "changed", "created", "deleted"]),
+    ];
+
+    /// Checks `params`, sent as `name`, against what tsrs reads of it, and the objects nested in it against theirs;
+    /// returns each mismatch.
+    fn mismatches(name: &str, params: &Value) -> Vec<String> {
+        let Some((_, required, optional)) = TSRS_READS.iter().find(|(known, _, _)| *known == name) else {
+            return vec![format!("{name}: not in the table of what tsrs reads")];
+        };
+        let Some(object) = params.as_object() else {
+            return if required.is_empty() && params.is_null() { vec![] } else { vec![format!("{name}: {params}")] };
+        };
+        let mut wrong: Vec<String> = Vec::new();
+        for key in object.keys() {
+            if !required.contains(&key.as_str()) && !optional.contains(&key.as_str()) {
+                wrong.push(format!("{name}: sends `{key}`, which tsrs does not read"));
+            }
+        }
+        for key in *required {
+            if !object.contains_key(*key) {
+                wrong.push(format!("{name}: does not send `{key}`"));
+            }
+        }
+        let each = |value: &'_ Value, key: &str| value.get(key).and_then(Value::as_array).cloned().unwrap_or_default();
+        // `createSnapshot` takes the changes as its parameters, `updateSnapshot` under `changes`.
+        if let Some(changes) = object.get("changes") {
+            wrong.extend(mismatches("CreateSnapshotParams", changes));
+        }
+        let changes = object.get("changes").unwrap_or(params);
+        if let Some(notified) = changes.get("fileNotifications") {
+            wrong.extend(mismatches("FileNotifications", notified));
+        }
+        for program in each(changes, "createPrograms") {
+            wrong.extend(mismatches("CreateSnapshotProgramParams", &program));
+        }
+        for program in each(changes, "reconfigurePrograms") {
+            wrong.extend(mismatches("ReconfigureSnapshotProgramParams", &program));
+        }
+        for request in each(params, "requests") {
+            wrong.extend(mismatches("BatchRequest", &request));
+            wrong.extend(mismatches(request["method"].as_str().unwrap_or_default(), &request["params"]));
+        }
+        wrong
+    }
+
+    /// Every request a session sends, and every request in its batches, sends exactly the keys tsrs reads for its
+    /// method: none it ignores, none it needs left out. And every method [`Ask`] names is among them.
+    #[test]
+    fn every_key_sent_is_one_tsrs_reads() {
+        let sent = sent_by_every_call();
+        let wrong: Vec<String> = sent
+            .iter()
+            .flat_map(|(method, params)| mismatches(method, &serde_json::from_str(params).unwrap()))
+            .collect();
+        let mut asked: Vec<String> = Vec::new();
+        for (method, params) in &sent {
+            asked.push(method.clone());
+            let params: Value = serde_json::from_str(params).unwrap();
+            for request in params.get("requests").and_then(Value::as_array).into_iter().flatten() {
+                asked.push(request["method"].as_str().unwrap().to_string());
+            }
+        }
+        let unasked: Vec<&str> =
+            ASKED.iter().copied().filter(|method| !asked.iter().any(|sent| sent == method)).collect();
+        let mut named = ASKED.to_vec();
+        named.sort_unstable();
+        named.dedup();
+
+        assert_eq!(wrong, Vec::<String>::new());
+        assert_eq!(unasked, Vec::<&str>::new(), "a method no call sends");
+        assert_eq!(named.len(), ASKED.len(), "a method named twice: {ASKED:?}");
+    }
+
+    /// The parameter that chooses the answer is read: a different `kind`, `flags` or `type` gives a different answer
+    /// from a real checker. (`files` has its own test, `semantic_diagnostics_checks_only_the_requested_file`.)
+    #[test]
+    fn each_parameter_that_chooses_the_answer_changes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let file = root.join("types.ts").to_string();
+        let source = "export type Handler = (value?: string) => void;\n\
+                      export interface Both { (x: number): string; new (x: string): Both; a: number }\n\
+                      export interface Other { b: string }\n\
+                      export declare const handler: Handler;\n";
+        let files = [(file.clone(), source.to_string())];
+        let checker = Backend::start(&root, 1).unwrap();
+        let runtime = multi_thread();
+        runtime.block_on(async {
+            let deadline = Duration::from_secs(30);
+            let client = checker.client();
+            let options = Rpc::prepare(&client, deadline, None).await.unwrap();
+            let rpc = Rpc::open_in_memory(client, deadline, &options, &files).await.unwrap();
+            let module = rpc.source_file_symbol(&file).await.unwrap().unwrap();
+            let exports = rpc.exports_of_module(&module.reference).await.unwrap();
+            let export = |name: &str| exports.iter().find(|symbol| symbol.name == name).unwrap().reference.clone();
+            let both = rpc.declared_type_of_symbol(&export("Both")).await.unwrap().id;
+            let other = rpc.declared_type_of_symbol(&export("Other")).await.unwrap().id;
+            let handler = rpc.type_of_symbol(&export("handler")).await.unwrap().id;
+            let returned = async |kind| {
+                let mut printed = Vec::new();
+                for signature in rpc.signatures(both, kind).await.unwrap() {
+                    let returns = rpc.return_type(signature.id).await.unwrap().id;
+                    printed.push(rpc.type_to_string(returns).await.unwrap());
+                }
+                printed
+            };
+            let names = async |type_id| {
+                rpc.properties(type_id).await.unwrap().into_iter().map(|property| property.name).collect::<Vec<_>>()
+            };
+
+            assert_eq!(returned(SignatureKind::Call).await, ["string"]);
+            assert_eq!(returned(SignatureKind::Construct).await, ["Both"]);
+            assert_eq!(rpc.type_to_string(handler).await.unwrap(), "Handler");
+            assert_eq!(rpc.type_to_string_expanded(handler).await.unwrap(), "(value?: string | undefined) => void");
+            assert_eq!(names(both).await, ["a"]);
+            assert_eq!(names(other).await, ["b"]);
+            rpc.release().await;
+        });
+        runtime.block_on(checker.shutdown());
     }
 
     #[test]
