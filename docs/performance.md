@@ -4,6 +4,40 @@ How fast Caliper is and what it costs is recorded in `docs/measurement.md`: a we
 
 The per-pull-request scorecard that used to enforce these numbers is gone. It caught one real regression (Mantine 38% and Chakra 47% slower after a batch of 20 resolver pull requests merged on 2026-10-26, found by the weekly run), and its gates failed on runner noise and on bases that had moved. The figures below came from it and are history, not limits.
 
+## Results with the checker and dependencies, 2026-11-23
+
+What a user gets by default: the checker and `--load-dependencies` on. The 15 to 39 times of the 2026-10-22 table below is the structural resolver alone; with the checker the edge over react-docgen-typescript (RDT) is 2 to 9 times cold and 6 to 30 times on a second run.
+
+Method: `scripts/weekly.py` (no `--oracle`) on main at `f00cbdc4`, five runs per corpus, Apple Silicon laptop, macOS, load average 8 to 12. Cold is one whole process; second run is the same command with the cache warm. RDT is the same run through `withCustomConfig`.
+
+| Corpus   | Caliper cold | Caliper second run |    RDT | Cold vs RDT | Second run vs RDT | Peak RSS, Caliper / RDT |
+| -------- | -----------: | -----------------: | -----: | ----------: | ----------------: | ----------------------: |
+| mantine  |       0.82 s |             0.32 s | 1.88 s |        2.3× |              5.8× |           645 / 583 MiB |
+| chakra   |       2.92 s |             0.94 s | 26.5 s |        9.1× |               28× |       1,077 / 2,865 MiB |
+| shadcn   |       1.39 s |             0.67 s |  5.0 s |        3.6× |              7.4× |         715 / 1,612 MiB |
+| antd     |       0.77 s |             0.10 s | 3.05 s |        4.0× |               30× |         367 / 1,070 MiB |
+| spectrum |       0.59 s |             0.27 s | 2.69 s |        4.5× |              9.9× |           456 / 876 MiB |
+
+Caliper's peak memory is below RDT's on four corpora and above it on Mantine.
+
+Since 2026-11-19 the cold runs fell by the whole-program diagnostics fix (`getSemanticDiagnostics` was sent `file`, which tsrs ignores, so every cold run type-checked the whole program: 12 to 76% wall time), by fewer and deduplicated checker requests, and by one conversion of an identical type instead of several in parallel.
+
+### Where the CPU goes, 2026-11-23
+
+A cold run makes about 40 threads: two rayon pools of 18 (Caliper's and tsrs's own `worker_pool()`, which tsrs sizes only from `RAYON_NUM_THREADS`), four tokio converter threads, two checker threads and main. `sample` at 1 ms on shadcn (load 3.7): about 37% of on-CPU samples are file-system syscalls, which is why system time is about 35% of CPU (user 3.5 s, sys 2.2 s). The largest items are tsrs's `realpath` (an `lstat` per path component), `read_file` and `file_exists`; Caliper's own dependency loader and `resolve_package_types_file` account for about 260 samples. Rayon idle spinning is about 4% on a quiet machine and about 30% at load 32.
+
+Variants, five interleaved runs on a quiet machine (output byte-identical in every one):
+
+| Variant | Wall | CPU | Peak RSS |
+| --- | --- | --- | --- |
+| `RAYON_NUM_THREADS=4` (both pools) | -2% to +12%, Chakra +7% (+23% at 2 threads) | -20% to -39% | -5% to -16% |
+| tsrs pool at 4, Caliper's unchanged | unchanged | -4% to -30% | 0 to -5% |
+| Caliper's pool at 4, tsrs's unchanged | +5% to +9% on four corpora | -6% to -15% | -5% to -10% |
+| One checker program (`CHECKER_PROGRAMS = 1`) | -2% to +20% (Mantine +20%) | -13% to -21% | -2% to -5% |
+| Two converter threads | -9% to +19% | -7% to 0% | unchanged |
+
+A thread cap costs wall time and the addon's session start (`startMs` 63 to 67 ms became 89 to 91 ms with Caliper's pool at 4), so it is not applied. The cap that costs nothing is on tsrs's pool, which needs a setting from tsrs.
+
 ## Size model
 
 Extraction time fits t ≈ 6.4 ms + 0.13 ms/kLOC + 3.8 ms/kprop (props summed over components). It is a sizing guide, reported by the old scorecard as "Model ms", never a gate: a fixed cost that varies by machine dominates small corpora, so per-corpus residuals vary too much to gate on. On the run below the model is within 2× of the measured extract time on every corpus (0.45× for mantine to 1.6× for chakra).
