@@ -32,8 +32,8 @@ type FxDashSet<K> = DashSet<K, FxBuildHasher>;
 /// The module a `(scope, specifier)` resolved to, once the first demand of the scope has resolved it.
 type ModuleCell = Arc<OnceLock<Option<Utf8PathBuf>>>;
 
-/// The resolution scope of a directory, once it is known (`Loader::scope_within`).
-type ScopeCell = Arc<OnceLock<Option<Box<str>>>>;
+/// What one probe of a directory found, once it has run (`probe_once`).
+type ProbeCell = Arc<OnceLock<bool>>;
 
 /// `(directory of the importing file, specifier, exported name path)`.
 type DemandKey = (Box<str>, Box<str>, CompactString);
@@ -432,10 +432,10 @@ struct Loader<'a> {
     augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
     unresolved: FxDashMap<DemandKey, Unresolved>,
-    /// Package directory of each directory asked about or passed on the way up, for grouping the index.
-    packages: FxDashMap<Box<str>, Option<Box<str>>>,
-    /// The resolution scope of each directory asked about or passed on the way up (`scope_within`).
-    scopes: FxDashMap<Box<str>, ScopeCell>,
+    /// Whether each directory `package_of` passed has a `package.json` file.
+    package_manifests: FxDashMap<Box<str>, ProbeCell>,
+    /// Whether each directory `resolution_scope` passed has one of its marks.
+    scope_marks: FxDashMap<Box<str>, ProbeCell>,
     /// What each `(scope, specifier)` of a module-only demand resolved to, when outside the project and not React's.
     module_demands: FxDashMap<(Box<str>, Box<str>), ModuleCell>,
     /// The re-exports of files that only an augmentation search passed through, which it did not parse in full.
@@ -466,8 +466,8 @@ impl<'a> Loader<'a> {
             augmenter_crossed: DashMap::default(),
             demands: DashSet::default(),
             unresolved: DashMap::default(),
-            packages: DashMap::default(),
-            scopes: DashMap::default(),
+            package_manifests: DashMap::default(),
+            scope_marks: DashMap::default(),
             module_demands: DashMap::default(),
             re_exports: DashMap::default(),
             learned: AtomicBool::new(false),
@@ -812,20 +812,10 @@ impl Loader<'_> {
     /// (its `imports`), a `tsconfig.json` or `jsconfig.json` (its `paths`) or a `node_modules`. A bare specifier
     /// resolves alike from every directory with the same scope. A directory with no such ancestor is its own.
     fn resolution_scope(&self, dir: &str) -> Box<str> {
-        self.scope_within(Utf8Path::new(dir)).unwrap_or_else(|| Box::from(dir))
-    }
-
-    /// The scope of `dir` if it or an ancestor has a mark. Memoised for every directory on the way up, so the files of
-    /// one tree probe each directory once rather than once per directory below it; the demands of a load start at once,
-    /// so one probe of a directory serves the threads that ask together. The wait only ever runs up the tree.
-    fn scope_within(&self, dir: &Utf8Path) -> Option<Box<str>> {
-        let cell = self.scopes.entry(Box::from(dir.as_str())).or_default().clone();
-        cell.get_or_init(|| {
-            let marks = ["package.json", "tsconfig.json", "jsconfig.json", "node_modules"];
-            let has_mark = marks.iter().any(|mark| dir.join(mark).exists());
-            if has_mark { Some(Box::from(dir.as_str())) } else { dir.parent().and_then(|up| self.scope_within(up)) }
-        })
-        .clone()
+        let marks = ["package.json", "tsconfig.json", "jsconfig.json", "node_modules"];
+        let has_mark = |candidate: &Utf8Path| marks.iter().any(|mark| candidate.join(mark).exists());
+        let scope = Utf8Path::new(dir).ancestors().find(|candidate| probe_once(&self.scope_marks, candidate, has_mark));
+        Box::from(scope.map_or(dir, Utf8Path::as_str))
     }
 
     /// Load the files `module` leads to through its re-exports that merge declarations into React
@@ -988,20 +978,26 @@ impl Loader<'_> {
         }
     }
 
-    /// The nearest directory at or above `dir` with a `package.json`, if it is inside `node_modules`. Memoised for every
-    /// directory on the way up, as `scope_within` is.
+    /// The nearest directory at or above `dir` with a `package.json`, if it is inside `node_modules`.
     fn package_of(&self, dir: &Utf8Path) -> Option<Box<str>> {
-        if let Some(found) = self.packages.get(dir.as_str()) {
-            return found.clone();
-        }
-        let found = if dir.join("package.json").is_file() {
-            in_node_modules(dir.as_str()).then(|| Box::from(dir.as_str()))
-        } else {
-            dir.parent().and_then(|up| self.package_of(up))
-        };
-        self.packages.insert(Box::from(dir.as_str()), found.clone());
-        found
+        let has_manifest = |candidate: &Utf8Path| candidate.join("package.json").is_file();
+        dir.ancestors()
+            .find(|candidate| probe_once(&self.package_manifests, candidate, has_manifest))
+            .filter(|candidate| in_node_modules(candidate.as_str()))
+            .map(|candidate| Box::from(candidate.as_str()))
     }
+}
+
+/// `probe(dir)`, asked of the disk once per load: the files of one tree share their ancestors, and a load's demands
+/// start together, so the threads that ask about one directory at once wait for one probe. A probe never waits on
+/// another directory's, and the callers walk the lexical ancestors in a loop, so a deep tree cannot deadlock or
+/// exhaust the stack.
+fn probe_once(memo: &FxDashMap<Box<str>, ProbeCell>, dir: &Utf8Path, probe: impl FnOnce(&Utf8Path) -> bool) -> bool {
+    let cell = match memo.get(dir.as_str()) {
+        Some(cell) => cell.clone(),
+        None => memo.entry(Box::from(dir.as_str())).or_default().clone(),
+    };
+    *cell.get_or_init(|| probe(dir))
 }
 
 /// Whether `source` could declare into the React namespace: `declare module "react"` or `namespace React`, which are
@@ -1089,17 +1085,10 @@ pub(crate) fn load(
     options: &PipelineOptions,
     previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
-    load_with(demands, options, previous, &ModuleResolvers::new(options))
-}
-
-/// `load` through `resolvers`, which a caller that resolves next with the same options passes on, so their
-/// file-system cache serves both.
-pub(crate) fn load_with(
-    demands: Vec<Demand>,
-    options: &PipelineOptions,
-    previous: Option<&Arc<DependencyLayer>>,
-    resolvers: &ModuleResolvers,
-) -> DependencyLayer {
+    // Its own resolvers, never another consumer's: `oxc_resolver` keeps a config reached through another's
+    // `references` without that config's own references, so a shared cache would make what this load resolves depend
+    // on what was resolved first.
+    let resolvers = &ModuleResolvers::new(options);
     let project_dirs: Vec<Utf8PathBuf> =
         options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
     let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();

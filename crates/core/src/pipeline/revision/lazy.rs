@@ -109,7 +109,6 @@ struct Engine {
 }
 
 impl Engine {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         global: &Arc<GlobalSourceData>,
         options: &PipelineOptions,
@@ -117,18 +116,16 @@ impl Engine {
         named_types: &Arc<NamedTypeIndex>,
         layer: Option<Arc<DependencyLayer>>,
         react_types: &Option<Arc<NamedTypeIndex>>,
-        resolvers: ModuleResolvers,
     ) -> Engine {
         let named_types = match &layer {
             Some(layer) => Arc::new(named_types.with_fallback(layer.named_types.clone())),
             None => named_types.clone(),
         };
-        let ctx = ResolutionContext::with_module_resolvers(
+        let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),
             options,
             ambient_global_files.to_vec(),
             named_types,
-            resolvers,
         )
         .with_dependencies(layer.clone())
         .with_react_types(react_types.clone());
@@ -205,10 +202,8 @@ impl Revision {
                 demands.iter().filter(|demand| &*demand.specifier == "react" || demand.name.is_empty()).cloned()
             })
             .collect();
-        let resolvers = ModuleResolvers::new(options);
-        let layer =
-            options.load_dependencies.then(|| Arc::new(dependency_types::load_with(react, options, None, &resolvers)));
-        let engine = Engine::new(&global, options, &ambient_global_files, &named_types, layer, &react_types, resolvers);
+        let layer = options.load_dependencies.then(|| Arc::new(dependency_types::load(react, options, None)));
+        let engine = Engine::new(&global, options, &ambient_global_files, &named_types, layer, &react_types);
         lib_diagnostics.extend(engine.ctx.tsconfig_diagnostic.clone());
         let (dts_files_parsed, dts_cache_hits) = cache.counts();
         let tail_diagnostics: Vec<Diagnostic> = match Arc::try_unwrap(cache) {
@@ -325,15 +320,7 @@ impl Revision {
         affected_files.dedup();
 
         let layer = previous.engine.load().layer.clone();
-        let engine = Engine::new(
-            &global,
-            options,
-            &self.ambient_global_files,
-            &named_types,
-            layer,
-            &self.react_types,
-            ModuleResolvers::new(options),
-        );
+        let engine = Engine::new(&global, options, &self.ambient_global_files, &named_types, layer, &self.react_types);
         // A kept answer is decided again against the new call sites, so an edit to a consumer can change its `used`
         // lists without touching its resolution. The new sites are the ones the next answer reads.
         if memo.iter().any(|entry| entry.value().evidence.is_some()) {

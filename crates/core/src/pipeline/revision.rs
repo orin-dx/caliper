@@ -17,7 +17,7 @@ use crate::cache::DtsCache;
 use crate::dependency_types::{self, Demand, DependencyLayer};
 use crate::named_type_index::NamedTypeIndex;
 use crate::resolver::relevance_inputs::{self, ProjectSites};
-use crate::resolver::{Dependencies, ModuleResolvers, ResolutionContext};
+use crate::resolver::{Dependencies, ResolutionContext};
 use crate::types::output::severity_rank;
 use crate::types::*;
 
@@ -555,21 +555,17 @@ impl Revision {
         }
         let demands: Vec<Demand> = file_demands.into_iter().flat_map(|(_, demands)| demands).collect();
 
-        let resolvers = ModuleResolvers::new(options);
-        let dependencies = options
-            .load_dependencies
-            .then(|| Arc::new(dependency_types::load_with(demands, options, None, &resolvers)));
+        let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
         let global = Arc::new(global);
         let mut named_types = NamedTypeIndex::build(&global);
         named_types.fallback = dependencies.as_ref().map(|layer| layer.named_types.clone());
         let named_types = Arc::new(named_types);
         let ambient_global_files = crate::resolver::compute_ambient_global_files(options);
-        let ctx = ResolutionContext::with_module_resolvers(
+        let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),
             options,
             ambient_global_files.clone(),
             named_types.clone(),
-            resolvers,
         )
         .with_dependencies(dependencies.clone())
         .with_react_types(react_types.clone());

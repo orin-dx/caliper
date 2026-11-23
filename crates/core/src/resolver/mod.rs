@@ -335,7 +335,7 @@ impl ResolutionContext {
     #[cfg(test)]
     pub fn new(global: Arc<GlobalSourceData>, options: &PipelineOptions) -> Self {
         let named_types = Arc::new(crate::named_type_index::NamedTypeIndex::build(&global));
-        Self::build(global, options, compute_ambient_global_files(options), named_types, ModuleResolvers::new(options))
+        Self::build(global, options, compute_ambient_global_files(options), named_types)
     }
 
     /// A context over an index and ambient file list the caller already holds. A watch revision patches its
@@ -347,19 +347,7 @@ impl ResolutionContext {
         ambient_global_files: Vec<Utf8PathBuf>,
         named_types: Arc<crate::named_type_index::NamedTypeIndex>,
     ) -> Self {
-        Self::build(global, options, ambient_global_files, named_types, ModuleResolvers::new(options))
-    }
-
-    /// `new_with_cached_ambient_global_files` over `resolvers`, built from the same `options`: the ones the dependency
-    /// loader of this revision used, so their file-system cache already holds the paths it reached.
-    pub(crate) fn with_module_resolvers(
-        global: Arc<GlobalSourceData>,
-        options: &PipelineOptions,
-        ambient_global_files: Vec<Utf8PathBuf>,
-        named_types: Arc<crate::named_type_index::NamedTypeIndex>,
-        resolvers: ModuleResolvers,
-    ) -> Self {
-        Self::build(global, options, ambient_global_files, named_types, resolvers)
+        Self::build(global, options, ambient_global_files, named_types)
     }
 
     fn build(
@@ -367,9 +355,11 @@ impl ResolutionContext {
         options: &PipelineOptions,
         ambient_global_files: Vec<Utf8PathBuf>,
         named_types: Arc<crate::named_type_index::NamedTypeIndex>,
-        resolvers: ModuleResolvers,
     ) -> Self {
-        let tsconfig_diagnostic = resolvers.tsconfig_diagnostic;
+        let resolvers = ModuleResolvers::new(options);
+        // First, on the context's own cache: what the context resolves next is what it resolved before any sharing.
+        let tsconfig_diagnostic = tsconfig_diagnostic(options, &resolvers.main);
+
         let mut enum_bare_index: FxHashMap<CompactString, CompactString> = FxHashMap::default();
         // Sorted so a bare name shared by several files binds to the same one regardless of hash order.
         let mut enum_keys: Vec<&String> = global.enums.keys().collect();
@@ -701,10 +691,18 @@ pub fn resolve_package_dts_path(
     react::resolve_package_types_file(&resolvers.main, &resolvers.types_first, &importing_file, package_name)
 }
 
-/// Why the governing tsconfig cannot be used, if it cannot: a tsconfig that can't be read or parsed would otherwise
-/// fail every aliased import one by one. `resolver` must not have resolved anything yet: its cache would hide a failure
-/// (a nested config that lists the governing one under `references` caches it without loading its own).
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread checked the governing tsconfig (`tsconfig_diagnostic`).
+    pub(crate) static TSCONFIG_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Why the governing tsconfig cannot be used, if it cannot: one that can't be read or parsed would otherwise fail every
+/// aliased import one by one. Asked of `resolver` before it resolves anything, which also loads the governing config
+/// with its references into its cache.
 fn tsconfig_diagnostic(options: &PipelineOptions, resolver: &Resolver) -> Option<Diagnostic> {
+    #[cfg(test)]
+    TSCONFIG_CHECKS.with(|checks| checks.set(checks.get() + 1));
     let path = governing_tsconfig(options)?;
     let error = resolver.resolve_tsconfig(path.as_std_path()).err()?;
     Some(
@@ -718,15 +716,14 @@ fn tsconfig_diagnostic(options: &PipelineOptions, resolver: &Resolver) -> Option
     )
 }
 
-/// The two resolvers of a run, configured the way TypeScript resolves this project's modules (`resolve_options`).
+/// The two resolvers of a run, configured the way TypeScript resolves this project's modules (`resolve_options`). Each
+/// consumer (the dependency loader, a `ResolutionContext`) builds its own and shares it with no other, for the reason
+/// in `new`.
 pub(crate) struct ModuleResolvers {
     pub(crate) main: Resolver,
     /// Only `types` and the custom conditions: `resolve_dts` takes the first `exports` key that matches any condition,
     /// so a package listing `"import"` before `"types"` resolves to JavaScript; this one reaches its declarations.
     pub(crate) types_first: Resolver,
-    /// Why the governing tsconfig cannot be used, if it cannot. Decided here, before either resolver resolves anything,
-    /// so the resolutions that share their cache cannot change the answer.
-    pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
 }
 
 impl ModuleResolvers {
@@ -735,12 +732,10 @@ impl ModuleResolvers {
         let custom = custom_conditions(options);
         let types_first =
             ResolveOptions { condition_names: std::iter::once("types".into()).chain(custom).collect(), ..main.clone() };
-        // One file-system cache for both: they differ only in conditions, and each would otherwise stat and read the
-        // same `node_modules` paths again.
-        let main = Resolver::new(main);
-        let tsconfig_diagnostic = tsconfig_diagnostic(options, &main);
-        let types_first = main.clone_with_options(types_first);
-        ModuleResolvers { main, types_first, tsconfig_diagnostic }
+        // A cache each, not `clone_with_options`: `oxc_resolver` caches a tsconfig reached through another's
+        // `references` without its own references, and a directory's nearest tsconfig once, so one resolver's answers
+        // would depend on what the other resolved first.
+        ModuleResolvers { main: Resolver::new(main), types_first: Resolver::new(types_first) }
     }
 }
 

@@ -1546,5 +1546,62 @@ fn concurrent_resolution_scopes_agree() {
     });
     assert!(scopes.iter().all(|scope| &**scope == root.join("pkg").as_str()), "{scopes:?}");
     // The 16 leaves, then `b`, `a` and `pkg`, where the walk stops.
-    assert_eq!(loader.scopes.len(), 19);
+    assert_eq!(loader.scope_marks.len(), 19);
+}
+
+/// Concurrent first asks of sibling packages' directories agree, and each directory on the way up is probed once.
+#[test]
+fn concurrent_package_lookups_agree() {
+    let (_tmp, root) = project(&[]);
+    let dist = root.join("node_modules/ui-kit/dist");
+    for i in 0..16 {
+        std::fs::create_dir_all(dist.join(i.to_string())).unwrap();
+    }
+    let resolvers = ModuleResolvers::new(&options(&root, true));
+    let loader = Loader::new(&resolvers, &[], None);
+    let packages: Vec<Option<Box<str>>> = std::thread::scope(|threads| {
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let (loader, dir) = (&loader, dist.join(i.to_string()));
+                threads.spawn(move || loader.package_of(&dir))
+            })
+            .collect();
+        handles.into_iter().map(|handle| handle.join().unwrap()).collect()
+    });
+    let package = Some(Box::from(root.join("node_modules/ui-kit").as_str()));
+    assert!(packages.iter().all(|found| *found == package), "{packages:?}");
+    // The 16 leaves, then `dist` and `ui-kit`, where the walk stops.
+    assert_eq!(loader.package_manifests.len(), 18);
+}
+
+/// A tree deeper than any real one, with and without a mark above it, gets the answer of a plain walk up to the root.
+#[test]
+fn a_deep_tree_and_a_path_with_no_mark_get_the_plain_walk_s_answer() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    let deep = (0..400).fold(root.clone(), |dir, _| dir.join("d"));
+    std::fs::create_dir_all(&deep).unwrap();
+    let marks = ["package.json", "tsconfig.json", "jsconfig.json", "node_modules"];
+    let plain_scope = |dir: &Utf8Path| {
+        let found = dir.ancestors().find(|candidate| marks.iter().any(|mark| candidate.join(mark).exists()));
+        Box::<str>::from(found.unwrap_or(dir).as_str())
+    };
+    let plain_package = |dir: &Utf8Path| {
+        let found = dir.ancestors().find(|candidate| candidate.join("package.json").is_file());
+        found
+            .filter(|candidate| in_node_modules(candidate.as_str()))
+            .map(|candidate| Box::<str>::from(candidate.as_str()))
+    };
+    let resolvers = ModuleResolvers::new(&PipelineOptions::default());
+    for marked in [false, true] {
+        if marked {
+            std::fs::write(root.join("d/package.json"), "{}").unwrap();
+        }
+        let loader = Loader::new(&resolvers, &[], None);
+        assert_eq!(loader.resolution_scope(deep.as_str()), plain_scope(&deep));
+        assert_eq!(loader.package_of(&deep), plain_package(&deep));
+    }
+    // With no mark anywhere above it, a directory is its own scope.
+    let loader = Loader::new(&resolvers, &[], None);
+    assert_eq!(&*loader.resolution_scope("/"), plain_scope(Utf8Path::new("/")).as_ref());
 }

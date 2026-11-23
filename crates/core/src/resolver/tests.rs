@@ -3254,60 +3254,280 @@ fn a_forward_ref_component_keeps_react_s_ref_in_its_element_layer_under_full() {
     assert!(holds("ref") && holds("type") && holds("onClick"), "{layer:?}");
 }
 
-/// `main` and `types_first` answer from one file-system cache: what one has seen, the other does not ask the disk for.
-#[test]
-fn module_resolvers_share_one_file_system_cache() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-    for (path, body) in [
-        ("node_modules/kit/package.json", r#"{ "name": "kit", "types": "index.d.ts" }"#),
-        ("node_modules/kit/index.d.ts", "export type A = string;\n"),
-    ] {
-        std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
-        std::fs::write(root.join(path), body).unwrap();
-    }
-    let resolvers = ModuleResolvers::new(&PipelineOptions::default());
-    let importer = root.join("index.ts");
-    let main = resolvers.main.resolve_dts(importer.as_std_path(), "kit").unwrap();
-    std::fs::remove_dir_all(root.join("node_modules")).unwrap();
-    let types_first = resolvers.types_first.resolve_dts(importer.as_std_path(), "kit").unwrap();
-    assert_eq!(types_first.path(), main.path());
-    // A new set of resolvers reads the disk again.
-    assert!(ModuleResolvers::new(&PipelineOptions::default()).main.resolve_dts(importer.as_std_path(), "kit").is_err());
+/// One tsconfig layout of the resolver model: the governing config's `references` and `extends`, the config of
+/// `src/nested`, and whether the run names its tsconfig or discovers the nearest one.
+#[derive(Clone, Copy, Debug)]
+struct Layout {
+    /// Bits: 1 a reference that does not exist, 2 a reference to `src/nested`.
+    governing_references: u8,
+    /// The governing config takes its `@base/*` alias from `tsconfig.base.json`.
+    extends: bool,
+    nested: Nested,
+    manual: bool,
 }
 
-/// The governing tsconfig is validated before the resolvers resolve anything: a nested config that lists it under
-/// `references` makes `oxc_resolver` cache it without loading its references, which hides a reference that does not
-/// exist.
-#[test]
-fn a_governing_tsconfig_with_a_missing_reference_is_reported_after_a_nested_config_warmed_the_resolvers() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-    for (path, body) in [
-        ("tsconfig.json", r#"{ "references": [{ "path": "./missing" }] }"#),
-        (
-            "src/nested/tsconfig.json",
+#[derive(Clone, Copy, Debug)]
+enum Nested {
+    Absent,
+    /// Its own `@n/*` alias.
+    Plain,
+    /// Its own `@n/*` alias, and the governing config under `references`, by file name.
+    ReferencesGoverning,
+    /// A solution config (no files of its own) whose referenced `tsconfig.app.json` owns `app` and defines `@app/*`.
+    Solution,
+}
+
+fn write_layout(root: &camino::Utf8Path, layout: Layout) {
+    let mut references = Vec::new();
+    if layout.governing_references & 1 != 0 {
+        references.push(r#"{ "path": "./missing" }"#);
+    }
+    if layout.governing_references & 2 != 0 {
+        references.push(r#"{ "path": "./src/nested/tsconfig.json" }"#);
+    }
+    let extends = if layout.extends { r#""extends": "./tsconfig.base.json","# } else { "" };
+    let governing = format!(
+        r#"{{ {extends} "compilerOptions": {{ "baseUrl": ".", "paths": {{ "@g/*": ["./src/g/*"] }} }}, "references": [{}] }}"#,
+        references.join(", ")
+    );
+    let nested = match layout.nested {
+        Nested::Absent => None,
+        Nested::Plain => Some(r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@n/*": ["./*"] } } }"#),
+        Nested::ReferencesGoverning => Some(
             r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@n/*": ["./*"] } }, "references": [{ "path": "../../tsconfig.json" }] }"#,
         ),
-        ("src/nested/inner.ts", "export type A = string;\n"),
-    ] {
+        Nested::Solution => {
+            Some(r#"{ "files": [], "include": [], "references": [{ "path": "./tsconfig.app.json" }] }"#)
+        }
+    };
+    let mut files: Vec<(&str, String)> = vec![
+        ("tsconfig.json", governing),
+        ("tsconfig.base.json", r#"{ "compilerOptions": { "paths": { "@base/*": ["./src/base/*"] } } }"#.into()),
+        ("src/main.ts", String::new()),
+        ("src/g/one.ts", "export type One = 1;\n".into()),
+        ("src/base/two.ts", "export type Two = 2;\n".into()),
+        ("src/nested/inner.ts", "export type Inner = 0;\n".into()),
+        ("src/nested/app/main.ts", String::new()),
+        ("src/nested/app/three.ts", "export type Three = 3;\n".into()),
+        // What a Vite app's solution config references: the files under `app` are its, and so is the `@app/*` alias.
+        (
+            "src/nested/tsconfig.app.json",
+            r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@app/*": ["./app/*"] } }, "include": ["app/**/*"] }"#
+                .into(),
+        ),
+        // `import` before `types`: `main` takes the JavaScript entry and `types_first` the declarations.
+        (
+            "node_modules/kit/package.json",
+            r#"{ "name": "kit", "exports": { ".": { "import": "./index.js", "types": "./index.d.ts" } } }"#.into(),
+        ),
+        ("node_modules/kit/index.js", "export {};\n".into()),
+        ("node_modules/kit/index.d.ts", "export type Kit = 1;\n".into()),
+    ];
+    if let Some(nested) = nested {
+        files.push(("src/nested/tsconfig.json", nested.into()));
+    }
+    for (path, body) in files {
         std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
         std::fs::write(root.join(path), body).unwrap();
     }
-    let options = PipelineOptions { src_dirs: vec![root.join("src")], ..Default::default() };
-    let governing = root.join("tsconfig.json");
-    // The premise: on a fresh cache the missing reference makes the governing config unusable.
-    assert!(ModuleResolvers::new(&options).main.resolve_tsconfig(governing.as_std_path()).is_err());
+}
 
-    // What the dependency loader does first: resolve from a file under the nested config.
-    let resolvers = ModuleResolvers::new(&options);
-    let importer = root.join("src/nested/index.ts");
-    let _ = super::import::resolve_module_with(&resolvers.main, &resolvers.types_first, "@n/inner", &importer);
+fn all_layouts() -> Vec<Layout> {
+    let mut layouts = Vec::new();
+    for governing_references in 0..4 {
+        for extends in [false, true] {
+            for nested in [Nested::Absent, Nested::Plain, Nested::ReferencesGoverning, Nested::Solution] {
+                for manual in [false, true] {
+                    layouts.push(Layout { governing_references, extends, nested, manual });
+                }
+            }
+        }
+    }
+    layouts
+}
+
+/// A resolver of the model: `main` or `types_first`, which resolve under different conditions.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kind {
+    Main,
+    TypesFirst,
+}
+
+/// What resolving `specifier` from `importer` gave, with the project root cut off.
+fn answer(resolver: &oxc_resolver::Resolver, root: &camino::Utf8Path, importer: &str, specifier: &str) -> String {
+    match resolver.resolve_file(root.join(importer).as_std_path(), specifier) {
+        Ok(found) => found.path().to_string_lossy().replace(root.as_str(), ""),
+        Err(error) => format!("error: {}", error.to_string().replace(root.as_str(), "")),
+    }
+}
+
+/// The resolutions of the model: every importer, specifier and resolver.
+fn queries() -> Vec<(Kind, &'static str, &'static str)> {
+    let mut queries = Vec::new();
+    for importer in ["src/main.ts", "src/nested/inner.ts", "src/nested/app/main.ts"] {
+        for specifier in ["@g/one", "@base/two", "@n/inner", "@app/three", "kit"] {
+            for kind in [Kind::Main, Kind::TypesFirst] {
+                queries.push((kind, importer, specifier));
+            }
+        }
+    }
+    queries
+}
+
+/// One order of the model: the loader's and the context's query orders, who starts, and whether they alternate.
+struct Order {
+    name: &'static str,
+    loader: Vec<usize>,
+    context: Vec<usize>,
+    loader_first: bool,
+    interleaved: bool,
+}
+
+fn orders() -> Vec<Order> {
+    let n = queries().len();
+    let forward: Vec<usize> = (0..n).collect();
+    let backward: Vec<usize> = (0..n).rev().collect();
+    // Every `types_first` query before any `main` one, within each consumer.
+    let mut types_first: Vec<usize> = forward.iter().copied().filter(|i| i % 2 == 1).collect();
+    types_first.extend(forward.iter().copied().filter(|i| i % 2 == 0));
+    let order = |name, loader: &Vec<usize>, context: &Vec<usize>, loader_first, interleaved| Order {
+        name,
+        loader: loader.clone(),
+        context: context.clone(),
+        loader_first,
+        interleaved,
+    };
+    vec![
+        order("loader first", &forward, &forward, true, false),
+        order("context first", &forward, &forward, false, false),
+        order("interleaved", &forward, &backward, true, true),
+        order("interleaved, context first", &backward, &forward, false, true),
+        order("types_first first", &types_first, &types_first, true, true),
+        order("main first", &forward, &types_first, false, true),
+    ]
+}
+
+/// The arrangement before resolver sharing, the oracle: each consumer has a fresh `main` and a fresh `types_first`, and
+/// the context checks the governing tsconfig on its fresh `main` before it resolves anything. A consumer's answers
+/// depend on its own queries alone.
+fn oracle(options: &PipelineOptions, root: &camino::Utf8Path, order: &[usize], context: bool) -> Vec<String> {
+    let main_options = super::resolve_options(options);
+    let types_first_options = oxc_resolver::ResolveOptions {
+        condition_names: std::iter::once("types".into()).chain(super::custom_conditions(options)).collect(),
+        ..main_options.clone()
+    };
+    let main = oxc_resolver::Resolver::new(main_options);
+    let types_first = oxc_resolver::Resolver::new(types_first_options);
+    if context && let Some(path) = super::governing_tsconfig(options) {
+        let _governing = main.resolve_tsconfig(path.as_std_path());
+    }
+    let queries = queries();
+    order
+        .iter()
+        .map(|&i| {
+            let (kind, importer, specifier) = queries[i];
+            answer(if kind == Kind::Main { &main } else { &types_first }, root, importer, specifier)
+        })
+        .collect()
+}
+
+fn empty_context(options: &PipelineOptions) -> ResolutionContext {
     let global = Arc::new(GlobalSourceData::default());
     let named_types = Arc::new(crate::named_type_index::NamedTypeIndex::build(&global));
-    let ctx = ResolutionContext::with_module_resolvers(global, &options, Vec::new(), named_types, resolvers);
+    ResolutionContext::new_with_cached_ambient_global_files(global, options, Vec::new(), named_types)
+}
 
-    let diagnostic = ctx.tsconfig_diagnostic.expect("the governing tsconfig is unusable");
-    assert!(diagnostic.message.starts_with("Could not use the tsconfig"), "{}", diagnostic.message);
-    assert_eq!(diagnostic.file.as_deref(), Some(governing.as_str()));
+/// The resolver model: for every tsconfig layout and every order in which the dependency loader and the context resolve,
+/// under both condition sets, each consumer's answers and the tsconfig report equal those of fresh resolvers per
+/// consumer (`oracle`). The loader's resolvers are the ones `dependency_types::load` builds, the context's the ones
+/// `ResolutionContext` builds.
+#[test]
+fn resolutions_and_the_tsconfig_report_do_not_depend_on_resolution_order() {
+    let queries = queries();
+    let mut failures = Vec::new();
+    for layout in all_layouts() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        write_layout(&root, layout);
+        let options = PipelineOptions {
+            src_dirs: vec![root.join("src")],
+            tsconfig_path: layout.manual.then(|| root.join("tsconfig.json")),
+            ..Default::default()
+        };
+        let expected_report = super::governing_tsconfig(&options).and_then(|path| {
+            let fresh = oxc_resolver::Resolver::new(super::resolve_options(&options));
+            fresh.resolve_tsconfig(path.as_std_path()).err().map(|_| path.to_string())
+        });
+        for order in orders() {
+            let loader = ModuleResolvers::new(&options);
+            let mut context = (!order.loader_first).then(|| empty_context(&options));
+            let (mut from_loader, mut from_context) = (Vec::new(), Vec::new());
+            let ask = |main: &oxc_resolver::Resolver, types_first: &oxc_resolver::Resolver, i: usize| {
+                let (kind, importer, specifier) = queries[i];
+                answer(if kind == Kind::Main { main } else { types_first }, &root, importer, specifier)
+            };
+            for step in 0..queries.len() {
+                if order.loader_first || order.interleaved {
+                    from_loader.push(ask(&loader.main, &loader.types_first, order.loader[step]));
+                }
+                if !order.loader_first || order.interleaved {
+                    let ctx = context.get_or_insert_with(|| empty_context(&options));
+                    from_context.push(ask(&ctx.oxc_resolver, &ctx.types_first_resolver, order.context[step]));
+                }
+            }
+            let ctx = context.get_or_insert_with(|| empty_context(&options));
+            if !order.interleaved {
+                for step in 0..queries.len() {
+                    if order.loader_first {
+                        from_context.push(ask(&ctx.oxc_resolver, &ctx.types_first_resolver, order.context[step]));
+                    } else {
+                        from_loader.push(ask(&loader.main, &loader.types_first, order.loader[step]));
+                    }
+                }
+            }
+            let report = ctx.tsconfig_diagnostic.as_ref().and_then(|diagnostic| diagnostic.file.clone());
+            let name = order.name;
+            if from_loader != oracle(&options, &root, &order.loader, false) {
+                failures.push(format!("{layout:?} {name}: the loader's answers"));
+            }
+            if from_context != oracle(&options, &root, &order.context, true) {
+                failures.push(format!("{layout:?} {name}: the context's answers"));
+            }
+            if report != expected_report {
+                failures.push(format!("{layout:?} {name}: report {report:?}, expected {expected_report:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// Only a context checks the governing tsconfig: the dependency loader, a lazy grow of it and a package lookup do not.
+#[test]
+fn only_a_context_checks_the_governing_tsconfig() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    write_layout(&root, Layout { governing_references: 3, extends: true, nested: Nested::Solution, manual: false });
+    let options = PipelineOptions { src_dirs: vec![root.join("src")], load_dependencies: true, ..Default::default() };
+    let checks = || super::TSCONFIG_CHECKS.with(std::cell::Cell::get);
+    let before = checks();
+    let layer = Arc::new(crate::dependency_types::load(Vec::new(), &options, None));
+    let _ = crate::dependency_types::load(Vec::new(), &options, Some(&layer));
+    let _ = super::resolve_package_dts_path(&root.join("src"), "kit", &options);
+    assert_eq!(checks(), before);
+    let ctx = empty_context(&options);
+    assert_eq!(checks(), before + 1);
+    assert!(ctx.tsconfig_diagnostic.is_some());
+}
+
+/// Each load builds its resolvers afresh, so a later load (a lazy grow, a watch revision) sees `node_modules` as it is.
+#[test]
+fn new_module_resolvers_see_the_disk_as_it_is_now() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    write_layout(&root, Layout { governing_references: 0, extends: false, nested: Nested::Absent, manual: false });
+    let options = PipelineOptions { src_dirs: vec![root.join("src")], ..Default::default() };
+    let first = ModuleResolvers::new(&options);
+    assert_eq!(answer(&first.types_first, &root, "src/main.ts", "kit"), "/node_modules/kit/index.d.ts");
+    std::fs::remove_dir_all(root.join("node_modules")).unwrap();
+    assert!(answer(&ModuleResolvers::new(&options).types_first, &root, "src/main.ts", "kit").starts_with("error"));
 }
