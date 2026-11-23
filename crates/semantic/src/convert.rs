@@ -836,7 +836,7 @@ struct State {
     /// The types of the properties [`Converter::fields`] lists, by the object type's handle and [`Listing`].
     field_types: Answers<(u64, Listing), Arc<[Arc<TypeInfo>]>>,
     /// Whether each of those properties is `readonly`, asked only for fields the size budget does not cut (see
-    /// [`Converter::fields`]).
+    /// [`Converter::fields`]), and kept only for a list with a property its answer does not settle.
     readonly: Answers<(u64, Listing), Arc<[bool]>>,
     /// Where props are declared ([`crate::declared`]), kept for the snapshot like the rest.
     declared: crate::declared::Memo,
@@ -1989,18 +1989,35 @@ impl Converter {
         // that object ([`Self::convert`]) replaces it with its name, and whether a property is `readonly` reaches
         // nothing.
         if !references.is_empty() && !fields_past_size_budget(&fields, MAX_SIZE) {
-            let readonly = self
-                .state
-                .readonly
-                .get(listed, || async { Ok(Arc::from(self.rpc.readonly_symbols(&references).await?)) })
-                .await?;
-            // `listed` names the same symbol list every time, so the cached flags are one per reference asked.
-            debug_assert_eq!(readonly.len(), references.len(), "the cached readonly flags are of another list");
+            let readonly = self.readonly(listed, properties).await?;
             for (field, readonly) in fields.iter_mut().zip(readonly.iter()) {
                 field.readonly = *readonly;
             }
         }
         Ok(fields)
+    }
+
+    /// Whether each property of `listed` is `readonly`: what the property answer settles ([`SymbolInfo::readonly`]),
+    /// and the checker's answer for the rest. Only answers that needed the checker are kept.
+    async fn readonly(&self, listed: (u64, Listing), properties: &[SymbolInfo]) -> Result<Arc<[bool]>, CallError> {
+        if let Some(settled) = properties.iter().map(|property| property.readonly).collect::<Option<Arc<[bool]>>>() {
+            return Ok(settled);
+        }
+        let readonly = self
+            .state
+            .readonly
+            .get(listed, || async {
+                let asked: Vec<_> =
+                    properties.iter().filter(|property| property.readonly.is_none()).map(|p| &p.reference).collect();
+                let mut answers = self.rpc.readonly_symbols(&asked).await?.into_iter();
+                let readonly: Option<Arc<[bool]>> =
+                    properties.iter().map(|property| property.readonly.or_else(|| answers.next())).collect();
+                readonly.ok_or_else(|| CallError::Rejected("a short isReadonlySymbol batch".to_string()))
+            })
+            .await?;
+        // `listed` names the same symbol list every time, so the cached flags are one per property.
+        debug_assert_eq!(readonly.len(), properties.len(), "the cached readonly flags are of another list");
+        Ok(readonly)
     }
 
     /// The parameter markers of the signatures of an object type, as the checker prints the type (see
@@ -2548,6 +2565,49 @@ mod tests {
         let style = &component.props.iter().find(|prop| prop.name == "style").unwrap().prop_type;
         assert!(field(style, "p167").readonly, "{style:?}");
         assert_eq!(calls.get("isReadonlySymbol"), Some(&168), "{calls:?}");
+    }
+
+    /// A mapped type's properties have no declaration of their own: their check flags say whether they are `readonly`,
+    /// and a method or a getter is settled by its flags. None of them is asked about; on the base each of the eight
+    /// was.
+    #[test]
+    fn mapped_properties_methods_and_getters_are_not_asked_whether_they_are_readonly() {
+        let (outcome, calls) = answered_with_calls(
+            "interface Base { a: string; readonly b: number; m(): void; get g(): number }\n\
+             type Frozen<T> = { readonly [K in keyof T]: T[K] };\n\
+             type Loose<T> = { [K in keyof T]?: T[K] };\n\
+             export function C(props: { f: Frozen<Base>; l: Loose<Base> }) { return null; }\n",
+        );
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let prop = |name: &str| &component.props.iter().find(|prop| prop.name == name).unwrap().prop_type;
+        let readonly = |ty: &PropType| ["a", "b", "m", "g"].map(|name| field(ty, name).readonly);
+        assert_eq!(readonly(prop("f")), [true, true, true, true]);
+        assert_eq!(readonly(prop("l")), [false, true, false, true]);
+        assert_eq!(calls.get("isReadonlySymbol"), None, "{calls:?}");
+        // Nor is an empty batch sent for a list the answers settle whole: the six are the members' and the props'.
+        assert_eq!(calls.get("batchRequests"), Some(&6), "{calls:?}");
+    }
+
+    /// The own list of an object (below the top, past the fields allowed from outside the project) settles what the
+    /// whole list settles: `got`, a getter, is `readonly` in both and asked about in neither; `own` is asked about once
+    /// per list, and of the lib's `String` only its declared properties (`length`), not its methods. On the base each
+    /// of the whole list's properties was asked about.
+    #[test]
+    fn the_own_list_settles_readonly_as_the_whole_list_does() {
+        let (outcome, calls) = answered_with_calls(
+            "interface Wide extends String { readonly own: boolean; get got(): number }\n\
+             export function C(props: { b: { inner: Wide }; a: Wide }) { return null; }\n",
+        );
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let prop = |name: &str| &component.props.iter().find(|prop| prop.name == name).unwrap().prop_type;
+        let whole = |name: &str| field(prop("a"), name).readonly;
+        assert_eq!((whole("own"), whole("got"), whole("length"), whole("charAt")), (true, true, true, false));
+        let PropType::Intersection(parts) = &field(prop("b"), "inner").prop_type else { panic!("{:?}", prop("b")) };
+        let PropType::Object(own) = &parts[0] else { panic!("{parts:?}") };
+        let own: Vec<_> = own.iter().map(|field| (field.name.as_str(), field.readonly)).collect();
+        // `key` is `String`'s index signature, `readonly [index: number]: string`.
+        assert_eq!(own, [("own", true), ("got", true), ("key", true)]);
+        assert_eq!(calls.get("isReadonlySymbol"), Some(&4), "{calls:?}");
     }
 
     /// One object type is listed whole at the top and only its own properties below it, where fewer properties from

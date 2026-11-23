@@ -144,6 +144,9 @@ pub(crate) struct SymbolInfo {
     /// The symbol it is a member of: the interface or type literal that declares a property. Absent for a property a
     /// mapped type or an intersection made (`Omit<Base, "x">`, `A & B`), whose declarations still name the original.
     pub parent: Option<CompactSymbol>,
+    /// What `isReadonlySymbol` answers for this symbol when the rest of the answer settles it
+    /// ([`settled_readonly`]); None when only the checker can say.
+    pub readonly: Option<bool>,
 }
 
 impl SymbolInfo {
@@ -164,12 +167,19 @@ struct SymbolWire {
     declarations: Vec<String>,
     #[serde(default)]
     parent: Option<CompactSymbol>,
+    /// Absent from an answer that does not carry it, which settles nothing ([`settled_readonly`]).
+    check_flags: Option<u64>,
+    #[serde(default)]
+    value_declaration: Option<String>,
 }
 
 impl From<SymbolWire> for SymbolInfo {
     fn from(wire: SymbolWire) -> Self {
         let member = internal_member_name(&wire.name);
         let name = unescape_leading_underscores(&wire.name).to_string();
+        let readonly = wire.check_flags.and_then(|check_flags| {
+            settled_readonly(wire.flags, check_flags, wire.value_declaration.is_some(), &wire.declarations)
+        });
         Self {
             reference: wire.reference,
             name,
@@ -177,9 +187,42 @@ impl From<SymbolWire> for SymbolInfo {
             flags: wire.flags,
             declarations: wire.declarations,
             parent: wire.parent,
+            readonly,
         }
     }
 }
+
+/// What the checker's `isReadonlySymbol` answers for a symbol, read off its flags, check flags, whether it has a value
+/// declaration and its declarations' kinds; None when that depends on what the answer leaves out. The checker (tsrs
+/// `is_readonly_symbol`, TypeScript's `isReadonlySymbol`) answers true for exactly:
+/// - a transient symbol whose check flags say `Readonly` (a mapped, reverse-mapped or union property);
+/// - a getter without a setter, and an enum member;
+/// - a property whose value declaration has the `readonly` modifier: the answer has no modifiers, so asked;
+/// - a variable declared `const`: the answer has no node flags, so asked;
+/// - a symbol with an `Object.defineProperty` call among its declarations: settled false only when every declaration
+///   is of a kind in [`NO_ASSIGNMENT_DECLARATION`].
+///
+/// A property without a value declaration (a mapped type's) has no declaration modifiers to read.
+fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, declarations: &[String]) -> Option<bool> {
+    if check_flags & flag::CHECK_READONLY != 0
+        || flags & flag::SYMBOL_GET_ACCESSOR != 0 && flags & flag::SYMBOL_SET_ACCESSOR == 0
+        || flags & flag::SYMBOL_ENUM_MEMBER != 0
+    {
+        return Some(true);
+    }
+    let modifiers_unread = flags & flag::SYMBOL_PROPERTY != 0 && value_declaration;
+    let constant_unread = flags & flag::SYMBOL_VARIABLE != 0;
+    let declarations_known = declarations.iter().all(|declaration| {
+        let kind = declaration.split('.').nth(1).and_then(|kind| kind.parse::<u32>().ok());
+        kind.is_some_and(|kind| NO_ASSIGNMENT_DECLARATION.contains(&kind))
+    });
+    (!modifiers_unread && !constant_unread && declarations_known).then_some(false)
+}
+
+/// The syntax kinds (tsrs 0.24 numbering, as node handles carry them) of the declarations that are not an
+/// `Object.defineProperty` call: parameter, property signature and declaration, method signature and declaration, get
+/// and set accessor, property assignment, shorthand property assignment.
+const NO_ASSIGNMENT_DECLARATION: [u32; 9] = [171, 173, 174, 175, 176, 179, 180, 304, 305];
 
 /// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
 /// `[brand]`. An ES-private member is `__#<symbol id>@#<name>`; the source writes `#<name>`. The id is the checker's
@@ -391,6 +434,14 @@ pub(crate) mod flag {
     pub(crate) const CONDITIONAL: u64 = 67108864;
     pub(crate) const UNION: u64 = 134217728;
     pub(crate) const INTERSECTION: u64 = 268435456;
+    /// `SymbolFlags`.
+    pub(crate) const SYMBOL_VARIABLE: u64 = 1 | 2;
+    pub(crate) const SYMBOL_PROPERTY: u64 = 4;
+    pub(crate) const SYMBOL_ENUM_MEMBER: u64 = 8;
+    pub(crate) const SYMBOL_GET_ACCESSOR: u64 = 32768;
+    pub(crate) const SYMBOL_SET_ACCESSOR: u64 = 65536;
+    /// `CheckFlags.Readonly`: a transient symbol made readonly.
+    pub(crate) const CHECK_READONLY: u64 = 8;
     pub(crate) const SYMBOL_INTERFACE: u64 = 64;
     pub(crate) const SYMBOL_ALIAS: u64 = 2097152;
     pub(crate) const SYMBOL_OPTIONAL: u64 = 16777216;
@@ -1042,6 +1093,134 @@ mod tests {
             rpc.release().await;
         });
         runtime.block_on(checker.shutdown());
+    }
+
+    /// Every form of property, of every kind of type that lists them: for each property whose answer settles
+    /// `isReadonlySymbol` ([`SymbolInfo::readonly`]), the checker answers the same. Also pins the syntax kinds
+    /// [`NO_ASSIGNMENT_DECLARATION`] reads off the node handles, which a checker upgrade may renumber.
+    #[test]
+    fn a_settled_readonly_answer_is_the_checkers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let file = root.join("forms.ts").to_string();
+        let source = "\
+            export interface I { a: string; readonly b: number; m(): void; get g(): number; get gs(): number; \
+              set gs(v: number); set so(v: number); c?: boolean; 'quoted-key': 1; readonly [Symbol.iterator]: 1; }\n\
+            export class K { x = 1; readonly y = 2; declare z: string; private p = 1; #q = 1; static s = 1; \
+              static readonly t = 1; get gk() { return 1; } set gk(v) {} get only() { return 1; } \
+              constructor(public pp: number, readonly rp: number) {} method() {} }\n\
+            export type R = Readonly<I>;\n\
+            export type P = Partial<I>;\n\
+            export type Req = Required<Partial<R>>;\n\
+            export type Mut = { -readonly [Key in keyof R]: R[Key] };\n\
+            export type Pk = Pick<I, 'a' | 'b' | 'm' | 'g'>;\n\
+            export type O = Omit<I, 'a'>;\n\
+            export type Rec = Record<'u' | 'v', number>;\n\
+            export type Ro = { readonly [Key in 'k1' | 'k2']: Key };\n\
+            export type Renamed = { [Key in keyof I as `on${Capitalize<string & Key>}`]: I[Key] };\n\
+            export type X = I & { readonly a: string; b: number; extra: 1 };\n\
+            export type Y = R & { a: string };\n\
+            export type U = I | { readonly a: string; b: number; m(): void; g: number; gs: number; c?: boolean };\n\
+            export type Inst = InstanceType<typeof K>;\n\
+            export type Tup = readonly [number, string];\n\
+            export type MutTup = [number, ...string[]];\n\
+            export type Str = String;\n\
+            export type Arr = ReadonlyArray<number>;\n\
+            export enum E { A, B = 'b' }\n\
+            const short = 1;\n\
+            export const ns = { lit: 1, readonly ro: 2, get gg() { return 1; }, set ss(v: number) {}, method() {}, short, \
+              ['computed']: 1, ...{ spread: 1 } };\n\
+            export const frozen = { a: 1, b: [1] } as const;\n\
+            export const fn = Object.assign(() => 1, { attached: 1 });\n\
+            export namespace N { export const c = 1; export let l = 2; export var v = 3; export function f() {} \
+              export class Kn {} export enum En { A } }\n";
+        let checker = Backend::start(&root, 1).unwrap();
+        let runtime = multi_thread();
+        let (compared, kinds) = runtime.block_on(async {
+            let deadline = Duration::from_secs(60);
+            let client = checker.client();
+            let options = Rpc::prepare(&client, deadline, None).await.unwrap();
+            let rpc =
+                Rpc::open_in_memory(client, deadline, &options, &[(file.clone(), source.to_string())]).await.unwrap();
+            let module = rpc.source_file_symbol(&file).await.unwrap().unwrap();
+            let mut compared = Vec::new();
+            let mut kinds = BTreeMap::new();
+            for export in rpc.exports_of_module(&module.reference).await.unwrap() {
+                // Type alias, interface, class: the declared type; variable, class, enum, namespace: the value's.
+                let mut types = Vec::new();
+                if export.flags & (524_288 | 64 | 32) != 0 {
+                    types.push(rpc.declared_type_of_symbol(&export.reference).await.unwrap());
+                }
+                if export.flags & (3 | 32 | 256 | 512) != 0 {
+                    types.push(rpc.type_of_symbol(&export.reference).await.unwrap());
+                }
+                for ty in types {
+                    let properties = rpc.properties(ty.id).await.unwrap();
+                    let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
+                    let asked = rpc.readonly_symbols(&references).await.unwrap();
+                    for (property, asked) in properties.iter().zip(asked) {
+                        let at = format!("{}.{}", export.name, property.name);
+                        if let Some(kind) = property.declarations.first().and_then(|d| d.split('.').nth(1)) {
+                            kinds.insert(at.clone(), kind.parse::<u32>().unwrap());
+                        }
+                        compared.push((at, property.readonly, asked));
+                    }
+                }
+            }
+            rpc.release().await;
+            (compared, kinds)
+        });
+        runtime.block_on(checker.shutdown());
+
+        let disagreements: Vec<_> =
+            compared.iter().filter(|(_, settled, asked)| settled.is_some_and(|settled| settled != *asked)).collect();
+        assert_eq!(disagreements, Vec::<&(String, Option<bool>, bool)>::new(), "{compared:#?}");
+        let settled = |value: bool| compared.iter().filter(|(_, settled, _)| *settled == Some(value)).count();
+        // The forms above settle 0 of these on an answer without check flags; the counts pin what they settle now.
+        assert!(settled(true) >= 20 && settled(false) >= 100, "{} {} {compared:#?}", settled(true), settled(false));
+        let pinned = [
+            ("K.pp", 171),
+            ("I.a", 173),
+            ("K.x", 174),
+            ("I.m", 175),
+            ("K.method", 176),
+            ("I.g", 179),
+            ("I.so", 180),
+            ("ns.lit", 304),
+            ("ns.short", 305),
+        ];
+        for (at, kind) in pinned {
+            assert_eq!(kinds.get(at), Some(&kind), "{at}: {kinds:#?}");
+        }
+        assert_eq!(pinned.map(|(_, kind)| kind), NO_ASSIGNMENT_DECLARATION);
+    }
+
+    /// The answer settles only what its fields decide; an answer without check flags settles nothing.
+    #[test]
+    fn readonly_is_settled_only_from_what_the_answer_carries() {
+        let settled = |extra: serde_json::Value| {
+            let mut symbol = serde_json::json!({ "reference": { "kind": 1, "id": 4, "snapshot": 2 }, "name": "x" });
+            if let (Some(symbol), serde_json::Value::Object(extra)) = (symbol.as_object_mut(), extra) {
+                symbol.extend(extra);
+            }
+            serde_json::from_value::<SymbolInfo>(symbol).unwrap().readonly
+        };
+        let mapped = |check_flags: u64| serde_json::json!({ "flags": 4, "checkFlags": check_flags, "declarations": ["1.173./a.ts"] });
+        assert_eq!(settled(mapped(8 | (1 << 21))), Some(true));
+        assert_eq!(settled(mapped(1 << 21)), Some(false));
+        assert_eq!(settled(serde_json::json!({ "flags": 4, "declarations": ["1.173./a.ts"] })), None);
+        let declared = serde_json::json!({ "flags": 4, "checkFlags": 0, "declarations": ["1.173./a.ts"], "valueDeclaration": "1.173./a.ts" });
+        assert_eq!(settled(declared), None);
+        assert_eq!(settled(serde_json::json!({ "flags": 2, "checkFlags": 0 })), None);
+        assert_eq!(settled(serde_json::json!({ "flags": 32768, "checkFlags": 0 })), Some(true));
+        assert_eq!(settled(serde_json::json!({ "flags": 32768 | 65536, "checkFlags": 0 })), Some(false));
+        assert_eq!(
+            settled(serde_json::json!({ "flags": 8 | 4, "checkFlags": 0, "valueDeclaration": "1.307./a.ts" })),
+            Some(true)
+        );
+        let call = serde_json::json!({ "flags": 4, "checkFlags": 1 << 21, "declarations": ["1.215./a.js"] });
+        assert_eq!(settled(call), None);
+        assert_eq!(settled(serde_json::json!({ "flags": 4, "checkFlags": 0, "declarations": ["bad"] })), None);
     }
 
     fn multi_thread() -> tokio::runtime::Runtime {
