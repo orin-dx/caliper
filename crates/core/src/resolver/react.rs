@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_at_types_when_package_has_no_own_types() {
-        let ModuleResolvers { main, types_first } = test_resolvers();
+        let ModuleResolvers { main, types_first, .. } = test_resolvers();
         // `react`'s package.json has an `exports` field with no "types" condition and
         // ships no .d.ts of its own — this repo's node_modules has a real `@types/react`
         // package, so this exercises the real gap end to end, not a mock.
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn resolves_own_types_directly_without_at_types_fallback() {
-        let ModuleResolvers { main, types_first } = test_resolvers();
+        let ModuleResolvers { main, types_first, .. } = test_resolvers();
         // Resolving "@types/react" itself (rather than "react") exercises the
         // primary (non-fallback) path with no ambiguity: if it ever fell through
         // to the fallback branch, that would ask for the nonexistent
@@ -201,7 +201,7 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, body).unwrap();
         }
-        let ModuleResolvers { main, types_first } = test_resolvers();
+        let ModuleResolvers { main, types_first, .. } = test_resolvers();
         let resolved = resolve_package_types_file(&main, &types_first, &root.join("index.ts"), name)?;
         Some(resolved.strip_prefix(root.as_str()).unwrap_or(&resolved).to_owned())
     }

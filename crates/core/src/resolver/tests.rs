@@ -3275,3 +3275,39 @@ fn module_resolvers_share_one_file_system_cache() {
     // A new set of resolvers reads the disk again.
     assert!(ModuleResolvers::new(&PipelineOptions::default()).main.resolve_dts(importer.as_std_path(), "kit").is_err());
 }
+
+/// The governing tsconfig is validated before the resolvers resolve anything: a nested config that lists it under
+/// `references` makes `oxc_resolver` cache it without loading its references, which hides a reference that does not
+/// exist.
+#[test]
+fn a_governing_tsconfig_with_a_missing_reference_is_reported_after_a_nested_config_warmed_the_resolvers() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    for (path, body) in [
+        ("tsconfig.json", r#"{ "references": [{ "path": "./missing" }] }"#),
+        (
+            "src/nested/tsconfig.json",
+            r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@n/*": ["./*"] } }, "references": [{ "path": "../../tsconfig.json" }] }"#,
+        ),
+        ("src/nested/inner.ts", "export type A = string;\n"),
+    ] {
+        std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+        std::fs::write(root.join(path), body).unwrap();
+    }
+    let options = PipelineOptions { src_dirs: vec![root.join("src")], ..Default::default() };
+    let governing = root.join("tsconfig.json");
+    // The premise: on a fresh cache the missing reference makes the governing config unusable.
+    assert!(ModuleResolvers::new(&options).main.resolve_tsconfig(governing.as_std_path()).is_err());
+
+    // What the dependency loader does first: resolve from a file under the nested config.
+    let resolvers = ModuleResolvers::new(&options);
+    let importer = root.join("src/nested/index.ts");
+    let _ = super::import::resolve_module_with(&resolvers.main, &resolvers.types_first, "@n/inner", &importer);
+    let global = Arc::new(GlobalSourceData::default());
+    let named_types = Arc::new(crate::named_type_index::NamedTypeIndex::build(&global));
+    let ctx = ResolutionContext::with_module_resolvers(global, &options, Vec::new(), named_types, resolvers);
+
+    let diagnostic = ctx.tsconfig_diagnostic.expect("the governing tsconfig is unusable");
+    assert!(diagnostic.message.starts_with("Could not use the tsconfig"), "{}", diagnostic.message);
+    assert_eq!(diagnostic.file.as_deref(), Some(governing.as_str()));
+}

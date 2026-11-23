@@ -369,20 +369,7 @@ impl ResolutionContext {
         named_types: Arc<crate::named_type_index::NamedTypeIndex>,
         resolvers: ModuleResolvers,
     ) -> Self {
-        // A tsconfig that can't be read or parsed would otherwise fail every aliased import one by one.
-        let tsconfig_diagnostic = governing_tsconfig(options).and_then(|path| {
-            let error = resolvers.main.resolve_tsconfig(path.as_std_path()).err()?;
-            Some(
-                Diagnostic::new(
-                    DiagnosticSeverity::Warning,
-                    DiagnosticCode::IoError,
-                    format!("Could not use the tsconfig '{path}': {error}"),
-                )
-                .with_file(path.to_string())
-                .with_help("Its `paths` aliases are not applied; imports that rely on them will not resolve."),
-            )
-        });
-
+        let tsconfig_diagnostic = resolvers.tsconfig_diagnostic;
         let mut enum_bare_index: FxHashMap<CompactString, CompactString> = FxHashMap::default();
         // Sorted so a bare name shared by several files binds to the same one regardless of hash order.
         let mut enum_keys: Vec<&String> = global.enums.keys().collect();
@@ -714,12 +701,32 @@ pub fn resolve_package_dts_path(
     react::resolve_package_types_file(&resolvers.main, &resolvers.types_first, &importing_file, package_name)
 }
 
+/// Why the governing tsconfig cannot be used, if it cannot: a tsconfig that can't be read or parsed would otherwise
+/// fail every aliased import one by one. `resolver` must not have resolved anything yet: its cache would hide a failure
+/// (a nested config that lists the governing one under `references` caches it without loading its own).
+fn tsconfig_diagnostic(options: &PipelineOptions, resolver: &Resolver) -> Option<Diagnostic> {
+    let path = governing_tsconfig(options)?;
+    let error = resolver.resolve_tsconfig(path.as_std_path()).err()?;
+    Some(
+        Diagnostic::new(
+            DiagnosticSeverity::Warning,
+            DiagnosticCode::IoError,
+            format!("Could not use the tsconfig '{path}': {error}"),
+        )
+        .with_file(path.to_string())
+        .with_help("Its `paths` aliases are not applied; imports that rely on them will not resolve."),
+    )
+}
+
 /// The two resolvers of a run, configured the way TypeScript resolves this project's modules (`resolve_options`).
 pub(crate) struct ModuleResolvers {
     pub(crate) main: Resolver,
     /// Only `types` and the custom conditions: `resolve_dts` takes the first `exports` key that matches any condition,
     /// so a package listing `"import"` before `"types"` resolves to JavaScript; this one reaches its declarations.
     pub(crate) types_first: Resolver,
+    /// Why the governing tsconfig cannot be used, if it cannot. Decided here, before either resolver resolves anything,
+    /// so the resolutions that share their cache cannot change the answer.
+    pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
 }
 
 impl ModuleResolvers {
@@ -731,8 +738,9 @@ impl ModuleResolvers {
         // One file-system cache for both: they differ only in conditions, and each would otherwise stat and read the
         // same `node_modules` paths again.
         let main = Resolver::new(main);
+        let tsconfig_diagnostic = tsconfig_diagnostic(options, &main);
         let types_first = main.clone_with_options(types_first);
-        ModuleResolvers { main, types_first }
+        ModuleResolvers { main, types_first, tsconfig_diagnostic }
     }
 }
 
