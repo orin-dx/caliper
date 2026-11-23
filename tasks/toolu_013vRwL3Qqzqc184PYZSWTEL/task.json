@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_013vRwL3Qqzqc184PYZSWTEL",
+  "agent_id": "a20980520dd802b64",
+  "subagent_type": "general-purpose",
+  "task_description": "Derive readonly from symbol flags",
+  "token_usage": {
+    "input_tokens": 210,
+    "cache_creation_tokens": 216148,
+    "cache_read_tokens": 15015327,
+    "output_tokens": 69695,
+    "api_call_count": 102
+  },
+  "started_at": "2026-11-23T12:06:38.004484-08:00",
+  "completed_at": "2026-11-23T12:57:44.347469-08:00"
+}
