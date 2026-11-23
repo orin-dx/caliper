@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_0134HC3EL23BR6SaFFcFnDdY",
+  "agent_id": "afafc5b51f8b5bd6e",
+  "subagent_type": "general-purpose",
+  "task_description": "Typed checker request structs",
+  "token_usage": {
+    "input_tokens": 166,
+    "cache_creation_tokens": 210507,
+    "cache_read_tokens": 13599216,
+    "output_tokens": 79227,
+    "api_call_count": 83
+  },
+  "started_at": "2026-11-23T13:21:37.608291-08:00",
+  "completed_at": "2026-11-23T13:42:21.53564-08:00"
+}
