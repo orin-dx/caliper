@@ -1,0 +1,24 @@
+{
+  "tool_use_id": "toolu_01RTPNQy6biiSfP4cNcqDk8r",
+  "agent_id": "aaf3691aa5d2d7699",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix the cached outage and the persisted read failure",
+  "files": [
+    ".changeset/degraded-results-are-not-kept.md",
+    "crates/core/src/dependency_types.rs",
+    "crates/core/src/dependency_types/augmentation_tests.rs",
+    "crates/core/src/dependency_types/tests.rs",
+    "crates/core/src/pipeline/semantic_hook.rs",
+    "crates/core/tests/semantic_hook.rs",
+    "crates/core/tests/semantic_join.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 162,
+    "cache_creation_tokens": 204724,
+    "cache_read_tokens": 13016135,
+    "output_tokens": 56413,
+    "api_call_count": 80
+  },
+  "started_at": "2026-11-24T10:36:46.569464-08:00",
+  "completed_at": "2026-11-24T10:54:53.703357-08:00"
+}
