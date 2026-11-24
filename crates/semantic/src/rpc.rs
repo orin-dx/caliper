@@ -804,7 +804,7 @@ impl Rpc {
     /// The snapshot after this one with `changed` and `deleted` read again from the disk and, given `roots`, its program
     /// rooted there instead, built at once (`updateSnapshot` with `ensurePrograms`). Files the program has not changed
     /// are kept as parsed: the checker re-reads only what it is told about, and a synthetic program sees even that
-    /// only when it is rebuilt. This snapshot stays alive until it is released.
+    /// only when it is rebuilt. The calls on it count with this one's; this snapshot stays alive until it is released.
     pub(crate) async fn updated(
         &self,
         changed: &[String],
@@ -830,7 +830,7 @@ impl Rpc {
             project,
             options: self.options.clone(),
             recording: self.recording.clone(),
-            calls: Arc::default(),
+            calls: self.calls.clone(),
             others: Mutex::default(),
         })
     }

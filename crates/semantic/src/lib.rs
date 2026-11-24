@@ -1412,4 +1412,35 @@ mod tests {
             assert_eq!(released, expected);
         }
     }
+
+    /// The lanes rooted anew count their requests with those of the lanes they replace, as lanes opened beside the
+    /// first do: one count per run, whichever way the early session was taken. On the base each rooted lane began at
+    /// nothing, and the run's count left out the opening and the rooting.
+    #[test]
+    fn lanes_rooted_anew_count_their_requests_with_the_run() {
+        let (_dir, root) = shared_types_project(3);
+        let request = request_over(&root);
+        let session = Numbering { made: Arc::default(), released: Arc::default() };
+        let checker = Backend::spawn(3, move || session).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let files = root_files(&request);
+
+        let (old, rooted) = runtime.block_on(async {
+            let timeout = request.request_timeout;
+            let opened = Rpc::open_programs(checker.client(), timeout, None, &files[..2], false, 3).await.unwrap();
+            let opened: Vec<Arc<Rpc>> = opened.into_iter().map(Arc::new).collect();
+            let old = opened[0].clone();
+            let rooted = reroot(opened, &files).await.unwrap();
+            rooted[2].release().await;
+            (old, rooted)
+        });
+        runtime.block_on(checker.shutdown());
+
+        let expected: std::collections::BTreeMap<&str, u64> =
+            [("createSnapshot", 1), ("release", 4), ("updateSnapshot", 5)].into();
+        assert_eq!(old.calls(), expected);
+        for lane in &rooted {
+            assert_eq!(lane.calls(), expected);
+        }
+    }
 }

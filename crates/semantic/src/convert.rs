@@ -855,6 +855,21 @@ struct State {
     trees: Arc<Trees>,
     hits: AtomicU64,
     misses: AtomicU64,
+    /// A test's pause between a conversion's memo read and its boarding: the next conversion to get there says it
+    /// arrived and waits to be let go.
+    #[cfg(test)]
+    paused: Mutex<Option<(tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Receiver<()>)>>,
+}
+
+#[cfg(test)]
+impl State {
+    async fn before_boarding(&self) {
+        let pause = self.paused.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        if let Some((arrived, go)) = pause {
+            let _sent = arrived.send(());
+            let _went = go.await;
+        }
+    }
 }
 
 /// The type of each symbol asked about, by its reference's text, each type held once however many symbols have it.
@@ -1109,8 +1124,17 @@ impl Converter {
                 if let Some(converted) = self.recalled(info.id, cx) {
                     return Ok(converted);
                 }
+                #[cfg(test)]
+                self.state.before_boarding().await;
                 match self.state.flights.board((info.id, cx.depth, cx.enclosing.clone()), cx.walk) {
-                    Boarding::Lead(lead) => break Some(lead),
+                    Boarding::Lead(lead) => {
+                        // The last to lead it may have ended since the read above: a leader's entry is in the memo
+                        // before its flight goes, so it is there now, and converting again would ask all of it again.
+                        if let Some(converted) = self.recalled(info.id, cx) {
+                            return Ok(converted);
+                        }
+                        break Some(lead);
+                    }
                     Boarding::Wait(mut done, waiting) => {
                         // Only ever closed, never sent on: the conversion it waits for has ended.
                         let _closed = done.changed().await;
@@ -2695,6 +2719,57 @@ mod tests {
             assert_eq!((first.unwrap(), second.unwrap()), (alone.clone(), alone));
             assert!(one.contains_key("getTypesOfSymbols"), "{one:?}");
             assert_eq!(both, one);
+            rpc.release().await;
+        });
+        runtime.block_on(checker.shutdown());
+    }
+
+    /// A walk that found no entry, and whose conversion ended in another walk before it boarded, leads a flight nobody
+    /// runs: it reads the memo again and recalls that conversion's type, asking the checker nothing and converting
+    /// nothing. On the base it converted the type again: the requests the lane's caches do not keep went out a second
+    /// time, and each type in it missed again.
+    #[test]
+    fn a_conversion_that_ended_between_the_memo_read_and_the_boarding_is_recalled() {
+        use crate::checker::Backend;
+
+        let dir = tempfile::Builder::new().prefix("Boarded").tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let file = root.join("shape.ts").to_string();
+        let source = "export interface Shape { a: string; b: { c: number; d: Inner }; e: Inner[] }\n\
+                      interface Inner { f: 'x' | 'y'; g?: () => void }\n";
+        let checker = Backend::start(&root, 1).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let deadline = std::time::Duration::from_secs(60);
+        runtime.block_on(async {
+            let client = checker.client();
+            let options = Rpc::prepare(&client, deadline, None).await.unwrap();
+            let rpc = Arc::new(
+                Rpc::open_in_memory(client, deadline, &options, &[(file.clone(), source.into())]).await.unwrap(),
+            );
+            let module = rpc.source_file_symbol(&file).await.unwrap().unwrap();
+            let exports = rpc.exports_of_module(&module.reference).await.unwrap();
+            let shape = exports.iter().find(|symbol| symbol.name == "Shape").unwrap();
+            let shape = rpc.declared_type_of_symbol(&shape.reference).await.unwrap();
+            let roots = std::slice::from_ref(&shape);
+
+            let converter = Converter::new(rpc.clone(), false);
+            let (arrived, has_arrived) = tokio::sync::oneshot::channel();
+            let (go, gone) = tokio::sync::oneshot::channel();
+            *converter.state.paused.lock().unwrap() = Some((arrived, gone));
+            let paused = converter.convert_roots(roots);
+            let other = async {
+                has_arrived.await.unwrap();
+                let led = converter.convert_roots(roots).await.unwrap();
+                let at_end = (rpc.calls(), converter.memo_stats());
+                go.send(()).unwrap();
+                (led, at_end)
+            };
+            let (resumed, (led, (calls, (hits, misses)))) = tokio::join!(paused, other);
+
+            assert_eq!(resumed.unwrap(), led);
+            assert_eq!(rpc.calls(), calls, "the walk let go asked the checker again");
+            assert!(misses > 1, "{misses}");
+            assert_eq!(converter.memo_stats(), (hits + 1, misses));
             rpc.release().await;
         });
         runtime.block_on(checker.shutdown());
