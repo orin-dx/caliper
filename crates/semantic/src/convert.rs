@@ -2015,10 +2015,12 @@ impl Converter {
                     .map(|(property, _)| &property.reference)
                     .collect();
                 let answers = if asked.is_empty() { Vec::new() } else { self.rpc.readonly_symbols(&asked).await? };
-                // `batch` fails a batch that does not get one answer per request, so this holds by construction.
-                debug_assert_eq!(answers.len(), asked.len(), "an isReadonlySymbol batch of another length");
+                // `batch` fails a batch that does not get one answer per request, so there is one answer for each property
+                // the answer did not settle. A missing one is never read as `false`: that would be silence as evidence.
                 let mut answers = answers.into_iter();
-                Ok(settled.iter().map(|settled| settled.or_else(|| answers.next()).unwrap_or(false)).collect())
+                let flags: Option<Arc<[bool]>> =
+                    settled.iter().map(|settled| settled.or_else(|| answers.next())).collect();
+                flags.ok_or_else(|| CallError::Rejected("an isReadonlySymbol batch of another length".to_string()))
             })
             .await?;
         // `listed` names the same symbol list every time, so the cached flags are one per property.
