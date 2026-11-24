@@ -35,8 +35,8 @@ pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Sco
     match callee {
         Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), None, scope),
         Expression::StaticMemberExpression(m) => {
-            let receiver = match super::component::peel_expr(&m.object) {
-                Expression::Identifier(object) => Some(object.name.as_str()),
+            let receiver = match super::component::named(&m.object) {
+                Some(Expression::Identifier(object)) => Some(object.name.as_str()),
                 _ => Some(""),
             };
             is_element_factory_name(m.property.name.as_str(), receiver, scope)
@@ -140,14 +140,14 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         let callee = super::component::callee_of(it);
-        let name = callee_name(callee);
-        let calls_helper = matches!(callee, Expression::Identifier(id) if self.scope.is_element_helper(&id.name));
-        if calls_helper || is_element_factory_callee(callee, self.scope) {
+        let name = callee.and_then(callee_name);
+        let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
+        if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, self.scope)) {
             self.found = true;
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
-            || matches!(callee, Expression::StaticMemberExpression(member)
-                if matches!(super::component::peel_expr(&member.object), Expression::Identifier(id) if id.name == "Promise")
+            || matches!(callee, Some(Expression::StaticMemberExpression(member))
+                if matches!(super::component::named(&member.object), Some(Expression::Identifier(id)) if id.name == "Promise")
                     && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
             walk::walk_call_expression(self, it);
@@ -174,7 +174,7 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
         // A component invoked directly: `return JoinList({ ... })`.
         Expression::CallExpression(call)
-            if callee_name(super::component::callee_of(call)).is_some_and(super::is_pascal_case) =>
+            if super::component::callee_of(call).and_then(callee_name).is_some_and(super::is_pascal_case) =>
         {
             true
         }
@@ -221,7 +221,7 @@ impl<'a> Visit<'a> for OwnBody<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if self.nested == 0 && callee_name(super::component::callee_of(it)).is_some_and(is_hook_name) {
+        if self.nested == 0 && super::component::callee_of(it).and_then(callee_name).is_some_and(is_hook_name) {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);

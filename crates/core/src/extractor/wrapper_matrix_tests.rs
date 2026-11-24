@@ -1,6 +1,7 @@
 //! Every component detection form, crossed with every wrapper TypeScript can put around the expression it reads,
-//! extracts the same component as the unwrapped form. OXC 0.159 stopped flattening `(f<T>)(x)` and
-//! `extends (B<T>)` into the enclosing call or heritage clause, which is how a wrapper first broke detection.
+//! extracts the same component as the unwrapped form while the wrapper keeps the callee's type, and what the replacing
+//! assertion says when it does not (`Expect`). OXC 0.159 stopped flattening `(f<T>)(x)` and `extends (B<T>)` into the
+//! enclosing call or heritage clause, which is how a wrapper first broke detection.
 
 use super::*;
 
@@ -27,10 +28,34 @@ enum Callee {
     ObjectParenthesized,
     ObjectAs,
     ObjectNonNull,
+    /// `(f as any)`: `any` says nothing about the callee, so its name still does.
+    AsAny,
+    /// `(f as (...args: any[]) => object)`: the assertion states a result that is no component.
+    AsObjectResult,
+    /// `(f as unknown as (...args: any[]) => object)`: the same through `unknown`.
+    AsUnknownAsObjectResult,
+    /// `(f as (...args: any[]) => React.FC<…>)`: a named result the extractor does not resolve.
+    AsOtherComponentResult,
+    /// `(React as object).forwardRef`: the namespace is asserted to a type with no such member.
+    ObjectAsObject,
+    /// `(<(...args: any[]) => object>f)`: the `<T>x` spelling of `AsObjectResult`, only valid where JSX is not.
+    TypeAssertionObjectResult,
+}
+
+/// What a row extracts, against the unwrapped form.
+#[derive(Debug, PartialEq)]
+enum Expect {
+    /// The assertion keeps the callee's type (none, `typeof` itself, `any`): the unwrapped form's component.
+    Same,
+    /// The assertion replaces the callee's type with a named result that is not resolved: the name still says what the
+    /// call is, but the callee's own declaration no longer describes it, so the mapping has no wrapper callee.
+    SameWithoutCallee,
+    /// The assertion states a result that is no named type: nothing is read through the callee's name.
+    Declined,
 }
 
 impl Callee {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 19] = [
         Self::Plain,
         Self::Parenthesized,
         Self::InstantiationInParens,
@@ -44,7 +69,37 @@ impl Callee {
         Self::ObjectParenthesized,
         Self::ObjectAs,
         Self::ObjectNonNull,
+        Self::AsAny,
+        Self::AsObjectResult,
+        Self::AsUnknownAsObjectResult,
+        Self::AsOtherComponentResult,
+        Self::ObjectAsObject,
+        Self::TypeAssertionObjectResult,
     ];
+
+    fn expect(self) -> Expect {
+        match self {
+            Self::Plain
+            | Self::Parenthesized
+            | Self::InstantiationInParens
+            | Self::InstantiationInDoubleParens
+            | Self::As
+            | Self::Satisfies
+            | Self::NonNull
+            | Self::InstantiationNonNull
+            | Self::TypeAssertion
+            | Self::InstantiationSatisfies
+            | Self::ObjectParenthesized
+            | Self::ObjectAs
+            | Self::ObjectNonNull
+            | Self::AsAny => Expect::Same,
+            Self::AsOtherComponentResult => Expect::SameWithoutCallee,
+            Self::AsObjectResult
+            | Self::AsUnknownAsObjectResult
+            | Self::ObjectAsObject
+            | Self::TypeAssertionObjectResult => Expect::Declined,
+        }
+    }
 
     fn wrap(self, base: &str, args: &str) -> String {
         let (object, member) = base.split_once('.').map_or((None, base), |(object, member)| (Some(object), member));
@@ -66,6 +121,16 @@ impl Callee {
                 object.map_or_else(|| format!("{base}{args}"), |o| format!("({o} as any).{member}{args}"))
             }
             Self::ObjectNonNull => object.map_or_else(|| format!("{base}{args}"), |o| format!("{o}!.{member}{args}")),
+            Self::AsAny => format!("({base} as any){args}"),
+            Self::AsObjectResult => format!("({base} as (...args: any[]) => object){args}"),
+            Self::AsUnknownAsObjectResult => format!("({base} as unknown as (...args: any[]) => object){args}"),
+            Self::AsOtherComponentResult => {
+                format!("({base} as (...args: any[]) => React.FC<{{ other?: number }}>){args}")
+            }
+            Self::ObjectAsObject => {
+                object.map_or_else(|| format!("{base}{args}"), |o| format!("({o} as object).{member}{args}"))
+            }
+            Self::TypeAssertionObjectResult => format!("(<(...args: any[]) => object>{base}){args}"),
         }
     }
 }
@@ -306,10 +371,11 @@ fn every_detection_form_extracts_the_same_component_through_every_wrapper() {
         // is read for components.
         for extension in ["tsx", "ts"] {
             let path = Utf8PathBuf::from(format!("/fixtures/{}.{extension}", form.stem));
-            let (expected, errors) = extracted(&path, &(form.source)(Callee::Plain, Value::Plain));
+            let plain = (form.source)(Callee::Plain, Value::Plain);
+            let (unwrapped, errors) = extracted(&path, &plain);
             assert!(errors.is_empty(), "{}: {errors:?}", form.name);
-            let [mapping] = expected.as_slice() else {
-                panic!("{}: expected one component, got {expected:#?}", form.name)
+            let [mapping] = unwrapped.as_slice() else {
+                panic!("{}: expected one component, got {unwrapped:#?}", form.name)
             };
             assert_eq!(mapping["component_name"], "Button", "{}", form.name);
             assert_eq!(mapping["props_type_name"], "Props", "{}", form.name);
@@ -319,11 +385,28 @@ fn every_detection_form_extracts_the_same_component_through_every_wrapper() {
                 .chain(Value::ALL.iter().map(|&value| (Callee::Plain, value)));
             for (callee, value) in rows {
                 let jsx_only = extension == "tsx";
-                if jsx_only && (matches!(callee, Callee::TypeAssertion) || matches!(value, Value::TypeAssertion)) {
+                if jsx_only
+                    && (matches!(callee, Callee::TypeAssertion | Callee::TypeAssertionObjectResult)
+                        || matches!(value, Value::TypeAssertion))
+                {
                     continue;
                 }
                 let source = (form.source)(callee, value);
                 let (actual, errors) = extracted(&path, &source);
+                // A form that reads no callee is written the same whatever the callee wrapper.
+                let expect = if source == plain { Expect::Same } else { callee.expect() };
+                let expected: Vec<serde_json::Value> = match expect {
+                    Expect::Same => unwrapped.clone(),
+                    Expect::SameWithoutCallee => unwrapped
+                        .iter()
+                        .map(|mapping| {
+                            let mut mapping = mapping.clone();
+                            mapping["wrapper_callee"] = serde_json::Value::Null;
+                            mapping
+                        })
+                        .collect(),
+                    Expect::Declined => Vec::new(),
+                };
                 if !errors.is_empty() {
                     failures.push(format!(
                         "{} [{callee:?}, {value:?}] .{extension}: parse errors {errors:?}\n{source}",
@@ -331,17 +414,66 @@ fn every_detection_form_extracts_the_same_component_through_every_wrapper() {
                     ));
                 } else if actual != expected {
                     failures.push(format!(
-                        "{} [{callee:?}, {value:?}] .{extension}:\n{source}\nexpected {expected:#?}\nactual {actual:#?}",
+                        "{} [{callee:?}, {value:?}] .{extension}, {expect:?}:\n{source}\nexpected {expected:#?}\nactual {actual:#?}",
                         form.name
                     ));
                 }
             }
         }
     }
-    assert!(
-        failures.is_empty(),
-        "{} rows differ from the unwrapped form:\n\n{}",
-        failures.len(),
-        failures.join("\n\n")
-    );
+    assert!(failures.is_empty(), "{} rows differ from what they expect:\n\n{}", failures.len(), failures.join("\n\n"));
+}
+
+/// `Object.assign` through an identity cast makes `Root` an alias of `Impl`, and the inline member scan reads the call
+/// through the same predicate, so `Item` is found with it. A cast of `Object` to another type finds neither.
+/// (`Impl` is not published under its own name while `Root` aliases it.)
+#[test]
+fn an_object_assign_through_an_identity_cast_attaches_its_inline_members() {
+    let found = |object: &str| {
+        let source = format!(
+            "interface P {{ a: string }}\n\
+             interface ItemProps {{ b: string }}\n\
+             function Impl(props: P) {{ return <div />; }}\n\
+             export const Root = {object}.assign(Impl, {{ Item: (props: ItemProps) => <div /> }});"
+        );
+        let data = parse_file(Utf8Path::new("/test/compound.tsx"), &source);
+        let mut found: Vec<(String, String)> =
+            data.component_mappings.iter().map(|m| (m.component_name.clone(), m.props_type_name.to_string())).collect();
+        found.sort_unstable();
+        found
+    };
+    let pair = |name: &str, props: &str| (name.to_owned(), props.to_owned());
+    for object in ["Object", "(Object as typeof Object)", "(Object as any)", "(Object)!"] {
+        assert_eq!(found(object), [pair("Item", "ItemProps"), pair("Root", "P")], "{object}");
+    }
+    // Not an alias, `Root` takes nothing and `Impl` stands as its own component.
+    assert_eq!(found("(Object as object)"), [pair("Impl", "P")]);
+}
+
+/// A PascalCase callee is rendering evidence only while its name describes the call: an assertion stating a result
+/// that is no named type takes it away; a named or React result, `typeof` itself and `any` leave it.
+#[test]
+fn an_asserted_callee_renders_only_when_the_assertion_leaves_a_named_result() {
+    let rows = [
+        ("(Object as (value: object) => object)", false),
+        ("(Object as unknown as (value: object) => string)", false),
+        ("(Object as { (value: object): object })", false),
+        ("(Object as (value: object) => React.ReactElement)", true),
+        ("(Object as (value: object) => React.ReactElement | null)", true),
+        ("(Object as F)", true),
+        ("(Object as typeof Object)", true),
+        ("(Object as any)", true),
+        ("Object", true),
+    ];
+    for (callee, renders) in rows {
+        let source = format!(
+            "import React from 'react';\n\
+             interface Props {{ a: string }}\n\
+             export const Normalize = (props: Props) => {callee}(props);"
+        );
+        let data = parse_file(Utf8Path::new("/test/normalize.tsx"), &source);
+        let names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
+        let expected: &[&str] = if renders { &["Normalize"] } else { &[] };
+        assert_eq!(names, expected, "{callee}");
+    }
 }

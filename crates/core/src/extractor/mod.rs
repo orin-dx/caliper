@@ -732,7 +732,7 @@ impl<'src> SourceDataCollector<'src> {
     /// (the global `React`, or `const { forwardRef } = React`) is read as written.
     pub(super) fn react_api(&self, call: &CallExpression<'_>) -> Option<ReactApi> {
         let import_of = |local: &str| self.data.imports.iter().find(|import| import.local_name.as_str() == local);
-        match component::callee_of(call) {
+        match component::callee_of(call)? {
             Expression::Identifier(id) => match import_of(id.name.as_str()) {
                 Some(import) if is_react_module(&import.specifier) => {
                     ReactApi::of_export(import.exported_name.as_str())
@@ -741,7 +741,7 @@ impl<'src> SourceDataCollector<'src> {
                 None => ReactApi::of_export(id.name.as_str()),
             },
             Expression::StaticMemberExpression(member) => {
-                let Expression::Identifier(object) = component::peel_expr(&member.object) else { return None };
+                let Expression::Identifier(object) = component::named(&member.object)? else { return None };
                 let api = ReactApi::of_export(member.property.name.as_str())?;
                 match import_of(object.name.as_str()) {
                     Some(import)
@@ -1309,9 +1309,9 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     pub(super) fn expression_to_ident_name<'a>(&self, expr: &Expression<'a>) -> String {
-        match component::peel_expr(expr) {
-            Expression::Identifier(id) => id.name.as_str().to_owned(),
-            Expression::StaticMemberExpression(me) => {
+        match component::named(expr) {
+            Some(Expression::Identifier(id)) => id.name.as_str().to_owned(),
+            Some(Expression::StaticMemberExpression(me)) => {
                 format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str())
             }
             _ => "unknown".to_owned(),

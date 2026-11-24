@@ -369,8 +369,12 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// The callee of a generic call that builds a component, and its type arguments, for the props its result type
-    /// adds (`resolver::callee`). `None` for a call without type arguments.
+    /// adds (`resolver::callee`). `None` for a call without type arguments, and for a callee asserted to another type
+    /// (`(wrap as G)<P>(…)`), whose declaration no longer describes the call.
     pub(super) fn wrapper_callee<'a>(&mut self, call: &CallExpression<'a>) -> Option<WrapperCallee> {
+        if !super::component::peel(&call.callee).keeps_identity() {
+            return None;
+        }
         let type_arguments = super::component::call_type_arguments(call)?;
         let name = self.extract_callee_name(call)?;
         Some(WrapperCallee {
@@ -489,7 +493,9 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_factory_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        let Expression::Identifier(callee) = super::component::callee_of(call) else { return false };
+        // The callee's declared result is what the resolver reads, so a callee asserted to another type is not one.
+        let callee = super::component::peel(&call.callee);
+        let (true, Expression::Identifier(callee)) = (callee.keeps_identity(), callee.expr) else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
         let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);

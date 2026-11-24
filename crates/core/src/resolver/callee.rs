@@ -389,3 +389,38 @@ fn component_props_type(
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use camino::Utf8Path;
+
+    use crate::types::GlobalSourceData;
+    use crate::types::options::PipelineOptions;
+
+    /// A generic wrapper asserted to another signature does not carry its original declaration, whose result would add
+    /// `internal`: the props are the render function's. Unasserted, or asserted to `typeof` itself, the declaration is
+    /// read. The extractor decides which (`Peeled::keeps_identity`); this is where its result is resolved.
+    #[test]
+    fn an_asserted_wrapper_callee_does_not_resolve_through_its_original_declaration() {
+        let props_of = |call: &str| {
+            let path = Utf8Path::new("/test/Wrapped.tsx");
+            let source = format!(
+                "import * as React from 'react';\n\
+                 function wrap<T>(render: React.FC<T>): React.FC<T & {{ internal?: string }}> {{ return render as any; }}\n\
+                 interface Props {{ label?: string }}\n\
+                 export const Wrapped = {call}((props: Props) => <div />);\n"
+            );
+            let mut global = GlobalSourceData::default();
+            global.merge(path, crate::extractor::parse_file(path, &source));
+            let ctx = super::ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+            let mapping = ctx.global.component_mappings.iter().find(|m| m.component_name == "Wrapped").unwrap().clone();
+            let (entry, _) = super::super::resolve_component(&mapping, &ctx);
+            entry.props.keys().cloned().collect::<Vec<String>>()
+        };
+        assert_eq!(props_of("(wrap as <T>(render: React.FC<T>) => React.FC<T>)<Props>"), ["label"]);
+        assert_eq!(props_of("wrap<Props>"), ["internal", "label"]);
+        assert_eq!(props_of("(wrap as typeof wrap)<Props>"), ["internal", "label"]);
+    }
+}

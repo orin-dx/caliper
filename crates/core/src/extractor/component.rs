@@ -14,8 +14,8 @@ use super::{ReactApi, SourceDataCollector, is_pascal_case};
 enum Wrapper<'b, 'a> {
     /// Parentheses, `satisfies` or `!`: the value and its type pass through.
     Transparent(&'b Expression<'a>),
-    /// `as` or `<T>x`: the value passes through, its type is replaced.
-    Asserted(&'b Expression<'a>),
+    /// `as` or `<T>x`: the value passes through, its type is replaced by the one asserted.
+    Asserted(&'b Expression<'a>, &'b TSType<'a>),
     /// `f<T>`: the value passes through with its type arguments given.
     Instantiation(&'b TSInstantiationExpression<'a>),
 }
@@ -27,8 +27,8 @@ fn wrapper<'a, 'b>(expr: &'b Expression<'a>) -> Option<Wrapper<'b, 'a>> {
         Expression::ParenthesizedExpression(inner) => Some(Wrapper::Transparent(&inner.expression)),
         Expression::TSSatisfiesExpression(inner) => Some(Wrapper::Transparent(&inner.expression)),
         Expression::TSNonNullExpression(inner) => Some(Wrapper::Transparent(&inner.expression)),
-        Expression::TSAsExpression(inner) => Some(Wrapper::Asserted(&inner.expression)),
-        Expression::TSTypeAssertion(inner) => Some(Wrapper::Asserted(&inner.expression)),
+        Expression::TSAsExpression(inner) => Some(Wrapper::Asserted(&inner.expression, &inner.type_annotation)),
+        Expression::TSTypeAssertion(inner) => Some(Wrapper::Asserted(&inner.expression, &inner.type_annotation)),
         Expression::TSInstantiationExpression(inner) => Some(Wrapper::Instantiation(inner)),
         Expression::BooleanLiteral(_)
         | Expression::NullLiteral(_)
@@ -77,20 +77,125 @@ fn wrapper<'a, 'b>(expr: &'b Expression<'a>) -> Option<Wrapper<'b, 'a>> {
 pub(super) fn peel_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
     loop {
         expr = match wrapper(expr) {
-            Some(Wrapper::Transparent(inner) | Wrapper::Asserted(inner)) => inner,
+            Some(Wrapper::Transparent(inner) | Wrapper::Asserted(inner, _)) => inner,
             Some(Wrapper::Instantiation(_)) | None => return expr,
         };
     }
 }
 
-/// An expression beneath every wrapper, instantiations included, and the type arguments an instantiation among them
-/// gave it.
+/// What the assertions between a callee and its call say about its type.
+#[derive(Clone, Copy)]
+pub(super) enum Identity<'b, 'a> {
+    /// No assertion, or only ones that keep the callee's own type: `typeof` the asserted expression itself, `any` and
+    /// `unknown` (which say nothing).
+    Kept,
+    /// The outermost assertion that gives the callee another type: `(Object as (v: object) => object)` is no longer
+    /// `Object`, and `(wrap as G)` no longer has `wrap`'s declared signature.
+    Replaced(&'b TSType<'a>),
+}
+
+/// An expression beneath every wrapper, instantiations included, the type arguments an instantiation among them gave
+/// it, and whether an assertion among them replaced its type.
 #[derive(Clone, Copy)]
 pub(super) struct Peeled<'b, 'a> {
     pub(super) expr: &'b Expression<'a>,
     /// The outermost instantiation's type arguments, unless an assertion above it replaced its type: `(f<T>)` and
     /// `(f<T>)!` give `T`; `(f<T> as G)` gives none, as the value then has type `G`.
     pub(super) type_arguments: Option<&'b TSTypeParameterInstantiation<'a>>,
+    pub(super) identity: Identity<'b, 'a>,
+}
+
+impl<'b, 'a> Peeled<'b, 'a> {
+    /// Whether the call has the type `expr` is declared with, so that its declaration (`resolver::callee`) describes
+    /// the call.
+    pub(super) fn keeps_identity(&self) -> bool {
+        matches!(self.identity, Identity::Kept)
+    }
+
+    /// `expr`, when what it is called still describes the call (`forwardRef`, `memo`, `Object.assign`, a PascalCase
+    /// component): its identity is kept, or the assertion replacing it gives a named result the extractor does not
+    /// resolve (React Aria's `(forwardRef as forwardRefType)(…)`), which leaves the name the only evidence. `None` when
+    /// the assertion states a result that is no named type, such as `(Object as (v: object) => object)(…)`, and for a
+    /// member read from a namespace whose name does not hold: `(React as object).memo` is no `memo` of React's.
+    pub(super) fn named(&self) -> Option<&'b Expression<'a>> {
+        let holds = match self.identity {
+            Identity::Kept => true,
+            Identity::Replaced(ty) => names_its_result(ty),
+        };
+        let namespace_holds = match self.expr {
+            Expression::StaticMemberExpression(member) => named(&member.object).is_some(),
+            _ => true,
+        };
+        (holds && namespace_holds).then_some(self.expr)
+    }
+}
+
+/// Whether an asserted type leaves the result named but unresolved: a type reference (`F`, `forwardRefType`), or a
+/// function type whose result is one (`(…) => React.ReactElement`, `<T>(r: FC<T>) => FC<T>`), alone or with `null`. An
+/// allow-list: a keyword, literal, object or any other type states a result, and that result is not a named one.
+fn names_its_result(ty: &TSType<'_>) -> bool {
+    fn named(ty: &TSType<'_>) -> bool {
+        match ty {
+            TSType::TSTypeReference(_) => true,
+            TSType::TSParenthesizedType(inner) => named(&inner.type_annotation),
+            TSType::TSUnionType(union) => {
+                union.types.iter().any(|member| matches!(member, TSType::TSTypeReference(_)))
+                    && union.types.iter().all(|member| {
+                        matches!(
+                            member,
+                            TSType::TSTypeReference(_) | TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_)
+                        )
+                    })
+            }
+            _ => false,
+        }
+    }
+    match ty {
+        TSType::TSTypeReference(_) => true,
+        TSType::TSParenthesizedType(inner) => names_its_result(&inner.type_annotation),
+        TSType::TSFunctionType(function) => named(&function.return_type.type_annotation),
+        _ => false,
+    }
+}
+
+/// Whether asserting `ty` on `beneath` keeps its type: `typeof` the same expression, or `any`/`unknown`, which say
+/// nothing. An allow-list: every other type replaces it.
+fn assertion_keeps_identity(ty: &TSType<'_>, beneath: &Expression<'_>) -> bool {
+    match ty {
+        TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_) => true,
+        TSType::TSParenthesizedType(inner) => assertion_keeps_identity(&inner.type_annotation, beneath),
+        TSType::TSTypeQuery(query) if query.type_arguments.is_none() => {
+            let beneath = peel(beneath);
+            beneath.keeps_identity() && query_names(&query.expr_name, beneath.expr)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `typeof name` is the type of `expr`: the same identifier or the same chain of static members.
+fn query_names(name: &TSTypeQueryExprName<'_>, expr: &Expression<'_>) -> bool {
+    match name {
+        TSTypeQueryExprName::IdentifierReference(id) => matches!(expr, Expression::Identifier(e) if e.name == id.name),
+        TSTypeQueryExprName::QualifiedName(qualified) => type_name_names(&qualified.left, &qualified.right, expr),
+        TSTypeQueryExprName::ThisExpression(_) => matches!(expr, Expression::ThisExpression(_)),
+        TSTypeQueryExprName::TSImportType(_) => false,
+    }
+}
+
+fn type_name_names(left: &TSTypeName<'_>, right: &IdentifierName<'_>, expr: &Expression<'_>) -> bool {
+    let Expression::StaticMemberExpression(member) = expr else { return false };
+    if member.property.name != right.name {
+        return false;
+    }
+    let object = peel(&member.object);
+    object.keeps_identity()
+        && match left {
+            TSTypeName::IdentifierReference(id) => {
+                matches!(object.expr, Expression::Identifier(e) if e.name == id.name)
+            }
+            TSTypeName::QualifiedName(qualified) => type_name_names(&qualified.left, &qualified.right, object.expr),
+            TSTypeName::ThisExpression(_) => matches!(object.expr, Expression::ThisExpression(_)),
+        }
 }
 
 /// See [`Peeled`]. For what a callee or an `extends` target is: OXC 0.159 keeps `(f<T>)(x)` and `extends (B<T>)` as an
@@ -98,11 +203,15 @@ pub(super) struct Peeled<'b, 'a> {
 pub(super) fn peel<'a, 'b>(mut expr: &'b Expression<'a>) -> Peeled<'b, 'a> {
     let mut type_arguments = None;
     let mut asserted = false;
+    let mut identity = Identity::Kept;
     loop {
         expr = match wrapper(expr) {
             Some(Wrapper::Transparent(inner)) => inner,
-            Some(Wrapper::Asserted(inner)) => {
+            Some(Wrapper::Asserted(inner, ty)) => {
                 asserted = true;
+                if matches!(identity, Identity::Kept) && !assertion_keeps_identity(ty, inner) {
+                    identity = Identity::Replaced(ty);
+                }
                 inner
             }
             Some(Wrapper::Instantiation(instantiation)) => {
@@ -111,14 +220,21 @@ pub(super) fn peel<'a, 'b>(mut expr: &'b Expression<'a>) -> Peeled<'b, 'a> {
                 }
                 &instantiation.expression
             }
-            None => return Peeled { expr, type_arguments },
+            None => return Peeled { expr, type_arguments, identity },
         };
     }
 }
 
-/// What a call invokes: `(forwardRef as F)(…)` and `(forwardRef<R, P>)(…)` call `forwardRef`.
-pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>) -> &'b Expression<'a> {
-    peel(&call.callee).expr
+/// A value read for its name (a callee, the namespace a member is read from), when that name still describes it: see
+/// [`Peeled::named`]. `(forwardRef as typeof forwardRef)(…)` and `(React as any).memo` keep it.
+pub(super) fn named<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
+    peel(expr).named()
+}
+
+/// What a call invokes, when its name still describes the call: `(forwardRef as F)(…)` and `(forwardRef<R, P>)(…)`
+/// call `forwardRef`; `(Object as (v: object) => object)(…)` calls nothing by a name. See [`Peeled::named`].
+pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
+    named(&call.callee)
 }
 
 /// The type arguments a call is made with: its own, or those of the instantiation it calls (`(forwardRef<R, P>)(…)`).
@@ -133,7 +249,7 @@ pub(super) fn call_type_arguments<'a, 'b>(
 pub(super) fn super_class<'a, 'b>(class: &'b Class<'a>) -> Option<Peeled<'b, 'a>> {
     let heritage = class.heritage.as_ref()?;
     let peeled = peel(&heritage.expression);
-    Some(Peeled { expr: peeled.expr, type_arguments: heritage.type_arguments.as_deref().or(peeled.type_arguments) })
+    Some(Peeled { type_arguments: heritage.type_arguments.as_deref().or(peeled.type_arguments), ..peeled })
 }
 
 /// What a call wrapping an aliased component is, as read from the call before the component is known.
@@ -395,6 +511,8 @@ impl<'src> SourceDataCollector<'src> {
             _ => return None,
         };
 
+        // `(hoc as (c: unknown) => object)(…)`: the assertion says what the call returns, and it is no component.
+        callee_of(call)?;
         // First arg should be a function with a typed props param — or a forwardRef() call.
         let first_arg = call.arguments.first()?;
 
@@ -707,7 +825,7 @@ impl<'src> SourceDataCollector<'src> {
     /// (bare or `React.`-qualified). Returns the matched bare name for use in
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
-        let super_name = self.expression_to_ident_name(super_class(class)?.expr);
+        let super_name = self.expression_to_ident_name(super_class(class)?.named()?);
         match self.react_type_export(&super_name)?.as_str() {
             "Component" => Some("Component"),
             "PureComponent" => Some("PureComponent"),
@@ -927,7 +1045,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(init) = decl.init.as_ref() else { return false };
         let target = match peel_expr(init) {
             Expression::StaticMemberExpression(member) => {
-                let Expression::Identifier(object) = peel_expr(&member.object) else { return false };
+                let Some(Expression::Identifier(object)) = named(&member.object) else { return false };
                 let property = member.property.name.as_str();
                 if !self.imported_names.contains(object.name.as_str()) || !is_pascal_case(property) {
                     return false;
@@ -990,8 +1108,8 @@ impl<'src> SourceDataCollector<'src> {
             return true;
         }
         let name = match callee_of(call) {
-            Expression::Identifier(id) => id.name.as_str(),
-            Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+            Some(Expression::Identifier(id)) => id.name.as_str(),
+            Some(Expression::StaticMemberExpression(member)) => member.property.name.as_str(),
             _ => return false,
         };
         name == "forwardRef" && self.react_api(call).is_none()
@@ -999,7 +1117,7 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Extract the callee name of a call expression (simple ident or member expr).
     pub(super) fn extract_callee_name<'a>(&self, call: &CallExpression<'a>) -> Option<String> {
-        match callee_of(call) {
+        match callee_of(call)? {
             Expression::Identifier(id) => Some(id.name.as_str().to_owned()),
             Expression::StaticMemberExpression(me) => {
                 Some(format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str()))
@@ -1029,9 +1147,9 @@ pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<
 
 /// Whether the call is `Object.assign(...)`.
 pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
-    matches!(callee_of(call), Expression::StaticMemberExpression(callee)
+    matches!(callee_of(call), Some(Expression::StaticMemberExpression(callee))
         if callee.property.name == "assign"
-            && matches!(peel_expr(&callee.object), Expression::Identifier(object) if object.name == "Object"))
+            && matches!(named(&callee.object), Some(Expression::Identifier(object)) if object.name == "Object"))
 }
 
 /// Whether a call wrapping a component returns a component, by the ecosystem's conventions:
@@ -1040,9 +1158,9 @@ pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
 fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
     // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`.
     let callee = match callee_of(call) {
-        Expression::Identifier(id) => id.name.as_str(),
-        Expression::StaticMemberExpression(m) => m.property.name.as_str(),
-        Expression::CallExpression(_) => return true,
+        Some(Expression::Identifier(id)) => id.name.as_str(),
+        Some(Expression::StaticMemberExpression(m)) => m.property.name.as_str(),
+        Some(Expression::CallExpression(_)) => return true,
         _ => return false,
     };
     let lower = callee.to_ascii_lowercase();

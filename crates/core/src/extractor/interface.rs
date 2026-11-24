@@ -406,19 +406,20 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     fn scan_object_assign_call<'a>(&mut self, call: &CallExpression<'a>) {
-        let Expression::StaticMemberExpression(callee) = super::component::callee_of(call) else { return };
-        if !matches!(&callee.object, Expression::Identifier(id) if id.name.as_str() == "Object") {
+        // The same predicate and argument reads as `record_object_assign_declarator` and `aliased_component`, which
+        // record `Root` as the alias this scan attaches the inline members to.
+        if !super::component::is_object_assign_call(call) {
             return;
         }
-        if callee.property.name.as_str() != "assign" {
-            return;
-        }
-        let Some(Argument::Identifier(parent_id)) = call.arguments.first() else { return };
+        let Some(Expression::Identifier(parent_id)) = super::component::aliased_component(call) else { return };
         if !is_pascal_case(parent_id.name.as_str()) {
             return;
         }
         let Some(second_arg) = call.arguments.get(1) else { return };
-        let Some(Expression::ObjectExpression(obj)) = second_arg.as_expression() else { return };
+        let Some(Expression::ObjectExpression(obj)) = second_arg.as_expression().map(super::component::peel_expr)
+        else {
+            return;
+        };
 
         for prop in &obj.properties {
             let ObjectPropertyKind::ObjectProperty(op) = prop else { continue };
@@ -461,8 +462,8 @@ impl<'src> SourceDataCollector<'src> {
                 // `Root.Item = memo(...)` is a component this scan cannot read; any other call (`createContext`)
                 // is not a component, so it is not reported.
                 let wrapper = match super::component::callee_of(call) {
-                    Expression::Identifier(id) => id.name.as_str(),
-                    Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+                    Some(Expression::Identifier(id)) => id.name.as_str(),
+                    Some(Expression::StaticMemberExpression(member)) => member.property.name.as_str(),
                     _ => return,
                 };
                 if matches!(wrapper, "memo" | "forwardRef") {
