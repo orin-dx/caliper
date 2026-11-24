@@ -406,7 +406,7 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     fn scan_object_assign_call<'a>(&mut self, call: &CallExpression<'a>) {
-        let Expression::StaticMemberExpression(callee) = &call.callee else { return };
+        let Expression::StaticMemberExpression(callee) = super::component::callee_of(call) else { return };
         if !matches!(&callee.object, Expression::Identifier(id) if id.name.as_str() == "Object") {
             return;
         }
@@ -460,7 +460,7 @@ impl<'src> SourceDataCollector<'src> {
             Expression::CallExpression(call) => {
                 // `Root.Item = memo(...)` is a component this scan cannot read; any other call (`createContext`)
                 // is not a component, so it is not reported.
-                let wrapper = match super::component::peel_expr(&call.callee) {
+                let wrapper = match super::component::callee_of(call) {
                     Expression::Identifier(id) => id.name.as_str(),
                     Expression::StaticMemberExpression(member) => member.property.name.as_str(),
                     _ => return,

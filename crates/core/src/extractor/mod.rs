@@ -730,9 +730,9 @@ impl<'src> SourceDataCollector<'src> {
     /// `forwardRef`, `React.forwardRef`, `R.forwardRef` for `import * as R from "react"`, and `import { forwardRef as fr }`
     /// all name the same one, while a `forwardRef` imported from another module is not React's. A name no import binds
     /// (the global `React`, or `const { forwardRef } = React`) is read as written.
-    pub(super) fn react_api(&self, callee: &Expression<'_>) -> Option<ReactApi> {
+    pub(super) fn react_api(&self, call: &CallExpression<'_>) -> Option<ReactApi> {
         let import_of = |local: &str| self.data.imports.iter().find(|import| import.local_name.as_str() == local);
-        match component::peel_expr(callee) {
+        match component::callee_of(call) {
             Expression::Identifier(id) => match import_of(id.name.as_str()) {
                 Some(import) if is_react_module(&import.specifier) => {
                     ReactApi::of_export(import.exported_name.as_str())
@@ -1535,6 +1535,9 @@ mod tests;
 #[cfg(test)]
 mod scope_tests;
 
+#[cfg(test)]
+mod wrapper_matrix_tests;
+
 impl evidence::Scope for SourceDataCollector<'_> {
     fn may_be_react(&self, name: &str) -> bool {
         SourceDataCollector::may_be_react(self, name)
@@ -1545,7 +1548,7 @@ impl evidence::Scope for SourceDataCollector<'_> {
     }
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
-        matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
+        matches!(self.react_api(call), Some(ReactApi::Memo | ReactApi::ForwardRef))
     }
 
     fn is_preact_h(&self, receiver: Option<&str>) -> bool {

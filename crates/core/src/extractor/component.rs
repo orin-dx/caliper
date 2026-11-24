@@ -10,24 +10,130 @@ use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, Diagnost
 use super::evidence::{FunctionShape, Scope, renders};
 use super::{ReactApi, SourceDataCollector, is_pascal_case};
 
-/// Peel any wrapping `as X` casts, `satisfies X` checks or `!` assertions down to the real
-/// expression underneath. Needed because component libraries commonly cast a
-/// forwardRef/HOC call to a hand-rolled wrapper type instead of relying on
-/// `@types/react`'s own generics (Fluent UI's own source notes this is
-/// "required due to lack of distributive union to support unions on
-/// @types/react"); `satisfies` (TS 4.9+) is the modern equivalent of the same
-/// pattern and must be peeled the same way.
-pub(super) fn peel_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    let mut expr = expr;
+/// One layer of the wrappers TypeScript erases from a value.
+enum Wrapper<'b, 'a> {
+    /// Parentheses, `satisfies` or `!`: the value and its type pass through.
+    Transparent(&'b Expression<'a>),
+    /// `as` or `<T>x`: the value passes through, its type is replaced.
+    Asserted(&'b Expression<'a>),
+    /// `f<T>`: the value passes through with its type arguments given.
+    Instantiation(&'b TSInstantiationExpression<'a>),
+}
+
+/// The wrapper `expr` is, if it is one. The one list of what a wrapper is, and exhaustive so that a new expression kind
+/// in an OXC release has to be placed here before it compiles.
+fn wrapper<'a, 'b>(expr: &'b Expression<'a>) -> Option<Wrapper<'b, 'a>> {
+    match expr {
+        Expression::ParenthesizedExpression(inner) => Some(Wrapper::Transparent(&inner.expression)),
+        Expression::TSSatisfiesExpression(inner) => Some(Wrapper::Transparent(&inner.expression)),
+        Expression::TSNonNullExpression(inner) => Some(Wrapper::Transparent(&inner.expression)),
+        Expression::TSAsExpression(inner) => Some(Wrapper::Asserted(&inner.expression)),
+        Expression::TSTypeAssertion(inner) => Some(Wrapper::Asserted(&inner.expression)),
+        Expression::TSInstantiationExpression(inner) => Some(Wrapper::Instantiation(inner)),
+        Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::RegExpLiteral(_)
+        | Expression::StringLiteral(_)
+        | Expression::TemplateLiteral(_)
+        | Expression::Identifier(_)
+        | Expression::Super(_)
+        | Expression::ArrayExpression(_)
+        | Expression::ArrowFunctionExpression(_)
+        | Expression::AssignmentExpression(_)
+        | Expression::AwaitExpression(_)
+        | Expression::BinaryExpression(_)
+        | Expression::CallExpression(_)
+        | Expression::ChainExpression(_)
+        | Expression::ClassExpression(_)
+        | Expression::ConditionalExpression(_)
+        | Expression::FunctionExpression(_)
+        | Expression::ImportExpression(_)
+        | Expression::LogicalExpression(_)
+        | Expression::NewExpression(_)
+        | Expression::ObjectExpression(_)
+        | Expression::SequenceExpression(_)
+        | Expression::TaggedTemplateExpression(_)
+        | Expression::ThisExpression(_)
+        | Expression::UnaryExpression(_)
+        | Expression::UpdateExpression(_)
+        | Expression::YieldExpression(_)
+        | Expression::PrivateInExpression(_)
+        | Expression::ImportMeta(_)
+        | Expression::NewTarget(_)
+        | Expression::JSXElement(_)
+        | Expression::JSXFragment(_)
+        | Expression::V8IntrinsicExpression(_)
+        | Expression::ComputedMemberExpression(_)
+        | Expression::StaticMemberExpression(_)
+        | Expression::PrivateFieldExpression(_) => None,
+    }
+}
+
+/// A value beneath its wrappers: component libraries cast a forwardRef or HOC call to a hand-rolled component type
+/// (Fluent UI: "required due to lack of distributive union to support unions on @types/react"), or check it with
+/// `satisfies`. An instantiation is kept: `const X = Base<P>` is not `Base`, and reading it as `Base` drops `P`.
+pub(super) fn peel_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
     loop {
-        expr = match expr {
-            Expression::ParenthesizedExpression(parenthesized) => &parenthesized.expression,
-            Expression::TSAsExpression(as_expr) => &as_expr.expression,
-            Expression::TSSatisfiesExpression(sat_expr) => &sat_expr.expression,
-            Expression::TSNonNullExpression(non_null) => &non_null.expression,
-            _ => return expr,
+        expr = match wrapper(expr) {
+            Some(Wrapper::Transparent(inner) | Wrapper::Asserted(inner)) => inner,
+            Some(Wrapper::Instantiation(_)) | None => return expr,
         };
     }
+}
+
+/// An expression beneath every wrapper, instantiations included, and the type arguments an instantiation among them
+/// gave it.
+#[derive(Clone, Copy)]
+pub(super) struct Peeled<'b, 'a> {
+    pub(super) expr: &'b Expression<'a>,
+    /// The outermost instantiation's type arguments, unless an assertion above it replaced its type: `(f<T>)` and
+    /// `(f<T>)!` give `T`; `(f<T> as G)` gives none, as the value then has type `G`.
+    pub(super) type_arguments: Option<&'b TSTypeParameterInstantiation<'a>>,
+}
+
+/// See [`Peeled`]. For what a callee or an `extends` target is: OXC 0.159 keeps `(f<T>)(x)` and `extends (B<T>)` as an
+/// instantiation node beneath the call or heritage clause, where 0.158 moved its type arguments onto them.
+pub(super) fn peel<'a, 'b>(mut expr: &'b Expression<'a>) -> Peeled<'b, 'a> {
+    let mut type_arguments = None;
+    let mut asserted = false;
+    loop {
+        expr = match wrapper(expr) {
+            Some(Wrapper::Transparent(inner)) => inner,
+            Some(Wrapper::Asserted(inner)) => {
+                asserted = true;
+                inner
+            }
+            Some(Wrapper::Instantiation(instantiation)) => {
+                if !asserted && type_arguments.is_none() {
+                    type_arguments = Some(&*instantiation.type_arguments);
+                }
+                &instantiation.expression
+            }
+            None => return Peeled { expr, type_arguments },
+        };
+    }
+}
+
+/// What a call invokes: `(forwardRef as F)(…)` and `(forwardRef<R, P>)(…)` call `forwardRef`.
+pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>) -> &'b Expression<'a> {
+    peel(&call.callee).expr
+}
+
+/// The type arguments a call is made with: its own, or those of the instantiation it calls (`(forwardRef<R, P>)(…)`).
+pub(super) fn call_type_arguments<'a, 'b>(
+    call: &'b CallExpression<'a>,
+) -> Option<&'b TSTypeParameterInstantiation<'a>> {
+    call.type_arguments.as_deref().or_else(|| peel(&call.callee).type_arguments)
+}
+
+/// What a class extends and the type arguments it extends it with: `extends React.Component<P>` and
+/// `extends (React.Component<P>)` both give `React.Component` and `P`.
+pub(super) fn super_class<'a, 'b>(class: &'b Class<'a>) -> Option<Peeled<'b, 'a>> {
+    let heritage = class.heritage.as_ref()?;
+    let peeled = peel(&heritage.expression);
+    Some(Peeled { expr: peeled.expr, type_arguments: heritage.type_arguments.as_deref().or(peeled.type_arguments) })
 }
 
 /// What a call wrapping an aliased component is, as read from the call before the component is known.
@@ -145,7 +251,7 @@ impl<'src> SourceDataCollector<'src> {
     /// Try to detect: `const Button: FC<ButtonProps> = ({ variant = 'primary' }) => ...`
     pub(super) fn try_fc_annotation<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let type_ann = decl.annotation?;
-        let init_params = match decl.init.as_ref() {
+        let init_params = match decl.init.map(peel_expr) {
             Some(Expression::ArrowFunctionExpression(afe)) => Some(&*afe.params),
             Some(Expression::FunctionExpression(fe)) => Some(&*fe.params),
             _ => None,
@@ -213,7 +319,7 @@ impl<'src> SourceDataCollector<'src> {
         }
 
         // forwardRef<RefType, PropsType>(fn) — PropsType is the second type parameter
-        let type_params = call.type_arguments.as_ref()?;
+        let type_params = call_type_arguments(call)?;
         if type_params.params.len() < 2 {
             return None;
         }
@@ -299,7 +405,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             // `forwardRef<Ref, Props>(…)` names the props in its second type argument; otherwise the render function's
             // first parameter does. A call with one type argument and no function (`forwardRef<Ref>()`) names neither.
-            let props_type = inner.type_arguments.as_ref().and_then(|type_params| type_params.params.get(1));
+            let props_type = call_type_arguments(inner).and_then(|type_params| type_params.params.get(1));
             let Some(props_type) = props_type else {
                 let render = inner.arguments.first()?;
                 return self.mapping_from_typed_function(decl, name, call, render, DetectionRule::ForwardRef);
@@ -601,7 +707,7 @@ impl<'src> SourceDataCollector<'src> {
     /// (bare or `React.`-qualified). Returns the matched bare name for use in
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
-        let super_name = self.expression_to_ident_name(&class.heritage.as_ref()?.expression);
+        let super_name = self.expression_to_ident_name(super_class(class)?.expr);
         match self.react_type_export(&super_name)?.as_str() {
             "Component" => Some("Component"),
             "PureComponent" => Some("PureComponent"),
@@ -618,7 +724,7 @@ impl<'src> SourceDataCollector<'src> {
     /// contract — callers decide whether and how to surface a diagnostic.
     pub(super) fn try_class_component<'a>(&mut self, class: &Class<'a>, name: &str) -> Option<ComponentMapping> {
         self.super_class_is_component_family(class)?;
-        let type_args = class.heritage.as_ref()?.type_arguments.as_ref()?;
+        let type_args = super_class(class)?.type_arguments?;
         let props_type = type_args.params.first()?;
         let (props_name, props_type_args) = self.extract_type_name_from_type(props_type)?;
         let (description, tags) = self.find_jsdoc_with_tags(class.span.start);
@@ -649,7 +755,7 @@ impl<'src> SourceDataCollector<'src> {
         name: &str,
     ) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
-        let Expression::ClassExpression(class) = init else { return None };
+        let Expression::ClassExpression(class) = peel_expr(init) else { return None };
         if class.id.is_some() {
             return None;
         }
@@ -880,20 +986,20 @@ impl<'src> SourceDataCollector<'src> {
     /// Whether `call` makes a component that takes a `ref` whatever its props type declares: React's `forwardRef` however
     /// it is imported or spelled, or another module's own `forwardRef` (React Aria's).
     fn is_forward_ref_call(&self, call: &CallExpression<'_>) -> bool {
-        if self.react_api(&call.callee) == Some(ReactApi::ForwardRef) {
+        if self.react_api(call) == Some(ReactApi::ForwardRef) {
             return true;
         }
-        let name = match peel_expr(&call.callee) {
+        let name = match callee_of(call) {
             Expression::Identifier(id) => id.name.as_str(),
             Expression::StaticMemberExpression(member) => member.property.name.as_str(),
             _ => return false,
         };
-        name == "forwardRef" && self.react_api(&call.callee).is_none()
+        name == "forwardRef" && self.react_api(call).is_none()
     }
 
     /// Extract the callee name of a call expression (simple ident or member expr).
     pub(super) fn extract_callee_name<'a>(&self, call: &CallExpression<'a>) -> Option<String> {
-        match &call.callee {
+        match callee_of(call) {
             Expression::Identifier(id) => Some(id.name.as_str().to_owned()),
             Expression::StaticMemberExpression(me) => {
                 Some(format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str()))
@@ -923,7 +1029,7 @@ pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<
 
 /// Whether the call is `Object.assign(...)`.
 pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
-    matches!(&call.callee, Expression::StaticMemberExpression(callee)
+    matches!(callee_of(call), Expression::StaticMemberExpression(callee)
         if callee.property.name == "assign"
             && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"))
 }
@@ -933,7 +1039,7 @@ pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
 /// `observer`, and curried wrappers such as `connect(...)(Component)` or `styled(...)(Component)`.
 fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
     // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`.
-    let callee = match peel_expr(&call.callee) {
+    let callee = match callee_of(call) {
         Expression::Identifier(id) => id.name.as_str(),
         Expression::StaticMemberExpression(m) => m.property.name.as_str(),
         Expression::CallExpression(_) => return true,

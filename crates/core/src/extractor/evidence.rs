@@ -139,13 +139,14 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        let name = callee_name(&it.callee);
-        let calls_helper = matches!(&it.callee, Expression::Identifier(id) if self.scope.is_element_helper(&id.name));
-        if calls_helper || is_element_factory_callee(&it.callee, self.scope) {
+        let callee = super::component::callee_of(it);
+        let name = callee_name(callee);
+        let calls_helper = matches!(callee, Expression::Identifier(id) if self.scope.is_element_helper(&id.name));
+        if calls_helper || is_element_factory_callee(callee, self.scope) {
             self.found = true;
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
-            || matches!(&it.callee, Expression::StaticMemberExpression(member)
+            || matches!(callee, Expression::StaticMemberExpression(member)
                 if matches!(&member.object, Expression::Identifier(id) if id.name == "Promise")
                     && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
@@ -172,7 +173,11 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         Expression::NullLiteral(_) => true,
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
         // A component invoked directly: `return JoinList({ ... })`.
-        Expression::CallExpression(call) if callee_name(&call.callee).is_some_and(super::is_pascal_case) => true,
+        Expression::CallExpression(call)
+            if callee_name(super::component::callee_of(call)).is_some_and(super::is_pascal_case) =>
+        {
+            true
+        }
         e if is_children(e) => true,
         e => value_has_element(e, scope),
     }
@@ -216,7 +221,7 @@ impl<'a> Visit<'a> for OwnBody<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if self.nested == 0 && callee_name(&it.callee).is_some_and(is_hook_name) {
+        if self.nested == 0 && callee_name(super::component::callee_of(it)).is_some_and(is_hook_name) {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);

@@ -91,7 +91,8 @@ fn component_argument_evidence(
     let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::component::peel_expr) else {
         return Err("has no argument that could be a component");
     };
-    let element_type_arg = || call.type_arguments.as_ref().is_some_and(|a| a.params.iter().any(is_element_type_arg));
+    let element_type_arg =
+        || super::component::call_type_arguments(call).is_some_and(|a| a.params.iter().any(is_element_type_arg));
     let sufficient = |r: Result<(), &'static str>| r.map(|()| ArgumentEvidence::Sufficient);
     match first {
         Expression::ArrowFunctionExpression(f) => sufficient(
@@ -138,9 +139,9 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_wrapper_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
+        let Some(type_arguments) = super::component::call_type_arguments(call) else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        let creates_context = self.react_api(&call.callee) == Some(super::ReactApi::CreateContext);
+        let creates_context = self.react_api(call) == Some(super::ReactApi::CreateContext);
         let needs_payload = match component_argument_evidence(creates_context, call, &*self) {
             Ok(ArgumentEvidence::Sufficient) => false,
             Ok(ArgumentEvidence::TagNeedsPayload) => true,
@@ -182,7 +183,7 @@ impl<'src> SourceDataCollector<'src> {
     ) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        if call.type_arguments.is_some() {
+        if super::component::call_type_arguments(call).is_some() {
             return false;
         }
         let [tag, config] = call.arguments.as_slice() else { return false };
@@ -223,7 +224,7 @@ impl<'src> SourceDataCollector<'src> {
     /// `withContext<HTMLDivElement, OverlayProps>(BaseOverlay, …)`. The call's own props then replace those of the
     /// component it receives.
     pub(super) fn call_names_props_type<'a>(&mut self, call: &CallExpression<'a>) -> bool {
-        let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
+        let Some(type_arguments) = super::component::call_type_arguments(call) else { return false };
         let type_args: Vec<WrapperTypeArg> = type_arguments
             .params
             .iter()
@@ -370,7 +371,7 @@ impl<'src> SourceDataCollector<'src> {
     /// The callee of a generic call that builds a component, and its type arguments, for the props its result type
     /// adds (`resolver::callee`). `None` for a call without type arguments.
     pub(super) fn wrapper_callee<'a>(&mut self, call: &CallExpression<'a>) -> Option<WrapperCallee> {
-        let type_arguments = call.type_arguments.as_ref()?;
+        let type_arguments = super::component::call_type_arguments(call)?;
         let name = self.extract_callee_name(call)?;
         Some(WrapperCallee {
             name: name.as_str().into(),
@@ -488,16 +489,14 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_factory_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) else { return false };
+        let Expression::Identifier(callee) = super::component::callee_of(call) else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
         let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);
-        if super::is_constant_name(name) || explained || element_builder || self.react_api(&call.callee).is_some() {
+        if super::is_constant_name(name) || explained || element_builder || self.react_api(call).is_some() {
             return false;
         }
-        let type_args = call
-            .type_arguments
-            .as_ref()
+        let type_args = super::component::call_type_arguments(call)
             .map(|arguments| arguments.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect())
             .unwrap_or_default();
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
