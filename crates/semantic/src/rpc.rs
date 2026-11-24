@@ -1800,52 +1800,473 @@ release {"snapshot":1}
         assert_eq!(named.len(), ASKED.len(), "a method named twice: {ASKED:?}");
     }
 
-    /// The parameter that chooses the answer is read: a different `kind`, `flags` or `type` gives a different answer
-    /// from a real checker. (`files` has its own test, `semantic_diagnostics_checks_only_the_requested_file`.)
+    /// How an answer is printed to be compared: each handle in it as what it names.
+    #[derive(Clone, Copy)]
+    enum Shape {
+        /// A symbol, as its name.
+        Symbol,
+        /// A type, as `typeToString` prints it.
+        Type,
+        /// A signature, as its parameters' names and its return type.
+        Signature,
+        /// An index signature, as its key and value types.
+        Index,
+        /// A diagnostic, as its file, line and message.
+        Diagnostic,
+        /// An answer that holds no handle, as its JSON; a string as itself.
+        Plain,
+    }
+
+    /// What chooses a method's answer besides the snapshot and project every question sends.
+    enum Chosen {
+        /// These parameters, each varied by a case of [`each_parameter_that_chooses_the_answer_changes_it`]; and how
+        /// the answer is printed.
+        By(&'static [&'static str], Shape),
+        /// Nothing: the method has no parameter of its own. Says why.
+        ScopeOnly(&'static str),
+    }
+
+    /// Every [`Ask`] variant, classified. There is no wildcard arm, so a new method does not compile until it is here.
+    fn chosen(ask: &Ask<'_>) -> Chosen {
+        use Chosen::{By, ScopeOnly};
+        match ask {
+            Ask::SourceFileNames {} => ScopeOnly("it lists every file of the program the snapshot and project name"),
+            Ask::SymbolOfSourceFile { .. } => By(&["file"], Shape::Symbol),
+            Ask::ExportsOfModule { .. } => By(&["symbol"], Shape::Symbol),
+            Ask::AliasedSymbol { .. } => By(&["symbol"], Shape::Symbol),
+            Ask::TypeOfSymbol { .. } => By(&["symbol"], Shape::Type),
+            Ask::TypesOfSymbols { .. } => By(&["symbols"], Shape::Type),
+            Ask::DeclaredTypeOfSymbol { .. } => By(&["symbol"], Shape::Type),
+            Ask::ParentOfSymbol { .. } => By(&["symbol"], Shape::Symbol),
+            Ask::ReadonlySymbol { .. } => By(&["symbol"], Shape::Plain),
+            Ask::DocumentationComment { .. } => By(&["symbol"], Shape::Plain),
+            Ask::JsDocTags { .. } => By(&["symbol"], Shape::Plain),
+            Ask::SymbolOfDeclaration { .. } => By(&["location"], Shape::Symbol),
+            Ask::SemanticDiagnostics { .. } => By(&["files"], Shape::Diagnostic),
+            Ask::SignaturesOfType { .. } => By(&["type", "kind"], Shape::Signature),
+            Ask::BaseTypes { .. } => By(&["type"], Shape::Type),
+            Ask::PropertiesOfType { .. } => By(&["type"], Shape::Symbol),
+            Ask::IndexInfosOfType { .. } => By(&["type"], Shape::Index),
+            Ask::TypeArguments { .. } => By(&["type"], Shape::Type),
+            Ask::TypeToString { .. } => By(&["type", "flags"], Shape::Plain),
+            Ask::SymbolOfType { .. } => By(&["objectId"], Shape::Symbol),
+            Ask::TargetOfType { .. } => By(&["objectId"], Shape::Type),
+            Ask::TypesOfType { .. } => By(&["objectId"], Shape::Type),
+            Ask::AliasSymbolOfType { .. } => By(&["objectId"], Shape::Symbol),
+            Ask::AliasTypeArgumentsOfType { .. } => By(&["objectId"], Shape::Type),
+            Ask::DefaultFromTypeParameter { .. } => By(&["objectId"], Shape::Type),
+            Ask::TypeParametersOfSignature { .. } => By(&["objectId"], Shape::Type),
+            Ask::ParametersOfSignature { .. } => By(&["objectId"], Shape::Symbol),
+            Ask::ReturnTypeOfSignature { .. } => By(&["objectId"], Shape::Type),
+        }
+    }
+
+    /// The methods [`chosen`] calls scope-only, one question each.
+    fn scope_only() -> Vec<Ask<'static>> {
+        vec![Ask::SourceFileNames {}]
+    }
+
+    /// The keys every question sends, which name the program asked rather than what is asked of it.
+    const SCOPE: &[&str] = &["snapshot", "project"];
+
+    /// Keys tsrs reads that no request sends, so no case varies them: the method, the key and why.
+    const LEFT_OUT: &[(&str, &str, &str)] = &[(
+        "typeToString",
+        "location",
+        "it scopes the printing to a node; we print at the top level, chosen by `flags`",
+    )];
+
+    /// A method's parameter varied: two questions that differ in `param` alone, and the answer each gets.
+    struct Varied<'a> {
+        param: &'static str,
+        asks: [Ask<'a>; 2],
+        answers: [&'static str; 2],
+    }
+
+    /// An answer as [`Shape`] prints it, with `root` cut from the file names in it; `none` for `null`.
+    async fn printed(rpc: &Rpc, shape: Shape, answer: &RawValue, root: &str) -> String {
+        let text = match decode::<Value>(answer).unwrap() {
+            Value::Null => "none".to_string(),
+            Value::Array(items) => {
+                let mut each = Vec::new();
+                for item in items {
+                    each.push(printed_one(rpc, shape, item).await);
+                }
+                format!("[{}]", each.join(", "))
+            }
+            single => printed_one(rpc, shape, single).await,
+        };
+        text.replace(root, "")
+    }
+
+    async fn printed_one(rpc: &Rpc, shape: Shape, value: Value) -> String {
+        let type_text = async |id| rpc.type_to_string(id).await.unwrap();
+        match shape {
+            Shape::Symbol => serde_json::from_value::<SymbolInfo>(value).unwrap().name,
+            Shape::Type => type_text(serde_json::from_value::<TypeInfo>(value).unwrap().id).await,
+            Shape::Signature => {
+                let signature: SignatureInfo = serde_json::from_value(value).unwrap();
+                let names: Vec<String> =
+                    rpc.parameters(signature.id).await.unwrap().into_iter().map(|parameter| parameter.name).collect();
+                let returns = rpc.return_type(signature.id).await.unwrap().id;
+                format!("({}) => {}", names.join(", "), type_text(returns).await)
+            }
+            Shape::Index => {
+                let index: IndexInfo = serde_json::from_value(value).unwrap();
+                format!("[{}]: {}", type_text(index.key_type.id).await, type_text(index.value_type.id).await)
+            }
+            Shape::Diagnostic => {
+                let diagnostic: FileDiagnostic = serde_json::from_value(value).unwrap();
+                format!("{}:{} {}", diagnostic.file_name, diagnostic.start_position.line, diagnostic.message())
+            }
+            Shape::Plain => match value {
+                Value::String(text) => text,
+                other => other.to_string(),
+            },
+        }
+    }
+
+    /// For every method [`Ask`] sends and each parameter that chooses its answer ([`chosen`]), two questions that
+    /// differ in that parameter alone get the two different answers written here from a real checker, asked alone and
+    /// in one batch. tsrs reads a missing key as its zero value and ignores one it does not know, so a parameter it
+    /// does not read gets one answer for both. The questions are built here; `every_request_writes_the_pinned_bytes`
+    /// pins that each [`Rpc`] method builds them from its arguments. Also: every method is classified, every key tsrs reads of it is varied, scope or
+    /// left out on purpose ([`LEFT_OUT`]), and every case's two questions differ in its parameter and nothing else.
     #[test]
     fn each_parameter_that_chooses_the_answer_changes_it() {
         let dir = tempfile::tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
-        let file = root.join("types.ts").to_string();
-        let source = "export type Handler = (value?: string) => void;\n\
-                      export interface Both { (x: number): string; new (x: string): Both; a: number }\n\
-                      export interface Other { b: string }\n\
-                      export declare const handler: Handler;\n";
-        let files = [(file.clone(), source.to_string())];
+        let [a, b, bad] = ["a.ts", "b.ts", "bad.ts"].map(|name| root.join(name).to_string());
+        std::fs::write(
+            &a,
+            "export interface Base1 { base1: string }\n\
+             export interface Base2 { base2: string }\n\
+             /** Alpha docs. @since 1 */\n\
+             export interface Alpha extends Base1 {\n  (x: number): string;\n  new (x: string): Alpha;\n  a: number;\n  \
+             readonly ra: number;\n  [key: string]: unknown;\n}\n\
+             /** Beta docs. @deprecated use Alpha */\n\
+             export interface Beta extends Base2 {\n  (y: string): number;\n  b: string;\n  [index: number]: string;\n}\n\
+             export declare const one: Alpha;\n\
+             export declare const two: Beta;\n\
+             export type Handler = (value?: string) => void;\n\
+             export declare const handler: Handler;\n\
+             export interface Box<T> { value: T }\n\
+             export interface Pair<T> { first: T; second: T }\n\
+             export declare const boxS: Box<string>;\n\
+             export declare const boxN: Box<number>;\n\
+             export declare const pairS: Pair<string>;\n\
+             export type U1 = 'x' | 'y';\n\
+             export type U2 = 'p' | 'q';\n\
+             export type Wrap<T> = { w: T };\n\
+             export declare const wrapS: Wrap<string>;\n\
+             export declare const wrapN: Wrap<number>;\n\
+             export declare function f1<T1 = string>(a1: T1): T1;\n\
+             export declare function f2<T2 = number, V2 = boolean>(b2: T2): T2;\n",
+        )
+        .unwrap();
+        std::fs::write(&b, "export { Alpha as AliasA, Beta as AliasB } from './a';\n").unwrap();
+        std::fs::write(&bad, "export const bad: string = 1;\n").unwrap();
+        let cut = format!("{root}/");
         let checker = Backend::start(&root, 1).unwrap();
         let runtime = multi_thread();
-        runtime.block_on(async {
-            let deadline = Duration::from_secs(30);
+        let wrong = runtime.block_on(async {
+            let deadline = Duration::from_secs(60);
             let client = checker.client();
             let options = Rpc::prepare(&client, deadline, None).await.unwrap();
-            let rpc = Rpc::open_in_memory(client, deadline, &options, &files).await.unwrap();
-            let module = rpc.source_file_symbol(&file).await.unwrap().unwrap();
-            let exports = rpc.exports_of_module(&module.reference).await.unwrap();
-            let export = |name: &str| exports.iter().find(|symbol| symbol.name == name).unwrap().reference.clone();
-            let both = rpc.declared_type_of_symbol(&export("Both")).await.unwrap().id;
-            let other = rpc.declared_type_of_symbol(&export("Other")).await.unwrap().id;
-            let handler = rpc.type_of_symbol(&export("handler")).await.unwrap().id;
-            let returned = async |kind| {
-                let mut printed = Vec::new();
-                for signature in rpc.signatures(both, kind).await.unwrap() {
-                    let returns = rpc.return_type(signature.id).await.unwrap().id;
-                    printed.push(rpc.type_to_string(returns).await.unwrap());
-                }
-                printed
+            let roots = [a.clone(), b.clone(), bad.clone()];
+            let rpc = Rpc::open_with(client, deadline, &options, &roots, false).await.unwrap();
+            let module = async |file: &str| rpc.source_file_symbol(file).await.unwrap().unwrap().reference;
+            let (a_module, b_module, bad_module) = (module(&a).await, module(&b).await, module(&bad).await);
+            let exports = rpc.exports_of_module(&a_module).await.unwrap();
+            let aliases = rpc.exports_of_module(&b_module).await.unwrap();
+            let named = |symbols: &[SymbolInfo], name: &str| {
+                let found = symbols.iter().find(|symbol| symbol.name == name);
+                let names: Vec<&str> = symbols.iter().map(|symbol| symbol.name.as_str()).collect();
+                found.unwrap_or_else(|| panic!("no {name} among {names:?}")).clone()
             };
-            let names = async |type_id| {
-                rpc.properties(type_id).await.unwrap().into_iter().map(|property| property.name).collect::<Vec<_>>()
+            let export = |name| named(&exports, name);
+            let typed = async |name| rpc.type_of_symbol(&export(name).reference).await.unwrap().id;
+            let declared = async |name| rpc.declared_type_of_symbol(&export(name).reference).await.unwrap().id;
+            let (alpha, beta) = (export("Alpha"), export("Beta"));
+            let (one, two) = (export("one").reference, export("two").reference);
+            let (alias_a, alias_b) = (named(&aliases, "AliasA").reference, named(&aliases, "AliasB").reference);
+            let (alpha_type, beta_type) = (declared("Alpha").await, declared("Beta").await);
+            let (u1, u2) = (declared("U1").await, declared("U2").await);
+            let (one_type, two_type, handler) = (typed("one").await, typed("two").await, typed("handler").await);
+            let (box_s, box_n, pair_s) = (typed("boxS").await, typed("boxN").await, typed("pairS").await);
+            let (wrap_s, wrap_n) = (typed("wrapS").await, typed("wrapN").await);
+            let alpha_members = rpc.properties(alpha_type).await.unwrap();
+            let beta_members = rpc.properties(beta_type).await.unwrap();
+            let a_member = named(&alpha_members, "a").reference;
+            let ra_member = named(&alpha_members, "ra").reference;
+            let b_member = named(&beta_members, "b").reference;
+            let signature = async |name| rpc.signatures(typed(name).await, SignatureKind::Call).await.unwrap()[0].id;
+            let (f1, f2) = (signature("f1").await, signature("f2").await);
+            let first_parameter = async |signature| rpc.type_parameters(signature).await.unwrap()[0].id;
+            let (t1, t2) = (first_parameter(f1).await, first_parameter(f2).await);
+            let (both, second) = ([&one, &two], [&two]);
+            let (in_a, in_bad) = ([a.as_str()], [bad.as_str()]);
+            let (call, construct) = (SignatureKind::Call as u8, SignatureKind::Construct as u8);
+            let (alpha_symbol, beta_symbol) = (&alpha.reference, &beta.reference);
+            let (alpha_declaration, beta_declaration) = (&alpha.declarations[0], &beta.declarations[0]);
+
+            let cases = || {
+                let case = |param, asks, answers| Varied { param, asks, answers };
+                vec![
+                    case(
+                        "file",
+                        [Ask::SymbolOfSourceFile { file: &a }, Ask::SymbolOfSourceFile { file: &b }],
+                        [r#""a""#, r#""b""#],
+                    ),
+                    case(
+                        "symbol",
+                        [Ask::ExportsOfModule { symbol: &b_module }, Ask::ExportsOfModule { symbol: &bad_module }],
+                        ["[AliasA, AliasB]", "[bad]"],
+                    ),
+                    case(
+                        "symbol",
+                        [Ask::AliasedSymbol { symbol: &alias_a }, Ask::AliasedSymbol { symbol: &alias_b }],
+                        ["Alpha", "Beta"],
+                    ),
+                    case(
+                        "symbol",
+                        [Ask::TypeOfSymbol { symbol: &one }, Ask::TypeOfSymbol { symbol: &two }],
+                        ["Alpha", "Beta"],
+                    ),
+                    case(
+                        "symbols",
+                        [Ask::TypesOfSymbols { symbols: &both }, Ask::TypesOfSymbols { symbols: &second }],
+                        ["[Alpha, Beta]", "[Beta]"],
+                    ),
+                    case(
+                        "symbol",
+                        [
+                            Ask::DeclaredTypeOfSymbol { symbol: alpha_symbol },
+                            Ask::DeclaredTypeOfSymbol { symbol: beta_symbol },
+                        ],
+                        ["Alpha", "Beta"],
+                    ),
+                    case(
+                        "symbol",
+                        [Ask::ParentOfSymbol { symbol: &a_member }, Ask::ParentOfSymbol { symbol: &b_member }],
+                        ["Alpha", "Beta"],
+                    ),
+                    case(
+                        "symbol",
+                        [Ask::ReadonlySymbol { symbol: &ra_member }, Ask::ReadonlySymbol { symbol: &a_member }],
+                        ["true", "false"],
+                    ),
+                    case(
+                        "symbol",
+                        [
+                            Ask::DocumentationComment { symbol: alpha_symbol },
+                            Ask::DocumentationComment { symbol: beta_symbol },
+                        ],
+                        ["Alpha docs.", "Beta docs."],
+                    ),
+                    case(
+                        "symbol",
+                        [Ask::JsDocTags { symbol: alpha_symbol }, Ask::JsDocTags { symbol: beta_symbol }],
+                        [r#"[{"name":"since","text":"1"}]"#, r#"[{"name":"deprecated","text":"use Alpha"}]"#],
+                    ),
+                    case(
+                        "location",
+                        [
+                            Ask::SymbolOfDeclaration { location: alpha_declaration },
+                            Ask::SymbolOfDeclaration { location: beta_declaration },
+                        ],
+                        ["Alpha", "Beta"],
+                    ),
+                    case(
+                        "files",
+                        [Ask::SemanticDiagnostics { files: &in_a }, Ask::SemanticDiagnostics { files: &in_bad }],
+                        ["[]", "[bad.ts:0 Type 'number' is not assignable to type 'string'.]"],
+                    ),
+                    case(
+                        "type",
+                        [
+                            Ask::SignaturesOfType { type_id: alpha_type, kind: call },
+                            Ask::SignaturesOfType { type_id: beta_type, kind: call },
+                        ],
+                        ["[(x) => string]", "[(y) => number]"],
+                    ),
+                    case(
+                        "kind",
+                        [
+                            Ask::SignaturesOfType { type_id: alpha_type, kind: call },
+                            Ask::SignaturesOfType { type_id: alpha_type, kind: construct },
+                        ],
+                        ["[(x) => string]", "[(x) => Alpha]"],
+                    ),
+                    case(
+                        "type",
+                        [Ask::BaseTypes { type_id: alpha_type }, Ask::BaseTypes { type_id: beta_type }],
+                        ["[Base1]", "[Base2]"],
+                    ),
+                    case(
+                        "type",
+                        [Ask::PropertiesOfType { type_id: alpha_type }, Ask::PropertiesOfType { type_id: beta_type }],
+                        ["[a, ra, base1]", "[b, base2]"],
+                    ),
+                    case(
+                        "type",
+                        [Ask::IndexInfosOfType { type_id: alpha_type }, Ask::IndexInfosOfType { type_id: beta_type }],
+                        ["[[string]: unknown]", "[[number]: string]"],
+                    ),
+                    case(
+                        "type",
+                        [Ask::TypeArguments { type_id: box_s }, Ask::TypeArguments { type_id: box_n }],
+                        ["[string]", "[number]"],
+                    ),
+                    case(
+                        "type",
+                        [
+                            Ask::TypeToString { type_id: one_type, flags: None },
+                            Ask::TypeToString { type_id: two_type, flags: None },
+                        ],
+                        ["Alpha", "Beta"],
+                    ),
+                    case(
+                        "flags",
+                        [
+                            Ask::TypeToString { type_id: handler, flags: None },
+                            Ask::TypeToString { type_id: handler, flags: Some(flag::PRINT_EXPANDED) },
+                        ],
+                        ["Handler", "(value?: string | undefined) => void"],
+                    ),
+                    case(
+                        "objectId",
+                        [Ask::SymbolOfType { object_id: one_type }, Ask::SymbolOfType { object_id: two_type }],
+                        ["Alpha", "Beta"],
+                    ),
+                    case(
+                        "objectId",
+                        [Ask::TargetOfType { object_id: box_s }, Ask::TargetOfType { object_id: pair_s }],
+                        ["Box<T>", "Pair<T>"],
+                    ),
+                    case(
+                        "objectId",
+                        [Ask::TypesOfType { object_id: u1 }, Ask::TypesOfType { object_id: u2 }],
+                        [r#"["x", "y"]"#, r#"["p", "q"]"#],
+                    ),
+                    case(
+                        "objectId",
+                        [Ask::AliasSymbolOfType { object_id: u1 }, Ask::AliasSymbolOfType { object_id: u2 }],
+                        ["U1", "U2"],
+                    ),
+                    case(
+                        "objectId",
+                        [
+                            Ask::AliasTypeArgumentsOfType { object_id: wrap_s },
+                            Ask::AliasTypeArgumentsOfType { object_id: wrap_n },
+                        ],
+                        ["[string]", "[number]"],
+                    ),
+                    case(
+                        "objectId",
+                        [
+                            Ask::DefaultFromTypeParameter { object_id: t1 },
+                            Ask::DefaultFromTypeParameter { object_id: t2 },
+                        ],
+                        ["string", "number"],
+                    ),
+                    case(
+                        "objectId",
+                        [
+                            Ask::TypeParametersOfSignature { object_id: f1 },
+                            Ask::TypeParametersOfSignature { object_id: f2 },
+                        ],
+                        ["[T1]", "[T2, V2]"],
+                    ),
+                    case(
+                        "objectId",
+                        [Ask::ParametersOfSignature { object_id: f1 }, Ask::ParametersOfSignature { object_id: f2 }],
+                        ["[a1]", "[b2]"],
+                    ),
+                    case(
+                        "objectId",
+                        [Ask::ReturnTypeOfSignature { object_id: f1 }, Ask::ReturnTypeOfSignature { object_id: f2 }],
+                        ["T1", "T2"],
+                    ),
+                ]
             };
 
-            assert_eq!(returned(SignatureKind::Call).await, ["string"]);
-            assert_eq!(returned(SignatureKind::Construct).await, ["Both"]);
-            assert_eq!(rpc.type_to_string(handler).await.unwrap(), "Handler");
-            assert_eq!(rpc.type_to_string_expanded(handler).await.unwrap(), "(value?: string | undefined) => void");
-            assert_eq!(names(both).await, ["a"]);
-            assert_eq!(names(other).await, ["b"]);
+            let mut wrong: Vec<String> = Vec::new();
+            let mut varied: BTreeMap<&'static str, Vec<&'static str>> = BTreeMap::new();
+            let mut classified: BTreeMap<&'static str, &'static [&'static str]> = BTreeMap::new();
+            for (index, Varied { param, asks: [left, right], answers }) in cases().into_iter().enumerate() {
+                let method = left.method();
+                let at = format!("{method} `{param}`");
+                let (keys, shape) = match chosen(&left) {
+                    Chosen::By(keys, shape) => (keys, shape),
+                    Chosen::ScopeOnly(reason) => {
+                        wrong.push(format!("{at}: varied, but classified scope-only: {reason}"));
+                        continue;
+                    }
+                };
+                let (mut sent_left, mut sent_right) =
+                    (serde_json::to_value(&left).unwrap(), serde_json::to_value(&right).unwrap());
+                if right.method() != method || !keys.contains(&param) || sent_left.get(param) == sent_right.get(param) {
+                    wrong.push(format!("{at}: the two questions do not differ in it: {sent_left} {sent_right}"));
+                }
+                sent_left.as_object_mut().unwrap().remove(param);
+                sent_right.as_object_mut().unwrap().remove(param);
+                if sent_left != sent_right {
+                    wrong.push(format!("{at}: the two questions differ in more than it: {sent_left} {sent_right}"));
+                }
+                varied.entry(method).or_default().push(param);
+                classified.insert(method, keys);
+                let mut answered: Vec<Result<Box<RawValue>, String>> = Vec::new();
+                for ask in [left, right] {
+                    answered.push(rpc.scoped_text(ask).await.map_err(|error| error.to_string()));
+                }
+                let Some(Varied { asks: [left, right], .. }) = cases().into_iter().nth(index) else { unreachable!() };
+                match rpc.batch(vec![left, right]).await {
+                    Ok(answers) => answered.extend(answers.into_iter().map(Ok)),
+                    Err(error) => answered.extend([Err(error.to_string()), Err(error.to_string())]),
+                }
+                let mut got = Vec::new();
+                for answer in &answered {
+                    got.push(match answer {
+                        Ok(answer) => printed(&rpc, shape, answer, &cut).await,
+                        Err(error) => format!("rejected: {error}"),
+                    });
+                }
+                let expected: Vec<&str> = answers.iter().chain(&answers).copied().collect();
+                if got != expected {
+                    wrong.push(format!("{at}: answered {got:?} (alone, then in a batch), not {expected:?}"));
+                }
+            }
+            for ask in scope_only() {
+                match chosen(&ask) {
+                    Chosen::ScopeOnly(_) => drop(classified.insert(ask.method(), &[])),
+                    Chosen::By(..) => wrong.push(format!("{}: listed scope-only, but classified as not", ask.method())),
+                }
+            }
+            for method in ASKED {
+                let Some(keys) = classified.get(method) else {
+                    wrong.push(format!("{method}: no case varies it, and it is not listed scope-only"));
+                    continue;
+                };
+                for key in *keys {
+                    if !varied.get(method).is_some_and(|params| params.contains(key)) {
+                        wrong.push(format!("{method} `{key}`: chooses the answer, but no case varies it"));
+                    }
+                }
+                let (_, required, optional) = TSRS_READS.iter().find(|(name, _, _)| name == method).unwrap();
+                for key in required.iter().chain(*optional) {
+                    let left_out = LEFT_OUT.iter().any(|(name, left, _)| name == method && left == key);
+                    if !SCOPE.contains(key) && !keys.contains(key) && !left_out {
+                        wrong.push(format!("{method} `{key}`: tsrs reads it, but it is neither varied nor left out"));
+                    }
+                }
+            }
             rpc.release().await;
+            wrong
         });
         runtime.block_on(checker.shutdown());
+
+        assert_eq!(wrong, Vec::<String>::new());
     }
 
     #[test]
