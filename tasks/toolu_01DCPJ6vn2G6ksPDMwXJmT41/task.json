@@ -1,0 +1,8 @@
+{
+  "tool_use_id": "toolu_01DCPJ6vn2G6ksPDMwXJmT41",
+  "agent_id": "ad02985add87aaee6",
+  "subagent_type": "general-purpose",
+  "task_description": "Follow-ups on merged flights and reroot",
+  "started_at": "2026-11-24T09:09:44.918955-08:00",
+  "transcript_unavailable_reason": "transcript path unresolvable"
+}
