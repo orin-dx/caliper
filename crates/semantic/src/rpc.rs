@@ -1648,8 +1648,10 @@ release {"snapshot":1}
     }
 
     /// What tsrs reads of each request's parameters, and of the objects nested in them: the name, the keys a request
-    /// must send for its answer to be the one asked, and the keys it may leave out. tsrs reads a missing key as its zero
-    /// value and ignores one it does not know, so neither a misspelled key nor a missing one fails a request.
+    /// must send for its answer to be the one asked, and the keys it may leave out. tsrs reads a missing key as its
+    /// zero value and ignores one it does not know, so neither a misspelled key nor a missing one fails a request.
+    /// This table is a copy, so it guards our types against what tsrs 0.24 read; the guard against tsrs changing is
+    /// `each_parameter_that_chooses_the_answer_changes_it`, which asks a real checker and fails when a key is ignored.
     ///
     /// Copied from `params_fields` in `tsrs_api` 0.24.0 (`src/paramfields.rs`, `pub(crate)`, so not importable): each
     /// method's arm, then the nested structs by Go name. `getSymbolOfDeclarationForChecker` and
