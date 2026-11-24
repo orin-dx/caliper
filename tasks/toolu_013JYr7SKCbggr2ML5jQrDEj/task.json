@@ -1,0 +1,16 @@
+{
+  "tool_use_id": "toolu_013JYr7SKCbggr2ML5jQrDEj",
+  "agent_id": "af7813df789a61394",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix package_of repeated ancestor lookups",
+  "token_usage": {
+    "input_tokens": 100,
+    "cache_creation_tokens": 104193,
+    "cache_read_tokens": 4228593,
+    "output_tokens": 20532,
+    "api_call_count": 50
+  },
+  "started_at": "2026-11-23T15:17:47.692646-08:00",
+  "completed_at": "2026-11-23T15:35:42.411087-08:00",
+  "transcript_unavailable_reason": "transcript unreadable"
+}
