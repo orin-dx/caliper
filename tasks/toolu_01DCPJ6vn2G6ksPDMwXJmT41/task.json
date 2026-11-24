@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01DCPJ6vn2G6ksPDMwXJmT41",
+  "agent_id": "ad02985add87aaee6",
+  "subagent_type": "general-purpose",
+  "task_description": "Follow-ups on merged flights and reroot",
+  "token_usage": {
+    "input_tokens": 158,
+    "cache_creation_tokens": 322727,
+    "cache_read_tokens": 10284899,
+    "output_tokens": 41498,
+    "api_call_count": 79
+  },
+  "started_at": "2026-11-24T09:09:44.918955-08:00",
+  "completed_at": "2026-11-24T10:36:32.270289-08:00"
+}
