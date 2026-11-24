@@ -220,8 +220,6 @@ impl From<SymbolWire> for SymbolInfo {
 /// A property's modifiers are read only off its value declaration (tsrs and TypeScript
 /// `getDeclarationModifierFlagsFromSymbol`), so one without a value declaration has no `readonly` modifier.
 fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, declarations: &[String]) -> Option<bool> {
-    #[cfg(test)]
-    READONLY_CLASSIFIED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if check_flags & flag::CHECK_READONLY != 0
         || flags & flag::SYMBOL_GET_ACCESSOR != 0 && flags & flag::SYMBOL_SET_ACCESSOR == 0
         || flags & flag::SYMBOL_ENUM_MEMBER != 0
@@ -234,11 +232,15 @@ fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, decla
     let modifiers_unread = flags & flag::SYMBOL_PROPERTY != 0
         && (value_declaration || check_flags & flag::CHECK_MADE_WITHOUT_DECLARATION == 0);
     let constant_unread = flags & flag::SYMBOL_VARIABLE != 0;
+    // Only the checker can say: do not read the declarations to find that out.
+    if modifiers_unread || constant_unread {
+        return None;
+    }
     let declarations_known = declarations.iter().all(|declaration| {
         let kind = declaration.split('.').nth(1).and_then(|kind| kind.parse::<u32>().ok());
         kind.is_some_and(|kind| NO_ASSIGNMENT_DECLARATION.contains(&kind))
     });
-    (!modifiers_unread && !constant_unread && declarations_known).then_some(false)
+    declarations_known.then_some(false)
 }
 
 /// The syntax kinds (tsrs_ast 0.24.0 numbering, as node handles carry them) of the declarations that are not an
@@ -250,10 +252,6 @@ fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, decla
 /// `the_declaration_kinds_are_read_from_the_pinned_tsrs` fails on any tsrs version but the one they were read from,
 /// and `a_settled_readonly_answer_is_the_checkers` pins each to a real declaration.
 const NO_ASSIGNMENT_DECLARATION: [u32; 9] = [171, 173, 174, 175, 176, 179, 180, 304, 305];
-
-/// How many symbols [`settled_readonly`] has classified in this process; nextest runs each test in a process of its own.
-#[cfg(test)]
-pub(crate) static READONLY_CLASSIFIED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
 /// `[brand]`. An ES-private member is `__#<symbol id>@#<name>`; the source writes `#<name>`. The id is the checker's
@@ -857,6 +855,15 @@ impl Rpc {
     /// `batchRequests`. It is a profile, not a count of round trips: a batch and its requests are both in it.
     pub(crate) fn calls(&self) -> BTreeMap<&'static str, u64> {
         self.calls.lock().map(|calls| calls.clone()).unwrap_or_default()
+    }
+
+    /// Counts something a test asks about under `what`, beside the requests, so a count belongs to the session under
+    /// test and not to the process: tests that run in parallel threads do not see each other's.
+    #[cfg(test)]
+    pub(crate) fn note(&self, what: &'static str, count: u64) {
+        if let Ok(mut calls) = self.calls.lock() {
+            *calls.entry(what).or_default() += count;
+        }
     }
 
     /// One request, its answer as the JSON text it arrived as: [`decode`] parses it once, into the shape the caller

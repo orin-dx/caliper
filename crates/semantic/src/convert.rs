@@ -2007,6 +2007,8 @@ impl Converter {
             .state
             .readonly
             .get(listed, || async {
+                #[cfg(test)]
+                self.rpc.note("readonly classified", properties.len() as u64);
                 let settled: Vec<_> = properties.iter().map(SymbolInfo::settled_readonly).collect();
                 let asked: Vec<_> = properties
                     .iter()
@@ -2543,7 +2545,6 @@ mod tests {
     /// 110 literals are 18,760 types. On the base each of the 169 was classified as its answer was read.
     #[test]
     fn the_fields_of_an_object_the_size_budget_cuts_are_not_asked_whether_they_are_readonly() {
-        let classified = crate::rpc::READONLY_CLASSIFIED.load(std::sync::atomic::Ordering::Relaxed);
         let literals: Vec<String> = (0..110).map(|index| format!("'v{index}'")).collect();
         let properties: Vec<String> = (0..169).map(|index| format!("p{index}: L;")).collect();
         let source = format!(
@@ -2556,15 +2557,13 @@ mod tests {
         let style = &component.props.iter().find(|prop| prop.name == "style").unwrap().prop_type;
         assert!(matches!(style, PropType::Truncated { limit: TruncationLimit::Depth, .. }), "{style:?}");
         assert_eq!(calls.get("isReadonlySymbol"), None, "{calls:?}");
-        let classified = crate::rpc::READONLY_CLASSIFIED.load(std::sync::atomic::Ordering::Relaxed) - classified;
-        assert_eq!(classified, 0);
+        assert_eq!(calls.get("readonly classified"), None, "{calls:?}");
     }
 
     /// One property fewer, 168 of them (18,649 types), and the object is kept and its fields are asked whether they are
     /// `readonly`: the budget the fields are held to is the one the conversion cuts by.
     #[test]
     fn the_fields_of_an_object_under_the_size_budget_are_asked_whether_they_are_readonly() {
-        let classified = crate::rpc::READONLY_CLASSIFIED.load(std::sync::atomic::Ordering::Relaxed);
         let literals: Vec<String> = (0..110).map(|index| format!("'v{index}'")).collect();
         let properties: Vec<String> = (0..168).map(|index| format!("readonly p{index}: L;")).collect();
         let source = format!(
@@ -2578,8 +2577,7 @@ mod tests {
         assert!(field(style, "p167").readonly, "{style:?}");
         assert_eq!(calls.get("isReadonlySymbol"), Some(&168), "{calls:?}");
         // Each of the 168 is classified once, and asked because its `readonly` modifier is not in its answer.
-        let classified = crate::rpc::READONLY_CLASSIFIED.load(std::sync::atomic::Ordering::Relaxed) - classified;
-        assert_eq!(classified, 168);
+        assert_eq!(calls.get("readonly classified"), Some(&168), "{calls:?}");
     }
 
     /// A mapped type's properties have no declaration of their own: their check flags say whether they are `readonly`,
