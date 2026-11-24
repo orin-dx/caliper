@@ -1,0 +1,8 @@
+{
+  "tool_use_id": "toolu_01R9iC96HJe5dBg5S8HvNgVW",
+  "agent_id": "a5bd7e81f4fe71658",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix oxc 0.159 wrapper-node regressions on #523",
+  "started_at": "2026-11-24T06:26:59.92149-08:00",
+  "transcript_unavailable_reason": "transcript path unresolvable"
+}
