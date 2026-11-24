@@ -1997,23 +1997,29 @@ impl Converter {
         Ok(fields)
     }
 
-    /// Whether each property of `listed` is `readonly`: what the property answer settles ([`SymbolInfo::readonly`]),
-    /// and the checker's answer for the rest. Kept by (handle, listing) like every answer about a list, so a list read
-    /// again is not worked out again; a list the answer settles entirely sends nothing.
+    /// Whether each property of `listed` is `readonly`: what the property answer settles
+    /// ([`SymbolInfo::settled_readonly`]), and the checker's answer for the rest. Kept by (handle, listing) like every
+    /// answer about a list, so a list read again is not worked out again; a list the answer settles entirely sends
+    /// nothing. The only caller is past the size budget, so a cut object's properties are not classified.
     async fn readonly(&self, listed: (u64, Listing), properties: &[SymbolInfo]) -> Result<Arc<[bool]>, CallError> {
         let readonly = self
             .state
             .readonly
             .get(listed, || async {
-                let asked: Vec<_> =
-                    properties.iter().filter(|property| property.readonly.is_none()).map(|p| &p.reference).collect();
+                let settled: Vec<_> = properties.iter().map(SymbolInfo::settled_readonly).collect();
+                let asked: Vec<_> = properties
+                    .iter()
+                    .zip(&settled)
+                    .filter(|(_, settled)| settled.is_none())
+                    .map(|(property, _)| &property.reference)
+                    .collect();
                 let mut answers = if asked.is_empty() {
                     Vec::new().into_iter()
                 } else {
                     self.rpc.readonly_symbols(&asked).await?.into_iter()
                 };
                 let readonly: Option<Arc<[bool]>> =
-                    properties.iter().map(|property| property.readonly.or_else(|| answers.next())).collect();
+                    settled.iter().map(|settled| settled.or_else(|| answers.next())).collect();
                 let readonly =
                     readonly.ok_or_else(|| CallError::Rejected("a short isReadonlySymbol batch".to_string()))?;
                 if answers.next().is_some() {
@@ -2538,10 +2544,11 @@ mod tests {
     }
 
     /// An object whose fields hold more types than the size budget is cut by the conversion it belongs to, so whether
-    /// its properties are `readonly` is never asked: 169 properties of a union of 110 literals are 18,760 types. On the
-    /// base each of the 169 was asked about.
+    /// its properties are `readonly` is neither asked nor worked out from their answers: 169 properties of a union of
+    /// 110 literals are 18,760 types. On the base each of the 169 was classified as its answer was read.
     #[test]
     fn the_fields_of_an_object_the_size_budget_cuts_are_not_asked_whether_they_are_readonly() {
+        let classified = crate::rpc::READONLY_CLASSIFIED.load(std::sync::atomic::Ordering::Relaxed);
         let literals: Vec<String> = (0..110).map(|index| format!("'v{index}'")).collect();
         let properties: Vec<String> = (0..169).map(|index| format!("p{index}: L;")).collect();
         let source = format!(
@@ -2554,12 +2561,15 @@ mod tests {
         let style = &component.props.iter().find(|prop| prop.name == "style").unwrap().prop_type;
         assert!(matches!(style, PropType::Truncated { limit: TruncationLimit::Depth, .. }), "{style:?}");
         assert_eq!(calls.get("isReadonlySymbol"), None, "{calls:?}");
+        let classified = crate::rpc::READONLY_CLASSIFIED.load(std::sync::atomic::Ordering::Relaxed) - classified;
+        assert_eq!(classified, 0);
     }
 
     /// One property fewer, 168 of them (18,649 types), and the object is kept and its fields are asked whether they are
     /// `readonly`: the budget the fields are held to is the one the conversion cuts by.
     #[test]
     fn the_fields_of_an_object_under_the_size_budget_are_asked_whether_they_are_readonly() {
+        let classified = crate::rpc::READONLY_CLASSIFIED.load(std::sync::atomic::Ordering::Relaxed);
         let literals: Vec<String> = (0..110).map(|index| format!("'v{index}'")).collect();
         let properties: Vec<String> = (0..168).map(|index| format!("readonly p{index}: L;")).collect();
         let source = format!(
@@ -2572,6 +2582,9 @@ mod tests {
         let style = &component.props.iter().find(|prop| prop.name == "style").unwrap().prop_type;
         assert!(field(style, "p167").readonly, "{style:?}");
         assert_eq!(calls.get("isReadonlySymbol"), Some(&168), "{calls:?}");
+        // Each of the 168 is classified once, and asked because its `readonly` modifier is not in its answer.
+        let classified = crate::rpc::READONLY_CLASSIFIED.load(std::sync::atomic::Ordering::Relaxed) - classified;
+        assert_eq!(classified, 168);
     }
 
     /// A mapped type's properties have no declaration of their own: their check flags say whether they are `readonly`,

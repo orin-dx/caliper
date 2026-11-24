@@ -144,15 +144,29 @@ pub(crate) struct SymbolInfo {
     /// The symbol it is a member of: the interface or type literal that declares a property. Absent for a property a
     /// mapped type or an intersection made (`Omit<Base, "x">`, `A & B`), whose declarations still name the original.
     pub parent: Option<CompactSymbol>,
-    /// What `isReadonlySymbol` answers for this symbol when the rest of the answer settles it
-    /// ([`settled_readonly`]); None when only the checker can say.
-    pub readonly: Option<bool>,
+    /// What the answer carries besides the flags and declarations that [`Self::settled_readonly`] reads; None for an
+    /// answer without check flags, which settles nothing. Kept raw so that a symbol nobody asks about is not classified.
+    pub readonly: Option<ReadonlyEvidence>,
+}
+
+/// The parts of a symbol's answer that only [`SymbolInfo::settled_readonly`] reads.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReadonlyEvidence {
+    check_flags: u64,
+    value_declaration: bool,
 }
 
 impl SymbolInfo {
     /// The name of this member as the source writes it.
     pub(crate) fn member_name(&self) -> &str {
         self.member.as_deref().unwrap_or(&self.name)
+    }
+
+    /// What `isReadonlySymbol` answers for this symbol when its answer settles it ([`settled_readonly`]); None when
+    /// only the checker can say.
+    pub(crate) fn settled_readonly(&self) -> Option<bool> {
+        let evidence = self.readonly?;
+        settled_readonly(self.flags, evidence.check_flags, evidence.value_declaration, &self.declarations)
     }
 }
 
@@ -169,17 +183,18 @@ struct SymbolWire {
     parent: Option<CompactSymbol>,
     /// Absent from an answer that does not carry it, which settles nothing ([`settled_readonly`]).
     check_flags: Option<u64>,
+    /// Only its presence is read, so the handle is skipped, not kept.
     #[serde(default)]
-    value_declaration: Option<String>,
+    value_declaration: Option<serde::de::IgnoredAny>,
 }
 
 impl From<SymbolWire> for SymbolInfo {
     fn from(wire: SymbolWire) -> Self {
         let member = internal_member_name(&wire.name);
         let name = unescape_leading_underscores(&wire.name).to_string();
-        let readonly = wire.check_flags.and_then(|check_flags| {
-            settled_readonly(wire.flags, check_flags, wire.value_declaration.is_some(), &wire.declarations)
-        });
+        let readonly = wire
+            .check_flags
+            .map(|check_flags| ReadonlyEvidence { check_flags, value_declaration: wire.value_declaration.is_some() });
         Self {
             reference: wire.reference,
             name,
@@ -204,6 +219,8 @@ impl From<SymbolWire> for SymbolInfo {
 ///
 /// A property without a value declaration (a mapped type's) has no declaration modifiers to read.
 fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, declarations: &[String]) -> Option<bool> {
+    #[cfg(test)]
+    READONLY_CLASSIFIED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if check_flags & flag::CHECK_READONLY != 0
         || flags & flag::SYMBOL_GET_ACCESSOR != 0 && flags & flag::SYMBOL_SET_ACCESSOR == 0
         || flags & flag::SYMBOL_ENUM_MEMBER != 0
@@ -231,6 +248,10 @@ fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, decla
 /// `Object.defineProperty` call: parameter, property signature and declaration, method signature and declaration, get
 /// and set accessor, property assignment, shorthand property assignment.
 const NO_ASSIGNMENT_DECLARATION: [u32; 9] = [171, 173, 174, 175, 176, 179, 180, 304, 305];
+
+/// How many symbols [`settled_readonly`] has classified in this process; nextest runs each test in a process of its own.
+#[cfg(test)]
+pub(crate) static READONLY_CLASSIFIED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
 /// `[brand]`. An ES-private member is `__#<symbol id>@#<name>`; the source writes `#<name>`. The id is the checker's
@@ -1104,7 +1125,7 @@ mod tests {
     }
 
     /// Every form of property, of every kind of type that lists them: for each property whose answer settles
-    /// `isReadonlySymbol` ([`SymbolInfo::readonly`]), the checker answers the same. Also pins the syntax kinds
+    /// `isReadonlySymbol` ([`SymbolInfo::settled_readonly`]), the checker answers the same. Also pins the syntax kinds
     /// [`NO_ASSIGNMENT_DECLARATION`] reads off the node handles, which a checker upgrade may renumber.
     #[test]
     fn a_settled_readonly_answer_is_the_checkers() {
@@ -1171,7 +1192,7 @@ mod tests {
                         if let Some(kind) = property.declarations.first().and_then(|d| d.split('.').nth(1)) {
                             kinds.insert(at.clone(), kind.parse::<u32>().unwrap());
                         }
-                        compared.push((at, property.readonly, asked));
+                        compared.push((at, property.settled_readonly(), asked));
                     }
                 }
             }
@@ -1211,7 +1232,7 @@ mod tests {
             if let (Some(symbol), serde_json::Value::Object(extra)) = (symbol.as_object_mut(), extra) {
                 symbol.extend(extra);
             }
-            serde_json::from_value::<SymbolInfo>(symbol).unwrap().readonly
+            serde_json::from_value::<SymbolInfo>(symbol).unwrap().settled_readonly()
         };
         let mapped = |check_flags: u64| serde_json::json!({ "flags": 4, "checkFlags": check_flags, "declarations": ["1.173./a.ts"] });
         assert_eq!(settled(mapped(8 | (1 << 21))), Some(true));
