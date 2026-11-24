@@ -29,8 +29,26 @@ use crate::types::*;
 
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
 type FxDashSet<K> = DashSet<K, FxBuildHasher>;
-/// The module a `(scope, specifier)` resolved to, once the first demand of the scope has resolved it.
-type ModuleCell = Arc<OnceLock<Option<Utf8PathBuf>>>;
+/// The files that augment React which the module a `(scope, specifier)` resolved to leads to, parsed, once the first
+/// demand of the scope has searched them; [`ReadFailed`] when the search could not read a file, for every demand of the
+/// scope.
+type ModuleCell = Arc<OnceLock<Result<Vec<(Utf8PathBuf, Arc<SourceData>)>, ReadFailed>>>;
+
+/// A file's data, read and parsed once per load whoever asks first, a failed read included (`Loader::parse_source`).
+type ParseCell = Arc<OnceLock<Result<Option<Arc<SourceData>>, ReadFailed>>>;
+
+/// Whether a file merges declarations into React, and the specifiers it re-exports, in order.
+type Scan = (bool, Arc<[String]>);
+
+/// A [`Scan`] of a file, read once per load (`Loader::augmentation_scan`).
+type ScanCell = Arc<OnceLock<Result<Option<Scan>, ReadFailed>>>;
+
+/// A dependency file that exists but could not be read (a permission, too many open files, an install racing the run):
+/// what it declares is unknown, not absent. Every consumer of `Loader::read` and `Loader::parse` gets it and passes it
+/// on: an answer derived from it is used by this load only, never kept in the layer or the index, and the demand that
+/// met it is not recorded as followed, so the next load over the layer follows it again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReadFailed;
 
 /// What one probe of a directory found, once it has run (`probe_once`).
 type ProbeCell = Arc<OnceLock<bool>>;
@@ -317,6 +335,9 @@ pub(crate) struct DependencyLayer {
     /// The panics this layer's own demands hit, contained, and the dependency files it could not read; the demands they
     /// covered stay unanswered.
     panics: Vec<Diagnostic>,
+    /// A dependency file could not be read while this layer, or one it extends, was loaded ([`ReadFailed`]). The layer
+    /// holds nothing derived from it, but what it holds is not the whole answer, so no load over it writes the index.
+    degraded: bool,
 }
 
 impl DependencyLayer {
@@ -421,7 +442,7 @@ struct Loader<'a> {
     project_dirs: &'a [Utf8PathBuf],
     /// The layer being extended, consulted before the maps below so an extension holds only its own additions.
     parent: Option<&'a DependencyLayer>,
-    parsed: FxDashMap<PathKey, Arc<OnceLock<Option<Arc<SourceData>>>>>,
+    parsed: FxDashMap<PathKey, ParseCell>,
     resolutions: FxDashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
     claimed: FxDashSet<(PathKey, CompactString)>,
@@ -431,6 +452,8 @@ struct Loader<'a> {
     /// For each module in `augmenters`, the stamps of the other packages its search read files from.
     augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
+    /// The demands of `demands` that met a file that could not be read: not followed, as far as the layer says.
+    failed: FxDashSet<DemandKey>,
     unresolved: FxDashMap<DemandKey, Unresolved>,
     /// Whether each directory `package_of` passed has a `package.json` file.
     package_manifests: FxDashMap<Box<str>, ProbeCell>,
@@ -442,19 +465,20 @@ struct Loader<'a> {
     scopes: FxDashMap<Box<str>, Box<str>>,
     /// What each `(scope, specifier)` of a module-only demand resolved to, when outside the project and not React's.
     module_demands: FxDashMap<(Box<str>, Box<str>), ModuleCell>,
-    /// The re-exports of files that only an augmentation search passed through, which it did not parse in full.
-    re_exports: FxDashMap<PathKey, Arc<OnceLock<Arc<[String]>>>>,
+    /// What an augmentation search found in each file it passed through that was not parsed already.
+    scans: FxDashMap<PathKey, ScanCell>,
     /// Something was resolved or answered that the index did not hold.
     learned: AtomicBool,
     /// The diagnostics of demands that panicked and of dependency files that could not be read.
     panics: Mutex<Vec<Diagnostic>>,
-    /// A dependency file existed but could not be read.
-    unreadable: AtomicBool,
+    /// A dependency file existed but could not be read ([`ReadFailed`]).
+    read_failed: AtomicBool,
+    /// How many times each file was read, and how long each read waits first, so a test can make readers meet.
+    #[cfg(test)]
+    reads: FxDashMap<PathKey, usize>,
+    #[cfg(test)]
+    read_pause: std::time::Duration,
 }
-
-/// A dependency file that exists but could not be read: what it declares is unknown, so no answer that depends on it
-/// is kept or persisted.
-struct Unreadable;
 
 impl<'a> Loader<'a> {
     fn new(
@@ -475,36 +499,40 @@ impl<'a> Loader<'a> {
             augmenters: DashMap::default(),
             augmenter_crossed: DashMap::default(),
             demands: DashSet::default(),
+            failed: DashSet::default(),
             unresolved: DashMap::default(),
             package_manifests: DashMap::default(),
             packages: DashMap::default(),
             scope_marks: DashMap::default(),
             scopes: DashMap::default(),
             module_demands: DashMap::default(),
-            re_exports: DashMap::default(),
+            scans: DashMap::default(),
             learned: AtomicBool::new(false),
             panics: Mutex::new(Vec::new()),
-            unreadable: AtomicBool::new(false),
+            read_failed: AtomicBool::new(false),
+            #[cfg(test)]
+            reads: DashMap::default(),
+            #[cfg(test)]
+            read_pause: std::time::Duration::ZERO,
         }
     }
 }
 
 impl Loader<'_> {
-    /// The text of a dependency file, `None` when it is missing or cannot be read.
-    fn read(&self, file: &Utf8Path) -> Option<String> {
-        self.read_text(file).ok().flatten()
-    }
-
     /// The text of a dependency file. One that is missing is skipped quietly (`Ok(None)`), since resolution found it a
-    /// moment ago and a dangling link or a racing uninstall declares nothing. One that exists but cannot be read (a
-    /// permission, too many open files, an install racing the run) is [`Unreadable`] and reported once: what it declares
-    /// is unknown, not absent.
-    fn read_text(&self, file: &Utf8Path) -> Result<Option<String>, Unreadable> {
+    /// moment ago and a dangling link or a racing uninstall declares nothing. One that exists but cannot be read is
+    /// [`ReadFailed`], reported once.
+    fn read(&self, file: &Utf8Path) -> Result<Option<String>, ReadFailed> {
+        #[cfg(test)]
+        {
+            *self.reads.entry(PathKey::from(file)).or_default() += 1;
+            std::thread::sleep(self.read_pause);
+        }
         match std::fs::read_to_string(file) {
             Ok(source) => Ok(Some(source)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => {
-                self.unreadable.store(true, Ordering::Relaxed);
+                self.read_failed.store(true, Ordering::Relaxed);
                 let mut diagnostic = Diagnostic::io_read_error(file, &error);
                 // The package's types are not the project's, and the run still produces its output.
                 diagnostic.severity = crate::types::DiagnosticSeverity::Warning;
@@ -512,39 +540,39 @@ impl Loader<'_> {
                 if !failures.iter().any(|known| known.file == diagnostic.file) {
                     failures.push(diagnostic);
                 }
-                Err(Unreadable)
+                Err(ReadFailed)
             }
         }
     }
 
-    /// The data of a dependency file, `None` when it is missing or cannot be read.
-    fn parse(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
-        self.parse_source(file, None).ok().flatten()
+    /// The data of a dependency file, `None` when it is missing.
+    fn parse(&self, file: &Utf8Path) -> Result<Option<Arc<SourceData>>, ReadFailed> {
+        self.parse_source(file, None)
     }
 
-    /// `parse`, with the text of `file` when the caller has already read it, and [`Unreadable`] when it exists but
-    /// could not be read. That is not kept, in this load or its layer: the next caller reads the file again.
-    fn parse_source(&self, file: &Utf8Path, source: Option<String>) -> Result<Option<Arc<SourceData>>, Unreadable> {
+    /// `parse`, with the text of `file` when the caller has already read it. The file is read once per load: callers
+    /// that ask at once wait for the first, and every caller gets its result, a failed read included, so one load sees
+    /// one state of the file and opens it once. The layer keeps only files that were read (`load`), so the next load
+    /// reads a failed one again.
+    fn parse_source(&self, file: &Utf8Path, source: Option<String>) -> Result<Option<Arc<SourceData>>, ReadFailed> {
         if let Some(found) = self.parent.and_then(|parent| parent.parsed_data(file.as_str())) {
             return Ok(found.clone());
         }
         let cell = self.parsed.entry(PathKey::from(file)).or_default().clone();
-        if let Some(found) = cell.get() {
-            return Ok(found.clone());
-        }
-        let source = match source {
-            Some(source) => Some(source),
-            None => self.read_text(file)?,
-        };
-        Ok(cell
-            .get_or_init(|| {
-                let source = source?;
-                let mut data = crate::extractor::parse_file(file, &source);
-                // Problems inside a package's types are not the project's; an unresolved demand is reported instead.
-                data.diagnostics.clear();
-                Some(Arc::new(data))
-            })
-            .clone())
+        cell.get_or_init(|| {
+            let source = match source {
+                Some(source) => source,
+                None => match self.read(file)? {
+                    Some(source) => source,
+                    None => return Ok(None),
+                },
+            };
+            let mut data = crate::extractor::parse_file(file, &source);
+            // Problems inside a package's types are not the project's; an unresolved demand is reported instead.
+            data.diagnostics.clear();
+            Ok(Some(Arc::new(data)))
+        })
+        .clone()
     }
 
     /// Resolve `specifier` as imported by `from_file`, the way the resolver will.
@@ -586,34 +614,36 @@ impl Loader<'_> {
     }
 
     /// The `(file, name)` declaring `name` as exported from `module`.
-    fn find_export(&self, module: &Utf8Path, name: &str) -> Option<(Utf8PathBuf, CompactString)> {
+    fn find_export(&self, module: &Utf8Path, name: &str) -> Result<Option<(Utf8PathBuf, CompactString)>, ReadFailed> {
         self.find_export_in(module, name, &mut FxHashSet::default(), &mut false)
     }
 
     /// `find_export` within one walk. A lookup that met a module already on the walk (a re-export cycle) is `cut`: its
     /// answer depends on where the walk entered the cycle, so it is returned but not kept, and the cut propagates to
-    /// every lookup that relied on it. Kept answers are therefore the same in any order and on any thread.
+    /// every lookup that relied on it. Kept answers are therefore the same in any order and on any thread. A walk that
+    /// could not read a module on its way has no answer: [`ReadFailed`], and nothing on the walk is kept.
     fn find_export_in(
         &self,
         module: &Utf8Path,
         name: &str,
         visited: &mut FxHashSet<(PathKey, CompactString)>,
         cut: &mut bool,
-    ) -> Option<(Utf8PathBuf, CompactString)> {
+    ) -> Result<Option<(Utf8PathBuf, CompactString)>, ReadFailed> {
         let key = (PathKey::from(module), CompactString::from(name));
         if let Some(found) = self.exports.get(&key) {
-            return found.clone();
+            return Ok(found.clone());
         }
         if let Some(found) = self.parent.and_then(|parent| parent.export_entry(&key)) {
-            return found.clone();
+            return Ok(found.clone());
         }
         if !visited.insert(key.clone()) {
             *cut = true;
-            return None;
+            return Ok(None);
         }
         let mut own_cut = false;
         let found = self.find_export_uncached(module, name, visited, &mut own_cut);
         visited.remove(&key);
+        let found = found?;
         if own_cut {
             *cut = true;
         } else {
@@ -622,7 +652,7 @@ impl Loader<'_> {
             }
             self.exports.insert(key, found.clone());
         }
-        found
+        Ok(found)
     }
 
     fn find_export_uncached(
@@ -631,22 +661,14 @@ impl Loader<'_> {
         name: &str,
         visited: &mut FxHashSet<(PathKey, CompactString)>,
         cut: &mut bool,
-    ) -> Option<(Utf8PathBuf, CompactString)> {
-        let data = match self.parse_source(module, None) {
-            Ok(data) => data?,
-            // What the module exports is unknown, not absent: the miss is returned but, like a cycle's, neither kept
-            // nor persisted, so the next lookup or run reads the module again.
-            Err(Unreadable) => {
-                *cut = true;
-                return None;
-            }
-        };
+    ) -> Result<Option<(Utf8PathBuf, CompactString)>, ReadFailed> {
+        let Some(data) = self.parse(module)? else { return Ok(None) };
         if declares(&data, module, name) {
-            return Some((module.to_owned(), CompactString::from(name)));
+            return Ok(Some((module.to_owned(), CompactString::from(name))));
         }
         // A member of a value the module declares (`Primitive.div`): its declaration is the value's.
         if name.split_once('.').is_some_and(|(head, _)| declares(&data, module, head)) {
-            return Some((module.to_owned(), CompactString::from(name)));
+            return Ok(Some((module.to_owned(), CompactString::from(name))));
         }
         let (head, rest) = match name.split_once('.') {
             Some((head, rest)) => (head, Some(rest)),
@@ -657,7 +679,7 @@ impl Loader<'_> {
                 LexedExport::ReExportNamed { local_name, source_name, source_specifier, .. } if local_name == head => {
                     // An explicit export shadows a wildcard one, so a hop that cannot be resolved leaves the name unanswered
                     // rather than to a later `export *`; `unresolved_cause` names the hop.
-                    let Ok(target) = self.resolve(module, source_specifier) else { return None };
+                    let Ok(target) = self.resolve(module, source_specifier) else { return Ok(None) };
                     let next = match rest {
                         Some(rest) => format!("{source_name}.{rest}"),
                         None => source_name.clone(),
@@ -665,8 +687,10 @@ impl Loader<'_> {
                     return self.find_export_in(&target, &next, visited, cut);
                 }
                 LexedExport::ReExportNamespace { namespace, source_specifier } if namespace == head => {
-                    let Ok(target) = self.resolve(module, source_specifier) else { return None };
-                    return self.find_export_in(&target, rest?, visited, cut);
+                    let (Ok(target), Some(rest)) = (self.resolve(module, source_specifier), rest) else {
+                        return Ok(None);
+                    };
+                    return self.find_export_in(&target, rest, visited, cut);
                 }
                 // `export { DialogContent as Content }`, the way bundled typings (Radix's) name their parts.
                 LexedExport::LocalDeclaration { name: exported, declared_as: Some(local), .. }
@@ -676,7 +700,7 @@ impl Loader<'_> {
                         Some(rest) => format!("{local}.{rest}"),
                         None => local.clone(),
                     };
-                    return Some((module.to_owned(), CompactString::from(name)));
+                    return Ok(Some((module.to_owned(), CompactString::from(name))));
                 }
                 _ => {}
             }
@@ -693,22 +717,22 @@ impl Loader<'_> {
         }) {
             let reference = rest.map_or_else(|| local.to_owned(), |rest| format!("{local}.{rest}"));
             if let Some(demand) = imported_demand(module, &data.imports, &reference) {
-                let target = self.resolve(module, &demand.specifier).ok()?;
+                let Ok(target) = self.resolve(module, &demand.specifier) else { return Ok(None) };
                 return self.find_export_in(&target, &demand.name, visited, cut);
             }
         }
         if head == "default" {
-            return None;
+            return Ok(None);
         }
         for export in &data.exports {
             if let LexedExport::ReExportAll { source_specifier, .. } = export {
                 let Ok(target) = self.resolve(module, source_specifier) else { continue };
-                if let Some(found) = self.find_export_in(&target, name, visited, cut) {
-                    return Some(found);
+                if let Some(found) = self.find_export_in(&target, name, visited, cut)? {
+                    return Ok(Some(found));
                 }
             }
         }
-        None
+        Ok(None)
     }
 
     /// Runs `demand` on the scope, recording a panic as a diagnostic instead of letting it end the whole load.
@@ -728,35 +752,42 @@ impl Loader<'_> {
         if self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone()) {
             return;
         }
+        if let Err(ReadFailed) = self.follow(scope, &demand, &key) {
+            // Not followed, as far as the layer says (`load`): the next load over it follows the demand again.
+            self.failed.insert(key);
+        }
+    }
+
+    /// Follows `demand`, whose key is `key`: what it names is loaded, or why not is in `unresolved`. [`ReadFailed`]
+    /// when a file it needed could not be read; nothing that read decided is kept then.
+    fn follow<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand, key: &DemandKey) -> Result<(), ReadFailed> {
         if demand.name.is_empty() {
-            self.module_demand(scope, &demand);
-            return;
+            return self.module_demand(scope, demand);
         }
         let module = match self.resolve(&demand.from, &demand.specifier) {
             Ok(module) => module,
             Err(reason) => {
-                if !demand.name.is_empty() {
-                    self.unresolved.insert(key, reason);
-                }
-                return;
+                self.unresolved.insert(key.clone(), reason);
+                return Ok(());
             }
         };
         if self.in_project(&module) {
-            return;
+            return Ok(());
         }
         if Self::is_react(&module) {
             // `@types/react` declares its exports inside `declare namespace React` (`export = React`).
             let qualified = CompactString::from(format!("React.{}", demand.name));
-            if self.parse(&module).is_some_and(|data| declares(&data, &module, &qualified)) {
-                self.load_declaration(scope, module, qualified);
+            if self.parse(&module)?.is_some_and(|data| declares(&data, &module, &qualified)) {
+                self.load_declaration(scope, module, qualified)?;
             }
-            return;
+            return Ok(());
         }
-        match self.find_export(&module, &demand.name) {
+        match self.find_export(&module, &demand.name)? {
             Some((file, name)) => self.load_declaration(scope, file, name),
             None => {
-                let cause = self.unresolved_cause(&module, &demand.name).unwrap_or(Unresolved::NotExported);
-                self.unresolved.insert(key, cause);
+                let cause = self.unresolved_cause(&module, &demand.name)?.unwrap_or(Unresolved::NotExported);
+                self.unresolved.insert(key.clone(), cause);
+                Ok(())
             }
         }
     }
@@ -764,10 +795,10 @@ impl Loader<'_> {
     /// Why a name `module` seems not to export was not found: a re-export hop on the way to it that cannot be
     /// resolved. A named or namespace hop for the name is the cause outright; an unresolvable `export *` only could
     /// have held it, so it is reported when nothing else explains the miss. `None` means every hop resolved.
-    fn unresolved_cause(&self, module: &Utf8Path, name: &str) -> Option<Unresolved> {
+    fn unresolved_cause(&self, module: &Utf8Path, name: &str) -> Result<Option<Unresolved>, ReadFailed> {
         let mut visited = FxHashSet::default();
         let mut star = None;
-        self.unresolved_cause_in(module, name, &mut visited, &mut star).or(star)
+        Ok(self.unresolved_cause_in(module, name, &mut visited, &mut star)?.or(star))
     }
 
     fn unresolved_cause_in(
@@ -776,11 +807,11 @@ impl Loader<'_> {
         name: &str,
         visited: &mut FxHashSet<(PathKey, CompactString)>,
         star: &mut Option<Unresolved>,
-    ) -> Option<Unresolved> {
+    ) -> Result<Option<Unresolved>, ReadFailed> {
         if !visited.insert((PathKey::from(module), CompactString::from(name))) {
-            return None;
+            return Ok(None);
         }
-        let data = self.parse(module)?;
+        let Some(data) = self.parse(module)? else { return Ok(None) };
         let (head, rest) = match name.split_once('.') {
             Some((head, rest)) => (head, Some(rest)),
             None => (name, None),
@@ -799,7 +830,8 @@ impl Loader<'_> {
                     LexedExport::ReExportNamespace { namespace, source_specifier }
                         if !star_pass && namespace == head =>
                     {
-                        (source_specifier, rest?.to_owned())
+                        let Some(rest) = rest else { return Ok(None) };
+                        (source_specifier, rest.to_owned())
                     }
                     // `export *` never carries `default`, as `find_export_uncached` enforces.
                     LexedExport::ReExportAll { source_specifier, .. } if star_pass && head != "default" => {
@@ -811,35 +843,47 @@ impl Loader<'_> {
                     Err(cause) if star_pass => {
                         star.get_or_insert(cause);
                     }
-                    Err(cause) => return Some(cause),
+                    Err(cause) => return Ok(Some(cause)),
                     Ok(target) => {
-                        let cause = self.unresolved_cause_in(&target, &next, visited, star);
+                        let cause = self.unresolved_cause_in(&target, &next, visited, star)?;
                         if cause.is_some() || !star_pass {
-                            return cause;
+                            return Ok(cause);
                         }
                     }
                 }
             }
         }
-        None
+        Ok(None)
     }
 
     /// A module imported for its own sake: only what it merges into React is read.
     ///
     /// Directories with the same resolution scope resolve a specifier to the same module, so the first of them to ask
-    /// resolves it and loads its augmentations, and the rest ask nothing.
-    fn module_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand) {
+    /// resolves it, finds and reads the files that augment React, and loads their declarations; the rest wait for the
+    /// files and ask nothing. A file it could not read fails every demand of the scope alike.
+    fn module_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand) -> Result<(), ReadFailed> {
         let dir = demand.from.parent().map_or("", Utf8Path::as_str);
         let key = (self.resolution_scope(dir), demand.specifier.clone());
         let cell = self.module_demands.entry(key).or_default().clone();
         let mut first = false;
-        let module = cell.get_or_init(|| {
+        let augmenting = cell.get_or_init(|| {
             first = true;
-            let module = self.resolve(&demand.from, &demand.specifier).ok()?;
-            (!self.in_project(&module) && !Self::is_react(&module)).then_some(module)
+            let Ok(module) = self.resolve(&demand.from, &demand.specifier) else { return Ok(Vec::new()) };
+            if self.in_project(&module) || Self::is_react(&module) {
+                return Ok(Vec::new());
+            }
+            let mut parsed = Vec::new();
+            for file in self.augmenting_files(&module)? {
+                if let Some(data) = self.parse(&file)? {
+                    parsed.push((file, data));
+                }
+            }
+            Ok(parsed)
         });
-        if let (true, Some(module)) = (first, module) {
-            self.load_augmentations(scope, module);
+        match augmenting {
+            Ok(augmenting) if first => self.load_augmentations(scope, augmenting),
+            Ok(_) => Ok(()),
+            Err(failed) => Err(*failed),
         }
     }
 
@@ -858,71 +902,77 @@ impl Loader<'_> {
         scope
     }
 
-    /// Load the files `module` leads to through its re-exports that merge declarations into React
+    /// The files `module` leads to through its re-exports that merge declarations into React
     /// (`declare module "react" { ... }`): TypeScript reads them whenever the program reaches the file, whether or not
     /// a name from them is used. The search is bounded ([`AUGMENTATION_SCAN_FILES`]), breadth first in source order,
-    /// so the answer for a module is the same on any thread; it is kept, in the layer and in the index on disk.
-    fn load_augmentations<'s>(&'s self, scope: &rayon::Scope<'s>, module: &Utf8Path) {
+    /// so the answer for a module is the same on any thread; it is kept, in the layer and in the index on disk, unless
+    /// the search could not read a file.
+    fn augmenting_files(&self, module: &Utf8Path) -> Result<Vec<Utf8PathBuf>, ReadFailed> {
         let key = PathKey::from(module);
         let known = self.augmenters.get(&key).map(|files| files.clone());
-        let known = known.or_else(|| self.parent.and_then(|parent| parent.augmenters_of(&key)).cloned());
-        let files = known.unwrap_or_else(|| {
-            let (files, crossed) = self.find_augmenting_files(module);
-            self.augmenters.insert(key.clone(), files.clone());
-            self.augmenter_crossed.insert(key, crossed);
-            // An empty answer is persisted too, or the next run would scan the module's re-exports again.
-            module.parent().inspect(|dir| self.learn(dir));
-            files
-        });
-        for file in files {
-            let Some(data) = self.parse(&file) else { continue };
+        if let Some(files) = known.or_else(|| self.parent.and_then(|parent| parent.augmenters_of(&key)).cloned()) {
+            return Ok(files);
+        }
+        let (files, crossed) = self.find_augmenting_files(module)?;
+        self.augmenters.insert(key.clone(), files.clone());
+        self.augmenter_crossed.insert(key, crossed);
+        // An empty answer is persisted too, or the next run would scan the module's re-exports again.
+        module.parent().inspect(|dir| self.learn(dir));
+        Ok(files)
+    }
+
+    /// Loads the `React.`-qualified declarations of `augmenting`, the parsed files that augment React.
+    fn load_augmentations<'s>(
+        &'s self,
+        scope: &rayon::Scope<'s>,
+        augmenting: &[(Utf8PathBuf, Arc<SourceData>)],
+    ) -> Result<(), ReadFailed> {
+        for (file, data) in augmenting {
             let mut names: Vec<&String> = data.interfaces.keys().collect();
             names.sort();
             for key in names {
                 if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':'))
                     && name.starts_with("React.")
                 {
-                    self.load_declaration(scope, file.clone(), CompactString::from(name));
+                    self.load_declaration(scope, file.clone(), CompactString::from(name))?;
                 }
             }
         }
+        Ok(())
     }
 
     /// Whether `file` merges declarations into React, and the specifiers it re-exports, in order. A file that names
     /// neither `React` nor the module `"react"` cannot declare into the React namespace, so one not already parsed is
     /// only scanned for its re-exports and keeps nothing else: most files an augmentation search passes through
-    /// declare nothing the run needs.
-    fn augmentation_scan(&self, file: &Utf8Path, entry: bool) -> Option<(bool, Arc<[String]>)> {
-        let parsed = self.parent.and_then(|parent| parent.parsed_data(file.as_str())).cloned().or_else(|| {
+    /// declare nothing the run needs. Read once per load, as `parse_source` reads; a file both scanned and parsed by
+    /// callers that meet may be read by each.
+    fn augmentation_scan(&self, file: &Utf8Path, entry: bool) -> Result<Option<Scan>, ReadFailed> {
+        let parsed = self.parent.and_then(|parent| parent.parsed_data(file.as_str())).cloned().map(Ok).or_else(|| {
             let cell = self.parsed.get(file.as_str())?;
             cell.get().cloned()
         });
         if let Some(parsed) = parsed {
-            return parsed.map(|data| scan_of(&data, file));
+            return Ok(parsed?.map(|data| scan_of(&data, file)));
         }
-        if let Some(cell) = self.re_exports.get(file.as_str())
-            && let Some(found) = cell.get()
-        {
-            return Some((false, found.clone()));
-        }
-        let source = self.read(file)?;
-        if entry || may_declare_into_react(&source) {
-            return self.parse_source(file, Some(source)).ok().flatten().map(|data| scan_of(&data, file));
-        }
-        let cell = self.re_exports.entry(PathKey::from(file)).or_default().clone();
-        let found = cell.get_or_init(|| {
-            if may_re_export(&source) {
-                Arc::from(crate::extractor::re_export_specifiers(file, &source))
-            } else {
-                Arc::from([])
+        let cell = self.scans.entry(PathKey::from(file)).or_default().clone();
+        cell.get_or_init(|| {
+            let Some(source) = self.read(file)? else { return Ok(None) };
+            if entry || may_declare_into_react(&source) {
+                return Ok(self.parse_source(file, Some(source))?.map(|data| scan_of(&data, file)));
             }
-        });
-        Some((false, found.clone()))
+            let re_exports = match may_re_export(&source) {
+                true => Arc::from(crate::extractor::re_export_specifiers(file, &source)),
+                false => Arc::from([]),
+            };
+            Ok(Some((false, re_exports)))
+        })
+        .clone()
     }
 
     /// The files `module`'s re-exports lead to that augment React, and the stamps of the other packages the search read
     /// files from: the answer holds only while those packages do not change, as well as the module's own.
-    fn find_augmenting_files(&self, module: &Utf8Path) -> (Vec<Utf8PathBuf>, Vec<PackageStampRow>) {
+    /// [`ReadFailed`] when it could not read a file on the way, which may have led to one.
+    fn find_augmenting_files(&self, module: &Utf8Path) -> Result<(Vec<Utf8PathBuf>, Vec<PackageStampRow>), ReadFailed> {
         let mut found = Vec::new();
         let mut seen: FxHashSet<Utf8PathBuf> = FxHashSet::default();
         let mut queue = std::collections::VecDeque::from([module.to_owned()]);
@@ -933,7 +983,7 @@ impl Loader<'_> {
             if !seen.insert(file.clone()) || self.in_project(&file) || Self::is_react(&file) {
                 continue;
             }
-            let Some((augments, re_exports)) = self.augmentation_scan(&file, file == module) else { continue };
+            let Some((augments, re_exports)) = self.augmentation_scan(&file, file == module)? else { continue };
             if augments {
                 found.push(file.clone());
             }
@@ -957,19 +1007,25 @@ impl Loader<'_> {
             })
             .collect();
         crossed.sort();
-        (found, crossed)
+        Ok((found, crossed))
     }
 
     /// Mark `(file, name)` loaded and follow the names its declaration references: same-file ones in place, imported
     /// ones as new demands. React's own declarations stay with the resolver's React handling (builtins, curated HTML
     /// attributes), so React's files never enter the layer, but what they import does: `CSSProperties` extends
-    /// csstype's `Properties`.
-    fn load_declaration<'s>(&'s self, scope: &rayon::Scope<'s>, file: Utf8PathBuf, name: CompactString) {
+    /// csstype's `Properties`. [`ReadFailed`], claiming nothing, when `file` could not be read (an export the index
+    /// answered, whose declaring file this load had not read).
+    fn load_declaration<'s>(
+        &'s self,
+        scope: &rayon::Scope<'s>,
+        file: Utf8PathBuf,
+        name: CompactString,
+    ) -> Result<(), ReadFailed> {
         if self.in_project(&file) {
-            return;
+            return Ok(());
         }
         let react = Self::is_react(&file);
-        let Some(data) = self.parse(&file) else { return };
+        let Some(data) = self.parse(&file)? else { return Ok(()) };
         // `Primitive.div` is a member of the value `Primitive`, whose declared type has it.
         let mut stack: Vec<CompactString> =
             name.split_once('.').map(|(head, _)| CompactString::from(head)).into_iter().collect();
@@ -1007,6 +1063,7 @@ impl Loader<'_> {
                 }
             }
         }
+        Ok(())
     }
 
     /// Note that an answer about `dir` is new. A project file's own imports are resolved on every run and never reach
@@ -1077,7 +1134,7 @@ fn may_re_export(source: &str) -> bool {
 }
 
 /// Whether `data`, the parse of `file`, declares into the React namespace, and the specifiers it re-exports, in order.
-fn scan_of(data: &SourceData, file: &Utf8Path) -> (bool, Arc<[String]>) {
+fn scan_of(data: &SourceData, file: &Utf8Path) -> Scan {
     let react_prefix = format!("{file}:React.");
     let augments = data.interfaces.keys().any(|key| key.starts_with(&react_prefix));
     let re_exports = data
@@ -1168,7 +1225,7 @@ pub(crate) fn load(
                     loader.exports.insert(key.clone(), value.clone());
                 }
                 for (key, data) in &layer.parsed {
-                    loader.parsed.insert(key.clone(), Arc::new(OnceLock::from(data.clone())));
+                    loader.parsed.insert(key.clone(), Arc::new(OnceLock::from(Ok(data.clone()))));
                 }
                 for key in &layer.demands {
                     loader.demands.insert(key.clone());
@@ -1204,8 +1261,11 @@ pub(crate) fn load(
             loader.spawn_demand(scope, demand);
         }
     });
+    // A read failed in this load or a layer below it: what is held is not the whole answer.
+    let degraded = loader.read_failed.load(Ordering::Relaxed) || previous.is_some_and(|layer| layer.degraded);
     if let (None, Some(path)) = (previous, &index_path)
         && loader.learned.load(Ordering::Relaxed)
+        && !degraded
     {
         write_index(path, &loader);
     }
@@ -1219,9 +1279,11 @@ pub(crate) fn load(
     named.fallback = parent.as_ref().map(|layer| layer.named_types.clone());
     let mut component_mappings: Vec<ComponentMapping> = Vec::new();
     let mut imports = GlobalSourceData::default();
+    // A file is declaring or React's only once its parse was claimed, so these read the parse this load kept; a failed
+    // read claimed nothing.
     for file in &files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
-        if let Some(data) = loader.parse(path) {
+        if let Ok(Some(data)) = loader.parse(path) {
             named.merge_file(&data);
             component_mappings.extend(data.component_mappings.iter().cloned());
             imports.import_map.insert(path.to_owned(), data.imports.clone());
@@ -1239,7 +1301,7 @@ pub(crate) fn load(
     let react_files: FxHashSet<PathKey> = loader.react_files.iter().map(|file| file.clone()).collect();
     for file in &react_files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
-        if let Some(data) = loader.parse(path) {
+        if let Ok(Some(data)) = loader.parse(path) {
             imports.import_map.insert(path.to_owned(), data.imports.clone());
             imports.re_export_map.insert(path.to_owned(), Vec::new());
         }
@@ -1250,6 +1312,7 @@ pub(crate) fn load(
     let exports = loader.exports.into_read_only();
     let resolutions: FxHashMap<_, _> = loader.resolutions.into_iter().collect();
     let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
+    let failed: FxHashSet<DemandKey> = loader.failed.into_iter().collect();
     let files: FxHashSet<PathKey> = files.into_iter().collect();
     let below = parent.as_ref().map(|layer| layer.totals).unwrap_or_default();
     let totals = Totals {
@@ -1272,12 +1335,14 @@ pub(crate) fn load(
         files,
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
-        demands: loader.demands.into_iter().collect(),
+        // A demand that met a file it could not read is left out, so a load over this layer follows it again.
+        demands: loader.demands.into_iter().filter(|key| !failed.contains(key)).collect(),
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
-        // A file that could not be read left its cell empty: the next revision reads it again.
-        parsed: loader.parsed.into_iter().filter_map(|(key, cell)| Some((key, cell.get()?.clone()))).collect(),
+        // Only files that were read: the next load reads a failed one again.
+        parsed: loader.parsed.into_iter().filter_map(|(key, cell)| Some((key, cell.get()?.clone().ok()?))).collect(),
         panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
+        degraded,
     }
 }
 
@@ -1402,11 +1467,6 @@ fn read_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
 /// Write every answer that came from inside a package, grouped by package. A write that fails leaves the next run
 /// to walk the stubs again; the output does not depend on the index.
 fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
-    // An answer that passed through a file that could not be read (an augmentation search's) may hold that failure as
-    // an absence, and every later run would trust it while the package's `package.json` is unchanged.
-    if loader.unreadable.load(Ordering::Relaxed) {
-        return;
-    }
     let mut packages: FxHashMap<Box<str>, PackageIndex> = FxHashMap::default();
     let mut entry = |dir: &Utf8Path| -> Option<Box<str>> {
         let package = loader.package_of(dir)?;

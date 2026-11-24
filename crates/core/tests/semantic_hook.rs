@@ -242,7 +242,7 @@ fn an_unavailable_checker_warns_on_every_answer_it_affects_and_never_fails_a_req
         assert_eq!(warnings, [vec![key.to_string()]], "{key}: {:?}", answer.diagnostics);
         assert!(!caliper_docgen_core::pipeline::awaits_checker(answer));
     }
-    assert_eq!(checker.requests(), 3, "an unavailable answer is not kept");
+    assert_eq!(checker.requests(), 2, "a request asked a moment ago is refused without asking the checker again");
 }
 
 /// A checker that times out on its first request, then answers as [`finds_size`]: one that restarted.
@@ -261,8 +261,10 @@ impl SemanticProvider for TimesOutOnce {
 }
 
 /// A request the checker did not answer (it timed out, crashed or was not running) is not the component's answer: the
-/// next request, once the checker is back, carries its props, as a session that never saw the outage does. On the
-/// base the empty answer was kept and every later request got the structural props, with no diagnostic, until an edit.
+/// request right after it is refused with the same warning, without asking the checker again, and the first after an
+/// edit, once the checker is back, carries its props, as a session that never saw the outage does. On the base the
+/// empty answer was kept and every later request got the structural props, with no diagnostic, until an edit. The
+/// retry after `DEGRADED_RETRY` without an edit is tested in `pipeline::semantic_hook::tests`, with its own clock.
 #[test]
 fn a_request_the_checker_did_not_answer_is_asked_again_and_answered() {
     let project = project(&[("Button.tsx", BUTTON)]);
@@ -270,26 +272,34 @@ fn a_request_the_checker_did_not_answer_is_asked_again_and_answered() {
     let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
         .with_semantic(checker.clone(), Duration::from_secs(5));
     drop(session.initialize());
+    let warned = |answer: &caliper_docgen_core::pipeline::ComponentAnswer| -> Vec<Vec<String>> {
+        answer
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Warning && d.code == DiagnosticCode::SemanticBackend)
+            .map(|d| d.affects.clone())
+            .collect()
+    };
 
     let first = session.component("Button").unwrap();
     let second = session.component("Button").unwrap();
+    let file = project.root.join("Button.tsx");
+    std::fs::write(&file, format!("{BUTTON}\n")).unwrap();
+    session.update_file(&file);
+    let edited = session.component("Button").unwrap();
     // The oracle: a session that never saw the outage.
     let oracle =
         self::session(&project, Fake::new(Duration::ZERO, finds_size), Duration::from_secs(5)).component("Button");
     let oracle = oracle.unwrap();
 
-    assert_eq!(first.entry.props.keys().cloned().collect::<Vec<_>>(), ["label"]);
-    let warned: Vec<_> = first
-        .diagnostics
-        .iter()
-        .filter(|d| d.severity == DiagnosticSeverity::Warning && d.code == DiagnosticCode::SemanticBackend)
-        .map(|d| d.affects.clone())
-        .collect();
-    assert_eq!(warned, [vec!["Button".to_string()]]);
-    assert_eq!(second.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
-    assert_eq!(second.entry.props, oracle.entry.props);
-    assert_eq!(second.diagnostics, oracle.diagnostics);
-    assert_eq!(checker.0.load(Ordering::SeqCst), 2);
+    for answer in [&first, &second] {
+        assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label"]);
+        assert_eq!(warned(answer), [vec!["Button".to_string()]]);
+    }
+    assert_eq!(edited.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    assert_eq!(edited.entry.props, oracle.entry.props);
+    assert_eq!(edited.diagnostics, oracle.diagnostics);
+    assert_eq!(checker.0.load(Ordering::SeqCst), 2, "the second request did not ask; the edited one did");
 }
 
 #[test]
@@ -754,6 +764,7 @@ fn keeps_structural_props_for_a_generic_component(target: &SemanticTarget) -> Se
         fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
             key: target.key.clone(),
             reason: "the instantiation Button<\"a\"> could not be formed: Cannot find name 'Settings'.".to_string(),
+            transient: false,
         }],
         ..SemanticOutcome::default()
     }
@@ -1001,8 +1012,10 @@ fn answers_for_menu(_: &SemanticTarget) -> SemanticOutcome {
         fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
             key: "Menu".to_string(),
             reason: "about Menu".to_string(),
+            transient: false,
         }],
         diagnostics: vec![],
+        unavailable: None,
     }
 }
 

@@ -128,8 +128,13 @@ fn an_outcome_reads_back_equal_with_its_props_shared_as_they_were() {
             },
             SemanticComponent { key: "B".into(), props: vec![shared], composes: None, whole: Vec::new() },
         ],
-        fallbacks: vec![SemanticFallback { key: "C".into(), reason: "overloaded call signatures".into() }],
+        fallbacks: vec![SemanticFallback {
+            key: "C".into(),
+            reason: "overloaded call signatures".into(),
+            transient: false,
+        }],
         diagnostics: vec![Diagnostic::new(DiagnosticSeverity::Info, DiagnosticCode::SemanticBackend, "kept")],
+        unavailable: None,
     };
 
     let read = SemanticOutcome::from_bytes(&outcome.to_bytes().unwrap()).unwrap();

@@ -329,8 +329,9 @@ fn still_holds(reads: &[(Question, u128)]) -> bool {
 }
 
 /// Keeps `outcome` at `file` for the request `key` names, with the questions `reads` noted. Nothing is kept for an
-/// outcome with a diagnostic or a run that read more than one state of the disk; a failure to write is logged and
-/// otherwise ignored (the next run asks the checker again).
+/// outcome with a diagnostic, a degraded one (the checker was unavailable, or failed on a component: `to_bytes` refuses
+/// it, [`SemanticOutcome::is_degraded`]) or a run that read more than one state of the disk; a failure to write is
+/// logged and otherwise ignored (the next run asks the checker again).
 pub(crate) fn save(file: &Utf8Path, key: u128, reads: &Reads, outcome: &SemanticOutcome) {
     if !outcome.diagnostics.is_empty() {
         return;
@@ -623,5 +624,28 @@ mod tests {
         let rerun = resolve_cached(request(&root), &cache);
         let last = rerun.components.iter().find(|c| c.key == "Z").unwrap();
         assert!(format!("{:?}", last.props[0].prop_type).contains("\"c\""), "{last:?}");
+    }
+
+    /// A fallback the checker gave because it failed (a rejected request: a panic, a stopped checker) is about that run,
+    /// not the component: it is not kept, so the next run asks again. The same fallback as a verdict is kept. On the base
+    /// both were kept, since neither carries a diagnostic.
+    #[test]
+    fn a_transient_fallback_is_not_kept_and_a_verdict_is() {
+        use caliper_docgen_core::types::semantic::SemanticFallback;
+        let dir = tempfile::tempdir().unwrap();
+        let file = Utf8PathBuf::from_path_buf(dir.path().join(FILE)).unwrap();
+        let outcome = |transient| SemanticOutcome {
+            fallbacks: vec![SemanticFallback {
+                key: "Button".to_string(),
+                reason: "the checker rejected a request: the checker stopped".to_string(),
+                transient,
+            }],
+            ..SemanticOutcome::default()
+        };
+
+        save(&file, 7, &Reads::default(), &outcome(true));
+        assert_eq!(load(&file, 7), None, "a transient fallback is asked again");
+        save(&file, 7, &Reads::default(), &outcome(false));
+        assert_eq!(load(&file, 7), Some(outcome(false)), "a verdict is kept");
     }
 }

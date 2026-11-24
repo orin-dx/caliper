@@ -259,7 +259,7 @@ fn a_file_an_augmentation_search_could_not_read_is_searched_again_on_the_next_ru
         [Some(inner.as_str())],
         "the read failure is reported"
     );
-    assert_eq!(unreadable.augmenters_of(&reexp), Some(&Vec::new()));
+    assert_eq!(unreadable.augmenters_of(&reexp), None, "the search that could not read a file has no answer to keep");
 
     let next = load(import_demand(&root, "reexp"), &options(&root), None);
     let oracle = load(import_demand(&root, "reexp"), &PipelineOptions { use_cache: false, ..options(&root) }, None);

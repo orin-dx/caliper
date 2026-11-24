@@ -775,8 +775,16 @@ impl Answered {
     }
 }
 
+/// The checker's verdict that `target` keeps its structural result.
 fn fallback_of(target: &Target, reason: &str) -> SemanticFallback {
-    SemanticFallback { key: target.key.clone(), reason: reason.to_string() }
+    SemanticFallback { key: target.key.clone(), reason: reason.to_string(), transient: false }
+}
+
+/// `target` keeps its structural result because the checker rejected a request about it: a panic, a stopped checker
+/// or an answer it could not decode, none of which says anything about the component, so the fallback is
+/// [`SemanticFallback::transient`].
+fn rejected_fallback_of(target: &Target, reason: &str) -> SemanticFallback {
+    SemanticFallback { transient: true, ..fallback_of(target, reason) }
 }
 
 /// A fatal error aborts the run; a call the checker rejected only sends that component to its structural result. The
@@ -793,11 +801,18 @@ async fn answer_file(
     let Some(first) = targets.first() else { return Ok(answered) };
     let module = match module_exports(rpc, first.file_path.as_str()).await {
         Ok(Some(module)) => module,
-        Ok(None) | Err(CallError::Rejected(_)) => {
+        Ok(None) => {
             answered
                 .outcome
                 .fallbacks
                 .extend(targets.iter().map(|target| fallback_of(target, "not part of the checker's program")));
+            return Ok(answered);
+        }
+        Err(CallError::Rejected(_)) => {
+            answered
+                .outcome
+                .fallbacks
+                .extend(targets.iter().map(|target| rejected_fallback_of(target, "not part of the checker's program")));
             return Ok(answered);
         }
         Err(CallError::OverBudget) => {
@@ -836,7 +851,8 @@ async fn answer_file(
             Ok(Answer::Fallback(reason)) => outcome.fallbacks.push(fallback_of(target, &reason)),
             Ok(Answer::Instantiate(instantiation)) => generic.push((target.clone(), instantiation)),
             Err(CallError::Rejected(message)) => {
-                outcome.fallbacks.push(fallback_of(target, &format!("the checker rejected a request: {message}")));
+                let reason = format!("the checker rejected a request: {message}");
+                outcome.fallbacks.push(rejected_fallback_of(target, &reason));
             }
             Err(CallError::OverBudget) => left.push(target.key.clone()),
             Err(fatal) => return Err(fatal),

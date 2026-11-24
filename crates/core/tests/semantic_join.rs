@@ -90,6 +90,7 @@ fn outcome(target: &SemanticTarget, names: &[&str], diagnostics: Vec<Diagnostic>
         )],
         fallbacks: Vec::new(),
         diagnostics,
+        unavailable: None,
     }
 }
 

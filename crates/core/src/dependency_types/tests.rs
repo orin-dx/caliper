@@ -1680,3 +1680,159 @@ fn an_export_in_a_file_that_could_not_be_read_is_found_on_the_next_run() {
     assert_eq!((declares(&oracle), reason(&oracle)), (true, None), "the oracle finds the export");
     assert_eq!((declares(&next), reason(&next)), (true, None), "the next run finds the export");
 }
+
+/// The paths that read a dependency file, each made to fail in its own project.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy)]
+enum ReadPath {
+    /// An export lookup walks an `export *` into a file it cannot read.
+    ExportWalk,
+    /// The index answered the export, and its declaring file cannot be read when it is claimed.
+    Claim,
+    /// The module an augmentation search starts from.
+    EntryScan,
+    /// A stub the search only scans for its re-exports (it names neither React nor "react").
+    ReExportScan,
+    /// A file the search parses because it may declare into React.
+    AugmentingScan,
+}
+
+/// A package whose `SoloProps` is declared behind an `export *`, and one whose React augmentation is two hops away.
+#[cfg(unix)]
+const READ_PATHS: &[(&str, &str)] = &[
+    ("node_modules/solo-kit/package.json", r#"{ "name": "solo-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+    ("node_modules/solo-kit/index.d.ts", "export * from './props';\n"),
+    ("node_modules/solo-kit/props.d.ts", "export interface SoloProps { tone: string }\n"),
+    ("node_modules/reexp/package.json", r#"{ "name": "reexp", "version": "1.0.0", "types": "index.d.ts" }"#),
+    ("node_modules/reexp/index.d.ts", "export * from './mid';\n"),
+    ("node_modules/reexp/mid.d.ts", "export * from 'inner';\n"),
+    ("node_modules/inner/package.json", r#"{ "name": "inner", "version": "1.0.0", "types": "index.d.ts" }"#),
+    (
+        "node_modules/inner/index.d.ts",
+        "export interface Inner {}\ndeclare module 'react' { interface HTMLAttributes<T> { tw?: string } }\n",
+    ),
+];
+
+/// What a layer answers for `demands`: whether it followed them, the files it loaded, why each name was not found, each
+/// resolution, and the files `reexp` leads to that augment React.
+#[cfg(unix)]
+type Answers = (
+    bool,
+    Vec<PathKey>,
+    Vec<Option<Unresolved>>,
+    Vec<Option<Result<Utf8PathBuf, Unresolved>>>,
+    Option<Vec<Utf8PathBuf>>,
+);
+
+#[cfg(unix)]
+fn answers(layer: &DependencyLayer, root: &Utf8Path, demands: &[Demand]) -> Answers {
+    let mut files: Vec<PathKey> = layer.chain().flat_map(|layer| layer.files.iter().cloned()).collect();
+    files.sort();
+    let dir = |demand: &Demand| demand.from.parent().unwrap().to_owned();
+    (
+        layer.covers(demands),
+        files,
+        demands.iter().map(|d| layer.unresolved_reason(&dir(d), &d.specifier, &d.name)).collect(),
+        demands
+            .iter()
+            .map(|d| layer.resolution(&(Box::from(dir(d).as_str()), Box::from(&*d.specifier))).cloned())
+            .collect(),
+        layer.augmenters_of(&PathKey::from(root.join("node_modules/reexp/index.d.ts").as_path())).cloned(),
+    )
+}
+
+/// Every path that reads a dependency file, made to fail one at a time (`chmod 000`) with the cache on: the run reports
+/// the file, and both a session's next load over its layer (the demands `missing` gives, as a session asks) and the next
+/// cold run answer as a run that never failed (the oracle: cache off, every file readable). On the base a failed read
+/// was kept in the layer as an absence (the demand counted as followed, its miss in `unresolved`, the search's
+/// augmenters), so the session never followed the demand again.
+#[cfg(unix)]
+#[test]
+fn a_file_that_could_not_be_read_is_read_again_by_the_next_load_on_every_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let paths =
+        [ReadPath::ExportWalk, ReadPath::Claim, ReadPath::EntryScan, ReadPath::ReExportScan, ReadPath::AugmentingScan];
+    for path in paths {
+        let (_tmp, root) = project(READ_PATHS);
+        let named = || vec![demand(&root, "solo-kit", "SoloProps")];
+        let module_only = || {
+            vec![Demand { from: root.join("src/App.tsx"), specifier: "reexp".into(), name: CompactString::default() }]
+        };
+        let (unreadable, demands, warm): (&str, Vec<Demand>, bool) = match path {
+            ReadPath::ExportWalk => ("node_modules/solo-kit/props.d.ts", named(), false),
+            ReadPath::Claim => ("node_modules/solo-kit/props.d.ts", named(), true),
+            ReadPath::EntryScan => ("node_modules/reexp/index.d.ts", module_only(), false),
+            ReadPath::ReExportScan => ("node_modules/reexp/mid.d.ts", module_only(), false),
+            ReadPath::AugmentingScan => ("node_modules/inner/index.d.ts", module_only(), false),
+        };
+        let file = root.join(unreadable);
+        let cached = options(&root, true);
+        if warm {
+            drop(load(demands.clone(), &cached, None));
+        }
+
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let failed = load(demands.clone(), &cached, None);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let failed = Arc::new(failed);
+        let session = load(failed.missing(&demands), &cached, Some(&failed));
+        let next = load(demands.clone(), &cached, None);
+        let oracle = load(demands.clone(), &PipelineOptions { use_cache: false, ..options(&root, true) }, None);
+
+        let reported: Vec<Option<&str>> = failed.panics.iter().map(|d| d.file.as_deref()).collect();
+        assert_eq!(reported, [Some(file.as_str())], "{path:?}: the failed read is reported");
+        assert!(failed.degraded, "{path:?}");
+        let expected = answers(&oracle, &root, &demands);
+        assert!(expected.0 && !expected.1.is_empty(), "{path:?}: the oracle loads the declaration: {expected:?}");
+        assert_ne!(answers(&failed, &root, &demands), expected, "{path:?}: the failure changed the answer");
+        assert_eq!(answers(&session, &root, &demands), expected, "{path:?}: the session's next load");
+        assert_eq!(answers(&next, &root, &demands), expected, "{path:?}: the next run");
+    }
+}
+
+/// Which reader of a dependency file a test asks.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy)]
+enum Reader {
+    Parse,
+    Scan,
+}
+
+/// Readers that ask for one file at once read it once and all get its one result, a failed read included, through
+/// either reader. On the base a parse read the file outside its cell, so each caller that met another read it too.
+#[cfg(unix)]
+#[test]
+fn readers_that_meet_read_a_file_once_and_share_its_result() {
+    use std::os::unix::fs::PermissionsExt;
+    const READERS: usize = 8;
+    let (_tmp, root) = project(&[("node_modules/kit/props.d.ts", "export * from './more';\n")]);
+    let file = root.join("node_modules/kit/props.d.ts");
+    let options = options(&root, true);
+    let resolvers = ModuleResolvers::new(&options);
+    for reader in [Reader::Parse, Reader::Scan] {
+        for readable in [true, false] {
+            let mode = if readable { 0o644 } else { 0o000 };
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+            let mut loader = Loader::new(&resolvers, &[], None);
+            loader.read_pause = std::time::Duration::from_millis(50);
+            let barrier = std::sync::Barrier::new(READERS);
+            let read = || -> Result<Option<Vec<String>>, ReadFailed> {
+                barrier.wait();
+                Ok(match reader {
+                    Reader::Parse => loader.parse(&file)?.map(|data| scan_of(&data, &file).1.to_vec()),
+                    Reader::Scan => loader.augmentation_scan(&file, false)?.map(|(_, re_exports)| re_exports.to_vec()),
+                })
+            };
+            let results: Vec<_> = std::thread::scope(|scope| {
+                let readers: Vec<_> = (0..READERS).map(|_| scope.spawn(read)).collect();
+                readers.into_iter().map(|reader| reader.join().unwrap()).collect()
+            });
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+            let expected = if readable { Ok(Some(vec!["./more".to_string()])) } else { Err(ReadFailed) };
+            assert_eq!(results, vec![expected; READERS], "{reader:?}, readable: {readable}");
+            let reads = *loader.reads.get(&PathKey::from(file.as_path())).unwrap();
+            assert_eq!(reads, 1, "{reader:?}, readable: {readable}");
+        }
+    }
+}

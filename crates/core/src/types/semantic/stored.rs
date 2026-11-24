@@ -172,6 +172,10 @@ enum Reason {
 impl SemanticOutcome {
     /// The outcome as bytes [`SemanticOutcome::from_bytes`] reads back in a process of the same build.
     pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        // What a degraded outcome is marked with is not stored, so it would read back as the checker's answer.
+        if self.is_degraded() {
+            return Err("a degraded outcome is not stored".to_string());
+        }
         let mut index: FxHashMap<*const SemanticProp, u32> = FxHashMap::default();
         let mut props = Vec::new();
         let mut components = Vec::with_capacity(self.components.len());
@@ -241,8 +245,14 @@ impl SemanticOutcome {
             .collect::<Result<_, String>>()?;
         Ok(SemanticOutcome {
             components,
-            fallbacks: stored.fallbacks.into_iter().map(|(key, reason)| SemanticFallback { key, reason }).collect(),
+            // `to_bytes` stores no degraded outcome, so no fallback read back is transient.
+            fallbacks: stored
+                .fallbacks
+                .into_iter()
+                .map(|(key, reason)| SemanticFallback { key, reason, transient: false })
+                .collect(),
             diagnostics: stored.diagnostics,
+            unavailable: None,
         })
     }
 }

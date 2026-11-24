@@ -344,8 +344,13 @@ fn provenance_names_the_resolved_components_and_each_fallback_reason() {
     let mut out = output();
     let outcome = SemanticOutcome {
         components: vec![button(vec![])],
-        fallbacks: vec![SemanticFallback { key: "Card".to_string(), reason: "not exported".to_string() }],
+        fallbacks: vec![SemanticFallback {
+            key: "Card".to_string(),
+            reason: "not exported".to_string(),
+            transient: false,
+        }],
         diagnostics: vec![],
+        unavailable: None,
     };
 
     merge_semantic(&mut out, outcome);
@@ -543,7 +548,7 @@ fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_fil
         composes: Some(Vec::new()),
         whole: Vec::new(),
     };
-    let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string() };
+    let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string(), transient: false };
     merge_semantic(
         &mut out,
         SemanticOutcome { components: vec![answer], fallbacks: vec![fallback], ..Default::default() },

@@ -147,6 +147,11 @@ pub struct SemanticFallback {
     /// Why the checker did not answer, for example that the component is not exported by its module. The merge groups
     /// components by this text into one warning.
     pub reason: String,
+    /// The checker failed while it answered (it rejected a request, panicked or stopped), so the structural result
+    /// stands for this request only: a session asks again, and nothing keeps it as the component's answer
+    /// ([`SemanticOutcome::is_degraded`]). `false` is a verdict about the component (it is not exported, not a
+    /// component), the same on every request until a file changes.
+    pub transient: bool,
 }
 
 /// The backend's answer for a run. A backend that could not start returns no components and one diagnostic, never an
@@ -159,7 +164,16 @@ pub struct SemanticOutcome {
     pub fallbacks: Vec<SemanticFallback>,
     /// What the backend itself reports (it could not start, it timed out); merged into the output's diagnostics.
     pub diagnostics: Vec<Diagnostic>,
+    /// Set when the checker answered nothing (it was not running, could not start, timed out or crashed), by
+    /// [`SemanticOutcome::unavailable`] and nothing else. An outcome without it is the checker's answer even when it has
+    /// no entry for a target (one the pass skipped, a run past its heap budget): absence is not unavailability.
+    pub unavailable: Option<Unavailable>,
 }
+
+/// The mark of an outcome the checker did not give ([`SemanticOutcome::unavailable`]): only that constructor makes one,
+/// so no other outcome can claim it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Unavailable(());
 
 /// A component the checker may be asked about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -370,7 +384,14 @@ impl SemanticOutcome {
             format!("TypeScript checker backend unavailable: {}", reason.into()),
         )
         .with_help("The structural result is used instead.");
-        Self { diagnostics: vec![diagnostic], ..Self::default() }
+        Self { diagnostics: vec![diagnostic], unavailable: Some(Unavailable(())), ..Self::default() }
+    }
+
+    /// Whether this outcome answers only for this request: the checker was unavailable, or failed while it answered a
+    /// component ([`SemanticFallback::transient`]). Nothing keeps such an outcome (a session's answers, the kept answer
+    /// on disk); the next request asks the checker again.
+    pub fn is_degraded(&self) -> bool {
+        self.unavailable.is_some() || self.fallbacks.iter().any(|fallback| fallback.transient)
     }
 }
 
@@ -1205,7 +1226,8 @@ pub fn merge_semantic_in(
     resolver: ResolverFacts,
     cx: CollapseContext,
 ) {
-    let SemanticOutcome { components, fallbacks, diagnostics } = outcome;
+    // A whole-project run merges what it got once and keeps nothing, so a degraded outcome merges like any other.
+    let SemanticOutcome { components, fallbacks, diagnostics, unavailable: _ } = outcome;
     let syntax = SourceSyntax::read(
         components
             .iter()
@@ -1253,7 +1275,7 @@ pub fn merge_semantic_in(
     }
 
     let mut by_reason: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for SemanticFallback { key, reason } in fallbacks {
+    for SemanticFallback { key, reason, transient: _ } in fallbacks {
         if output.components.contains_key(&key) {
             by_reason.entry(reason).or_default().push(key);
         }
