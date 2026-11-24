@@ -21,10 +21,16 @@ enum Callee {
     InstantiationNonNull,
     /// `(<typeof f>f)<T>`: only valid where JSX is not.
     TypeAssertion,
+    /// `(f<T> satisfies G)`: `satisfies` keeps the type of what it checks, so the type arguments still name the props.
+    InstantiationSatisfies,
+    /// `(React).forwardRef`: the namespace a member is read from is wrapped, not the callee. A bare name has none.
+    ObjectParenthesized,
+    ObjectAs,
+    ObjectNonNull,
 }
 
 impl Callee {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 13] = [
         Self::Plain,
         Self::Parenthesized,
         Self::InstantiationInParens,
@@ -34,9 +40,14 @@ impl Callee {
         Self::NonNull,
         Self::InstantiationNonNull,
         Self::TypeAssertion,
+        Self::InstantiationSatisfies,
+        Self::ObjectParenthesized,
+        Self::ObjectAs,
+        Self::ObjectNonNull,
     ];
 
     fn wrap(self, base: &str, args: &str) -> String {
+        let (object, member) = base.split_once('.').map_or((None, base), |(object, member)| (Some(object), member));
         match self {
             Self::Plain => format!("{base}{args}"),
             Self::Parenthesized => format!("({base}){args}"),
@@ -47,6 +58,14 @@ impl Callee {
             Self::NonNull => format!("{base}!{args}"),
             Self::InstantiationNonNull => format!("({base}{args})!"),
             Self::TypeAssertion => format!("(<typeof {base}>{base}){args}"),
+            Self::InstantiationSatisfies => format!("({base}{args} satisfies typeof {base})"),
+            Self::ObjectParenthesized => {
+                object.map_or_else(|| format!("{base}{args}"), |o| format!("({o}).{member}{args}"))
+            }
+            Self::ObjectAs => {
+                object.map_or_else(|| format!("{base}{args}"), |o| format!("({o} as any).{member}{args}"))
+            }
+            Self::ObjectNonNull => object.map_or_else(|| format!("{base}{args}"), |o| format!("{o}!.{member}{args}")),
         }
     }
 }

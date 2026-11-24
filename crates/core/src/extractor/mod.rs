@@ -1309,7 +1309,7 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     pub(super) fn expression_to_ident_name<'a>(&self, expr: &Expression<'a>) -> String {
-        match expr {
+        match component::peel_expr(expr) {
             Expression::Identifier(id) => id.name.as_str().to_owned(),
             Expression::StaticMemberExpression(me) => {
                 format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str())

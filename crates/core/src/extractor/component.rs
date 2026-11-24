@@ -927,7 +927,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(init) = decl.init.as_ref() else { return false };
         let target = match peel_expr(init) {
             Expression::StaticMemberExpression(member) => {
-                let Expression::Identifier(object) = &member.object else { return false };
+                let Expression::Identifier(object) = peel_expr(&member.object) else { return false };
                 let property = member.property.name.as_str();
                 if !self.imported_names.contains(object.name.as_str()) || !is_pascal_case(property) {
                     return false;
@@ -1031,7 +1031,7 @@ pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<
 pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
     matches!(callee_of(call), Expression::StaticMemberExpression(callee)
         if callee.property.name == "assign"
-            && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"))
+            && matches!(peel_expr(&callee.object), Expression::Identifier(object) if object.name == "Object"))
 }
 
 /// Whether a call wrapping a component returns a component, by the ecosystem's conventions:

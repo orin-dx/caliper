@@ -35,7 +35,7 @@ pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Sco
     match callee {
         Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), None, scope),
         Expression::StaticMemberExpression(m) => {
-            let receiver = match &m.object {
+            let receiver = match super::component::peel_expr(&m.object) {
                 Expression::Identifier(object) => Some(object.name.as_str()),
                 _ => Some(""),
             };
@@ -147,7 +147,7 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
             || matches!(callee, Expression::StaticMemberExpression(member)
-                if matches!(&member.object, Expression::Identifier(id) if id.name == "Promise")
+                if matches!(super::component::peel_expr(&member.object), Expression::Identifier(id) if id.name == "Promise")
                     && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
             walk::walk_call_expression(self, it);
