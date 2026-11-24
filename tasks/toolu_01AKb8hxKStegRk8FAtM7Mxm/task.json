@@ -1,0 +1,8 @@
+{
+  "tool_use_id": "toolu_01AKb8hxKStegRk8FAtM7Mxm",
+  "agent_id": "a1fad31d13234050a",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix #519 decode cost before the budget guard",
+  "started_at": "2026-11-24T06:26:59.923023-08:00",
+  "transcript_unavailable_reason": "transcript path unresolvable"
+}
