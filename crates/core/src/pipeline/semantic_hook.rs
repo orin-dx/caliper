@@ -19,7 +19,6 @@
 //! call tells the checker which files changed, since a warm one answers from what it read before (ADR 0026 S6).
 
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -47,8 +46,12 @@ struct Answered {
 /// What became of one request to the checker, for every caller that waited on it.
 #[derive(Clone)]
 enum Settled {
-    /// The checker answered: what is kept for the component, and what an unavailable checker says once per session.
-    Answered { answered: Answered, once: Vec<Diagnostic> },
+    /// The checker answered for the component: kept for the next request.
+    Answered(Answered),
+    /// The checker answered nothing: it was unavailable, timed out or crashed. The structural props stand, with what
+    /// the checker said, for the callers of this request only. Never kept: a checker that recovers answers the next
+    /// request.
+    Degraded(Vec<Diagnostic>),
     /// The checker stopped without answering.
     Stopped,
     /// The request was cancelled before the checker converted it ([`SharedPriority::cancel`]): not an answer, and not
@@ -149,19 +152,11 @@ pub(crate) struct SemanticHook {
     /// How long it waits instead when the structural answer has no props; never less than `wait`.
     wait_empty: Duration,
     answers: Arc<Answers>,
-    /// Set once the checker has been reported unavailable, so a session says so once, not per component.
-    warned: AtomicBool,
 }
 
 impl SemanticHook {
     pub(crate) fn new(provider: Arc<dyn SemanticProvider>, wait: Duration) -> Self {
-        Self {
-            provider,
-            wait,
-            wait_empty: DEFAULT_WAIT_EMPTY,
-            answers: Arc::new(Mutex::new(AnswerCache::default())),
-            warned: AtomicBool::new(false),
-        }
+        Self { provider, wait, wait_empty: DEFAULT_WAIT_EMPTY, answers: Arc::new(Mutex::new(AnswerCache::default())) }
     }
 
     /// Sets how long a request for a component with no structural props waits for the checker. A wait at most `wait`
@@ -243,14 +238,8 @@ impl SemanticHook {
         };
 
         match pending.wait(self.wait_for(&answer, priority)) {
-            Some(Settled::Answered { answered, once }) => {
-                for diagnostic in once {
-                    if !self.warned.swap(true, Ordering::Relaxed) {
-                        answer.diagnostics.push(diagnostic);
-                    }
-                }
-                self.apply(&mut answer, answered, mode, cx);
-            }
+            Some(Settled::Answered(answered)) => self.apply(&mut answer, answered, mode, cx),
+            Some(Settled::Degraded(diagnostics)) => answer.diagnostics.extend(diagnostics),
             Some(Settled::Stopped) => {
                 let mut stopped = Diagnostic::new(
                     DiagnosticSeverity::Warning,
@@ -292,19 +281,16 @@ impl SemanticHook {
         (Found::Asking(pending), generation)
     }
 
-    /// Asks the checker about `target`. Its outcome settles `pending` for every caller waiting on it and is
-    /// kept for the next request, unless the cache was invalidated since `generation`. Called without the cache's lock,
-    /// since a provider may deliver at once.
+    /// Asks the checker about `target`. Its outcome settles `pending` for every caller waiting on it and, when it
+    /// answers for the component, is kept for the next request, unless the cache was invalidated since `generation`.
+    /// Called without the cache's lock, since a provider may deliver at once.
     fn ask(&self, target: SemanticTarget, pending: &Arc<Pending>, key: Option<(String, u64)>, generation: u64) {
         let answers = self.answers.clone();
         let asked = target.key.clone();
         let settling = pending.clone();
         let delivery = Delivery::new(move |outcome| {
             let mut settled = match outcome {
-                Some(outcome) => {
-                    let Read { answered, once } = read_outcome(&asked, outcome);
-                    Settled::Answered { answered, once }
-                }
+                Some(outcome) => read_outcome(&asked, outcome),
                 None if settling.priority.is_cancelled() => Settled::Cancelled,
                 None => Settled::Stopped,
             };
@@ -313,7 +299,7 @@ impl SemanticHook {
                 if cache.pending.get(&key).is_some_and(|registered| Arc::ptr_eq(registered, &settling)) {
                     cache.pending.remove(&key);
                 }
-                if let Settled::Answered { answered, .. } = &mut settled
+                if let Settled::Answered(answered) = &mut settled
                     && cache.generation == generation
                 {
                     answered.component = answered.component.take().map(|component| cache.shared(component));
@@ -401,31 +387,25 @@ fn target_of(answer: &ComponentAnswer, mode: HtmlAttributeMode, layering: Layeri
     }
 }
 
-/// An outcome read for the component asked about.
-struct Read {
-    /// What is kept for the next request: the component and what the checker said about the request, each diagnostic
-    /// naming the component.
-    answered: Answered,
-    /// What an unavailable checker says, which a session says once and not per component, so it is not kept.
-    once: Vec<Diagnostic>,
-}
-
-/// The answer for the component whose output key is `asked`, and the diagnostics the request produced: a warning that
-/// came with an answer (an edit the checker was not told about) is about this request, and its fallback's reason says
-/// why the component kept its structural result. An answer or fallback for another key is not this component's.
-fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Read {
+/// The outcome read for the component whose output key is `asked`, with every diagnostic it carries: a warning that
+/// came with an answer (an edit the checker was not told about) is about this request, and a fallback's reason says why
+/// the component kept its structural result. An outcome with no component and no fallback at all (the checker was
+/// unavailable, timed out or crashed) answers nothing: it is [`Settled::Degraded`], whatever it says. An answer or
+/// fallback for another key is not this component's.
+fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Settled {
     let SemanticOutcome { components, fallbacks, diagnostics: reported } = outcome;
-    // Only an outcome with no answer at all says the checker is unavailable.
     let unavailable = components.is_empty() && fallbacks.is_empty();
-    let mut read = Read { answered: Answered::default(), once: Vec::new() };
-    for mut diagnostic in reported {
-        diagnostic.affects = vec![asked.to_owned()];
-        if unavailable && diagnostic.severity == DiagnosticSeverity::Warning {
-            read.once.push(diagnostic);
-        } else {
-            read.answered.diagnostics.push(diagnostic);
-        }
+    let mut diagnostics: Vec<Diagnostic> = reported
+        .into_iter()
+        .map(|mut diagnostic| {
+            diagnostic.affects = vec![asked.to_owned()];
+            diagnostic
+        })
+        .collect();
+    if unavailable {
+        return Settled::Degraded(diagnostics);
     }
+    let component = components.into_iter().find(|found| found.key == asked).map(Arc::new);
     for SemanticFallback { key, reason } in fallbacks {
         if key != asked {
             continue;
@@ -436,10 +416,9 @@ fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Read {
             format!("1 component(s) kept their structural result: {reason}"),
         );
         info.affects = vec![key];
-        read.answered.diagnostics.push(info);
+        diagnostics.push(info);
     }
-    read.answered.component = components.into_iter().find(|found| found.key == asked).map(Arc::new);
-    read
+    Settled::Answered(Answered { component, diagnostics })
 }
 
 #[cfg(test)]

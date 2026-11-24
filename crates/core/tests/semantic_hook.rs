@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! A session with a checker attached asks it for the component a request names (ADR 0022): the checker's props when it
-//! answers in time, the structural ones when it does not, its late answer on the next request, and one warning when it
-//! is unavailable. The checker here is a fake, so the contract is tested without `tsc`.
+//! answers in time, the structural ones when it does not, its late answer on the next request, and a warning on every
+//! answer it could not give. The checker here is a fake, so the contract is tested without `tsc`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -217,23 +217,79 @@ fn a_slow_checker_leaves_the_structural_props_and_its_late_answer_serves_the_nex
     assert_eq!(checker.requests(), 1, "the late answer was kept, not asked for again");
 }
 
+/// An unavailable checker never fails a request: each answer it affects keeps its structural props and carries the
+/// warning, naming it, every time, and nothing is kept, so the next request asks again. On the base the warning was
+/// shown once per session and the empty answer was kept.
 #[test]
-fn an_unavailable_checker_warns_once_per_session_and_never_fails_a_request() {
+fn an_unavailable_checker_warns_on_every_answer_it_affects_and_never_fails_a_request() {
     let project = project(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
     let checker = Fake::new(Duration::ZERO, down);
-    let session = session(&project, checker, Duration::from_secs(5));
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
 
-    let button = session.component("Button").unwrap();
-    let card = session.component("Card").unwrap();
+    let answers = [session.component("Button").unwrap(), session.component("Card").unwrap()];
+    let again = session.component("Button").unwrap();
 
-    assert_eq!(button.entry.props.keys().cloned().collect::<Vec<_>>(), ["label"]);
-    assert_eq!(card.entry.props.keys().cloned().collect::<Vec<_>>(), ["title"]);
-    let warnings = [&button, &card]
+    for (answer, key, props) in
+        [(&answers[0], "Button", ["label"]), (&answers[1], "Card", ["title"]), (&again, "Button", ["label"])]
+    {
+        assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), props);
+        let warnings: Vec<_> = answer
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Warning && d.code == DiagnosticCode::SemanticBackend)
+            .map(|d| d.affects.clone())
+            .collect();
+        assert_eq!(warnings, [vec![key.to_string()]], "{key}: {:?}", answer.diagnostics);
+        assert!(!caliper_docgen_core::pipeline::awaits_checker(answer));
+    }
+    assert_eq!(checker.requests(), 3, "an unavailable answer is not kept");
+}
+
+/// A checker that times out on its first request, then answers as [`finds_size`]: one that restarted.
+struct TimesOutOnce(AtomicUsize);
+
+impl SemanticProvider for TimesOutOnce {
+    fn request(&self, targets: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+        let (sender, receiver) = channel();
+        let outcome = match self.0.fetch_add(1, Ordering::SeqCst) {
+            0 => SemanticOutcome::unavailable("the checker stopped answering: the request timed out"),
+            _ => finds_size(&targets[0]),
+        };
+        sender.send(outcome).ok();
+        receiver
+    }
+}
+
+/// A request the checker did not answer (it timed out, crashed or was not running) is not the component's answer: the
+/// next request, once the checker is back, carries its props, as a session that never saw the outage does. On the
+/// base the empty answer was kept and every later request got the structural props, with no diagnostic, until an edit.
+#[test]
+fn a_request_the_checker_did_not_answer_is_asked_again_and_answered() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Arc::new(TimesOutOnce(AtomicUsize::new(0)));
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(checker.clone(), Duration::from_secs(5));
+    drop(session.initialize());
+
+    let first = session.component("Button").unwrap();
+    let second = session.component("Button").unwrap();
+    // The oracle: a session that never saw the outage.
+    let oracle =
+        self::session(&project, Fake::new(Duration::ZERO, finds_size), Duration::from_secs(5)).component("Button");
+    let oracle = oracle.unwrap();
+
+    assert_eq!(first.entry.props.keys().cloned().collect::<Vec<_>>(), ["label"]);
+    let warned: Vec<_> = first
+        .diagnostics
         .iter()
-        .flat_map(|answer| answer.diagnostics.iter())
         .filter(|d| d.severity == DiagnosticSeverity::Warning && d.code == DiagnosticCode::SemanticBackend)
-        .count();
-    assert_eq!(warnings, 1);
+        .map(|d| d.affects.clone())
+        .collect();
+    assert_eq!(warned, [vec!["Button".to_string()]]);
+    assert_eq!(second.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    assert_eq!(second.entry.props, oracle.entry.props);
+    assert_eq!(second.diagnostics, oracle.diagnostics);
+    assert_eq!(checker.0.load(Ordering::SeqCst), 2);
 }
 
 #[test]
@@ -659,7 +715,7 @@ fn every_change_the_session_applies_is_told_to_the_checker() {
     );
 }
 
-/// A warning that comes with an answer is about that answer, and shows every time; only "unavailable" is said once.
+/// A warning that comes with an answer is about that answer, and shows every time.
 #[test]
 fn a_warning_that_comes_with_an_answer_is_shown_on_every_answer() {
     fn warns(target: &SemanticTarget) -> SemanticOutcome {

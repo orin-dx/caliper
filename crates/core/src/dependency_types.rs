@@ -448,7 +448,13 @@ struct Loader<'a> {
     learned: AtomicBool,
     /// The diagnostics of demands that panicked and of dependency files that could not be read.
     panics: Mutex<Vec<Diagnostic>>,
+    /// A dependency file existed but could not be read.
+    unreadable: AtomicBool,
 }
+
+/// A dependency file that exists but could not be read: what it declares is unknown, so no answer that depends on it
+/// is kept or persisted.
+struct Unreadable;
 
 impl<'a> Loader<'a> {
     fn new(
@@ -478,19 +484,27 @@ impl<'a> Loader<'a> {
             re_exports: DashMap::default(),
             learned: AtomicBool::new(false),
             panics: Mutex::new(Vec::new()),
+            unreadable: AtomicBool::new(false),
         }
     }
 }
 
 impl Loader<'_> {
-    /// The text of a dependency file. One that is missing is skipped quietly, since resolution found it a moment ago and
-    /// a dangling link or a racing uninstall declares nothing; one that exists but cannot be read is reported once,
-    /// because its declarations are then absent from every answer.
+    /// The text of a dependency file, `None` when it is missing or cannot be read.
     fn read(&self, file: &Utf8Path) -> Option<String> {
+        self.read_text(file).ok().flatten()
+    }
+
+    /// The text of a dependency file. One that is missing is skipped quietly (`Ok(None)`), since resolution found it a
+    /// moment ago and a dangling link or a racing uninstall declares nothing. One that exists but cannot be read (a
+    /// permission, too many open files, an install racing the run) is [`Unreadable`] and reported once: what it declares
+    /// is unknown, not absent.
+    fn read_text(&self, file: &Utf8Path) -> Result<Option<String>, Unreadable> {
         match std::fs::read_to_string(file) {
-            Ok(source) => Some(source),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Ok(source) => Ok(Some(source)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => {
+                self.unreadable.store(true, Ordering::Relaxed);
                 let mut diagnostic = Diagnostic::io_read_error(file, &error);
                 // The package's types are not the project's, and the run still produces its output.
                 diagnostic.severity = crate::types::DiagnosticSeverity::Warning;
@@ -498,32 +512,39 @@ impl Loader<'_> {
                 if !failures.iter().any(|known| known.file == diagnostic.file) {
                     failures.push(diagnostic);
                 }
-                None
+                Err(Unreadable)
             }
         }
     }
 
+    /// The data of a dependency file, `None` when it is missing or cannot be read.
     fn parse(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
-        self.parse_source(file, None)
+        self.parse_source(file, None).ok().flatten()
     }
 
-    /// `parse`, with the text of `file` when the caller has already read it.
-    fn parse_source(&self, file: &Utf8Path, source: Option<String>) -> Option<Arc<SourceData>> {
+    /// `parse`, with the text of `file` when the caller has already read it, and [`Unreadable`] when it exists but
+    /// could not be read. That is not kept, in this load or its layer: the next caller reads the file again.
+    fn parse_source(&self, file: &Utf8Path, source: Option<String>) -> Result<Option<Arc<SourceData>>, Unreadable> {
         if let Some(found) = self.parent.and_then(|parent| parent.parsed_data(file.as_str())) {
-            return found.clone();
+            return Ok(found.clone());
         }
         let cell = self.parsed.entry(PathKey::from(file)).or_default().clone();
-        cell.get_or_init(|| {
-            let source = match source {
-                Some(source) => source,
-                None => self.read(file)?,
-            };
-            let mut data = crate::extractor::parse_file(file, &source);
-            // Problems inside a package's types are not the project's; an unresolved demand is reported instead.
-            data.diagnostics.clear();
-            Some(Arc::new(data))
-        })
-        .clone()
+        if let Some(found) = cell.get() {
+            return Ok(found.clone());
+        }
+        let source = match source {
+            Some(source) => Some(source),
+            None => self.read_text(file)?,
+        };
+        Ok(cell
+            .get_or_init(|| {
+                let source = source?;
+                let mut data = crate::extractor::parse_file(file, &source);
+                // Problems inside a package's types are not the project's; an unresolved demand is reported instead.
+                data.diagnostics.clear();
+                Some(Arc::new(data))
+            })
+            .clone())
     }
 
     /// Resolve `specifier` as imported by `from_file`, the way the resolver will.
@@ -611,7 +632,15 @@ impl Loader<'_> {
         visited: &mut FxHashSet<(PathKey, CompactString)>,
         cut: &mut bool,
     ) -> Option<(Utf8PathBuf, CompactString)> {
-        let data = self.parse(module)?;
+        let data = match self.parse_source(module, None) {
+            Ok(data) => data?,
+            // What the module exports is unknown, not absent: the miss is returned but, like a cycle's, neither kept
+            // nor persisted, so the next lookup or run reads the module again.
+            Err(Unreadable) => {
+                *cut = true;
+                return None;
+            }
+        };
         if declares(&data, module, name) {
             return Some((module.to_owned(), CompactString::from(name)));
         }
@@ -878,7 +907,7 @@ impl Loader<'_> {
         }
         let source = self.read(file)?;
         if entry || may_declare_into_react(&source) {
-            return self.parse_source(file, Some(source)).map(|data| scan_of(&data, file));
+            return self.parse_source(file, Some(source)).ok().flatten().map(|data| scan_of(&data, file));
         }
         let cell = self.re_exports.entry(PathKey::from(file)).or_default().clone();
         let found = cell.get_or_init(|| {
@@ -1246,7 +1275,8 @@ pub(crate) fn load(
         demands: loader.demands.into_iter().collect(),
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
-        parsed: loader.parsed.into_iter().map(|(key, cell)| (key, cell.get().cloned().flatten())).collect(),
+        // A file that could not be read left its cell empty: the next revision reads it again.
+        parsed: loader.parsed.into_iter().filter_map(|(key, cell)| Some((key, cell.get()?.clone()))).collect(),
         panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
     }
 }
@@ -1372,6 +1402,11 @@ fn read_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
 /// Write every answer that came from inside a package, grouped by package. A write that fails leaves the next run
 /// to walk the stubs again; the output does not depend on the index.
 fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
+    // An answer that passed through a file that could not be read (an augmentation search's) may hold that failure as
+    // an absence, and every later run would trust it while the package's `package.json` is unchanged.
+    if loader.unreadable.load(Ordering::Relaxed) {
+        return;
+    }
     let mut packages: FxHashMap<Box<str>, PackageIndex> = FxHashMap::default();
     let mut entry = |dir: &Utf8Path| -> Option<Box<str>> {
         let package = loader.package_of(dir)?;

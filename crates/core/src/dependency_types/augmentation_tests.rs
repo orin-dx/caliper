@@ -238,3 +238,31 @@ fn only_an_export_of_a_list_or_a_star_makes_a_file_worth_scanning_for_re_exports
         assert!(!may_re_export(source), "{source}");
     }
 }
+
+/// A file an augmentation search could not read is not held as one that augments nothing: the run that met it writes
+/// no index, so the next run, with the file readable, finds its augmentation, as a run with the cache off does. On the
+/// base the search's answer without it was persisted and trusted while `inner`'s `package.json` was unchanged.
+#[cfg(unix)]
+#[test]
+fn a_file_an_augmentation_search_could_not_read_is_searched_again_on_the_next_run() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_tmp, root) = project(REEXPORTING);
+    let reexp = module(&root, "node_modules/reexp/index.d.ts");
+    let inner = root.join("node_modules/inner/index.d.ts");
+    let found = vec![inner.clone()];
+
+    std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let unreadable = load(import_demand(&root, "reexp"), &options(&root), None);
+    std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        unreadable.panics.iter().map(|d| d.file.as_deref()).collect::<Vec<_>>(),
+        [Some(inner.as_str())],
+        "the read failure is reported"
+    );
+    assert_eq!(unreadable.augmenters_of(&reexp), Some(&Vec::new()));
+
+    let next = load(import_demand(&root, "reexp"), &options(&root), None);
+    let oracle = load(import_demand(&root, "reexp"), &PipelineOptions { use_cache: false, ..options(&root) }, None);
+    assert_eq!(oracle.augmenters_of(&reexp), Some(&found));
+    assert_eq!(next.augmenters_of(&reexp), Some(&found));
+}

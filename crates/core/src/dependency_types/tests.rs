@@ -1637,3 +1637,46 @@ fn a_deep_tree_and_a_path_with_no_mark_get_the_plain_walk_s_answer() {
     let loader = Loader::new(&resolvers, &[], None);
     assert_eq!(&*loader.resolution_scope("/"), plain_scope(Utf8Path::new("/")).as_ref());
 }
+
+/// A dependency file that could not be read is unknown, not empty: the run reports it, and the next run, with the file
+/// readable again, finds what it exports, as a run with the cache off does. On the base the failed read was kept as
+/// "not exported" and persisted in the index, which every later run trusted while the package was unchanged.
+#[cfg(unix)]
+#[test]
+fn an_export_in_a_file_that_could_not_be_read_is_found_on_the_next_run() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_tmp, root) = project(&[
+        ("node_modules/solo-kit/package.json", r#"{ "name": "solo-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/solo-kit/index.d.ts", "export * from './props';\n"),
+        ("node_modules/solo-kit/props.d.ts", "export interface SoloProps { tone: string }\n"),
+    ]);
+    let props = root.join("node_modules/solo-kit/props.d.ts");
+    let demands = || vec![demand(&root, "solo-kit", "SoloProps")];
+    let reason = |layer: &DependencyLayer| layer.unresolved_reason(&root.join("src"), "solo-kit", "SoloProps");
+    let declares = |layer: &DependencyLayer| layer.files.contains(&PathKey::from(props.as_path()));
+
+    std::fs::set_permissions(&props, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let unreadable = load(demands(), &options(&root, true), None);
+    std::fs::set_permissions(&props, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        unreadable
+            .panics
+            .iter()
+            .map(|d| (d.file.as_deref(), d.severity == crate::types::DiagnosticSeverity::Warning))
+            .collect::<Vec<_>>(),
+        [(Some(props.as_str()), true)]
+    );
+    assert!(!declares(&unreadable));
+
+    // A session extends the layer: a demand from another directory looks the export up again, past the parent.
+    let unreadable = Arc::new(unreadable);
+    let elsewhere =
+        Demand { from: root.join("src/other/Tag.tsx"), specifier: "solo-kit".into(), name: "SoloProps".into() };
+    let extended = load(vec![elsewhere], &options(&root, true), Some(&unreadable));
+    assert!(declares(&extended), "the session's next revision finds the export");
+
+    let next = load(demands(), &options(&root, true), None);
+    let oracle = load(demands(), &PipelineOptions { use_cache: false, ..options(&root, true) }, None);
+    assert_eq!((declares(&oracle), reason(&oracle)), (true, None), "the oracle finds the export");
+    assert_eq!((declares(&next), reason(&next)), (true, None), "the next run finds the export");
+}

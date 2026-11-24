@@ -244,8 +244,10 @@ fn a_request_after_an_edit_does_not_join_the_request_asked_before_it() {
     }
 }
 
+/// The story that joined the request and every later story the checker could not answer each carry the warning: an
+/// unavailable checker is reported on every answer it affects, not once per session.
 #[test]
-fn an_unavailable_checker_is_reported_once_to_the_story_that_joined_the_request() {
+fn an_unavailable_checker_is_reported_to_the_story_that_joined_the_request_and_to_every_later_one() {
     let project = project(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
     let checker = Arc::new(Queued::default());
     let session = session(&project, &checker, Duration::from_secs(60));
@@ -263,7 +265,7 @@ fn an_unavailable_checker_is_reported_once_to_the_story_that_joined_the_request(
     let warnings = |answer: &ComponentAnswer| {
         answer.diagnostics.iter().filter(|d| d.severity == DiagnosticSeverity::Warning).count()
     };
-    assert_eq!((warnings(&joined), warnings(&card)), (1, 0));
+    assert_eq!((warnings(&joined), warnings(&card)), (1, 1));
     assert_eq!(names(&joined), ["label"]);
 }
 
