@@ -147,8 +147,10 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
             || matches!(callee, Some(Expression::StaticMemberExpression(member))
-                if matches!(super::component::named(&member.object), Some(Expression::Identifier(id)) if id.name == "Promise")
-                    && matches!(member.property.name.as_str(), "resolve" | "all"))
+                if matches!(
+                    super::component::named(&member.object),
+                    Some(Expression::Identifier(id)) if id.name == "Promise"
+                ) && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
             walk::walk_call_expression(self, it);
         }

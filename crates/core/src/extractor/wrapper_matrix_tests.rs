@@ -363,6 +363,45 @@ fn type_arguments_beneath_an_assertion_do_not_name_the_props() {
     }
 }
 
+/// The alias detection and the inline-member scan of `Object.assign(Impl, { Item })` answer one question: they agree
+/// through every wrapper of the callee, of its namespace and of the first argument.
+#[test]
+fn object_assign_attaches_its_inline_members_through_every_wrapper() {
+    let sources = |assign: &str, first: &str| {
+        format!(
+            "{HEADER}interface ItemProps {{ size?: string }}\n\
+             function Impl(props: Props) {{ return {RENDER}; }}\n\
+             export const Root = {assign}({first}, {{ Item: (props: ItemProps) => {RENDER} }});"
+        )
+    };
+    let path = Utf8Path::new("/fixtures/Root.tsx");
+    let (expected, errors) = extracted(path, &sources("Object.assign", "Impl"));
+    assert!(errors.is_empty(), "{errors:?}");
+    let names = |mappings: &[serde_json::Value]| -> Vec<String> {
+        let mut names: Vec<String> =
+            mappings.iter().filter_map(|mapping| mapping["component_name"].as_str().map(str::to_owned)).collect();
+        names.sort();
+        names
+    };
+    assert_eq!(names(&expected), ["Item", "Root"], "{expected:#?}");
+    let mut failures = Vec::new();
+    for assign in [
+        "(Object).assign",
+        "(Object as typeof Object).assign",
+        "Object!.assign",
+        "(Object satisfies ObjectConstructor).assign",
+    ] {
+        for first in ["Impl", "(Impl)", "Impl as typeof Impl", "Impl!"] {
+            let source = sources(assign, first);
+            let (actual, errors) = extracted(path, &source);
+            if !errors.is_empty() || actual != expected {
+                failures.push(format!("{assign}({first}, …): {errors:?}\n{source}\nactual {:?}", names(&actual)));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} forms differ from the plain one:\n{}", failures.len(), failures.join("\n\n"));
+}
+
 #[test]
 fn every_detection_form_extracts_the_same_component_through_every_wrapper() {
     let mut failures = Vec::new();

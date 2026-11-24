@@ -114,9 +114,10 @@ impl<'b, 'a> Peeled<'b, 'a> {
 
     /// `expr`, when what it is called still describes the call (`forwardRef`, `memo`, `Object.assign`, a PascalCase
     /// component): its identity is kept, or the assertion replacing it gives a named result the extractor does not
-    /// resolve (React Aria's `(forwardRef as forwardRefType)(…)`), which leaves the name the only evidence. `None` when
-    /// the assertion states a result that is no named type, such as `(Object as (v: object) => object)(…)`, and for a
-    /// member read from a namespace whose name does not hold: `(React as object).memo` is no `memo` of React's.
+    /// resolve (React Aria's `(forwardRef as forwardRefType)(…)`), which leaves the name the only evidence. `None`
+    /// when the assertion states a result that is no named type, such as `(Object as (v: object) => object)(…)`,
+    /// and for a member read from a namespace whose name does not hold: `(React as object).memo` is no `memo` of
+    /// React's.
     pub(super) fn named(&self) -> Option<&'b Expression<'a>> {
         let holds = match self.identity {
             Identity::Kept => true,
@@ -131,8 +132,8 @@ impl<'b, 'a> Peeled<'b, 'a> {
 }
 
 /// Whether an asserted type leaves the result named but unresolved: a type reference (`F`, `forwardRefType`), or a
-/// function type whose result is one (`(…) => React.ReactElement`, `<T>(r: FC<T>) => FC<T>`), alone or with `null`. An
-/// allow-list: a keyword, literal, object or any other type states a result, and that result is not a named one.
+/// function type whose result is one (`(…) => React.ReactElement`, `<T>(r: FC<T>) => FC<T>`), alone or with `null`.
+/// An allow-list: a keyword, literal, object or any other type states a result, and that result is not a named one.
 fn names_its_result(ty: &TSType<'_>) -> bool {
     fn named(ty: &TSType<'_>) -> bool {
         match ty {
