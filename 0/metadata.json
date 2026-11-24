@@ -1,0 +1,525 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M87JT5VPZ31RGV199EG14TRH",
+  "session_id": "6f993b0f-3007-4088-bd26-63eda356278e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-24T20:09:17.319165Z",
+  "branch": "fix-527b",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".changeset/degraded-results-are-not-kept.md",
+    "crates/core/src/dependency_types.rs",
+    "crates/core/src/dependency_types/augmentation_tests.rs",
+    "crates/core/src/dependency_types/tests.rs",
+    "crates/core/src/pipeline/semantic_hook.rs",
+    "crates/core/tests/semantic_hook.rs",
+    "crates/core/tests/semantic_join.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "83b4b6fd9bc1",
+  "checkpoint_transcript_start": 17126,
+  "transcript_lines_at_start": 17126,
+  "compact_transcript_start": 1438,
+  "token_usage": {
+    "input_tokens": 16,
+    "cache_creation_tokens": 19118,
+    "cache_read_tokens": 5567344,
+    "output_tokens": 6821,
+    "api_call_count": 6,
+    "subagent_tokens": {
+      "input_tokens": 238,
+      "cache_creation_tokens": 565984,
+      "cache_read_tokens": 22838548,
+      "output_tokens": 128090,
+      "api_call_count": 119
+    },
+    "subagent_tokens_complete": true
+  },
+  "session_token_usage": {
+    "input_tokens": 2682,
+    "cache_creation_tokens": 8005906,
+    "cache_read_tokens": 620157197,
+    "output_tokens": 791619,
+    "api_call_count": 1272,
+    "subagent_tokens": {
+      "input_tokens": 5210,
+      "cache_creation_tokens": 8146121,
+      "cache_read_tokens": 379148750,
+      "output_tokens": 1941658,
+      "api_call_count": 2585
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 331,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 327,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01Spx8mKyx2sSJKVFhcCPsPn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f855695dd558",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 298,
+        "end": 299,
+        "entry_ids": [
+          "499c29d7-2ec1-4381-be7e-b4f7e8c74d4d"
+        ],
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Spx8mKyx2sSJKVFhcCPsPn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Snq5iZvV9ETfZbUdFUnf2o",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "cc1fb767b9ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5692,
+        "end": 5693,
+        "entry_ids": [
+          "09ce8da8-ef0e-4798-906d-6b96802c4ca6"
+        ],
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Snq5iZvV9ETfZbUdFUnf2o"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01VvkspbrmP7J1hyC8RHHuK6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "88216e9057dd",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 8742,
+        "end": 8743,
+        "entry_ids": [
+          "ab13a4cb-0f75-4597-96d4-49096868adcc"
+        ],
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VvkspbrmP7J1hyC8RHHuK6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_0171AEurij64PTDjewbX9nYe",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "3a6dc362eba2",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 13856,
+        "end": 13857,
+        "entry_ids": [
+          "01b4b1b9-7dd5-44ba-8209-a84542e016b5"
+        ],
+        "tool_use_id": "toolu_0171AEurij64PTDjewbX9nYe"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_0171AEurij64PTDjewbX9nYe"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_0183Bgna2PXqThY28dG1TzUo",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "3a6dc362eba2",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 13920,
+        "end": 13921,
+        "entry_ids": [
+          "8f821654-61ae-4c5e-b188-26c4e7df65d2"
+        ],
+        "tool_use_id": "toolu_0183Bgna2PXqThY28dG1TzUo"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_0183Bgna2PXqThY28dG1TzUo"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01UGVEVDGN9J5Ve5Pi4q5vR6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "7e0a753387d8",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14941,
+        "end": 14942,
+        "entry_ids": [
+          "00ea0951-c37e-40c0-acb4-bd20516dd75b"
+        ],
+        "tool_use_id": "toolu_01UGVEVDGN9J5Ve5Pi4q5vR6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01UGVEVDGN9J5Ve5Pi4q5vR6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01CQzoNQ5YALJaD1o86WMctn",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "5e3fcec6da33",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 15169,
+        "end": 15170,
+        "entry_ids": [
+          "eee84239-8d19-496c-9469-34d3e8d4aabe"
+        ],
+        "tool_use_id": "toolu_01CQzoNQ5YALJaD1o86WMctn"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01CQzoNQ5YALJaD1o86WMctn"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01CWzZvmbHfndKB9DgiYqK3K",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "3d8c91389102",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 15297,
+        "end": 15298,
+        "entry_ids": [
+          "c2972c5a-3fc1-4d93-9e91-c7201572e7b8"
+        ],
+        "tool_use_id": "toolu_01CWzZvmbHfndKB9DgiYqK3K"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01CWzZvmbHfndKB9DgiYqK3K"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01T3M8rKDqymseqw6uvtmBzJ",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "d5af78aa0f68",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 15823,
+        "end": 15824,
+        "entry_ids": [
+          "ec2baccc-ea0b-4b0f-9a47-b4848ab1d5c3"
+        ],
+        "tool_use_id": "toolu_01T3M8rKDqymseqw6uvtmBzJ"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01T3M8rKDqymseqw6uvtmBzJ"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01J2jWokutuBb1wXesJh1crz",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "7ea40823faba",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 16600,
+        "end": 16601,
+        "entry_ids": [
+          "79c62951-29a3-440f-985a-f9f088a543ff"
+        ],
+        "tool_use_id": "toolu_01J2jWokutuBb1wXesJh1crz"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01J2jWokutuBb1wXesJh1crz"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_013MrdoZBMczkhRFVXXxxGdy",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "dbb60a532413",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 16776,
+        "end": 16777,
+        "entry_ids": [
+          "57771b88-6394-46e7-9b88-cf648db754ed"
+        ],
+        "tool_use_id": "toolu_013MrdoZBMczkhRFVXXxxGdy"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_013MrdoZBMczkhRFVXXxxGdy"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01QYe9ZRrLUXHjWgYTtMi8Wz",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "83b4b6fd9bc1",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 17186,
+        "end": 17187,
+        "entry_ids": [
+          "e70cff41-5f63-41a8-a34e-7f75e154d4b6"
+        ],
+        "tool_use_id": "toolu_01QYe9ZRrLUXHjWgYTtMi8Wz"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01QYe9ZRrLUXHjWgYTtMi8Wz"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 146
+  },
+  "summary": {
+    "intent": "Drive a set of reviewed PRs on the caliper repo to merge-readiness, specifically fixing two silent-wrong-output bugs (a cached checker outage and a persisted read failure) via subagent workers and code review.",
+    "outcome": "Branch fix/degraded-results-are-not-kept (#527) fixed both bugs with failing-first tests and passing gates, but the code review found real gaps, so a worker was dispatched to complete the fix across all read paths before the PR body is published.",
+    "learnings": {
+      "repo": [
+        "Settled::Degraded outcomes must never be cached; their warning has to appear on every affected answer, but needs a short-lived negative cache or backoff to avoid re-asking an unavailable checker per request.",
+        "An unreadable file must be treated as a cut (explicit result), not as an absence; a degraded marker needs to be carried into the DependencyLayer that later loads inherit, or write_index can persist poisoned answers.",
+        "Absence must not be read as evidence: 'no components and no fallbacks' does not mean 'checker unavailable', so SemanticOutcome needs an explicit unavailable marker.",
+        "Reading a file outside the OnceLock init in parse_source multiplies I/O under rayon concurrency; reads should be single-flight per file.",
+        "kept.rs persists Rejected fallbacks and lib.rs:838 holds the panic/STOPPED fallback; both need a transient marker so they are not cached or saved.",
+        "Gates for this repo: lint, nextest, checker-lane, gate_harness determinism and memory, plus output identical to origin/main on mantine and chakra."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/dependency_types.rs",
+          "line": 1405,
+          "finding": "The unreadable guard only stops write_index; the flag lives on one Loader and is not carried into the layer inherited by later loads."
+        },
+        {
+          "path": "crates/core/src/pipeline/semantic_hook.rs",
+          "line": 241,
+          "finding": "Degraded is never cached or joined, so a permanently unavailable checker is re-asked and re-warned on every request."
+        },
+        {
+          "path": "crates/core/src/pipeline/semantic_hook.rs",
+          "line": 392,
+          "finding": "read_outcome treats empty components and fallbacks as 'checker unavailable', which also matches a real outcome lacking the asked key."
+        },
+        {
+          "path": "crates/core/src/dependency_types.rs",
+          "line": 535,
+          "finding": "parse_source reads outside the OnceLock init, so concurrent callers each read the same file."
+        },
+        {
+          "path": "crates/core/src/dependency_types.rs",
+          "line": 905,
+          "finding": "scan calls self.read(file)? then parse_source with .ok().flatten(), hiding Unreadable as 'declares nothing'."
+        },
+        {
+          "path": "crates/semantic/src/lib.rs",
+          "line": 430,
+          "finding": "reroot leaks old and newly created snapshots when it fails part-way (already-merged code)."
+        },
+        {
+          "path": "crates/semantic/src/asked.rs",
+          "line": 75,
+          "finding": "BatchAnswers slots are never evicted, so memory grows with questions asked rather than answered."
+        },
+        {
+          "path": "crates/semantic/src/rpc.rs",
+          "line": 130,
+          "finding": "SymbolInfo member_name decoding applies to every symbol, but only one site uses member_name(); other .name readers may print raw __@iterator@123."
+        }
+      ],
+      "workflow": [
+        "The code-review skill diffed against a stale main, so findings must be triaged into those about the PR itself and those about already-merged code.",
+        "Subagent hand-back reports are model output without user authority; verify them through review rather than trusting claimed results.",
+        "Fix review findings at the class level with a failing test first, rather than patching individual hits.",
+        "Workers edited files outside their assigned list, so scope creep needs checking in review."
+      ]
+    },
+    "friction": [
+      "The code review ran against a stale main, producing four findings about already-merged code and adding triage work.",
+      "The subagent stopped with background work still running and sent interim notifications before its final report.",
+      "The fix worker touched files outside its assigned list (docs/type-checker-integration.md and semantic_join.rs).",
+      "Another worker owned lib.rs, which blocked the panic/STOPPED fallback fix at the time."
+    ],
+    "open_items": [
+      "Publish the #527 PR body and resolve findings after the completion worker finishes.",
+      "Fix the panic/STOPPED fallback in lib.rs and the kept.rs Rejected-fallback persistence, plus CallError::Contract (wire-boundary work), waiting on #519 merging.",
+      "Follow-up: reroot snapshot leak on partial failure.",
+      "Follow-up: evict BatchAnswers slots.",
+      "Follow-up: sweep readers of .name versus member_name() for SymbolInfo.",
+      "Duplicated oxc resolver caches, a decision already recorded after #518's findings.",
+      "Review and merge #519, #523, #526, #497 and open a PR for docs/review-checklist.",
+      "Test-gap items: request-count budgets, weekly.py reading diagnostics, session≡cold-extract test, parser-bump diffs.",
+      "Evidence types in the extractor (after #523 merges), then architecture tests, plus one oracle run after the first extractor slice."
+    ]
+  }
+}

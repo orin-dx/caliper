@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01DQX2di9Ry1PZSp3dxQt8vt",
+  "agent_id": "ae35fdd19437b5c91",
+  "subagent_type": "general-purpose",
+  "task_description": "Complete the degraded-results fix across every read path",
+  "started_at": "2026-11-24T11:07:25.956958-08:00"
+}
