@@ -3361,6 +3361,32 @@ fn an_unusable_nearest_tsconfig_is_reported_once() {
     assert_eq!(reports[0].file.as_deref(), Some(root.join("tsconfig.json").as_str()));
 }
 
+/// The dependency loader resolves an alias under the nested config first, which caches the governing config without
+/// its references. The report of its unusable reference still comes.
+#[test]
+fn a_governing_tsconfig_with_a_missing_reference_is_reported_when_a_nested_config_resolves_first() {
+    let (_tmp, root, mut options) = project_with(&[
+        ("tsconfig.json", "{ \"references\": [{ \"path\": \"./missing\" }] }"),
+        (
+            "src/nested/tsconfig.json",
+            "{ \"compilerOptions\": { \"baseUrl\": \".\", \"paths\": { \"@n/*\": [\"./*\"] } }, \"references\": [{ \"path\": \"../../tsconfig.json\" }] }",
+        ),
+        ("src/nested/types.ts", "export interface ButtonProps { label: string }\n"),
+        (
+            "src/nested/Button.tsx",
+            "import type { ButtonProps } from '@n/types';\nexport function Button(props: ButtonProps) { return null; }\n",
+        ),
+    ]);
+    options.load_dependencies = true;
+
+    let output = extract(&options);
+
+    let reports: Vec<&Diagnostic> =
+        output.diagnostics.iter().filter(|d| d.message.starts_with("Could not use the tsconfig")).collect();
+    assert_eq!(reports.len(), 1, "{:#?}", output.diagnostics);
+    assert_eq!(reports[0].file.as_deref(), Some(root.join("tsconfig.json").as_str()));
+}
+
 #[test]
 fn an_import_written_with_a_javascript_extension_finds_its_typescript_source() {
     let (_tmp, _root, options) = project_with(&[
