@@ -13,18 +13,10 @@ use super::{SourceDataCollector, js_text};
 /// Objects with more keys than this are not a lookup table a prop's type is likely to name.
 const MAX_KEYS: usize = 128;
 
-/// The expression under `as const`, `satisfies T`, `!` and parentheses: none of them changes which literal it is.
-fn peel<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    loop {
-        expr = match expr {
-            Expression::ParenthesizedExpression(inner) => &inner.expression,
-            Expression::TSAsExpression(inner) => &inner.expression,
-            Expression::TSSatisfiesExpression(inner) => &inner.expression,
-            Expression::TSTypeAssertion(inner) => &inner.expression,
-            Expression::TSNonNullExpression(inner) => &inner.expression,
-            other => return other,
-        };
-    }
+/// The expression under `as const`, `satisfies T`, `!` and parentheses: none of them changes which literal it is. The
+/// one list of what a wrapper is lives in `component::wrapper`.
+fn peel<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    super::component::peel_expr(expr)
 }
 
 /// The literal type a literal expression has, as a `const` declares it.
