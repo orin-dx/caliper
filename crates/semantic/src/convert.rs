@@ -2768,7 +2768,10 @@ mod tests {
 
             assert_eq!(resumed.unwrap(), led);
             assert_eq!(rpc.calls(), calls, "the walk let go asked the checker again");
-            assert!(misses > 1, "{misses}");
+            // Two walks of one shape convert each of its types once: as many misses as a walk of a fresh converter.
+            let alone = Converter::new(rpc.clone(), false);
+            alone.convert_roots(roots).await.unwrap();
+            assert_eq!(misses, alone.memo_stats().1);
             assert_eq!(converter.memo_stats(), (hits + 1, misses));
             rpc.release().await;
         });
