@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01AKb8hxKStegRk8FAtM7Mxm",
+  "agent_id": "a1fad31d13234050a",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix #519 decode cost before the budget guard",
+  "token_usage": {
+    "input_tokens": 136,
+    "cache_creation_tokens": 146136,
+    "cache_read_tokens": 7509431,
+    "output_tokens": 33927,
+    "api_call_count": 68
+  },
+  "started_at": "2026-11-24T06:26:59.923023-08:00",
+  "completed_at": "2026-11-24T06:45:22.880139-08:00"
+}
