@@ -836,7 +836,8 @@ struct State {
     /// The types of the properties [`Converter::fields`] lists, by the object type's handle and [`Listing`].
     field_types: Answers<(u64, Listing), Arc<[Arc<TypeInfo>]>>,
     /// Whether each of those properties is `readonly`, asked only for fields the size budget does not cut (see
-    /// [`Converter::fields`]), and kept only for a list with a property its answer does not settle.
+    /// [`Converter::fields`]). Kept for every list, also one the answers settle without a request: a byte per property
+    /// is small beside the list's types, and a list read again is not classified again.
     readonly: Answers<(u64, Listing), Arc<[bool]>>,
     /// Where props are declared ([`crate::declared`]), kept for the snapshot like the rest.
     declared: crate::declared::Memo,
@@ -2013,19 +2014,11 @@ impl Converter {
                     .filter(|(_, settled)| settled.is_none())
                     .map(|(property, _)| &property.reference)
                     .collect();
-                let mut answers = if asked.is_empty() {
-                    Vec::new().into_iter()
-                } else {
-                    self.rpc.readonly_symbols(&asked).await?.into_iter()
-                };
-                let readonly: Option<Arc<[bool]>> =
-                    settled.iter().map(|settled| settled.or_else(|| answers.next())).collect();
-                let readonly =
-                    readonly.ok_or_else(|| CallError::Rejected("a short isReadonlySymbol batch".to_string()))?;
-                if answers.next().is_some() {
-                    return Err(CallError::Rejected("a long isReadonlySymbol batch".to_string()));
-                }
-                Ok(readonly)
+                let answers = if asked.is_empty() { Vec::new() } else { self.rpc.readonly_symbols(&asked).await? };
+                // `batch` fails a batch that does not get one answer per request, so this holds by construction.
+                debug_assert_eq!(answers.len(), asked.len(), "an isReadonlySymbol batch of another length");
+                let mut answers = answers.into_iter();
+                Ok(settled.iter().map(|settled| settled.or_else(|| answers.next()).unwrap_or(false)).collect())
             })
             .await?;
         // `listed` names the same symbol list every time, so the cached flags are one per property.

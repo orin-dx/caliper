@@ -217,7 +217,8 @@ impl From<SymbolWire> for SymbolInfo {
 /// - a symbol with an `Object.defineProperty` call among its declarations: settled false only when every declaration
 ///   is of a kind in [`NO_ASSIGNMENT_DECLARATION`].
 ///
-/// A property without a value declaration (a mapped type's) has no declaration modifiers to read.
+/// A property's modifiers are read only off its value declaration (tsrs and TypeScript
+/// `getDeclarationModifierFlagsFromSymbol`), so one without a value declaration has no `readonly` modifier.
 fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, declarations: &[String]) -> Option<bool> {
     #[cfg(test)]
     READONLY_CLASSIFIED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -227,26 +228,27 @@ fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, decla
     {
         return Some(true);
     }
-    let modifiers_unread = flags & flag::SYMBOL_PROPERTY != 0 && value_declaration;
-    // A declared property always has a value declaration, and the answer omits the field when there is none. One with
-    // neither a value declaration nor check flags (the checker did not make it: a mapped type's property has them) may
-    // be an answer that did not carry the field, so its `readonly` modifier is unread too.
-    let transient_unproven = flags & flag::SYMBOL_PROPERTY != 0 && !value_declaration && check_flags == 0;
+    // The answer omits `valueDeclaration` both when there is none and when it was not sent, so "none" is believed only
+    // of a property the checker makes without one: a mapped, reverse-mapped, union or intersection property. Any other
+    // check flag (`Instantiated` alone, `Late`) proves nothing about the declaration.
+    let modifiers_unread = flags & flag::SYMBOL_PROPERTY != 0
+        && (value_declaration || check_flags & flag::CHECK_MADE_WITHOUT_DECLARATION == 0);
     let constant_unread = flags & flag::SYMBOL_VARIABLE != 0;
     let declarations_known = declarations.iter().all(|declaration| {
         let kind = declaration.split('.').nth(1).and_then(|kind| kind.parse::<u32>().ok());
         kind.is_some_and(|kind| NO_ASSIGNMENT_DECLARATION.contains(&kind))
     });
-    (!modifiers_unread && !transient_unproven && !constant_unread && declarations_known).then_some(false)
+    (!modifiers_unread && !constant_unread && declarations_known).then_some(false)
 }
 
-/// Coupled to the tsrs version: a renumbering makes a listed kind mean something else, which
-/// `a_settled_readonly_answer_is_the_checkers` pins to real declarations (rerun it on every tsrs bump). A kind that is
-/// not listed is asked, so the list only ever errs toward the checker.
-///
-/// The syntax kinds (tsrs 0.24 numbering, as node handles carry them) of the declarations that are not an
+/// The syntax kinds (tsrs_ast 0.24.0 numbering, as node handles carry them) of the declarations that are not an
 /// `Object.defineProperty` call: parameter, property signature and declaration, method signature and declaration, get
-/// and set accessor, property assignment, shorthand property assignment.
+/// and set accessor, property assignment, shorthand property assignment. A kind not listed is asked.
+///
+/// The numbers are tsrs's, not ours: after a renumbering a listed number may name `CallExpression`, and a
+/// `defineProperty` declaration would then be settled not readonly. So the test
+/// `the_declaration_kinds_are_read_from_the_pinned_tsrs` fails on any tsrs version but the one they were read from,
+/// and `a_settled_readonly_answer_is_the_checkers` pins each to a real declaration.
 const NO_ASSIGNMENT_DECLARATION: [u32; 9] = [171, 173, 174, 175, 176, 179, 180, 304, 305];
 
 /// How many symbols [`settled_readonly`] has classified in this process; nextest runs each test in a process of its own.
@@ -471,6 +473,9 @@ pub(crate) mod flag {
     pub(crate) const SYMBOL_SET_ACCESSOR: u64 = 65536;
     /// `CheckFlags.Readonly`: a transient symbol made readonly.
     pub(crate) const CHECK_READONLY: u64 = 8;
+    /// `CheckFlags.SyntheticProperty | SyntheticMethod | ReverseMapped | Mapped`: a property the checker makes for a
+    /// union or intersection, a reverse-inferred mapped type or a mapped type.
+    pub(crate) const CHECK_MADE_WITHOUT_DECLARATION: u64 = 2 | 4 | (1 << 16) | (1 << 21);
     pub(crate) const SYMBOL_INTERFACE: u64 = 64;
     pub(crate) const SYMBOL_ALIAS: u64 = 2097152;
     pub(crate) const SYMBOL_OPTIONAL: u64 = 16777216;
@@ -1125,8 +1130,9 @@ mod tests {
     }
 
     /// Every form of property, of every kind of type that lists them: for each property whose answer settles
-    /// `isReadonlySymbol` ([`SymbolInfo::settled_readonly`]), the checker answers the same. Also pins the syntax kinds
-    /// [`NO_ASSIGNMENT_DECLARATION`] reads off the node handles, which a checker upgrade may renumber.
+    /// `isReadonlySymbol` ([`SymbolInfo::settled_readonly`]), the checker answers the same, and which properties are
+    /// settled true, settled false or asked is pinned by name. Also pins the syntax kinds [`NO_ASSIGNMENT_DECLARATION`]
+    /// reads off the node handles to real declarations, and checks that an expando assignment's kind is not listed.
     #[test]
     fn a_settled_readonly_answer_is_the_checkers() {
         let dir = tempfile::tempdir().unwrap();
@@ -1162,7 +1168,14 @@ mod tests {
             export const frozen = { a: 1, b: [1] } as const;\n\
             export const fn = Object.assign(() => 1, { attached: 1 });\n\
             export namespace N { export const c = 1; export let l = 2; export var v = 3; export function f() {} \
-              export class Kn {} export enum En { A } }\n";
+              export class Kn {} export enum En { A } }\n\
+            export interface G<T> { readonly gr: T; gw: T }\n\
+            export type Gi = G<number>;\n\
+            declare function unbox<T>(boxed: { [Key in keyof T]: { v: T[Key] } }): T;\n\
+            export const rev = unbox({ ra: { v: 1 }, rb: { v: 'b' } });\n\
+            export function fx() { return 1; }\n\
+            fx.dotted = 1;\n\
+            fx['bracketed'] = 2;\n";
         let checker = Backend::start(&root, 1).unwrap();
         let runtime = multi_thread();
         let (compared, kinds) = runtime.block_on(async {
@@ -1175,12 +1188,13 @@ mod tests {
             let mut compared = Vec::new();
             let mut kinds = BTreeMap::new();
             for export in rpc.exports_of_module(&module.reference).await.unwrap() {
-                // Type alias, interface, class: the declared type; variable, class, enum, namespace: the value's.
+                // Type alias, interface, class: the declared type; variable, function, class, enum, namespace: the
+                // value's.
                 let mut types = Vec::new();
                 if export.flags & (524_288 | 64 | 32) != 0 {
                     types.push(rpc.declared_type_of_symbol(&export.reference).await.unwrap());
                 }
-                if export.flags & (3 | 32 | 256 | 512) != 0 {
+                if export.flags & (3 | 16 | 32 | 256 | 512) != 0 {
                     types.push(rpc.type_of_symbol(&export.reference).await.unwrap());
                 }
                 for ty in types {
@@ -1188,10 +1202,10 @@ mod tests {
                     let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
                     let asked = rpc.readonly_symbols(&references).await.unwrap();
                     for (property, asked) in properties.iter().zip(asked) {
-                        let at = format!("{}.{}", export.name, property.name);
-                        if let Some(kind) = property.declarations.first().and_then(|d| d.split('.').nth(1)) {
-                            kinds.insert(at.clone(), kind.parse::<u32>().unwrap());
-                        }
+                        let at = format!("{}.{}", export.name, property.member_name());
+                        let declared =
+                            property.declarations.iter().map(|d| d.split('.').nth(1).unwrap().parse().unwrap());
+                        kinds.insert(at.clone(), declared.collect::<Vec<u32>>());
                         compared.push((at, property.settled_readonly(), asked));
                     }
                 }
@@ -1204,9 +1218,46 @@ mod tests {
         let disagreements: Vec<_> =
             compared.iter().filter(|(_, settled, asked)| settled.is_some_and(|settled| settled != *asked)).collect();
         assert_eq!(disagreements, Vec::<&(String, Option<bool>, bool)>::new(), "{compared:#?}");
-        let settled = |value: bool| compared.iter().filter(|(_, settled, _)| *settled == Some(value)).count();
-        // The forms above settle 0 of these on an answer without check flags; the counts pin what they settle now.
-        assert!(settled(true) >= 20 && settled(false) >= 100, "{} {} {compared:#?}", settled(true), settled(false));
+        assert_eq!(kinds.len(), compared.len(), "a property named twice: {compared:#?}");
+        // Which properties the answer settles, and how: one settled that was asked, or settled the other way, fails
+        // here by name.
+        let partition = |want: Option<bool>| {
+            let named = compared.iter().filter(|(_, settled, _)| *settled == want).map(|(at, ..)| at.as_str());
+            named.collect::<Vec<_>>().join(" ")
+        };
+        let readonly = "I.g K.only R.a R.b R.m R.g R.gs R.so R.c R.quoted-key R.[Symbol.iterator] P.b P.g \
+            P.[Symbol.iterator] Req.a Req.b Req.m Req.g Req.gs Req.so Req.c Req.quoted-key Req.[Symbol.iterator] \
+            Pk.b Pk.g O.b O.g O.[Symbol.iterator] Ro.k1 Ro.k2 Renamed.onB Renamed.onG X.g Y.b Y.m Y.g Y.gs Y.so Y.c \
+            Y.quoted-key Y.[Symbol.iterator] U.a U.b U.g Inst.only Tup.0 Tup.1 Tup.length E.A E.B frozen.a frozen.b";
+        assert_eq!(partition(Some(true)), readonly, "settled readonly");
+        let not_readonly = "I.m I.gs I.so K.gk K.method P.a P.m P.gs P.so P.c P.quoted-key Mut.a Mut.b Mut.m \
+            Mut.g Mut.gs Mut.so Mut.c Mut.quoted-key Mut.[Symbol.iterator] Pk.a Pk.m O.m O.gs O.so O.c O.quoted-key \
+            Rec.u Rec.v Renamed.onA Renamed.onC Renamed.onGs Renamed.onM Renamed.onQuoted-key Renamed.onSo X.a X.b \
+            X.m X.gs X.so U.m U.gs U.c Inst.gk Inst.method Tup.toString Tup.toLocaleString Tup.concat Tup.join \
+            Tup.slice Tup.indexOf Tup.lastIndexOf Tup.every Tup.some Tup.forEach Tup.map Tup.filter Tup.reduce \
+            Tup.reduceRight Tup.find Tup.findIndex Tup.[Symbol.iterator] Tup.entries Tup.keys Tup.values \
+            Tup.includes Tup.flatMap Tup.flat Tup.at MutTup.toString MutTup.toLocaleString MutTup.pop MutTup.push \
+            MutTup.concat MutTup.join MutTup.reverse MutTup.shift MutTup.slice MutTup.sort MutTup.splice \
+            MutTup.unshift MutTup.indexOf MutTup.lastIndexOf MutTup.every MutTup.some MutTup.forEach MutTup.map \
+            MutTup.filter MutTup.reduce MutTup.reduceRight MutTup.find MutTup.findIndex MutTup.fill \
+            MutTup.copyWithin MutTup.[Symbol.iterator] MutTup.entries MutTup.keys MutTup.values MutTup.includes \
+            MutTup.flatMap MutTup.flat MutTup.at Str.toString Str.charAt Str.charCodeAt Str.concat Str.indexOf \
+            Str.lastIndexOf Str.localeCompare Str.match Str.replace Str.search Str.slice Str.split Str.substring \
+            Str.toLowerCase Str.toLocaleLowerCase Str.toUpperCase Str.toLocaleUpperCase Str.trim Str.substr \
+            Str.valueOf Str.codePointAt Str.includes Str.endsWith Str.normalize Str.repeat Str.startsWith Str.anchor \
+            Str.big Str.blink Str.bold Str.fixed Str.fontcolor Str.fontsize Str.italics Str.link Str.small \
+            Str.strike Str.sub Str.sup Str.[Symbol.iterator] Str.padStart Str.padEnd Str.trimEnd Str.trimStart \
+            Str.trimLeft Str.trimRight Str.matchAll Str.replaceAll Str.at Arr.toString Arr.toLocaleString Arr.concat \
+            Arr.join Arr.slice Arr.indexOf Arr.lastIndexOf Arr.every Arr.some Arr.forEach Arr.map Arr.filter \
+            Arr.reduce Arr.reduceRight Arr.find Arr.findIndex Arr.[Symbol.iterator] Arr.entries Arr.keys Arr.values \
+            Arr.includes Arr.flatMap Arr.flat Arr.at rev.ra rev.rb";
+        assert_eq!(partition(Some(false)), not_readonly, "settled not readonly");
+        let unsettled = "I.a I.b I.c I.quoted-key I.[Symbol.iterator] K.x K.y K.z K.p K.#q K.pp K.rp K.s K.t \
+            K.prototype X.c X.quoted-key X.[Symbol.iterator] X.extra Y.a Inst.x Inst.y Inst.z Inst.p Inst.#q Inst.pp \
+            Inst.rp Tup.[Symbol.unscopables] MutTup.[Symbol.unscopables] MutTup.0 MutTup.length Str.length \
+            Arr.length Arr.[Symbol.unscopables] ns.lit ns.ro ns.gg ns.ss ns.method ns.short ns.computed ns.spread \
+            fn.attached N.c N.l N.v N.f N.Kn N.En G.gr G.gw Gi.gr Gi.gw fx.dotted fx.bracketed";
+        assert_eq!(partition(None), unsettled, "asked");
         let pinned = [
             ("K.pp", 171),
             ("I.a", 173),
@@ -1219,9 +1270,49 @@ mod tests {
             ("ns.short", 305),
         ];
         for (at, kind) in pinned {
-            assert_eq!(kinds.get(at), Some(&kind), "{at}: {kinds:#?}");
+            assert_eq!(kinds.get(at), Some(&vec![kind]), "{at}: {kinds:#?}");
         }
         assert_eq!(pinned.map(|(_, kind)| kind), NO_ASSIGNMENT_DECLARATION);
+        // The expando assignments' declarations are of a kind the list leaves out, so they are asked.
+        for at in ["fx.dotted", "fx.bracketed"] {
+            let declared = kinds.get(at).unwrap();
+            assert!(declared.iter().all(|kind| !NO_ASSIGNMENT_DECLARATION.contains(kind)), "{at}: {declared:?}");
+            assert!(ASSIGNMENT_DECLARATION.iter().any(|(_, kind)| declared.contains(kind)), "{at}: {declared:?}");
+        }
+    }
+
+    /// The kinds (tsrs_ast 0.24.0's `Kind`, the version [`the_declaration_kinds_are_read_from_the_pinned_tsrs`] holds)
+    /// of the nodes that make a declaration an assignment or `Object.defineProperty` one, after TypeScript's
+    /// `getAssignmentDeclarationKind`, and of the JSDoc tags that declare a property.
+    const ASSIGNMENT_DECLARATION: [(&str, u32); 7] = [
+        ("PropertyAccessExpression", 213),
+        ("ElementAccessExpression", 214),
+        ("CallExpression", 215),
+        ("BinaryExpression", 228),
+        ("JSDocCallbackTag", 332),
+        ("JSDocTypedefTag", 339),
+        ("JSDocPropertyTag", 341),
+    ];
+
+    /// The syntax kind numbers above are tsrs's and change when it renumbers, which no check here can see; this fails
+    /// on any tsrs but the one they were read from, until they are read again from its `tsrs_ast::Kind` and the
+    /// version below updated. A real `defineProperty` declaration cannot stand in: tsrs 0.24 does not bind one.
+    #[test]
+    fn the_declaration_kinds_are_read_from_the_pinned_tsrs() {
+        let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock")).unwrap();
+        let versions: Vec<_> = lock
+            .split("[[package]]")
+            .filter(|package| package.contains("\nname = \"tsrs_ast\"\n"))
+            .filter_map(|package| package.lines().find_map(|line| line.strip_prefix("version = ")))
+            .collect();
+        assert_eq!(
+            versions,
+            ["\"0.24.0\""],
+            "tsrs_ast moved: re-read NO_ASSIGNMENT_DECLARATION and ASSIGNMENT_DECLARATION from its Kind"
+        );
+        for (name, kind) in ASSIGNMENT_DECLARATION {
+            assert!(!NO_ASSIGNMENT_DECLARATION.contains(&kind), "{name} ({kind}) is listed");
+        }
     }
 
     /// The answer settles only what its fields decide; an answer without check flags settles nothing.
@@ -1236,10 +1327,21 @@ mod tests {
         };
         let mapped = |check_flags: u64| serde_json::json!({ "flags": 4, "checkFlags": check_flags, "declarations": ["1.173./a.ts"] });
         assert_eq!(settled(mapped(8 | (1 << 21))), Some(true));
-        assert_eq!(settled(mapped(1 << 21)), Some(false));
+        // Mapped, union or intersection (property or method), reverse-mapped: made with no value declaration.
+        for made in [1 << 21, 2, 4, 1 << 16, (1 << 21) | 1] {
+            assert_eq!(settled(mapped(made)), Some(false), "{made}");
+        }
         assert_eq!(settled(serde_json::json!({ "flags": 4, "declarations": ["1.173./a.ts"] })), None);
-        // No value declaration and no check flags: the checker did not make it, so the field may have gone missing.
-        assert_eq!(settled(serde_json::json!({ "flags": 4, "checkFlags": 0, "declarations": ["1.173./a.ts"] })), None);
+        // No value declaration, and no check flag that says the checker made it without one: the field may have gone
+        // missing from a declared, instantiated, late-bound or index-signature property's answer, so its `readonly`
+        // modifier is unread.
+        for unproven in [0, 1, 1 << 15, 1 << 26] {
+            assert_eq!(settled(mapped(unproven)), None, "{unproven}");
+        }
+        let synthetic_declared = serde_json::json!({
+            "flags": 4, "checkFlags": 2, "declarations": ["1.173./a.ts"], "valueDeclaration": "1.173./a.ts"
+        });
+        assert_eq!(settled(synthetic_declared), None);
         let declared = serde_json::json!({
             "flags": 4, "checkFlags": 0, "declarations": ["1.173./a.ts"], "valueDeclaration": "1.173./a.ts"
         });
@@ -1251,8 +1353,11 @@ mod tests {
             settled(serde_json::json!({ "flags": 8 | 4, "checkFlags": 0, "valueDeclaration": "1.307./a.ts" })),
             Some(true)
         );
-        let call = serde_json::json!({ "flags": 4, "checkFlags": 1 << 21, "declarations": ["1.215./a.js"] });
-        assert_eq!(settled(call), None);
+        for (name, kind) in ASSIGNMENT_DECLARATION {
+            let assigned =
+                serde_json::json!({ "flags": 4, "checkFlags": 1 << 21, "declarations": [format!("1.{kind}./a.js")] });
+            assert_eq!(settled(assigned), None, "{name}");
+        }
         assert_eq!(settled(serde_json::json!({ "flags": 4, "checkFlags": 0, "declarations": ["bad"] })), None);
     }
 
