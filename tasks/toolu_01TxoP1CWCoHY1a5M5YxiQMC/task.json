@@ -1,0 +1,16 @@
+{
+  "tool_use_id": "toolu_01TxoP1CWCoHY1a5M5YxiQMC",
+  "agent_id": "aa3349c9fc68b6a22",
+  "subagent_type": "general-purpose",
+  "task_description": "Audit detection decisions against binding and one-owner invariants",
+  "token_usage": {
+    "input_tokens": 150,
+    "cache_creation_tokens": 242007,
+    "cache_read_tokens": 12275636,
+    "output_tokens": 56643,
+    "api_call_count": 75
+  },
+  "started_at": "2026-11-24T10:21:04.44865-08:00",
+  "completed_at": "2026-11-24T10:31:22.122036-08:00",
+  "transcript_unavailable_reason": "transcript unreadable"
+}

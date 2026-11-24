@@ -1,0 +1,16 @@
+{
+  "tool_use_id": "toolu_01RvqTviUfhYdsefHQay5tqj",
+  "agent_id": "aecc483ae4b535a06",
+  "subagent_type": "general-purpose",
+  "task_description": "Audit shared state and cache ordering across all crates",
+  "token_usage": {
+    "input_tokens": 140,
+    "cache_creation_tokens": 273901,
+    "cache_read_tokens": 11571480,
+    "output_tokens": 56806,
+    "api_call_count": 70
+  },
+  "started_at": "2026-11-24T10:21:04.454881-08:00",
+  "completed_at": "2026-11-24T10:31:52.097183-08:00",
+  "transcript_unavailable_reason": "transcript unreadable"
+}

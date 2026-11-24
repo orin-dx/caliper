@@ -1,0 +1,16 @@
+{
+  "tool_use_id": "toolu_01VPhD6s9bDahvABeQErRdMx",
+  "agent_id": "a509db9901b92d3dd",
+  "subagent_type": "general-purpose",
+  "task_description": "Audit silence-as-evidence and guard ordering in the semantic crate",
+  "token_usage": {
+    "input_tokens": 140,
+    "cache_creation_tokens": 265158,
+    "cache_read_tokens": 12242678,
+    "output_tokens": 57081,
+    "api_call_count": 70
+  },
+  "started_at": "2026-11-24T10:21:04.455618-08:00",
+  "completed_at": "2026-11-24T10:32:01.579436-08:00",
+  "transcript_unavailable_reason": "transcript unreadable"
+}

@@ -1,0 +1,19 @@
+{
+  "tool_use_id": "toolu_01Xa4DGtaFm6deVZTR6nLjoe",
+  "agent_id": "a2bdef5e9b00600a9",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix #523 assertion over-acceptance findings",
+  "files": [
+    ".changeset/wrapped-component-forms.md"
+  ],
+  "token_usage": {
+    "input_tokens": 168,
+    "cache_creation_tokens": 342468,
+    "cache_read_tokens": 13197126,
+    "output_tokens": 76664,
+    "api_call_count": 83
+  },
+  "started_at": "2026-11-24T09:11:34.521829-08:00",
+  "completed_at": "2026-11-24T10:26:51.22158-08:00",
+  "transcript_unavailable_reason": "transcript unreadable"
+}
