@@ -1,0 +1,18 @@
+{
+  "tool_use_id": "toolu_01R9iC96HJe5dBg5S8HvNgVW",
+  "agent_id": "a5bd7e81f4fe71658",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix oxc 0.159 wrapper-node regressions on #523",
+  "files": [
+    "crates/core/src/extractor/wrapper_matrix_tests.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 144,
+    "cache_creation_tokens": 246029,
+    "cache_read_tokens": 11130577,
+    "output_tokens": 64306,
+    "api_call_count": 71
+  },
+  "started_at": "2026-11-24T06:26:59.92149-08:00",
+  "completed_at": "2026-11-24T06:50:52.460956-08:00"
+}
