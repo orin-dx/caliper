@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01FdvoU4FfbQ3yD5PN8egjNQ",
+  "agent_id": "a36677b04604a7f2e",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix #521 per-method parameter tests",
+  "token_usage": {
+    "input_tokens": 96,
+    "cache_creation_tokens": 199085,
+    "cache_read_tokens": 6820411,
+    "output_tokens": 62789,
+    "api_call_count": 47
+  },
+  "started_at": "2026-11-24T06:26:59.924495-08:00",
+  "completed_at": "2026-11-24T06:46:33.459333-08:00"
+}
