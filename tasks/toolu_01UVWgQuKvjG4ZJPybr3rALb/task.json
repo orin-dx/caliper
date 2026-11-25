@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01UVWgQuKvjG4ZJPybr3rALb",
+  "agent_id": "a3490eee9529e9738",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix the #519 all-fallback allocation finding",
+  "token_usage": {
+    "input_tokens": 122,
+    "cache_creation_tokens": 124930,
+    "cache_read_tokens": 6011386,
+    "output_tokens": 26757,
+    "api_call_count": 61
+  },
+  "started_at": "2026-11-25T14:38:00.075908-08:00",
+  "completed_at": "2026-11-25T14:58:29.829727-08:00"
+}
