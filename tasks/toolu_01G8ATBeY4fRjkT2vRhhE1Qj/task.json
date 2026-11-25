@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01G8ATBeY4fRjkT2vRhhE1Qj",
+  "agent_id": "a57a8ab917f1457a1",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix #527 four findings: partial results on read failure",
+  "started_at": "2026-11-25T15:15:05.164225-08:00"
+}
