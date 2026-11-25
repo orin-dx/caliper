@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use camino::Utf8Path;
+use compact_str::CompactString;
 use oxc_ast::ast::*;
+use rustc_hash::FxHashMap;
 
 use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode};
 
@@ -83,97 +85,366 @@ pub(super) fn peel_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<
     }
 }
 
-/// What the assertions between a callee and its call say about its type.
+/// What the outermost assertion on a callee, or on the namespace it is read from, says about calling it. Only the
+/// outermost one counts: `(e as A) as B` has type `B` whatever `A` is. An assertion declines a candidate only on
+/// affirmative evidence ([`Evidence::NotRenderable`]); a type the extractor cannot read leaves the call the candidate
+/// its name makes it ([`Evidence::Unknown`]), as before assertions were read at all.
 #[derive(Clone, Copy)]
-pub(super) enum Identity<'b, 'a> {
-    /// No assertion, or only ones that keep the callee's own type: `typeof` the asserted expression itself, `any` and
-    /// `unknown` (which say nothing).
-    Kept,
-    /// The outermost assertion that gives the callee another type: `(Object as (v: object) => object)` is no longer
-    /// `Object`, and `(wrap as G)` no longer has `wrap`'s declared signature.
-    Replaced(&'b TSType<'a>),
+pub(super) enum Evidence<'b, 'a> {
+    /// No assertion, or one that keeps the callee's own type: `typeof` the same expression, `any` and `unknown`. The
+    /// callee's declaration describes the call.
+    Identity,
+    /// A type reference (`(forwardRef as forwardRefType)`). The file may alias it to `typeof` the callee
+    /// (`SourceDataCollector::describes_call`); otherwise it reads as [`Evidence::Unknown`].
+    Reference(&'b TSTypeReference<'a>),
+    /// Every call signature of the asserted type returns what no component or element is ([`Returns::NotRenderable`]):
+    /// `(Object as (v: object) => object)(…)` is no component, whatever its name.
+    NotRenderable,
+    /// Anything else: `typeof` another expression, a signature whose result may render or is not read, a type with no
+    /// call signature. The name still says what the call is; the callee's declaration no longer describes it.
+    Unknown,
 }
 
 /// An expression beneath every wrapper, instantiations included, the type arguments an instantiation among them gave
-/// it, and whether an assertion among them replaced its type.
+/// it, and what the outermost assertion says about calling it.
 #[derive(Clone, Copy)]
 pub(super) struct Peeled<'b, 'a> {
     pub(super) expr: &'b Expression<'a>,
     /// The outermost instantiation's type arguments, unless an assertion above it replaced its type: `(f<T>)` and
     /// `(f<T>)!` give `T`; `(f<T> as G)` gives none, as the value then has type `G`.
     pub(super) type_arguments: Option<&'b TSTypeParameterInstantiation<'a>>,
-    pub(super) identity: Identity<'b, 'a>,
+    pub(super) evidence: Evidence<'b, 'a>,
 }
 
 impl<'b, 'a> Peeled<'b, 'a> {
-    /// Whether the call has the type `expr` is declared with, so that its declaration (`resolver::callee`) describes
-    /// the call.
-    pub(super) fn keeps_identity(&self) -> bool {
-        matches!(self.identity, Identity::Kept)
-    }
-
-    /// `expr`, when what it is called still describes the call (`forwardRef`, `memo`, `Object.assign`, a PascalCase
-    /// component): its identity is kept, or the assertion replacing it gives a named result the extractor does not
-    /// resolve (React Aria's `(forwardRef as forwardRefType)(…)`), which leaves the name the only evidence. `None`
-    /// when the assertion states a result that is no named type, such as `(Object as (v: object) => object)(…)`,
-    /// and for a member read from a namespace whose name does not hold: `(React as object).memo` is no `memo` of
-    /// React's.
+    /// `expr`, when what it is called still says what the call is (`forwardRef`, `memo`, `Object.assign`, a PascalCase
+    /// component): always, unless the assertion gives the call a result no component has.
     pub(super) fn named(&self) -> Option<&'b Expression<'a>> {
-        let holds = match self.identity {
-            Identity::Kept => true,
-            Identity::Replaced(ty) => names_its_result(ty),
-        };
-        let namespace_holds = match self.expr {
-            Expression::StaticMemberExpression(member) => named(&member.object).is_some(),
-            _ => true,
-        };
-        (holds && namespace_holds).then_some(self.expr)
+        match self.evidence {
+            Evidence::NotRenderable => None,
+            Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown => Some(self.expr),
+        }
     }
 }
 
-/// Whether an asserted type leaves the result named but unresolved: a type reference (`F`, `forwardRefType`), or a
-/// function type whose result is one (`(…) => React.ReactElement`, `<T>(r: FC<T>) => FC<T>`), alone or with `null`.
-/// An allow-list: a keyword, literal, object or any other type states a result, and that result is not a named one.
-fn names_its_result(ty: &TSType<'_>) -> bool {
-    fn named(ty: &TSType<'_>) -> bool {
-        match ty {
-            TSType::TSTypeReference(_) => true,
-            TSType::TSParenthesizedType(inner) => named(&inner.type_annotation),
-            TSType::TSUnionType(union) => {
-                union.types.iter().any(|member| matches!(member, TSType::TSTypeReference(_)))
-                    && union.types.iter().all(|member| {
-                        matches!(
-                            member,
-                            TSType::TSTypeReference(_) | TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_)
-                        )
-                    })
+/// The value beneath `expr`'s wrappers, the outermost instantiation's type arguments when no assertion is above them,
+/// and the outermost assertion. One pass over the wrappers, so a chain of them costs its length.
+fn layers<'a, 'b>(
+    mut expr: &'b Expression<'a>,
+) -> (&'b Expression<'a>, Option<&'b TSTypeParameterInstantiation<'a>>, Option<&'b TSType<'a>>) {
+    let mut type_arguments = None;
+    let mut outermost = None;
+    loop {
+        #[cfg(test)]
+        steps::count();
+        expr = match wrapper(expr) {
+            Some(Wrapper::Transparent(inner)) => inner,
+            Some(Wrapper::Asserted(inner, ty)) => {
+                outermost = outermost.or(Some(ty));
+                inner
             }
-            _ => false,
-        }
-    }
-    match ty {
-        TSType::TSTypeReference(_) => true,
-        TSType::TSParenthesizedType(inner) => names_its_result(&inner.type_annotation),
-        TSType::TSFunctionType(function) => named(&function.return_type.type_annotation),
-        _ => false,
-    }
-}
-
-/// Whether asserting `ty` on `beneath` keeps its type: `typeof` the same expression, or `any`/`unknown`, which say
-/// nothing. An allow-list: every other type replaces it.
-fn assertion_keeps_identity(ty: &TSType<'_>, beneath: &Expression<'_>) -> bool {
-    match ty {
-        TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_) => true,
-        TSType::TSParenthesizedType(inner) => assertion_keeps_identity(&inner.type_annotation, beneath),
-        TSType::TSTypeQuery(query) if query.type_arguments.is_none() => {
-            let beneath = peel(beneath);
-            beneath.keeps_identity() && query_names(&query.expr_name, beneath.expr)
-        }
-        _ => false,
+            Some(Wrapper::Instantiation(instantiation)) => {
+                if outermost.is_none() && type_arguments.is_none() {
+                    type_arguments = Some(&*instantiation.type_arguments);
+                }
+                &instantiation.expression
+            }
+            None => return (expr, type_arguments, outermost),
+        };
     }
 }
 
-/// Whether `typeof name` is the type of `expr`: the same identifier or the same chain of static members.
+/// See [`Peeled`]. For what a callee or an `extends` target is: OXC 0.159 keeps `(f<T>)(x)` and `extends (B<T>)` as an
+/// instantiation node beneath the call or heritage clause, where 0.158 moved its type arguments onto them.
+pub(super) fn peel<'a, 'b>(expr: &'b Expression<'a>) -> Peeled<'b, 'a> {
+    let (expr, type_arguments, outermost) = layers(expr);
+    let evidence = match (outermost, expr) {
+        (Some(ty), _) => asserted(ty, expr),
+        // `(React as { forwardRef: typeof React.forwardRef }).forwardRef`: the namespace's assertion gives the member
+        // the type it declares for it.
+        (None, Expression::StaticMemberExpression(member)) => match receiver(&member.object) {
+            Typed::Own => Evidence::Identity,
+            Typed::Asserted(ty) => member_evidence(ty, member.property.name.as_str(), expr),
+            Typed::Unread => Evidence::Unknown,
+        },
+        (None, _) => Evidence::Identity,
+    };
+    Peeled { expr, type_arguments, evidence }
+}
+
+/// The type a namespace has, as far as the assertions on it and on the namespaces it is read from say.
+enum Typed<'b, 'a> {
+    /// Its own: no assertion, or one that keeps it.
+    Own,
+    /// The asserted type, or the type an asserted namespace's type literal declares for the member.
+    Asserted(&'b TSType<'a>),
+    /// A member the asserted type does not declare where the extractor looks (a type literal's property).
+    Unread,
+}
+
+fn receiver<'a, 'b>(expr: &'b Expression<'a>) -> Typed<'b, 'a> {
+    let (expr, _, outermost) = layers(expr);
+    let declared = match (outermost, expr) {
+        (Some(ty), _) => Some(ty),
+        (None, Expression::StaticMemberExpression(object)) => match receiver(&object.object) {
+            Typed::Own => None,
+            Typed::Asserted(ty) => match member(ty, object.property.name.as_str()) {
+                Member::Property(ty) => Some(ty),
+                Member::Methods(_) | Member::Unread => return Typed::Unread,
+            },
+            Typed::Unread => return Typed::Unread,
+        },
+        (None, _) => None,
+    };
+    match declared {
+        None => Typed::Own,
+        Some(ty) if matches!(asserted(ty, expr), Evidence::Identity) => Typed::Own,
+        Some(ty) => Typed::Asserted(ty),
+    }
+}
+
+/// What a type literal declares for a member.
+enum Member<'b, 'a> {
+    Property(&'b TSType<'a>),
+    /// The literal declares the member as methods (`{ memo(c: C): R }`): their signatures are its type.
+    Methods(&'b TSTypeLiteral<'a>),
+    Unread,
+}
+
+fn names_key(key: &PropertyKey<'_>, name: &str) -> bool {
+    key.static_name().is_some_and(|key| super::js_text::property_name(&key) == name)
+}
+
+fn member<'a, 'b>(ty: &'b TSType<'a>, name: &str) -> Member<'b, 'a> {
+    match ty {
+        TSType::TSParenthesizedType(inner) => member(&inner.type_annotation, name),
+        TSType::TSTypeLiteral(literal) => {
+            for signature in &literal.members {
+                match signature {
+                    TSSignature::TSPropertySignature(property) if names_key(&property.key, name) => {
+                        return property
+                            .type_annotation
+                            .as_ref()
+                            .map_or(Member::Unread, |annotation| Member::Property(&annotation.type_annotation));
+                    }
+                    TSSignature::TSMethodSignature(method)
+                        if method.kind == TSMethodSignatureKind::Method && names_key(&method.key, name) =>
+                    {
+                        return Member::Methods(literal);
+                    }
+                    TSSignature::TSPropertySignature(_)
+                    | TSSignature::TSMethodSignature(_)
+                    | TSSignature::TSIndexSignature(_)
+                    | TSSignature::TSCallSignatureDeclaration(_)
+                    | TSSignature::TSConstructSignatureDeclaration(_) => {}
+                }
+            }
+            Member::Unread
+        }
+        TSType::TSAnyKeyword(_)
+        | TSType::TSBigIntKeyword(_)
+        | TSType::TSBooleanKeyword(_)
+        | TSType::TSIntrinsicKeyword(_)
+        | TSType::TSNeverKeyword(_)
+        | TSType::TSNullKeyword(_)
+        | TSType::TSNumberKeyword(_)
+        | TSType::TSObjectKeyword(_)
+        | TSType::TSStringKeyword(_)
+        | TSType::TSSymbolKeyword(_)
+        | TSType::TSUndefinedKeyword(_)
+        | TSType::TSUnknownKeyword(_)
+        | TSType::TSVoidKeyword(_)
+        | TSType::TSArrayType(_)
+        | TSType::TSConditionalType(_)
+        | TSType::TSConstructorType(_)
+        | TSType::TSFunctionType(_)
+        | TSType::TSImportType(_)
+        | TSType::TSIndexedAccessType(_)
+        | TSType::TSInferType(_)
+        | TSType::TSIntersectionType(_)
+        | TSType::TSLiteralType(_)
+        | TSType::TSMappedType(_)
+        | TSType::TSNamedTupleMember(_)
+        | TSType::TSTemplateLiteralType(_)
+        | TSType::TSThisType(_)
+        | TSType::TSTupleType(_)
+        | TSType::TSTypeOperatorType(_)
+        | TSType::TSTypePredicate(_)
+        | TSType::TSTypeQuery(_)
+        | TSType::TSTypeReference(_)
+        | TSType::TSUnionType(_)
+        | TSType::JSDocNullableType(_)
+        | TSType::JSDocNonNullableType(_)
+        | TSType::JSDocUnknownType(_) => Member::Unread,
+    }
+}
+
+/// What calling `expr`, a member read from a namespace asserted to `ty`, is.
+fn member_evidence<'a, 'b>(ty: &'b TSType<'a>, name: &str, expr: &Expression<'_>) -> Evidence<'b, 'a> {
+    match member(ty, name) {
+        Member::Property(ty) => asserted(ty, expr),
+        Member::Methods(literal) => results(literal.members.iter().filter_map(|signature| match signature {
+            TSSignature::TSMethodSignature(method)
+                if method.kind == TSMethodSignatureKind::Method && names_key(&method.key, name) =>
+            {
+                Some(method.return_type.as_ref().map(|annotation| &annotation.type_annotation))
+            }
+            TSSignature::TSMethodSignature(_)
+            | TSSignature::TSPropertySignature(_)
+            | TSSignature::TSIndexSignature(_)
+            | TSSignature::TSCallSignatureDeclaration(_)
+            | TSSignature::TSConstructSignatureDeclaration(_) => None,
+        })),
+        Member::Unread => Evidence::Unknown,
+    }
+}
+
+/// What asserting `ty` on `beneath` says about calling it. One exhaustive match: a new type kind in an OXC release
+/// has to be placed here before it compiles.
+fn asserted<'a, 'b>(ty: &'b TSType<'a>, beneath: &Expression<'_>) -> Evidence<'b, 'a> {
+    match ty {
+        TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_) => Evidence::Identity,
+        TSType::TSParenthesizedType(inner) => asserted(&inner.type_annotation, beneath),
+        TSType::TSTypeQuery(query) if query.type_arguments.is_none() && query_names(&query.expr_name, beneath) => {
+            Evidence::Identity
+        }
+        TSType::TSTypeReference(reference) => Evidence::Reference(reference),
+        TSType::TSFunctionType(function) => results(std::iter::once(Some(&function.return_type.type_annotation))),
+        TSType::TSTypeLiteral(literal) => results(literal.members.iter().filter_map(|signature| match signature {
+            TSSignature::TSCallSignatureDeclaration(call) => {
+                Some(call.return_type.as_ref().map(|annotation| &annotation.type_annotation))
+            }
+            TSSignature::TSPropertySignature(_)
+            | TSSignature::TSMethodSignature(_)
+            | TSSignature::TSIndexSignature(_)
+            | TSSignature::TSConstructSignatureDeclaration(_) => None,
+        })),
+        TSType::TSTypeQuery(_)
+        | TSType::TSBigIntKeyword(_)
+        | TSType::TSBooleanKeyword(_)
+        | TSType::TSIntrinsicKeyword(_)
+        | TSType::TSNeverKeyword(_)
+        | TSType::TSNullKeyword(_)
+        | TSType::TSNumberKeyword(_)
+        | TSType::TSObjectKeyword(_)
+        | TSType::TSStringKeyword(_)
+        | TSType::TSSymbolKeyword(_)
+        | TSType::TSUndefinedKeyword(_)
+        | TSType::TSVoidKeyword(_)
+        | TSType::TSArrayType(_)
+        | TSType::TSConditionalType(_)
+        | TSType::TSConstructorType(_)
+        | TSType::TSImportType(_)
+        | TSType::TSIndexedAccessType(_)
+        | TSType::TSInferType(_)
+        | TSType::TSIntersectionType(_)
+        | TSType::TSLiteralType(_)
+        | TSType::TSMappedType(_)
+        | TSType::TSNamedTupleMember(_)
+        | TSType::TSTemplateLiteralType(_)
+        | TSType::TSThisType(_)
+        | TSType::TSTupleType(_)
+        | TSType::TSTypeOperatorType(_)
+        | TSType::TSTypePredicate(_)
+        | TSType::TSUnionType(_)
+        | TSType::JSDocNullableType(_)
+        | TSType::JSDocNonNullableType(_)
+        | TSType::JSDocUnknownType(_) => Evidence::Unknown,
+    }
+}
+
+/// The evidence of a type's call signatures, given their declared results (`None` when one declares none): no
+/// component only when there is at least one and each result is [`Returns::NotRenderable`].
+fn results<'a, 'b>(signatures: impl Iterator<Item = Option<&'b TSType<'a>>>) -> Evidence<'b, 'a> {
+    let mut any = false;
+    for result in signatures {
+        any = true;
+        if !result.is_some_and(|result| matches!(result_of(result), Returns::NotRenderable)) {
+            return Evidence::Unknown;
+        }
+    }
+    if any { Evidence::NotRenderable } else { Evidence::Unknown }
+}
+
+/// What a call's declared result says about whether it renders or is a component.
+#[derive(Clone, Copy)]
+enum Returns {
+    /// No component or element has this type: a primitive or `object` keyword, `void`, `never`, a literal or template
+    /// literal, a type predicate, an object type with no call or construct signature, an array whose elements cannot
+    /// render (`unknown[]`, `string[]`).
+    NotRenderable,
+    /// `null` or `undefined`: what a component may return, and no evidence alone.
+    Empty,
+    /// Anything that may be a component or an element, or that the extractor does not read (a reference, `unknown`).
+    Maybe,
+}
+
+fn result_of(ty: &TSType<'_>) -> Returns {
+    match ty {
+        TSType::TSBigIntKeyword(_)
+        | TSType::TSBooleanKeyword(_)
+        | TSType::TSNeverKeyword(_)
+        | TSType::TSNumberKeyword(_)
+        | TSType::TSObjectKeyword(_)
+        | TSType::TSStringKeyword(_)
+        | TSType::TSSymbolKeyword(_)
+        | TSType::TSVoidKeyword(_)
+        | TSType::TSLiteralType(_)
+        | TSType::TSTemplateLiteralType(_)
+        | TSType::TSTypePredicate(_) => Returns::NotRenderable,
+        TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_) => Returns::Empty,
+        TSType::TSParenthesizedType(inner) => result_of(&inner.type_annotation),
+        TSType::TSTypeLiteral(literal) => {
+            let callable = literal.members.iter().any(|signature| match signature {
+                TSSignature::TSCallSignatureDeclaration(_) | TSSignature::TSConstructSignatureDeclaration(_) => true,
+                TSSignature::TSPropertySignature(_)
+                | TSSignature::TSMethodSignature(_)
+                | TSSignature::TSIndexSignature(_) => false,
+            });
+            if callable { Returns::Maybe } else { Returns::NotRenderable }
+        }
+        // `ReactNode[]` renders; `unknown[]` does not, as TypeScript does not take `unknown` for a node.
+        TSType::TSArrayType(array) => match (&array.element_type, result_of(&array.element_type)) {
+            (TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_), _) => Returns::NotRenderable,
+            (_, Returns::Maybe) => Returns::Maybe,
+            (_, Returns::NotRenderable | Returns::Empty) => Returns::NotRenderable,
+        },
+        TSType::TSUnionType(union) => {
+            let mut result = Returns::Empty;
+            for member in &union.types {
+                result = match (result, result_of(member)) {
+                    (Returns::Maybe, _) | (_, Returns::Maybe) => return Returns::Maybe,
+                    (Returns::NotRenderable, _) | (_, Returns::NotRenderable) => Returns::NotRenderable,
+                    (Returns::Empty, Returns::Empty) => Returns::Empty,
+                };
+            }
+            result
+        }
+        TSType::TSAnyKeyword(_)
+        | TSType::TSUnknownKeyword(_)
+        | TSType::TSIntrinsicKeyword(_)
+        | TSType::TSThisType(_)
+        | TSType::TSConditionalType(_)
+        | TSType::TSConstructorType(_)
+        | TSType::TSFunctionType(_)
+        | TSType::TSImportType(_)
+        | TSType::TSIndexedAccessType(_)
+        | TSType::TSInferType(_)
+        | TSType::TSIntersectionType(_)
+        | TSType::TSMappedType(_)
+        | TSType::TSNamedTupleMember(_)
+        | TSType::TSTupleType(_)
+        | TSType::TSTypeOperatorType(_)
+        | TSType::TSTypeQuery(_)
+        | TSType::TSTypeReference(_)
+        | TSType::JSDocNullableType(_)
+        | TSType::JSDocNonNullableType(_)
+        | TSType::JSDocUnknownType(_) => Returns::Maybe,
+    }
+}
+
+/// Whether `typeof name` is the type of `expr`: the same identifier or the same chain of static members, read through
+/// the namespaces' wrappers (the outermost assertion states the type whatever the namespace was asserted to).
 fn query_names(name: &TSTypeQueryExprName<'_>, expr: &Expression<'_>) -> bool {
     match name {
         TSTypeQueryExprName::IdentifierReference(id) => matches!(expr, Expression::Identifier(e) if e.name == id.name),
@@ -188,41 +459,81 @@ fn type_name_names(left: &TSTypeName<'_>, right: &IdentifierName<'_>, expr: &Exp
     if member.property.name != right.name {
         return false;
     }
-    let object = peel(&member.object);
-    object.keeps_identity()
-        && match left {
-            TSTypeName::IdentifierReference(id) => {
-                matches!(object.expr, Expression::Identifier(e) if e.name == id.name)
-            }
-            TSTypeName::QualifiedName(qualified) => type_name_names(&qualified.left, &qualified.right, object.expr),
-            TSTypeName::ThisExpression(_) => matches!(object.expr, Expression::ThisExpression(_)),
-        }
+    let object = peel_expr(&member.object);
+    match left {
+        TSTypeName::IdentifierReference(id) => matches!(object, Expression::Identifier(e) if e.name == id.name),
+        TSTypeName::QualifiedName(qualified) => type_name_names(&qualified.left, &qualified.right, object),
+        TSTypeName::ThisExpression(_) => matches!(object, Expression::ThisExpression(_)),
+    }
 }
 
-/// See [`Peeled`]. For what a callee or an `extends` target is: OXC 0.159 keeps `(f<T>)(x)` and `extends (B<T>)` as an
-/// instantiation node beneath the call or heritage clause, where 0.158 moved its type arguments onto them.
-pub(super) fn peel<'a, 'b>(mut expr: &'b Expression<'a>) -> Peeled<'b, 'a> {
-    let mut type_arguments = None;
-    let mut asserted = false;
-    let mut identity = Identity::Kept;
-    loop {
-        expr = match wrapper(expr) {
-            Some(Wrapper::Transparent(inner)) => inner,
-            Some(Wrapper::Asserted(inner, ty)) => {
-                asserted = true;
-                if matches!(identity, Identity::Kept) && !assertion_keeps_identity(ty, inner) {
-                    identity = Identity::Replaced(ty);
-                }
-                inner
+/// Whether a dotted chain (`createButton`, `React.forwardRef`) names `expr`, read through the namespaces' wrappers.
+fn chain_names(chain: &str, expr: &Expression<'_>) -> bool {
+    match (chain.rsplit_once('.'), expr) {
+        (None, Expression::Identifier(id)) => id.name == chain,
+        (Some((left, right)), Expression::StaticMemberExpression(member)) => {
+            member.property.name == right && chain_names(left, peel_expr(&member.object))
+        }
+        (None | Some(_), _) => false,
+    }
+}
+
+/// The module-level aliases of a value's type, `type Factory = typeof createButton`, as alias name to the dotted chain
+/// it queries. A name declared twice is left out: which one a use means is not read here.
+pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, CompactString> {
+    fn chain(name: &TSTypeName<'_>) -> Option<String> {
+        match name {
+            TSTypeName::IdentifierReference(id) => Some(id.name.as_str().to_owned()),
+            TSTypeName::QualifiedName(qualified) => {
+                Some(format!("{}.{}", chain(&qualified.left)?, qualified.right.name))
             }
-            Some(Wrapper::Instantiation(instantiation)) => {
-                if !asserted && type_arguments.is_none() {
-                    type_arguments = Some(&*instantiation.type_arguments);
-                }
-                &instantiation.expression
-            }
-            None => return Peeled { expr, type_arguments, identity },
+            TSTypeName::ThisExpression(_) => None,
+        }
+    }
+    let mut aliases: FxHashMap<CompactString, Option<CompactString>> = FxHashMap::default();
+    for statement in &program.body {
+        let declaration = match statement {
+            Statement::ExportDeclaration(export) => Some(&export.declaration),
+            _ => statement.as_declaration(),
         };
+        let Some(Declaration::TSTypeAliasDeclaration(declaration)) = declaration else { continue };
+        let mut ty = &declaration.type_annotation;
+        while let TSType::TSParenthesizedType(inner) = ty {
+            ty = &inner.type_annotation;
+        }
+        let queried = match ty {
+            TSType::TSTypeQuery(query) if declaration.type_parameters.is_none() && query.type_arguments.is_none() => {
+                match &query.expr_name {
+                    TSTypeQueryExprName::IdentifierReference(id) => Some(id.name.as_str().to_owned()),
+                    TSTypeQueryExprName::QualifiedName(qualified) => {
+                        chain(&qualified.left).map(|left| format!("{left}.{}", qualified.right.name))
+                    }
+                    TSTypeQueryExprName::ThisExpression(_) | TSTypeQueryExprName::TSImportType(_) => None,
+                }
+            }
+            _ => None,
+        };
+        aliases
+            .entry(CompactString::from(declaration.id.name.as_str()))
+            .and_modify(|seen| *seen = None)
+            .or_insert_with(|| queried.map(CompactString::from));
+    }
+    aliases.into_iter().filter_map(|(name, chain)| Some((name, chain?))).collect()
+}
+
+/// Counts the wrapper layers `peel` reads, so a test can show that a chain of assertions is read in one pass.
+#[cfg(test)]
+pub(super) mod steps {
+    use std::cell::Cell;
+
+    thread_local!(static STEPS: Cell<u64> = const { Cell::new(0) });
+
+    pub(in crate::extractor) fn count() {
+        STEPS.with(|steps| steps.set(steps.get() + 1));
+    }
+
+    pub(in crate::extractor) fn take() -> u64 {
+        STEPS.with(|steps| steps.replace(0))
     }
 }
 
@@ -235,7 +546,7 @@ pub(super) fn named<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b Expression<'
 /// What a call invokes, when its name still describes the call: `(forwardRef as F)(…)` and `(forwardRef<R, P>)(…)`
 /// call `forwardRef`; `(Object as (v: object) => object)(…)` calls nothing by a name. See [`Peeled::named`].
 pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
-    named(&call.callee)
+    peel(&call.callee).named()
 }
 
 /// The type arguments a call is made with: its own, or those of the instantiation it calls (`(forwardRef<R, P>)(…)`).
@@ -366,6 +677,23 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Try to detect: `const Button: FC<ButtonProps> = ({ variant = 'primary' }) => ...`
+    /// Whether the callee's declaration describes the call, so `resolver::callee` may read it: the evidence is the
+    /// identity, or a reference to a module-level `type F = typeof <the callee>`. Any other assertion may hide what the
+    /// declaration says (`(wrap as <T>(r: FC<T>) => FC<T>)<P>(…)` drops the props `wrap`'s result adds).
+    pub(super) fn describes_call(&self, peeled: &Peeled<'_, '_>) -> bool {
+        match peeled.evidence {
+            Evidence::Identity => true,
+            Evidence::Reference(reference) => {
+                let chain = match &reference.type_name {
+                    TSTypeName::IdentifierReference(alias) => self.typeof_aliases.get(alias.name.as_str()),
+                    TSTypeName::QualifiedName(_) | TSTypeName::ThisExpression(_) => None,
+                };
+                reference.type_arguments.is_none() && chain.is_some_and(|chain| chain_names(chain, peeled.expr))
+            }
+            Evidence::NotRenderable | Evidence::Unknown => false,
+        }
+    }
+
     pub(super) fn try_fc_annotation<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let type_ann = decl.annotation?;
         let init_params = match decl.init.map(peel_expr) {

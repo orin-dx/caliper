@@ -401,7 +401,7 @@ mod tests {
 
     /// A generic wrapper asserted to another signature does not carry its original declaration, whose result would add
     /// `internal`: the props are the render function's. Unasserted, or asserted to `typeof` itself, the declaration is
-    /// read. The extractor decides which (`Peeled::keeps_identity`); this is where its result is resolved.
+    /// read. The extractor decides which (`SourceDataCollector::describes_call`); this is where its result is resolved.
     #[test]
     fn an_asserted_wrapper_callee_does_not_resolve_through_its_original_declaration() {
         let props_of = |call: &str| {
