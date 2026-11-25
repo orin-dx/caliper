@@ -2025,7 +2025,10 @@ impl Converter {
                             .get_or_insert_with(|| {
                                 #[cfg(test)]
                                 self.rpc.note("readonly merge data", 1);
-                                vec![None; index]
+                                // Room for every property now, so the push after an unresolved prefix does not grow it.
+                                let mut merge = Vec::with_capacity(properties.len());
+                                merge.resize(index, None);
+                                merge
                             })
                             .push(Some(value)),
                         None => settled.iter_mut().for_each(|settled| settled.push(None)),
