@@ -1,0 +1,103 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M8ADQMWJZNZC383EF7MDCBPP",
+  "session_id": "01a1fb38-9ae7-76c3-a88f-217d0c63f26e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-25T22:38:14.066334Z",
+  "branch": "fix-entire-hook",
+  "checkpoints_count": 6,
+  "save_step_count": 1,
+  "files_touched": [
+    "docs/research/tsrs-checker-session/deep-dive.md",
+    "docs/research/tsrs-checker-session/deep-evidence/README.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-6.1-sol",
+  "turn_id": "8872c71650f1",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 611966,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 35494912,
+    "output_tokens": 184492,
+    "api_call_count": 154
+  },
+  "session_token_usage": {
+    "input_tokens": 611966,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 35494912,
+    "output_tokens": 184492,
+    "api_call_count": 154
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Investigate cold-start performance of the checker (tsrs crates, pinned 0.24.0) as used by the caliper repo, starting with the getSemanticDiagnostics probe call, and report findings and recommendations without pushing, opening PRs, or contacting upstream.",
+    "outcome": "Benchmarked shadcn, Chakra and Mantine, found Caliper sends `file` where tsrs expects `files` (diagnostics checked the whole program), kept that fix uncommitted on a local branch with a regression test, and saved a report, evidence and an unsent upstream issue draft. The user then questioned whether Caliper changes were in scope, since they had asked for an investigation of tsrs.",
+    "learnings": {
+      "repo": [
+        "Caliper calls tsrs in-process via tsrs_api::Session, with JSON text requests and answers; tsrs is pinned to =0.24.0.",
+        "The semantic diagnostics probe request sent `file`, but tsrs 0.24.0's handler reads `files: [...]`, so diagnostics covered the whole program.",
+        "The converter memoizes printed types and type parts, and the structural resolver caches by (directory, specifier), yet many repeated checker requests still get through.",
+        "Chakra issued 745,088 isReadonlySymbol subrequests, 535,076 of them repeats within a snapshot.",
+        "Same-snapshot identical requests can return different raw responses because tsrs lazily mutates objectFlags bits 19, 21 and 27; Caliper masks these bits, so memoization is safe for consumed fields only.",
+        "Early checker sessions are discarded over small root mismatches (Chakra predicts 116 roots, uses 113; Mantine 324 vs 323); reconfiguring the existing session saved about 7.5% CPU.",
+        "Readonly queries cannot be replaced by SymbolInfo.flags alone, as readonly depends on modifiers, accessors, mapped-type flags and assignment declarations.",
+        "A field mask on getPropertiesOfType would trim only about 23% of shadcn's payload and 8% of Chakra's.",
+        "The pre-push gate is `just lint doc-check machete typos` plus cargo nextest; pnpm rejects a symlinked node_modules, so each worktree needs its own `pnpm install`."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/rpc.rs",
+          "finding": "semantic_diagnostics sent `file` to getSemanticDiagnostics instead of `files: [probe]`. Fixing it cut shadcn's call from ~803 ms to ~2.35 ms with identical output."
+        },
+        {
+          "path": "crates/semantic/src/instantiate.rs",
+          "line": 182,
+          "finding": "Generic-instantiation probe file whose diagnostics call accounted for ~45% of handler time on shadcn."
+        }
+      ],
+      "workflow": [
+        "Use CPU time and interleaved, shuffled runs on a loaded machine, and exclude degraded runs (e.g. bogus multi-trillion-MiB heap readings).",
+        "Cumulative savings from separate optimizations overlap, so benchmark combinations instead of summing estimates.",
+        "A regression test should be shown to fail on main before the fix is accepted.",
+        "Scratch files and experiment patches go in $TMPDIR, with evidence copied into the repo's docs/research directory; delete multi-GB target/ directories when finished.",
+        "The handoff file lives in /tmp, which does not survive a restart, so copy it somewhere durable."
+      ]
+    },
+    "friction": [
+      "Entire Brain lookup failed on a sandbox lock-file permission, forcing direct source inspection.",
+      "pnpm rejected the shared node_modules symlink, so the quality gate failed until dependencies were installed in the worktree.",
+      "Some Chakra runs were degraded (implausible heap values) and had to be excluded and rerun.",
+      "The startup trace did not reproduce the briefing's claimed fixed ~250 ms gap.",
+      "The user thought the task was an investigation of tsrs only, and was surprised by Caliper code changes. The assistant read the handoff's 'small, safe, measured win' exception as authorization but did not make the distinction clear.",
+      "The user had to ask repeatedly what the assistant was doing before getting a clear status."
+    ],
+    "open_items": [
+      "The diagnostics fix on `perf/probe-file-diagnostics` is uncommitted and awaits the user's decision.",
+      "The concurrent-conversion scheduling prototype (27.4% CPU saved on Chakra) and the request memoization from worker commit 39edef5c have not been through the production gate.",
+      "Session-reuse after root reconfiguration needs lifecycle hardening before it ships.",
+      "Bound the property-response cache: an unbounded one added ~230 MiB RSS.",
+      "Direct dispatch across the JSON boundary is unmeasured; re-measure after reducing unnecessary work, as the earlier ~450 ms estimate may not be additive.",
+      "Investigate tsrs's lazy objectFlags mutation within a snapshot.",
+      "The upstream issue draft is saved but unsent, pending approval.",
+      "The four-thread setting saves CPU but slowed shadcn wall time, so it is not supported as a universal default.",
+      "Items 4-7 of the briefing's priority list were not clearly covered in the visible transcript."
+    ]
+  }
+}

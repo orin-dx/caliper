@@ -1,0 +1,93 @@
+Briefing for the tsrs/checker session: how we use it, measurements, what to dig into, how to measure, rules.
+
+  › [file] /tmp/claude-501/handoff-tsrs-checker.md (9.2KB)
+Allowed by auto mode classifier
+
+I've sent you handoff-tsrs-checker.md. It covers how we use tsrs, the cold-run and request measurements, seven items to investigate in priority order, how to measure, and the rules. Below is the prompt to paste with it.
+
+You're picking up a performance investigation on the caliper repo (Rust workspace; start in a fresh worktree off origin/main). Read the attached briefing handoff-tsrs-checker.md first; it has the architecture, measurements and the ordered list of things to dig into. Also read AGENTS.md, CONTRIBUTING.md (the pre-push bar), docs/type-checker-integration.md and docs/adr/0026-the-checker-is-the-type-authority.md.
+
+Goal: cut the cold-start cost of a default run (checker on, --load-dependencies) without changing the output. The checker is the `tsrs` crates (upstream: oxc-project/tsrs, pinned =0.24.0), called in process through tsrs_api::Session, whose requests and answers are JSON text. Start with item 1 of the briefing: the single getSemanticDiagnostics call on the generic-instantiation probe file (instantiate.rs:182), about 800 ms and 45% of handler time on shadcn. Measure how much of it is avoidable before changing anything. Then items 2 and 3 (getPropertiesOfType payload; request count per component, memoized by type id), then 4 to 7.
+
+Constraints: report findings and recommendations; do not push, open PRs, send anything to tsrs upstream, or merge. Only if an item is a small, safe, measured win, do it on its own branch with the evidence, the tests that fail on main, and the gate from CONTRIBUTING.md. Corpora are already cloned in ~/.cache/caliper/corpora/repos. Use CPU time and interleaved runs because the machine is loaded; do not run the weekly oracle. Keep build output in the worktree's target/ and delete multi-GB build directories when done; scratch in $TMPDIR.
+
+Deliverable: a report under 700 words plus a table, listing for each item what you measured, the saving expected or ruled out, effort, risk, and a recommended order, with a separate draft of the upstream issue text.
+
+State of the other workers: the request-profile worker (counts by method and call site) and the lazy-HTML-attributes worker are still running. I'll report their results when they finish, and the new session can use the request-profile table for items 3 and 4.
+
+The file is in /tmp/claude-501, which doesn't survive a restart, so copy it somewhere you keep before then.
+
+---
+
+for context from caliper work:
+
+The request profile is in and it found two cheap wins that don't depend on tsrs at all. I've sent you the updated briefing; the prompt I gave you earlier still applies, but tell the new session to start with the two new items (0 and 0b) before item 1.
+
+What it found (machine at load 22–30, so times are secondary; counts are exact):
+
+1. Chakra's isReadonlySymbol: 743,000 sub-requests of its 777k batched.
+   - Converter::fields asks readonly-ness for every property of every object type it converts. Chakra's batch requests take 3.6 s of a 5–7 s run and return 261 MB.
+   - This is the biggest single item on the heaviest corpus. The question is whether the property flags already in an answer carry it, so the calls can go. If they don't, they can be asked only for properties that are shown.
+2. Identical repeats are everywhere.
+   - On Chakra, roughly 28,000 of 58,900 requests repeat a method with the same arguments (getBaseTypes, getAliasTypeArgumentsOfType, typeToString, getTypeArguments, getTypesOfSymbols). On shadcn, getBaseTypes repeats 1,718 of 2,433 times.
+   - The converter's type-id memo doesn't catch these. A per-run memo keyed by method and arguments is the cheapest change, and it needs nothing from upstream. I don't know yet whether the repeats come from different components (a shared cache wins) or one function missing a memo.
+3. Batching gaps: per-item loops in parts, printed and type_arguments_of send the same method back to back, and 1,171 of shadcn's batches have only one or two requests.
+4. Payload: getPropertiesOfType returns 113 KB per call and 193 MB per run on shadcn, with 684 of its 1,708 calls repeating.
+
+Where things stand
+- The tsrs spike and request profile are both done. The lazy-HTML-attributes worker is still running; I'll report when it finishes.
+- My recommendation has shifted: do items 0, 0b, then the diagnostics call (item 1 in the briefing), before any upstream request or the checker rewrite. They are local, measurable and low-risk.
+- The file lives in /tmp/claude-501, which doesn't survive a restart, so copy it somewhere you keep.
+
+✻ Waiting for 1 background agent to finish
+
+❯ I have other sessions investigating improvements to tsrs. I want to focus on caliper and how we leverage what we have. Can we avoid the JSON boundary?
+
+Focusing on what we can change without tsrs. The spike said dispatch::handle is public and takes and returns JSON values, not text. That might let us skip the text on both sides while keeping the real handlers. Checking how Session calls it and whether we can get at it.
+
+  Read 2 files, ran 2 shell commands
+
+tsrs_api::checker::dispatch::handle is public but needs a CheckerHost, and Session keeps its own private SessionHost. I'm checking how large that trait is to see whether we can supply one. · summary
+
+  Ran 1 shell command
+
+Level 2 can drop the JSON round-trip by calling tsrs_api::checker::dispatch::handle directly through our own CheckerHost, which would save up to about 450 ms on shadcn, while parsing each answer once removes roughly 310 ms of our own cost. I'm launching a Level 2 prototype and a request reduction in parallel, since they touch different files. · summary
+
+⏺ 2 background agents launched (↓ to manage)
+Prototype: call tsrs dispatch without JSON text
+Fewer checker requests: memo and readonly
+
+Two more workers are running: a prototype of Level 2 (skipping the JSON text through a CheckerHost of our own) and the request reduction. Three workers are now active; the cap is three. When they report, I'll check each one's claims against the code before presenting them, and compare the results.
+
+Where the avoid-JSON question stands:
+- Level 2 (prototype running): feasible on paper through the public dispatch::handle, with the real handlers kept. The worker will report which CheckerHost methods we can implement from public API and what the numbers are on shadcn and Chakra.
+- Level 1 (not started): parse each answer once instead of twice (about 310 ms of our own half on shadcn). It touches the same rpc.rs the prototype is in, so I'm holding it until the prototype reports.
+- Fewer crossings (running): the isReadonlySymbol and repeated-request reductions, which help every level.
+
+---
+
+Give me a rundown
+
+---
+
+Feels like we can do a lot deeper here
+
+---
+
+Are you making changes to caliper?
+
+---
+
+What are you doing now???
+
+---
+
+I asked you check and investigate tsrs, not caliper right?
+
+---
+
+What did you do?
+
+---
+
+What do I hand off to claude? What did you find?
