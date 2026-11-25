@@ -35,7 +35,7 @@ pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Sco
     match callee {
         Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), None, scope),
         Expression::StaticMemberExpression(m) => {
-            let receiver = match super::component::named(&m.object) {
+            let receiver = match super::component::peel(&m.object).renderable() {
                 Some(Expression::Identifier(object)) => Some(object.name.as_str()),
                 _ => Some(""),
             };
@@ -139,7 +139,8 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        let callee = super::component::callee_of(it);
+        // The call's result is part of the value, so only a result React cannot render declines it.
+        let callee = super::component::rendered_callee(it);
         let name = callee.and_then(callee_name);
         let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
         if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, self.scope)) {
@@ -148,7 +149,7 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
             || matches!(callee, Some(Expression::StaticMemberExpression(member))
                 if matches!(
-                    super::component::named(&member.object),
+                    super::component::peel(&member.object).renderable(),
                     Some(Expression::Identifier(id)) if id.name == "Promise"
                 ) && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
@@ -174,9 +175,10 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         // Rendering nothing is a valid render.
         Expression::NullLiteral(_) => true,
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
-        // A component invoked directly: `return JoinList({ ... })`.
+        // A component invoked directly: `return JoinList({ ... })`. Its result is this function's, which may be a
+        // string or a number, so only a cast to a result React cannot render declines it.
         Expression::CallExpression(call)
-            if super::component::callee_of(call).and_then(callee_name).is_some_and(super::is_pascal_case) =>
+            if super::component::rendered_callee(call).and_then(callee_name).is_some_and(super::is_pascal_case) =>
         {
             true
         }
@@ -223,7 +225,8 @@ impl<'a> Visit<'a> for OwnBody<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if self.nested == 0 && super::component::callee_of(it).and_then(callee_name).is_some_and(is_hook_name) {
+        // Calling a hook is the evidence, whatever an assertion says the hook returns.
+        if self.nested == 0 && callee_name(super::component::peel(&it.callee).expr).is_some_and(is_hook_name) {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);

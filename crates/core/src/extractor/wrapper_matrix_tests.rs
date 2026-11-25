@@ -493,12 +493,24 @@ fn an_object_assign_through_an_identity_cast_attaches_its_inline_members() {
 
 /// A PascalCase callee is rendering evidence only while its name describes the call: an assertion stating a result
 /// that is no named type takes it away; a named or React result, `typeof` itself and `any` leave it.
+/// A component invoked directly and returned gives this function's result, and a component may return a string, a
+/// number, a boolean or `null`: only a cast to a result React cannot render is evidence that it does not render.
 #[test]
 fn an_asserted_callee_renders_only_when_the_assertion_leaves_a_named_result() {
     let rows = [
         ("(Object as (value: object) => object)", false),
-        ("(Object as unknown as (value: object) => string)", false),
         ("(Object as { (value: object): object })", false),
+        ("(Object as (value: object) => symbol)", false),
+        ("(Object as (value: object) => { id: string })", false),
+        ("(Object as (value: object) => unknown[])", false),
+        ("(Object as (value: object) => object | null)", false),
+        ("(Object as unknown as (value: object) => string)", true),
+        ("(Object as (value: object) => number)", true),
+        ("(Object as (value: object) => boolean)", true),
+        ("(Object as (value: object) => string | null)", true),
+        ("(Object as (value: object) => null)", true),
+        ("(Object as (value: object) => string | object)", true),
+        ("(Object as (value: object) => string[])", true),
         ("(Object as (value: object) => React.ReactElement)", true),
         ("(Object as (value: object) => React.ReactElement | null)", true),
         ("(Object as F)", true),
@@ -665,6 +677,126 @@ fn a_callable_type_literal_is_read_for_its_call_signatures() {
     }
 }
 
+/// Review round 5, finding 3: calling a hook is the evidence, whatever an assertion says the hook returns.
+#[test]
+fn a_hook_called_through_an_assertion_is_still_a_hook_call() {
+    let names = |hook: &str| {
+        let source = format!(
+            "declare function useThing(): object;\n\
+             export const Panel = (props: Props) => {{ {hook}(); return props.label; }};"
+        );
+        tsx(&source).iter().map(|m| m["component_name"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
+    };
+    assert_eq!(names("useThing"), ["Panel"]);
+    assert_eq!(names("(useThing as () => object)"), ["Panel"]);
+    assert_eq!(names("(useThing as () => string)"), ["Panel"]);
+    assert_eq!(names("(notAHook as () => object)"), Vec::<String>::new());
+}
+
+/// Finding 2: an initializer, a wrapper's argument and `Object.assign`'s first argument are read through an
+/// instantiation beneath any other wrapper, as through the others: `memo(List<Row>)` is `List` memoized. The type
+/// arguments are not applied to the props, which stay `List`'s own.
+#[test]
+fn an_instantiated_value_is_read_through_at_every_initializer_and_argument_site() {
+    let prelude = "interface ListProps<T> { items?: T[] }\n\
+                   interface ItemProps { size?: string }\n\
+                   declare function withTheme<C>(c: C): C;\n\
+                   function List<T>(props: ListProps<T>) { return <div />; }\n";
+    let sites: [(&str, &[&str]); 4] = [
+        ("export const Alias = {V};", &["Alias"]),
+        ("export const Memo = memo({V});", &["Memo"]),
+        ("export const Themed = withTheme({V});", &["Themed"]),
+        ("export const Root = Object.assign({V}, { Item: (props: ItemProps) => <div /> });", &["Item", "Root"]),
+    ];
+    let sorted = |mappings: &[serde_json::Value]| {
+        let mut names: Vec<String> =
+            mappings.iter().map(|m| m["component_name"].as_str().unwrap().to_owned()).collect();
+        names.sort();
+        names
+    };
+    let mut failures = Vec::new();
+    for (site, expected) in sites {
+        let plain = tsx(&format!("{prelude}{}", site.replace("{V}", "List")));
+        if sorted(&plain) != expected {
+            failures.push(format!("{site} plain: {:?}", sorted(&plain)));
+        }
+        for value in [
+            "List<string>",
+            "(List<string>)",
+            "(List<string>) as any",
+            "(List<string>)!",
+            "(List<string>) satisfies unknown",
+            "((List as any)<string>)!",
+        ] {
+            let actual = tsx(&format!("{prelude}{}", site.replace("{V}", value)));
+            if actual != plain {
+                failures.push(format!("{site} with {value}: {:?}", sorted(&actual)));
+            }
+        }
+    }
+    // An initializer's function under an instantiation keeps its parameter defaults.
+    let annotated = |arrow: &str| tsx(&format!("export const Button: React.FC<Props> = {arrow};"));
+    let plain = annotated("<T,>({ label = 'x' }) => <div />");
+    assert_eq!(plain[0]["param_defaults"]["label"]["value"], "'x'", "{plain:#?}");
+    for arrow in
+        ["((<T,>({ label = 'x' }) => <div />)<string>)!", "((<T,>({ label = 'x' }) => <div />)<string>) as any"]
+    {
+        if annotated(arrow) != plain {
+            failures.push(format!("React.FC annotation with {arrow}: {:#?}", annotated(arrow)));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Finding 4: an alias is the callee's own type only when its name means nothing else in the file's type space.
+#[test]
+fn a_typeof_alias_counts_only_when_its_name_is_declared_once() {
+    let factory = "function createButton(): React.FC<Props> { return (props) => <div />; }\n\
+                   type Factory = typeof createButton;\n";
+    let plain = tsx(&format!("{factory}export const Button = createButton();"));
+    assert_eq!(plain.len(), 1, "{plain:#?}");
+    let asserted = |other: &str| tsx(&format!("{factory}{other}\nexport const Button = (createButton as Factory)();"));
+    // A value of the same name declares no type.
+    assert_eq!(asserted("const Factory = 1;"), plain);
+    for other in [
+        "import type { Factory } from './factory';",
+        "import { Factory as Factory } from './factory';",
+        "namespace N { export type Factory = () => string; }",
+        "declare module 'm' { type Factory = () => string; }",
+        "interface Factory { (): string }",
+        "function g<Factory>(f: Factory) { return f; }",
+        "type Mapped = { [Factory in 'a']: Factory };",
+    ] {
+        assert_eq!(asserted(other), Vec::<serde_json::Value>::new(), "{other}");
+    }
+}
+
+/// Finding 5: a type literal's member has every type declared for its name, so it declines only when each one does.
+#[test]
+fn a_namespace_member_declared_several_times_declines_only_when_every_declaration_does() {
+    let render = "<HTMLButtonElement, Props>((props, ref) => <div />);";
+    let plain = tsx(&format!("export const Button = React.forwardRef{render}"));
+    assert_eq!(plain.len(), 1, "{plain:#?}");
+    let with = |literal: &str| tsx(&format!("export const Button = (React as {literal}).forwardRef{render}"));
+    for literal in [
+        "{ forwardRef(...a: any[]): string; forwardRef(...a: any[]): React.FC<Props> }",
+        "{ forwardRef: (...a: any[]) => string; forwardRef(...a: any[]): React.FC<Props> }",
+        "{ forwardRef(...a: any[]): string; forwardRef: typeof React.forwardRef }",
+        "{ forwardRef: (...a: any[]) => object; forwardRef: any }",
+        "{ get forwardRef(): typeof React.forwardRef }",
+        "{ forwardRef(...a: any[]): object; set forwardRef(v: (...a: any[]) => object) }",
+    ] {
+        assert_eq!(with(literal), plain, "{literal}");
+    }
+    for literal in [
+        "{ forwardRef: (...a: any[]) => string; forwardRef(...a: any[]): object }",
+        "{ forwardRef(...a: any[]): object; forwardRef: (...a: any[]) => string }",
+        "{ get forwardRef(): (...a: any[]) => object }",
+    ] {
+        assert_eq!(with(literal), Vec::<serde_json::Value>::new(), "{literal}");
+    }
+}
+
 // BEGIN DIFFERENTIAL CASES. Copied verbatim into a scratch test on origin/main (oxc 0.158, which read every assertion
 // as transparent) to print `BASE_DETECTIONS`; keep the two in step.
 
@@ -793,18 +925,16 @@ fn differential_detections(source: &str) -> String {
 // END DIFFERENTIAL CASES.
 
 /// What the outermost assertion of a row is, as `component::Evidence` reads it: the rows whose expectation differs
-/// from the base. `NotRenderable` declines the form's candidate; `Unknown` keeps it but withholds the callee's
-/// declaration, which a factory needs for any props.
+/// from the base. `NotRenderable` declines the form's candidate; `NoComponent` declines it unless the call's result is
+/// rendered rather than expected to be a component; `Unknown` keeps it but withholds the callee's declaration, which a
+/// factory needs for any props.
 fn differential_class(assertion: &str) -> &'static str {
     match assertion {
+        "function, string" | "function, string | null" | "function, void" | "function, literal" => "NoComponent",
         "callable literal, object"
-        | "function, string"
-        | "function, string | null"
         | "function, object"
         | "function, object literal"
-        | "function, void"
         | "function, unknown[]"
-        | "function, literal"
         | "unknown, then function object"
         | "namespace member function object"
         | "namespace method object" => "NotRenderable",
@@ -848,8 +978,12 @@ fn every_form_the_base_detected_is_still_detected_unless_the_assertion_says_it_i
         };
         let actual = differential_detections(source);
         let found: Vec<&str> = actual.split(' ').collect();
+        // A call whose result is rendered (returned, or an element factory) may give a string or a number: only a
+        // result React cannot render declines it.
+        let rendered = matches!(form, "PascalCase call returned" | "element factory");
         let declined = match differential_class(assertion) {
             "NotRenderable" => !subject.is_empty(),
+            "NoComponent" => !subject.is_empty() && !rendered,
             "Unknown" => form == "factory",
             _ => false,
         };

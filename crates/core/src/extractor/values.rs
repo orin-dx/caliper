@@ -8,24 +8,19 @@ use oxc_ast::ast::*;
 
 use crate::types::{CollectedObjectField, CollectedType, CollectedTypeAlias};
 
+use super::component::peel_expr;
 use super::{SourceDataCollector, js_text};
 
 /// Objects with more keys than this are not a lookup table a prop's type is likely to name.
 const MAX_KEYS: usize = 128;
 
-/// The expression under `as const`, `satisfies T`, `!` and parentheses: none of them changes which literal it is. The
-/// one list of what a wrapper is lives in `component::wrapper`.
-fn peel<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    super::component::peel_expr(expr)
-}
-
 /// The literal type a literal expression has, as a `const` declares it.
 fn literal(expr: &Expression<'_>) -> Option<CollectedType> {
-    match peel(expr) {
+    match peel_expr(expr) {
         Expression::StringLiteral(s) => Some(CollectedType::StringLiteral(js_text::lossy(s.value).into_owned().into())),
         Expression::NumericLiteral(n) => Some(CollectedType::NumberLiteral(n.value)),
         Expression::BooleanLiteral(b) => Some(CollectedType::BoolLiteral(b.value)),
-        Expression::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => match peel(&u.argument) {
+        Expression::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => match peel_expr(&u.argument) {
             Expression::NumericLiteral(n) => Some(CollectedType::NumberLiteral(-n.value)),
             _ => None,
         },
@@ -74,7 +69,7 @@ impl SourceDataCollector<'_> {
         else {
             return;
         };
-        let target = match (literal(init), peel(init)) {
+        let target = match (literal(init), peel_expr(init)) {
             (Some(literal), _) => literal,
             (None, Expression::ObjectExpression(object)) => match static_fields(object) {
                 Some(fields) => CollectedType::Object(fields),

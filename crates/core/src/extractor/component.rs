@@ -73,14 +73,17 @@ fn wrapper<'a, 'b>(expr: &'b Expression<'a>) -> Option<Wrapper<'b, 'a>> {
     }
 }
 
-/// A value beneath its wrappers: component libraries cast a forwardRef or HOC call to a hand-rolled component type
-/// (Fluent UI: "required due to lack of distributive union to support unions on @types/react"), or check it with
-/// `satisfies`. An instantiation is kept: `const X = Base<P>` is not `Base`, and reading it as `Base` drops `P`.
+/// A value beneath its wrappers, for an initializer, an argument or an object's member: component libraries cast a
+/// forwardRef or HOC call to a hand-rolled component type (Fluent UI: "required due to lack of distributive union to
+/// support unions on @types/react"), check it with `satisfies`, or instantiate a generic component (`memo(List<Row>)`,
+/// `(List<Row>)!`). The value is the same function or component beneath an instantiation, so every wrapper is read
+/// through; only a callee or an `extends` target needs the instantiation's type arguments ([`peel`]).
 pub(super) fn peel_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
     loop {
         expr = match wrapper(expr) {
             Some(Wrapper::Transparent(inner) | Wrapper::Asserted(inner, _)) => inner,
-            Some(Wrapper::Instantiation(_)) | None => return expr,
+            Some(Wrapper::Instantiation(instantiation)) => &instantiation.expression,
+            None => return expr,
         };
     }
 }
@@ -97,8 +100,12 @@ pub(super) enum Evidence<'b, 'a> {
     /// A type reference (`(forwardRef as forwardRefType)`). The file may alias it to `typeof` the callee
     /// (`SourceDataCollector::describes_call`); otherwise it reads as [`Evidence::Unknown`].
     Reference(&'b TSTypeReference<'a>),
-    /// Every call signature of the asserted type returns what no component or element is ([`Returns::NotRenderable`]):
-    /// `(Object as (v: object) => object)(…)` is no component, whatever its name.
+    /// Every call signature of the asserted type returns what no component is, and at least one what React renders as a
+    /// node ([`Returns::Node`]): `(Greeting as (p: P) => string)(…)` gives no component, but a component may return
+    /// its result.
+    NoComponent,
+    /// Every call signature of the asserted type returns what neither a component nor a node is ([`Returns::Neither`]):
+    /// `(Object as (v: object) => object)(…)` neither is a component nor renders, whatever its name.
     NotRenderable,
     /// Anything else: `typeof` another expression, a signature whose result may render or is not read, a type with no
     /// call signature. The name still says what the call is; the callee's declaration no longer describes it.
@@ -117,12 +124,22 @@ pub(super) struct Peeled<'b, 'a> {
 }
 
 impl<'b, 'a> Peeled<'b, 'a> {
-    /// `expr`, when what it is called still says what the call is (`forwardRef`, `memo`, `Object.assign`, a PascalCase
-    /// component): always, unless the assertion gives the call a result no component has.
+    /// `expr`, when what it is called still says what a call expected to give a component is (`forwardRef`, `memo`,
+    /// `Object.assign`, a HOC): always, unless the assertion gives the call a result no component has.
     pub(super) fn named(&self) -> Option<&'b Expression<'a>> {
         match self.evidence {
-            Evidence::NotRenderable => None,
+            Evidence::NoComponent | Evidence::NotRenderable => None,
             Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown => Some(self.expr),
+        }
+    }
+
+    /// `expr`, when what it is called still says what a call whose result is rendered is (a component invoked
+    /// directly, an element factory, `map`): always, unless the assertion gives the call a result React cannot render.
+    /// A string, number or `null` result renders, so it is no evidence against such a call.
+    pub(super) fn renderable(&self) -> Option<&'b Expression<'a>> {
+        match self.evidence {
+            Evidence::NotRenderable => None,
+            Evidence::Identity | Evidence::Reference(_) | Evidence::NoComponent | Evidence::Unknown => Some(self.expr),
         }
     }
 }
@@ -190,7 +207,7 @@ fn receiver<'a, 'b>(expr: &'b Expression<'a>) -> Typed<'b, 'a> {
             Typed::Own => None,
             Typed::Asserted(ty) => match member(ty, object.property.name.as_str()) {
                 Member::Property(ty) => Some(ty),
-                Member::Methods(_) | Member::Unread => return Typed::Unread,
+                Member::Declared(_) | Member::Unread => return Typed::Unread,
             },
             Typed::Unread => return Typed::Unread,
         },
@@ -205,41 +222,61 @@ fn receiver<'a, 'b>(expr: &'b Expression<'a>) -> Typed<'b, 'a> {
 
 /// What a type literal declares for a member.
 enum Member<'b, 'a> {
+    /// One property or getter, and nothing else of that name: its type is the member's.
     Property(&'b TSType<'a>),
-    /// The literal declares the member as methods (`{ memo(c: C): R }`): their signatures are its type.
-    Methods(&'b TSTypeLiteral<'a>),
+    /// Anything else of that name (`{ memo(c: C): R }`, overloads, a property beside a method): every declaration of
+    /// the name in the literal counts ([`declarations`]).
+    Declared(&'b TSTypeLiteral<'a>),
     Unread,
+}
+
+/// One declaration of a member's name in a type literal.
+enum MemberDeclaration<'b, 'a> {
+    /// A property or getter, and the type it gives the member, if written.
+    Typed(Option<&'b TSType<'a>>),
+    /// A method, and the result it declares, if written.
+    Method(Option<&'b TSType<'a>>),
 }
 
 fn names_key(key: &PropertyKey<'_>, name: &str) -> bool {
     key.static_name().is_some_and(|key| super::js_text::property_name(&key) == name)
 }
 
+/// Every declaration of `name` among a type literal's members, in order.
+fn declarations<'a, 'b>(literal: &'b TSTypeLiteral<'a>, name: &str) -> impl Iterator<Item = MemberDeclaration<'b, 'a>> {
+    literal.members.iter().filter_map(move |signature| match signature {
+        TSSignature::TSPropertySignature(property) if names_key(&property.key, name) => Some(MemberDeclaration::Typed(
+            property.type_annotation.as_ref().map(|annotation| &annotation.type_annotation),
+        )),
+        TSSignature::TSMethodSignature(method) if names_key(&method.key, name) => {
+            let written = method.return_type.as_ref().map(|annotation| &annotation.type_annotation);
+            Some(match method.kind {
+                TSMethodSignatureKind::Method => MemberDeclaration::Method(written),
+                TSMethodSignatureKind::Get => MemberDeclaration::Typed(written),
+                // A setter's parameter is what is assigned, not what is read.
+                TSMethodSignatureKind::Set => MemberDeclaration::Typed(None),
+            })
+        }
+        TSSignature::TSPropertySignature(_)
+        | TSSignature::TSMethodSignature(_)
+        | TSSignature::TSIndexSignature(_)
+        | TSSignature::TSCallSignatureDeclaration(_)
+        | TSSignature::TSConstructSignatureDeclaration(_) => None,
+    })
+}
+
 fn member<'a, 'b>(ty: &'b TSType<'a>, name: &str) -> Member<'b, 'a> {
     match ty {
         TSType::TSParenthesizedType(inner) => member(&inner.type_annotation, name),
         TSType::TSTypeLiteral(literal) => {
-            for signature in &literal.members {
-                match signature {
-                    TSSignature::TSPropertySignature(property) if names_key(&property.key, name) => {
-                        return property
-                            .type_annotation
-                            .as_ref()
-                            .map_or(Member::Unread, |annotation| Member::Property(&annotation.type_annotation));
-                    }
-                    TSSignature::TSMethodSignature(method)
-                        if method.kind == TSMethodSignatureKind::Method && names_key(&method.key, name) =>
-                    {
-                        return Member::Methods(literal);
-                    }
-                    TSSignature::TSPropertySignature(_)
-                    | TSSignature::TSMethodSignature(_)
-                    | TSSignature::TSIndexSignature(_)
-                    | TSSignature::TSCallSignatureDeclaration(_)
-                    | TSSignature::TSConstructSignatureDeclaration(_) => {}
-                }
+            let mut all = declarations(literal, name);
+            match (all.next(), all.next()) {
+                (None, _) => Member::Unread,
+                (Some(MemberDeclaration::Typed(Some(ty))), None) => Member::Property(ty),
+                (Some(MemberDeclaration::Typed(None)), None) => Member::Unread,
+                (Some(MemberDeclaration::Typed(_) | MemberDeclaration::Method(_)), Some(_))
+                | (Some(MemberDeclaration::Method(_)), None) => Member::Declared(literal),
             }
-            Member::Unread
         }
         TSType::TSAnyKeyword(_)
         | TSType::TSBigIntKeyword(_)
@@ -283,17 +320,11 @@ fn member<'a, 'b>(ty: &'b TSType<'a>, name: &str) -> Member<'b, 'a> {
 fn member_evidence<'a, 'b>(ty: &'b TSType<'a>, name: &str, expr: &Expression<'_>) -> Evidence<'b, 'a> {
     match member(ty, name) {
         Member::Property(ty) => asserted(ty, expr),
-        Member::Methods(literal) => results(literal.members.iter().filter_map(|signature| match signature {
-            TSSignature::TSMethodSignature(method)
-                if method.kind == TSMethodSignatureKind::Method && names_key(&method.key, name) =>
-            {
-                Some(method.return_type.as_ref().map(|annotation| &annotation.type_annotation))
-            }
-            TSSignature::TSMethodSignature(_)
-            | TSSignature::TSPropertySignature(_)
-            | TSSignature::TSIndexSignature(_)
-            | TSSignature::TSCallSignatureDeclaration(_)
-            | TSSignature::TSConstructSignatureDeclaration(_) => None,
+        // The member has every type declared for it: no component only when each declaration says so.
+        Member::Declared(literal) => combine(declarations(literal, name).map(|declaration| match declaration {
+            MemberDeclaration::Typed(Some(ty)) => asserted(ty, expr),
+            MemberDeclaration::Typed(None) => Evidence::Unknown,
+            MemberDeclaration::Method(result) => results(std::iter::once(result)),
         })),
         Member::Unread => Evidence::Unknown,
     }
@@ -353,26 +384,46 @@ fn asserted<'a, 'b>(ty: &'b TSType<'a>, beneath: &Expression<'_>) -> Evidence<'b
     }
 }
 
-/// The evidence of a type's call signatures, given their declared results (`None` when one declares none): no
-/// component only when there is at least one and each result is [`Returns::NotRenderable`].
+/// The evidence of a type's call signatures, given their declared results (`None` when one declares none): see
+/// [`combine`].
 fn results<'a, 'b>(signatures: impl Iterator<Item = Option<&'b TSType<'a>>>) -> Evidence<'b, 'a> {
-    let mut any = false;
-    for result in signatures {
-        any = true;
-        if !result.is_some_and(|result| matches!(result_of(result), Returns::NotRenderable)) {
-            return Evidence::Unknown;
-        }
-    }
-    if any { Evidence::NotRenderable } else { Evidence::Unknown }
+    combine(signatures.map(|result| match result.map(result_of) {
+        Some(Returns::Neither) => Evidence::NotRenderable,
+        Some(Returns::Node) => Evidence::NoComponent,
+        Some(Returns::Empty | Returns::Maybe) | None => Evidence::Unknown,
+    }))
 }
 
-/// What a call's declared result says about whether it renders or is a component.
+/// The evidence of several signatures or declarations of one callee, each read alone: [`Evidence::NotRenderable`] when
+/// every one is, [`Evidence::NoComponent`] when every one is that or `NotRenderable`, and [`Evidence::Unknown`]
+/// otherwise or when there are none. One that may give a component keeps the whole callee a candidate.
+fn combine<'a, 'b>(all: impl Iterator<Item = Evidence<'b, 'a>>) -> Evidence<'b, 'a> {
+    let mut combined = None;
+    for evidence in all {
+        combined = Some(match (combined, evidence) {
+            (None | Some(Evidence::NotRenderable), Evidence::NotRenderable) => Evidence::NotRenderable,
+            (None | Some(Evidence::NotRenderable | Evidence::NoComponent), Evidence::NoComponent)
+            | (Some(Evidence::NoComponent), Evidence::NotRenderable) => Evidence::NoComponent,
+            (_, Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown)
+            | (
+                Some(Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown),
+                Evidence::NoComponent | Evidence::NotRenderable,
+            ) => return Evidence::Unknown,
+        });
+    }
+    combined.unwrap_or(Evidence::Unknown)
+}
+
+/// What a call's declared result says about whether it is a component and whether React renders it.
 #[derive(Clone, Copy)]
 enum Returns {
-    /// No component or element has this type: a primitive or `object` keyword, `void`, `never`, a literal or template
-    /// literal, a type predicate, an object type with no call or construct signature, an array whose elements cannot
-    /// render (`unknown[]`, `string[]`).
-    NotRenderable,
+    /// What React renders as a node and no component is: a string, number, bigint or boolean keyword, `void`, a
+    /// literal or template literal, a type predicate, an array of those, or a union with one of them and nothing that
+    /// may be a component.
+    Node,
+    /// Neither a component nor a node: the `object`, `symbol` and `never` keywords, an object type with no call or
+    /// construct signature, an array of those or of `unknown`/`any` (TypeScript does not take `unknown` for a node).
+    Neither,
     /// `null` or `undefined`: what a component may return, and no evidence alone.
     Empty,
     /// Anything that may be a component or an element, or that the extractor does not read (a reference, `unknown`).
@@ -383,15 +434,13 @@ fn result_of(ty: &TSType<'_>) -> Returns {
     match ty {
         TSType::TSBigIntKeyword(_)
         | TSType::TSBooleanKeyword(_)
-        | TSType::TSNeverKeyword(_)
         | TSType::TSNumberKeyword(_)
-        | TSType::TSObjectKeyword(_)
         | TSType::TSStringKeyword(_)
-        | TSType::TSSymbolKeyword(_)
         | TSType::TSVoidKeyword(_)
         | TSType::TSLiteralType(_)
         | TSType::TSTemplateLiteralType(_)
-        | TSType::TSTypePredicate(_) => Returns::NotRenderable,
+        | TSType::TSTypePredicate(_) => Returns::Node,
+        TSType::TSNeverKeyword(_) | TSType::TSObjectKeyword(_) | TSType::TSSymbolKeyword(_) => Returns::Neither,
         TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_) => Returns::Empty,
         TSType::TSParenthesizedType(inner) => result_of(&inner.type_annotation),
         TSType::TSTypeLiteral(literal) => {
@@ -401,20 +450,23 @@ fn result_of(ty: &TSType<'_>) -> Returns {
                 | TSSignature::TSMethodSignature(_)
                 | TSSignature::TSIndexSignature(_) => false,
             });
-            if callable { Returns::Maybe } else { Returns::NotRenderable }
+            if callable { Returns::Maybe } else { Returns::Neither }
         }
-        // `ReactNode[]` renders; `unknown[]` does not, as TypeScript does not take `unknown` for a node.
+        // `ReactNode[]` and `string[]` render; `unknown[]` does not.
         TSType::TSArrayType(array) => match (&array.element_type, result_of(&array.element_type)) {
-            (TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_), _) => Returns::NotRenderable,
+            (TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_), _) => Returns::Neither,
             (_, Returns::Maybe) => Returns::Maybe,
-            (_, Returns::NotRenderable | Returns::Empty) => Returns::NotRenderable,
+            (_, Returns::Node | Returns::Empty) => Returns::Node,
+            (_, Returns::Neither) => Returns::Neither,
         },
+        // The value is one of the members: it may render when one does, and is a candidate when one may be.
         TSType::TSUnionType(union) => {
             let mut result = Returns::Empty;
             for member in &union.types {
                 result = match (result, result_of(member)) {
                     (Returns::Maybe, _) | (_, Returns::Maybe) => return Returns::Maybe,
-                    (Returns::NotRenderable, _) | (_, Returns::NotRenderable) => Returns::NotRenderable,
+                    (Returns::Node, _) | (_, Returns::Node) => Returns::Node,
+                    (Returns::Neither, _) | (_, Returns::Neither) => Returns::Neither,
                     (Returns::Empty, Returns::Empty) => Returns::Empty,
                 };
             }
@@ -478,8 +530,67 @@ fn chain_names(chain: &str, expr: &Expression<'_>) -> bool {
     }
 }
 
+/// Counts every name the file declares in type space, at any depth: type aliases, interfaces, classes, enums,
+/// namespaces, type parameters (`infer` and mapped keys among them) and every import, which may bring a type.
+#[derive(Default)]
+struct TypeNames(FxHashMap<CompactString, u32>);
+
+impl TypeNames {
+    fn declare(&mut self, name: &str) {
+        *self.0.entry(CompactString::from(name)).or_default() += 1;
+    }
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for TypeNames {
+    fn visit_ts_type_alias_declaration(&mut self, it: &TSTypeAliasDeclaration<'a>) {
+        self.declare(&it.id.name);
+        oxc_ast_visit::walk::walk_ts_type_alias_declaration(self, it);
+    }
+
+    fn visit_ts_interface_declaration(&mut self, it: &TSInterfaceDeclaration<'a>) {
+        self.declare(&it.id.name);
+        oxc_ast_visit::walk::walk_ts_interface_declaration(self, it);
+    }
+
+    fn visit_class(&mut self, it: &Class<'a>) {
+        if let Some(id) = &it.id {
+            self.declare(&id.name);
+        }
+        oxc_ast_visit::walk::walk_class(self, it);
+    }
+
+    fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
+        self.declare(&it.id.name);
+        oxc_ast_visit::walk::walk_ts_enum_declaration(self, it);
+    }
+
+    fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
+        self.declare(&it.id.name);
+        oxc_ast_visit::walk::walk_ts_namespace_declaration(self, it);
+    }
+
+    fn visit_ts_type_parameter(&mut self, it: &TSTypeParameter<'a>) {
+        self.declare(&it.name.name);
+        oxc_ast_visit::walk::walk_ts_type_parameter(self, it);
+    }
+
+    fn visit_ts_mapped_type(&mut self, it: &TSMappedType<'a>) {
+        self.declare(&it.key.name);
+        oxc_ast_visit::walk::walk_ts_mapped_type(self, it);
+    }
+
+    fn visit_import_declaration_specifier(&mut self, it: &ImportDeclarationSpecifier<'a>) {
+        self.declare(&it.local().name);
+    }
+
+    fn visit_ts_import_equals_declaration(&mut self, it: &TSImportEqualsDeclaration<'a>) {
+        self.declare(&it.id.name);
+    }
+}
+
 /// The module-level aliases of a value's type, `type Factory = typeof createButton`, as alias name to the dotted chain
-/// it queries. A name declared twice is left out: which one a use means is not read here.
+/// it queries. Only a name the file declares once in type space is kept: an import, an interface merged with it, a
+/// type parameter or a namespace's own type of that name may be what a use means, and which one is not read here.
 pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, CompactString> {
     fn chain(name: &TSTypeName<'_>) -> Option<String> {
         match name {
@@ -490,7 +601,9 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
             TSTypeName::ThisExpression(_) => None,
         }
     }
-    let mut aliases: FxHashMap<CompactString, Option<CompactString>> = FxHashMap::default();
+    let mut declared = TypeNames::default();
+    oxc_ast_visit::Visit::visit_program(&mut declared, program);
+    let mut aliases = FxHashMap::default();
     for statement in &program.body {
         let declaration = match statement {
             Statement::ExportDeclaration(export) => Some(&export.declaration),
@@ -513,12 +626,13 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
             }
             _ => None,
         };
-        aliases
-            .entry(CompactString::from(declaration.id.name.as_str()))
-            .and_modify(|seen| *seen = None)
-            .or_insert_with(|| queried.map(CompactString::from));
+        if let Some(queried) = queried
+            && declared.0.get(declaration.id.name.as_str()) == Some(&1)
+        {
+            aliases.insert(CompactString::from(declaration.id.name.as_str()), CompactString::from(queried));
+        }
     }
-    aliases.into_iter().filter_map(|(name, chain)| Some((name, chain?))).collect()
+    aliases
 }
 
 /// Counts the wrapper layers `peel` reads, so a test can show that a chain of assertions is read in one pass.
@@ -547,6 +661,13 @@ pub(super) fn named<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b Expression<'
 /// call `forwardRef`; `(Object as (v: object) => object)(…)` calls nothing by a name. See [`Peeled::named`].
 pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
     peel(&call.callee).named()
+}
+
+/// What a call whose result is rendered invokes, when its name still describes the call: `return (Greeting as (p: P)
+/// => string)(props)` calls `Greeting`, as a component may return a string; `(Object as (v: object) => object)(…)`
+/// calls nothing by a name. See [`Peeled::renderable`].
+pub(super) fn rendered_callee<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
+    peel(&call.callee).renderable()
 }
 
 /// The type arguments a call is made with: its own, or those of the instantiation it calls (`(forwardRef<R, P>)(…)`).
@@ -676,10 +797,10 @@ impl<'src> SourceDataCollector<'src> {
             .or_else(|| self.try_typed_function_expression(binding, name))
     }
 
-    /// Try to detect: `const Button: FC<ButtonProps> = ({ variant = 'primary' }) => ...`
     /// Whether the callee's declaration describes the call, so `resolver::callee` may read it: the evidence is the
-    /// identity, or a reference to a module-level `type F = typeof <the callee>`. Any other assertion may hide what the
-    /// declaration says (`(wrap as <T>(r: FC<T>) => FC<T>)<P>(…)` drops the props `wrap`'s result adds).
+    /// identity, or a reference to a module-level `type F = typeof <the callee>` whose name means nothing else in the
+    /// file ([`typeof_aliases`]). Any other assertion may hide what the declaration says (`(wrap as <T>(r: FC<T>) =>
+    /// FC<T>)<P>(…)` drops the props `wrap`'s result adds).
     pub(super) fn describes_call(&self, peeled: &Peeled<'_, '_>) -> bool {
         match peeled.evidence {
             Evidence::Identity => true,
@@ -690,10 +811,11 @@ impl<'src> SourceDataCollector<'src> {
                 };
                 reference.type_arguments.is_none() && chain.is_some_and(|chain| chain_names(chain, peeled.expr))
             }
-            Evidence::NotRenderable | Evidence::Unknown => false,
+            Evidence::NoComponent | Evidence::NotRenderable | Evidence::Unknown => false,
         }
     }
 
+    /// Try to detect: `const Button: FC<ButtonProps> = ({ variant = 'primary' }) => ...`
     pub(super) fn try_fc_annotation<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let type_ann = decl.annotation?;
         let init_params = match decl.init.map(peel_expr) {

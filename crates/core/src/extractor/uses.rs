@@ -204,7 +204,7 @@ impl<'src> SourceDataCollector<'src> {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
         let renders_argument = super::component::is_component_wrapper(&*self, call)
-            || peeled.named().is_some_and(|callee| super::evidence::is_element_factory_callee(callee, &*self));
+            || peeled.renderable().is_some_and(|callee| super::evidence::is_element_factory_callee(callee, &*self));
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;
         }
