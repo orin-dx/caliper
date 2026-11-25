@@ -907,6 +907,56 @@ mod tests {
         runtime.block_on(checker.backend.take().unwrap().shutdown());
     }
 
+    /// The requests on the snapshot kept, which the answer's finish line logs.
+    fn calls_of(checker: &Checker) -> std::collections::BTreeMap<&'static str, u64> {
+        checker.live.as_ref().unwrap().rpc.calls()
+    }
+
+    /// The requests each answer's finish line counts are its own snapshot's: one the warm-up's snapshot was brought to
+    /// for the request's roots, or brought up to date after an edit, counts from the update that made it, as one built
+    /// afresh from the disk counts from its `createSnapshot`. The requests on the snapshots before it are not in it. On
+    /// the base an updated snapshot counted with every one before it, back to the warm-up's.
+    #[test]
+    fn each_answer_counts_the_requests_on_its_own_snapshot_alone() {
+        let project = Warmed::new();
+        let runtime = current_thread();
+        let mut cold = Checker::default();
+        runtime.block_on(cold.answer(&project.config, vec![project.button()]));
+        let built = calls_of(&cold);
+        assert_eq!(built.get("createSnapshot"), Some(&1), "{built:?}");
+        assert_eq!(built.get("updateSnapshot"), None, "{built:?}");
+        let mut brought = built.clone();
+        brought.remove("createSnapshot");
+        brought.insert("updateSnapshot", 1);
+        let mut checker = Checker::default();
+        runtime.block_on(checker.take(&project.config, Job::Warm, &mut Queue::default()));
+
+        let rooted = runtime.block_on(checker.answer(&project.config, vec![project.button()]));
+        assert_eq!(calls_of(&checker), brought, "rooted anew: {rooted:?}");
+        runtime.block_on(checker.stamp());
+        project.write("Button.tsx", &format!("{BUTTON}// edited\n"));
+        let changed = SourceChange::Files(vec![project.root.join("Button.tsx")]);
+        runtime.block_on(checker.take(&project.config, Job::Changed(changed), &mut Queue::default()));
+        let edited = runtime.block_on(checker.answer(&project.config, vec![project.button()]));
+        assert_eq!(calls_of(&checker), brought, "after an edit: {edited:?}");
+        runtime.block_on(checker.stamp());
+        let gauges = |checker: &Checker| {
+            (checker.gauges.created.load(Ordering::Relaxed), checker.gauges.updated.load(Ordering::Relaxed))
+        };
+        assert_eq!(gauges(&checker), (1, 2), "the warm-up built one snapshot, which each answer brought up to date");
+        project.write_at("node_modules/dep/index.d.ts", "export interface DepProps { fromDep?: string }\n// x\n", true);
+        let rebuilt = runtime.block_on(checker.answer(&project.config, vec![project.button()]));
+        assert_eq!(calls_of(&checker), built, "built again: {rebuilt:?}");
+        assert_eq!(gauges(&checker), (2, 2), "an unannounced change builds afresh");
+
+        assert_eq!(props(&edited), ["fromDep", "label"], "{edited:?}");
+        assert_eq!(rooted.components, edited.components);
+        assert_eq!(rebuilt.components, edited.components);
+        for checker in [checker, cold] {
+            runtime.block_on(checker.backend.unwrap().shutdown());
+        }
+    }
+
     #[test]
     fn a_warm_up_imports_each_package_the_project_depends_on_but_not_its_types_packages() {
         let project = Warmed::new();

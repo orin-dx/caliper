@@ -450,7 +450,7 @@ async fn reroot(old: Vec<Arc<Rpc>>, files: &[String]) -> Result<Vec<Arc<Rpc>>, C
     let mut tasks = JoinSet::new();
     for (lane, rpc) in old.iter().enumerate() {
         let (rpc, files) = (rpc.clone(), files.clone());
-        tasks.spawn(async move { (lane, rpc.updated(&[], &[], Some(&files)).await) });
+        tasks.spawn(async move { (lane, rpc.rerooted(&files).await) });
     }
     let mut rooted: Vec<Option<Rpc>> = old.iter().map(|_| None).collect();
     while let Some(joined) = tasks.join_next().await {
@@ -739,6 +739,8 @@ async fn session(
     {
         tracing::warn!("could not write the recording to {path}: {error}");
     }
+    // The requests on the snapshot answered from: a whole run's, its opening and any rooting anew included; on a
+    // checker kept between answers, those since the snapshot was built or brought up to date.
     tracing::debug!(
         requests = ?rpc.calls(),
         files = files.len(),

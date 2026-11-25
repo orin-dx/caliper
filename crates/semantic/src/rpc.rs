@@ -570,6 +570,9 @@ pub(crate) struct Rpc {
     options: Value,
     /// Every call and its answer, when the caller asked to record a replay fixture; shared with a layered snapshot.
     recording: Option<Arc<Mutex<Vec<Value>>>>,
+    /// The requests sent on this snapshot ([`Rpc::calls`]), shared with the sessions that answer one run with it: the
+    /// lanes beside it, a layered snapshot, a lane rooted anew ([`Rpc::rerooted`]) and the session a checker thread asks
+    /// it through. A snapshot brought up to date for the next answer ([`Rpc::updated`]) or built afresh counts its own.
     calls: Arc<Mutex<BTreeMap<&'static str, u64>>>,
     /// The snapshots of the other lanes [`Rpc::open_programs`] opened beside this one, which [`Rpc::release`] on this
     /// one releases too, unless [`Rpc::release_lanes`] released them already.
@@ -804,13 +807,35 @@ impl Rpc {
     /// The snapshot after this one with `changed` and `deleted` read again from the disk and, given `roots`, its program
     /// rooted there instead, built at once (`updateSnapshot` with `ensurePrograms`). Files the program has not changed
     /// are kept as parsed: the checker re-reads only what it is told about, and a synthetic program sees even that
-    /// only when it is rebuilt. The calls on it count with this one's; this snapshot stays alive until it is released.
+    /// only when it is rebuilt. It counts its own requests, from the update that makes it, as a snapshot built afresh
+    /// counts from its `createSnapshot`: the requests on this one are not in its count. This snapshot stays alive until
+    /// it is released.
     pub(crate) async fn updated(
         &self,
         changed: &[String],
         deleted: &[String],
         roots: Option<&[String]>,
     ) -> Result<Rpc, CallError> {
+        self.derived(changed, deleted, roots, Arc::default()).await
+    }
+
+    /// The snapshot after this one with its program rooted at `roots` instead, as [`Rpc::updated`] makes it, for a
+    /// session opened early over some of a request's roots and taken by that request ([`crate::reroot`]): it continues
+    /// the session, so its requests count with this one's and every lane's, the update among them, and the run's count
+    /// holds the opening, the rooting and the answer. This snapshot stays alive until it is released.
+    pub(crate) async fn rerooted(&self, roots: &[String]) -> Result<Rpc, CallError> {
+        self.derived(&[], &[], Some(roots), self.calls.clone()).await
+    }
+
+    /// The snapshot `updateSnapshot` derives from this one, its requests, the update first, counted in `calls`.
+    async fn derived(
+        &self,
+        changed: &[String],
+        deleted: &[String],
+        roots: Option<&[String]>,
+        calls: Arc<Mutex<BTreeMap<&'static str, u64>>>,
+    ) -> Result<Rpc, CallError> {
+        let mut next = Rpc { calls, ..self.through(self.client.clone()) };
         let changes = Changes {
             file_notifications: (!changed.is_empty() || !deleted.is_empty())
                 .then_some(FileNotifications { changed, deleted }),
@@ -820,19 +845,13 @@ impl Rpc {
             ..Changes::default()
         };
         let response: SnapshotResponse =
-            decode(&self.call(&UpdateSnapshot { snapshot: self.snapshot, changes }).await?)?;
+            decode(&next.call(&UpdateSnapshot { snapshot: self.snapshot, changes }).await?)?;
+        next.snapshot = response.snapshot;
         // The response lists only the projects it replaced; the synthetic program keeps its id.
-        let project = response.projects.into_iter().next().map_or_else(|| self.project.clone(), |project| project.id);
-        Ok(Rpc {
-            client: self.client.clone(),
-            deadline: self.deadline,
-            snapshot: response.snapshot,
-            project,
-            options: self.options.clone(),
-            recording: self.recording.clone(),
-            calls: self.calls.clone(),
-            others: Mutex::default(),
-        })
+        if let Some(project) = response.projects.into_iter().next() {
+            next.project = project.id;
+        }
+        Ok(next)
     }
 
     /// Runs `work` on the checker thread this session asks ([`Client::run_on_thread`]), given this session as that
@@ -1522,6 +1541,39 @@ mod tests {
         fn close(&self) {}
     }
 
+    /// A snapshot brought up to date ([`Rpc::updated`]) counts its own requests, the update that made it first, so the
+    /// next answer on a kept checker counts that snapshot's alone; one rooted anew ([`Rpc::rerooted`]) counts with the
+    /// session it continues, which counts its update too. On the base an updated snapshot counted with the one before,
+    /// and that one with every update made from it.
+    #[test]
+    fn an_updated_snapshot_counts_its_own_requests_and_a_rerooted_one_the_session_s() {
+        let session = Wire { sent: Arc::default(), snapshots: std::sync::atomic::AtomicU64::new(1) };
+        let checker = Backend::spawn(1, move || session).unwrap();
+        let runtime = multi_thread();
+        let deadline = Duration::from_secs(5);
+        let (opened, updated, rerooted) = runtime.block_on(async {
+            let roots = ["/p/a.ts".to_string(), "/p/b.tsx".to_string()];
+            let options = Rpc::prepare(&checker.client(), deadline, None).await.unwrap();
+            let opened = Rpc::open_with(checker.client(), deadline, &options, &roots[..1], false).await.unwrap();
+            opened.source_file_names().await.ok();
+            let updated = opened.updated(&roots[..1], &[], Some(&roots)).await.unwrap();
+            updated.source_file_names().await.ok();
+            updated.source_file_names().await.ok();
+            let rerooted = opened.rerooted(&roots).await.unwrap();
+            rerooted.source_file_names().await.ok();
+            (opened, updated, rerooted)
+        });
+        runtime.block_on(checker.shutdown_within(Duration::from_secs(5)));
+
+        let own: BTreeMap<&str, u64> = [("getSourceFileNames", 2), ("updateSnapshot", 1)].into();
+        assert_eq!(updated.calls(), own);
+        // The opening, the rooting anew and one request on each; the update that made `updated` is not in it.
+        let session: BTreeMap<&str, u64> =
+            [("createSnapshot", 1), ("getSourceFileNames", 2), ("updateSnapshot", 1)].into();
+        assert_eq!(opened.calls(), session);
+        assert_eq!(rerooted.calls(), session);
+    }
+
     /// Every request a session sends, in order, as its method and the text of its parameters: each method of [`Rpc`]
     /// called once with fixed values (twice where its parameters vary), the batches [`crate::declared`] sends included.
     fn sent_by_every_call() -> Vec<(String, String)> {
@@ -1583,7 +1635,7 @@ mod tests {
             let deleted = ["/p/gone.ts".to_string()];
             rpc.updated(&changed, &deleted, Some(&roots)).await.unwrap().release().await;
             rpc.updated(&changed, &[], None).await.unwrap().release().await;
-            rpc.updated(&[], &[], Some(&roots[..1])).await.unwrap().release().await;
+            rpc.rerooted(&roots[..1]).await.unwrap().release().await;
             rpc.release_lanes().await;
             rpc.release().await;
         });
