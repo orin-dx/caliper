@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01DQX2di9Ry1PZSp3dxQt8vt",
+  "agent_id": "ae35fdd19437b5c91",
+  "subagent_type": "general-purpose",
+  "task_description": "Complete the degraded-results fix across every read path",
+  "token_usage": {
+    "input_tokens": 190,
+    "cache_creation_tokens": 426363,
+    "cache_read_tokens": 19768767,
+    "output_tokens": 112614,
+    "api_call_count": 95
+  },
+  "started_at": "2026-11-24T11:07:25.956958-08:00",
+  "completed_at": "2026-11-24T12:09:59.101235-08:00"
+}
