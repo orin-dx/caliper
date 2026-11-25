@@ -1990,7 +1990,7 @@ impl Converter {
         // that object ([`Self::convert`]) replaces it with its name, and whether a property is `readonly` reaches
         // nothing.
         if !references.is_empty() && !fields_past_size_budget(&fields, MAX_SIZE) {
-            let readonly = self.readonly(listed, properties).await?;
+            let readonly = self.readonly(listed, properties, &references).await?;
             for (field, readonly) in fields.iter_mut().zip(readonly.iter()) {
                 field.readonly = *readonly;
             }
@@ -1999,30 +1999,58 @@ impl Converter {
     }
 
     /// Whether each property of `listed` is `readonly`: what the property answer settles
-    /// ([`SymbolInfo::settled_readonly`]), and the checker's answer for the rest. Kept by (handle, listing) like every
-    /// answer about a list, so a list read again is not worked out again; a list the answer settles entirely sends
-    /// nothing. The only caller is past the size budget, so a cut object's properties are not classified.
-    async fn readonly(&self, listed: (u64, Listing), properties: &[SymbolInfo]) -> Result<Arc<[bool]>, CallError> {
+    /// ([`SymbolInfo::settled_readonly`]), and the checker's answer for the rest. `references` are the properties' own,
+    /// one each, which [`Self::fields`] has already gathered. Kept by (handle, listing) like every answer about a list,
+    /// so a list read again is not worked out again; a list the answer settles entirely sends nothing, and one it
+    /// settles not at all is the checker's answer as it comes. The only caller is past the size budget, so a cut
+    /// object's properties are not classified.
+    async fn readonly(
+        &self,
+        listed: (u64, Listing),
+        properties: &[SymbolInfo],
+        references: &[&SymbolRef],
+    ) -> Result<Arc<[bool]>, CallError> {
+        debug_assert_eq!(references.len(), properties.len(), "the references are of another list");
         let readonly = self
             .state
             .readonly
             .get(listed, || async {
                 #[cfg(test)]
                 self.rpc.note("readonly classified", properties.len() as u64);
-                let settled: Vec<_> = properties.iter().map(SymbolInfo::settled_readonly).collect();
-                let asked: Vec<_> = properties
-                    .iter()
-                    .zip(&settled)
-                    .filter(|(_, settled)| settled.is_none())
-                    .map(|(property, _)| &property.reference)
-                    .collect();
+                // Nothing to merge until a property is settled: a list the answer settles not at all gets no vector.
+                let mut settled: Option<Vec<Option<bool>>> = None;
+                for (index, property) in properties.iter().enumerate() {
+                    match property.settled_readonly() {
+                        Some(value) => settled
+                            .get_or_insert_with(|| {
+                                #[cfg(test)]
+                                self.rpc.note("readonly merge data", 1);
+                                vec![None; index]
+                            })
+                            .push(Some(value)),
+                        None => settled.iter_mut().for_each(|settled| settled.push(None)),
+                    }
+                }
+                let wrong_length = || CallError::Rejected("an isReadonlySymbol batch of another length".to_string());
+                let Some(settled) = settled else {
+                    // `batch` fails a batch that does not get one answer per request.
+                    let answers = self.rpc.readonly_symbols(references).await?;
+                    return (answers.len() == properties.len()).then(|| Arc::from(answers)).ok_or_else(wrong_length);
+                };
+                let asked: Vec<&SymbolRef> = if settled.iter().any(Option::is_none) {
+                    #[cfg(test)]
+                    self.rpc.note("readonly references built", 1);
+                    references.iter().zip(&settled).filter(|(_, settled)| settled.is_none()).map(|(r, _)| *r).collect()
+                } else {
+                    Vec::new()
+                };
                 let answers = if asked.is_empty() { Vec::new() } else { self.rpc.readonly_symbols(&asked).await? };
-                // `batch` fails a batch that does not get one answer per request, so there is one answer for each property
-                // the answer did not settle. A missing one is never read as `false`: that would be silence as evidence.
+                // There is one answer for each property the answer did not settle. A missing one is never read as
+                // `false`: that would be silence as evidence.
                 let mut answers = answers.into_iter();
                 let flags: Option<Arc<[bool]>> =
                     settled.iter().map(|settled| settled.or_else(|| answers.next())).collect();
-                flags.ok_or_else(|| CallError::Rejected("an isReadonlySymbol batch of another length".to_string()))
+                flags.ok_or_else(wrong_length)
             })
             .await?;
         // `listed` names the same symbol list every time, so the cached flags are one per property.
@@ -2578,6 +2606,29 @@ mod tests {
         assert_eq!(calls.get("isReadonlySymbol"), Some(&168), "{calls:?}");
         // Each of the 168 is classified once, and asked because its `readonly` modifier is not in its answer.
         assert_eq!(calls.get("readonly classified"), Some(&168), "{calls:?}");
+        // Nothing is settled, so the 168 are the checker's answer as it comes: no settlement vector, and the references
+        // `fields` gathered are the ones asked, not a second list.
+        assert_eq!(calls.get("readonly merge data"), None, "{calls:?}");
+        assert_eq!(calls.get("readonly references built"), None, "{calls:?}");
+    }
+
+    /// A list the answer settles in part merges the settled flags and the checker's answers in property order: `a` and
+    /// `b` are declared properties (asked), `g` is a getter (settled `readonly`) and `m` a method (settled not).
+    /// Interleaved, so a merge that appended the asked flags after the settled ones, or dropped the earlier `None`s of a
+    /// list that starts with an asked property, gets a flag wrong.
+    #[test]
+    fn a_list_settled_in_part_merges_the_settled_and_the_asked_flags_in_order() {
+        let (outcome, calls) = answered_with_calls(
+            "interface Mixed { a: string; get g(): number; readonly b: number; m(): void; c: string }\n\
+             export function C(props: { mixed: Mixed }) { return null; }\n",
+        );
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let mixed = &component.props.iter().find(|prop| prop.name == "mixed").unwrap().prop_type;
+        let PropType::Object(fields) = mixed else { panic!("{mixed:?}") };
+        let flags: Vec<_> = fields.iter().map(|field| (field.name.as_str(), field.readonly)).collect();
+        assert_eq!(flags, [("a", false), ("g", true), ("b", true), ("m", false), ("c", false)]);
+        assert_eq!(calls.get("readonly merge data"), Some(&1), "{calls:?}");
+        assert_eq!(calls.get("readonly references built"), Some(&1), "{calls:?}");
     }
 
     /// A mapped type's properties have no declaration of their own: their check flags say whether they are `readonly`,
