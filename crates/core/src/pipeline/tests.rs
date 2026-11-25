@@ -4943,3 +4943,68 @@ fn a_css_property_that_takes_a_number_or_a_string_is_both_without_dependencies()
 
     assert_eq!(output.components["Box"].props["z"].prop_type.raw_string(), "string | number");
 }
+
+/// A component asked while one of its dependency files could not be read is answered from what was read, and the
+/// answer is not kept: once the file reads again, the next request has the full props, the same as a fresh session's,
+/// whether or not another component's request loaded the file first. The file fails to read for any user, root
+/// included: its bytes are not UTF-8. On the base the lazy memo kept the answer without the file, since the failed
+/// demand stayed missing after its retry.
+#[test]
+fn a_component_asked_while_a_dependency_file_could_not_be_read_is_answered_in_full_once_it_reads() {
+    const PROPS: &str = "export interface SoloProps { tone: string }\n";
+    for other_first in [false, true] {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        for (name, content) in [
+            (
+                "node_modules/solo-kit/package.json",
+                r#"{ "name": "solo-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/solo-kit/index.d.ts", "export * from './props';\n"),
+            ("node_modules/solo-kit/props.d.ts", PROPS),
+            (
+                "src/Card.tsx",
+                "import type { SoloProps } from 'solo-kit';\ninterface CardProps extends SoloProps { title: string }\n\
+                 export function Card(props: CardProps) { return null; }\n",
+            ),
+            (
+                "src/Tag.tsx",
+                "import type { SoloProps } from 'solo-kit';\ninterface TagProps extends SoloProps { label: string }\n\
+                 export function Tag(props: TagProps) { return null; }\n",
+            ),
+        ] {
+            write_file_at(&root, name, content);
+        }
+        let root = Utf8PathBuf::from_path_buf(root).unwrap();
+        let props_file = root.join("node_modules/solo-kit/props.d.ts");
+        let options = PipelineOptions {
+            src_dirs: vec![root.join("src")],
+            cache_dir: Some(root.join("cache")),
+            load_dependencies: true,
+            collapse_inherited_props: CollapseInheritedProps::None,
+            ..Default::default()
+        };
+        let names = |answer: &Option<ComponentAnswer>| -> Vec<String> {
+            let mut names: Vec<String> = answer.as_ref().unwrap().entry.props.keys().cloned().collect();
+            names.sort();
+            names
+        };
+
+        let session = WatchSession::lazy(options.clone());
+        drop(session.initialize());
+        fs::write(&props_file, [0xff_u8, 0xfe, 0xfd]).unwrap();
+        assert_eq!(names(&session.component("Card")), ["title"], "answered from what was read");
+        fs::write(&props_file, PROPS).unwrap();
+        let tag = other_first.then(|| session.component("Tag"));
+        let card = session.component("Card");
+
+        let fresh = WatchSession::lazy(options);
+        drop(fresh.initialize());
+        let fresh_card = fresh.component("Card");
+        assert_eq!(names(&fresh_card), ["title", "tone"]);
+        if let Some(tag) = tag {
+            assert_eq!(names(&tag), ["label", "tone"]);
+        }
+        assert_eq!(card, fresh_card, "other first: {other_first}: once the file reads, a fresh session's answer");
+    }
+}

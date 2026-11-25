@@ -444,6 +444,11 @@ impl Revision {
             // unanswered), so asking again would never end.
             if missing.is_empty() || missing == asked_for {
                 let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes });
+                // A name a file that could not be read left missing may load on the next request, whichever component
+                // asks: the answer without it is this request's alone.
+                if engine.layer.as_ref().is_some_and(|layer| layer.awaits_read(&missing)) {
+                    return Some(resolved);
+                }
                 return Some(lazy.memo.entry(id.clone()).or_insert(resolved).clone());
             }
             self.grow(options, lazy, &missing);
