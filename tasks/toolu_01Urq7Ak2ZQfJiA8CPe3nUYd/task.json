@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Urq7Ak2ZQfJiA8CPe3nUYd",
+  "agent_id": "af6a892f0c286ca33",
+  "subagent_type": "general-purpose",
+  "task_description": "Add session equals cold-extract random edit test",
+  "token_usage": {
+    "input_tokens": 74,
+    "cache_creation_tokens": 109329,
+    "cache_read_tokens": 3316656,
+    "output_tokens": 21201,
+    "api_call_count": 37
+  },
+  "started_at": "2026-11-25T15:04:34.91403-08:00",
+  "completed_at": "2026-11-25T15:11:19.033022-08:00"
+}

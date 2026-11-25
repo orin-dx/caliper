@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01VjRUN4wVLAcpqXh4qPMKca",
+  "agent_id": "af2146f5ce3c47893",
+  "subagent_type": "general-purpose",
+  "task_description": "Rework #523 assertion handling to decline only on evidence",
+  "token_usage": {
+    "input_tokens": 174,
+    "cache_creation_tokens": 264831,
+    "cache_read_tokens": 16430786,
+    "output_tokens": 109932,
+    "api_call_count": 87
+  },
+  "started_at": "2026-11-25T14:38:00.067148-08:00",
+  "completed_at": "2026-11-25T15:11:39.267996-08:00"
+}
