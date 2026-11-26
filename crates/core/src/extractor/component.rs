@@ -500,29 +500,39 @@ impl TypeofAlias {
     }
 }
 
-/// The scopes inside the module that declare one of `names` in type space, and so shadow the module's own declaration
-/// of it there. A type parameter shadows only within the function or class that declares it; one of a type (an alias,
-/// an interface, a signature, `infer`, a mapped key) holds no expression, so no cast can sit inside it. A declaration
-/// with no scope around it is the module's own, which `typeof_aliases` counts.
-struct Shadows<'n> {
+/// Every declaration in type space of one of `names`, from one walk of the module: the one list of what declares a
+/// type name. A declaration outside every scope is the module's own and is counted; one inside a scope shadows the
+/// module's declaration there. Scopes: a function's or arrow's type parameters cover the whole function, its body's
+/// declarations only the body (so they do not reach a parameter default); a class, a block (a catch clause's
+/// included), a `switch`, a static block, a namespace and a `declare module`/`declare global` body. A type holds no
+/// expression, so nothing declared in one (an alias's or interface's type parameters, `infer`, a mapped key) encloses
+/// a cast.
+struct TypeDeclarations<'n> {
     names: &'n [(&'n str, String)],
     scopes: Vec<oxc_span::Span>,
+    /// Per candidate name, how many declarations the module itself makes.
+    module_level: Vec<usize>,
+    /// Per candidate name, the scopes that declare it again.
     shadowed_in: Vec<Vec<oxc_span::Span>>,
 }
 
-impl Shadows<'_> {
-    fn declare_in(&mut self, name: &str, scope: Option<oxc_span::Span>) {
-        let Some(scope) = scope.or_else(|| self.scopes.last().copied()) else { return };
+impl TypeDeclarations<'_> {
+    /// Records a declaration of `name` in `scope`, or in the innermost open scope when `None`.
+    fn declare(&mut self, name: &str, scope: Option<oxc_span::Span>) {
+        let scope = scope.or_else(|| self.scopes.last().copied());
         for (index, (candidate, _)) in self.names.iter().enumerate() {
             if *candidate == name {
-                self.shadowed_in[index].push(scope);
+                match scope {
+                    None => self.module_level[index] += 1,
+                    Some(scope) => self.shadowed_in[index].push(scope),
+                }
             }
         }
     }
 
     fn type_parameters(&mut self, declared: Option<&TSTypeParameterDeclaration<'_>>, scope: oxc_span::Span) {
         for parameter in declared.into_iter().flat_map(|declared| &declared.params) {
-            self.declare_in(&parameter.name.name, Some(scope));
+            self.declare(&parameter.name.name, Some(scope));
         }
     }
 
@@ -533,21 +543,68 @@ impl Shadows<'_> {
     }
 }
 
-impl<'a> oxc_ast_visit::Visit<'a> for Shadows<'_> {
+impl<'a> oxc_ast_visit::Visit<'a> for TypeDeclarations<'_> {
+    fn visit_import_declaration(&mut self, it: &ImportDeclaration<'a>) {
+        // Every import binds its name in type space too (a value import may be a class or a namespace).
+        for specifier in it.specifiers.iter().flatten() {
+            self.declare(&specifier.local().name, None);
+        }
+    }
+
+    fn visit_declaration(&mut self, it: &Declaration<'a>) {
+        let declared = match it {
+            Declaration::ClassDeclaration(class) => class.id.as_ref().map(|id| &id.name),
+            Declaration::TSTypeAliasDeclaration(alias) => Some(&alias.id.name),
+            Declaration::TSInterfaceDeclaration(interface) => Some(&interface.id.name),
+            Declaration::TSEnumDeclaration(declaration) => Some(&declaration.id.name),
+            Declaration::TSNamespaceDeclaration(namespace) => Some(&namespace.id.name),
+            // `import F = require('f')`, `import type F = require('f')` and `import F = N.M`.
+            Declaration::TSImportEqualsDeclaration(import) => Some(&import.id.name),
+            // Values, and modules named by a string or the global scope: no type name in this module's scope.
+            Declaration::VariableDeclaration(_)
+            | Declaration::FunctionDeclaration(_)
+            | Declaration::TSExternalModuleDeclaration(_)
+            | Declaration::TSGlobalDeclaration(_) => None,
+        };
+        if let Some(declared) = declared {
+            self.declare(declared, None);
+        }
+        oxc_ast_visit::walk::walk_declaration(self, it);
+    }
+
+    fn visit_export_default_declaration(&mut self, it: &ExportDefaultDeclaration<'a>) {
+        let declared = match &it.declaration {
+            ExportDefaultDeclarationKind::ClassDeclaration(class) => class.id.as_ref().map(|id| &id.name),
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(interface) => Some(&interface.id.name),
+            // A function or an expression is a value.
+            ExportDefaultDeclarationKind::FunctionDeclaration(_) => None,
+            match_expression!(ExportDefaultDeclarationKind) => None,
+        };
+        if let Some(declared) = declared {
+            self.declare(declared, None);
+        }
+        oxc_ast_visit::walk::walk_export_default_declaration(self, it);
+    }
+
     fn visit_function(&mut self, it: &Function<'a>, flags: oxc_syntax::scope::ScopeFlags) {
         self.type_parameters(it.type_parameters.as_deref(), it.span);
-        self.within(it.span, |this| oxc_ast_visit::walk::walk_function(this, it, flags));
+        oxc_ast_visit::walk::walk_function(self, it, flags);
     }
 
     fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
         self.type_parameters(it.type_parameters.as_deref(), it.span);
-        self.within(it.span, |this| oxc_ast_visit::walk::walk_arrow_function_expression(this, it));
+        oxc_ast_visit::walk::walk_arrow_function_expression(self, it);
+    }
+
+    fn visit_function_body(&mut self, it: &FunctionBody<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_function_body(this, it));
     }
 
     fn visit_class(&mut self, it: &Class<'a>) {
-        if let Some(id) = &it.id {
-            // A class expression's name is in scope only inside the class.
-            self.declare_in(&id.name, (!it.is_declaration()).then_some(it.span));
+        // A class declaration's name is declared where the declaration is (`visit_declaration`); a class expression's
+        // only inside the class.
+        if let (Some(id), false) = (&it.id, it.is_declaration()) {
+            self.declare(&id.name, Some(it.span));
         }
         self.type_parameters(it.type_parameters.as_deref(), it.span);
         self.within(it.span, |this| oxc_ast_visit::walk::walk_class(this, it));
@@ -565,24 +622,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for Shadows<'_> {
         self.within(it.span, |this| oxc_ast_visit::walk::walk_static_block(this, it));
     }
 
-    fn visit_ts_type_alias_declaration(&mut self, it: &TSTypeAliasDeclaration<'a>) {
-        self.declare_in(&it.id.name, None);
-    }
-
-    fn visit_ts_interface_declaration(&mut self, it: &TSInterfaceDeclaration<'a>) {
-        self.declare_in(&it.id.name, None);
-    }
-
-    fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
-        self.declare_in(&it.id.name, None);
-    }
-
-    fn visit_ts_import_equals_declaration(&mut self, it: &TSImportEqualsDeclaration<'a>) {
-        self.declare_in(&it.id.name, None);
-    }
-
     fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
-        self.declare_in(&it.id.name, None);
         self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_namespace_declaration(this, it));
     }
 
@@ -594,60 +634,13 @@ impl<'a> oxc_ast_visit::Visit<'a> for Shadows<'_> {
         self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_global_declaration(this, it));
     }
 
-    // A type holds no expression, so nothing declared in one encloses a cast.
     fn visit_ts_type(&mut self, _it: &TSType<'a>) {}
-}
-
-/// Calls `found` with each name a module-level statement declares in type space: an import, a type alias, an interface,
-/// a class, an enum, a namespace or an `import =`. A value (`const`, `function`) declares no type.
-fn type_space_names(statement: &Statement<'_>, found: &mut impl FnMut(&str)) {
-    let declaration = match statement {
-        Statement::ImportDeclaration(import) => {
-            for specifier in import.specifiers.iter().flatten() {
-                found(specifier.local().name.as_str());
-            }
-            return;
-        }
-        Statement::ExportDeclaration(export) => Some(&export.declaration),
-        Statement::ExportDefaultDeclaration(export) => {
-            let declared = match &export.declaration {
-                ExportDefaultDeclarationKind::ClassDeclaration(class) => class.id.as_ref().map(|id| &id.name),
-                ExportDefaultDeclarationKind::TSInterfaceDeclaration(interface) => Some(&interface.id.name),
-                // A function or an expression is a value.
-                ExportDefaultDeclarationKind::FunctionDeclaration(_) => None,
-                kind => kind.as_expression().and(None),
-            };
-            if let Some(declared) = declared {
-                found(declared.as_str());
-            }
-            return;
-        }
-        _ => statement.as_declaration(),
-    };
-    let declared = match declaration {
-        Some(Declaration::ClassDeclaration(class)) => class.id.as_ref().map(|id| &id.name),
-        Some(Declaration::TSTypeAliasDeclaration(alias)) => Some(&alias.id.name),
-        Some(Declaration::TSInterfaceDeclaration(interface)) => Some(&interface.id.name),
-        Some(Declaration::TSEnumDeclaration(declaration)) => Some(&declaration.id.name),
-        Some(Declaration::TSNamespaceDeclaration(namespace)) => Some(&namespace.id.name),
-        Some(Declaration::TSImportEqualsDeclaration(import)) => Some(&import.id.name),
-        Some(
-            Declaration::VariableDeclaration(_)
-            | Declaration::FunctionDeclaration(_)
-            | Declaration::TSExternalModuleDeclaration(_)
-            | Declaration::TSGlobalDeclaration(_),
-        )
-        | None => None,
-    };
-    if let Some(declared) = declared {
-        found(declared.as_str());
-    }
 }
 
 /// The module-level aliases of a value's type, `type Factory = typeof createButton`, by alias name. Only a name the
 /// module declares once in type space is kept: an import or an interface of the same name may be what a use means. A
 /// declaration of the name in an inner scope shadows the alias only inside that scope ([`TypeofAlias::means_at`]).
-/// The scopes are walked only when the module has such an alias.
+/// The module is walked once ([`TypeDeclarations`]), and only when it has such an alias.
 pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, TypeofAlias> {
     fn chain(name: &TSTypeName<'_>) -> Option<String> {
         match name {
@@ -689,25 +682,20 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
     }
     #[cfg(test)]
     steps::count_walk();
-    let mut shadows =
-        Shadows { names: &candidates, scopes: Vec::new(), shadowed_in: vec![Vec::new(); candidates.len()] };
-    oxc_ast_visit::Visit::visit_program(&mut shadows, program);
-    // One scan of the module body counts the type-space declarations of every candidate name.
-    let mut declared: FxHashMap<&str, usize> = candidates.iter().map(|(name, _)| (*name, 0)).collect();
-    for statement in &program.body {
-        #[cfg(test)]
-        steps::count_scanned();
-        type_space_names(statement, &mut |name| {
-            if let Some(count) = declared.get_mut(name) {
-                *count += 1;
-            }
-        });
-    }
+    let mut declarations = TypeDeclarations {
+        names: &candidates,
+        scopes: Vec::new(),
+        module_level: vec![0; candidates.len()],
+        shadowed_in: vec![Vec::new(); candidates.len()],
+    };
+    oxc_ast_visit::Visit::visit_program(&mut declarations, program);
+    let TypeDeclarations { module_level, shadowed_in, .. } = declarations;
     candidates
         .iter()
-        .zip(shadows.shadowed_in)
-        .filter(|((name, _), _)| declared.get(name) == Some(&1))
-        .map(|((name, queried), shadowed_in)| {
+        .zip(module_level)
+        .zip(shadowed_in)
+        .filter(|((_, module_level), _)| *module_level == 1)
+        .map(|(((name, queried), _), shadowed_in)| {
             (CompactString::from(*name), TypeofAlias { chain: CompactString::from(queried.as_str()), shadowed_in })
         })
         .collect()
@@ -738,18 +726,6 @@ pub(super) mod steps {
 
     pub(in crate::extractor) fn take_walks() -> u64 {
         WALKS.with(|walks| walks.replace(0))
-    }
-
-    thread_local!(static SCANNED: Cell<u64> = const { Cell::new(0) });
-
-    /// Counts the module-level statements `typeof_aliases` reads to count declarations, so a test can show that it
-    /// reads each once however many aliases the module has.
-    pub(in crate::extractor) fn count_scanned() {
-        SCANNED.with(|scanned| scanned.set(scanned.get() + 1));
-    }
-
-    pub(in crate::extractor) fn take_scanned() -> u64 {
-        SCANNED.with(|scanned| scanned.replace(0))
     }
 }
 

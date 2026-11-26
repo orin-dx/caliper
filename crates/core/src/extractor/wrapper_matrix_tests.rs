@@ -776,6 +776,21 @@ const DIFFERENTIAL_FORMS: &[(&str, &str, &str)] = &[
          function Base(props: ItemProps) { return <div />; }\n\
          export const Button = {C}<Props>(Base);",
     ),
+    (
+        "wrapper with two type arguments",
+        "wrap2",
+        "declare function wrap2<E, P>(View: React.ComponentType<P>): React.FC<P>;\n\
+         function Base(props: ItemProps) { return <div />; }\n\
+         export const Button = {C}<HTMLDivElement, Props>(Base);",
+    ),
+    // The value a wrapper or `Object.assign` receives, wrapped in place of a callee.
+    (
+        "Object.assign argument",
+        "Impl",
+        "function Impl(props: Props) { return <div />; }\n\
+         export const Root = Object.assign({C}, { Item: (props: ItemProps) => <div /> });",
+    ),
+    ("memo argument", "Impl", "function Impl(props: Props) { return <div />; }\nexport const Button = memo({C});"),
     ("class", "React.Component", "export class Button extends {C}<Props> { render() { return <div />; } }"),
     (
         "call-only helper",
@@ -935,7 +950,7 @@ fn differential_detections(source: &str) -> String {
 /// dropped as a helper and `Button` renders JSX of its own whatever the assertion says.
 fn differential_subject(form: &str) -> &'static str {
     match form {
-        "Object.assign" => "Root:",
+        "Object.assign" | "Object.assign argument" => "Root:",
         "PascalCase call returned" => "Normalize:",
         "generic wrapper" => "Wrapped:",
         "call-only helper" => "",
@@ -948,11 +963,55 @@ fn differential_subject(form: &str) -> &'static str {
 /// type withholds.
 fn differential_declines(case: &Case) -> Option<&'static str> {
     let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
-    if differential_subject(form).is_empty() {
+    if differential_subject(form).is_empty() || ARGUMENT_FORMS.contains(&form) {
         return None;
     }
     case.closed.or_else(|| (form == "factory" && !case.keeps).then_some("factory callee withheld"))
 }
+
+/// The forms whose wrapped expression is a value handed to a wrapper, not a callee: nothing calls it there, so the
+/// closed list says nothing about it, and the value beneath a cast is read as origin/main read it.
+const ARGUMENT_FORMS: &[&str] = &["Object.assign argument", "memo argument"];
+
+/// Review round 10: the forms the review named, a generic wrapper given its props in its type arguments through a
+/// replacing cast (`(wrap2 as Foo)<E, P>(Base)`) and a cast on the value a wrapper or `Object.assign` receives
+/// (`Object.assign(Impl as unknown as Other, { Item })`, `memo(Impl as Wrapped)`). Each row that does not decline
+/// extracts exactly what origin/main extracts for the form's plain, uncast call. Origin/main itself read some casts
+/// differently from its own plain call: `(wrap2 as typeof wrap2)<E, P>(Base)` as a factory of `wrap2` (`Button:wrap2`,
+/// as it did not peel a callee for the wrapper rule), and `Object.assign(Impl as X, { Item })` without `Item` (as it
+/// did not peel the first argument when it attached inline members). Those rows are counted, by form.
+#[test]
+fn the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain_call() {
+    let base = base_detections();
+    let forms = ["wrapper with two type arguments", "Object.assign argument", "memo argument"];
+    let mut failures = Vec::new();
+    let mut main_differs_from_its_plain_call = [0; 3];
+    for case in differential_cases() {
+        let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
+        let Some(index) = forms.iter().position(|named| *named == form) else { continue };
+        let plain = base.get(format!("{form} | plain").as_str()).copied().unwrap_or("not in the base table");
+        let main = base.get(case.id.as_str()).copied().unwrap_or("not in the base table");
+        let actual = differential_detections(&case.source);
+        if differential_declines(&case).is_some() {
+            if actual.split(' ').any(|d| d.starts_with(differential_subject(form))) {
+                failures.push(format!("{} declines: main `{main}`, now `{actual}`", case.id));
+            }
+            continue;
+        }
+        if actual != plain {
+            failures.push(format!("{}: main's plain call `{plain}`, main `{main}`, now `{actual}`", case.id));
+        }
+        if main != plain {
+            main_differs_from_its_plain_call[index] += 1;
+        }
+    }
+    assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
+    assert_eq!(main_differs_from_its_plain_call, [98, 108, 0]);
+}
+
+/// The forms where origin/main read a cast differently from its own plain call; the differential holds their rows to
+/// main's plain call instead (`the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain_call`).
+const MAIN_DIFFERS_FROM_ITS_PLAIN_CALL: &[&str] = &["wrapper with two type arguments", "Object.assign argument"];
 
 /// What origin/main (f4a88f93, oxc 0.158) extracts from each of `differential_cases()`, one `id<TAB>detections` line
 /// each, as `differential_detections` prints it. Produced by copying the block between `BEGIN DIFFERENTIAL CASES` and
@@ -972,8 +1031,12 @@ fn every_form_the_base_detected_is_still_detected_unless_its_result_is_on_the_cl
     assert_eq!(cases.len(), base.len(), "the base table and the cases are out of step");
     let mut failures = Vec::new();
     for case in &cases {
-        let Some(&expected) = base.get(case.id.as_str()) else { panic!("{} is not in the base table", case.id) };
+        let Some(&row) = base.get(case.id.as_str()) else { panic!("{} is not in the base table", case.id) };
         let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
+        let expected = match base.get(format!("{form} | plain").as_str()) {
+            Some(plain) if MAIN_DIFFERS_FROM_ITS_PLAIN_CALL.contains(&form) => plain,
+            Some(_) | None => row,
+        };
         let subject = differential_subject(form);
         let actual = differential_detections(&case.source);
         let found: Vec<&str> = actual.split(' ').collect();
@@ -1009,7 +1072,8 @@ fn each_closed_list_entry_declines_every_form() {
         for case in rows {
             let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
             let subject = differential_subject(form);
-            if subject.is_empty() {
+            // A form with no candidate of its own, or whose cast value is handed on rather than called.
+            if differential_declines(case).is_none() {
                 continue;
             }
             let actual = differential_detections(&case.source);
@@ -1031,7 +1095,7 @@ fn each_closed_list_entry_declines_every_form() {
     assert_eq!(by_reason.iter().map(|(_, n)| n).sum::<usize>(), declined.len(), "{}", declined.join("\n"));
     assert_eq!(
         by_reason,
-        [("object", 47), ("symbol", 18), ("void", 25), ("factory callee withheld", 90)],
+        [("object", 52), ("symbol", 20), ("void", 28), ("factory callee withheld", 90)],
         "{}",
         declined.join("\n")
     );
@@ -1130,27 +1194,26 @@ fn an_instantiated_value_is_read_as_origin_main_reads_it() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Finding 1 of round 9: the declarations of every `typeof` alias's name are counted in one scan of the module body,
-/// however many aliases there are, and a module with none is not scanned or walked.
+/// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing
+/// scopes found in one walk of the module, however many aliases there are; a module with none is not walked.
 #[test]
-fn every_typeof_alias_is_counted_in_one_scan_of_the_module() {
+fn every_typeof_alias_is_counted_in_one_walk_of_the_module() {
     let cost = |aliases: usize| {
-        let mut source = String::new();
+        let mut source = String::from(HEADER);
         for i in 0..aliases {
             source.push_str(&format!("declare function make{i}(): unknown;\ntype Factory{i} = typeof make{i};\n"));
         }
         source.push_str("export const Button = memo((props: Props) => <div />);\n");
-        super::component::steps::take_scanned();
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
         super::component::steps::take_walks();
-        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &format!("{HEADER}{source}"));
-        assert_eq!(data.component_mappings.len(), 1, "{source}");
-        (super::component::steps::take_scanned(), super::component::steps::take_walks())
+        let kept = super::component::typeof_aliases(&parsed.program).len();
+        (kept, super::component::steps::take_walks())
     };
-    // `HEADER` has two statements and the module one more, besides each alias's two.
     assert_eq!(cost(0), (0, 0));
-    assert_eq!(cost(1), (5, 1));
-    assert_eq!(cost(10), (23, 1));
-    assert_eq!(cost(40), (83, 1));
+    assert_eq!(cost(1), (1, 1));
+    assert_eq!(cost(10), (10, 1));
+    assert_eq!(cost(40), (40, 1));
 }
 
 /// Finding 3: a name declared again in an inner scope shadows the module's `typeof` alias only there; the module's
@@ -1174,6 +1237,8 @@ fn a_typeof_alias_is_shadowed_only_where_its_name_is_declared_again() {
         "namespace N.M { interface Factory { (): string } }",
         "declare module 'm' { type Factory = () => string; }",
         "function f() { type Factory = () => string; }",
+        "export as namespace Factory;",
+        "try {} catch (e) { type Factory = () => string; }",
     ] {
         assert_eq!(asserted(other), plain, "{other}");
     }
@@ -1185,6 +1250,11 @@ fn a_typeof_alias_is_shadowed_only_where_its_name_is_declared_again() {
         "class Factory {}",
         "export enum Factory { A }",
         "namespace Factory {}",
+        "export declare type Factory = () => string;",
+        "import Factory = require('./factory');",
+        "import type Factory = require('./factory');",
+        "export default interface Factory { (): string }",
+        "export default class Factory {}",
     ] {
         assert_eq!(asserted(other), Vec::<serde_json::Value>::new(), "{other}");
         // The declined factory call is the skip any unmatched PascalCase binding is, not silence.
@@ -1361,6 +1431,27 @@ fn a_redeclaration_around_the_cast_shadows_the_alias() {
         ("const C = class Factory { m() { return (make as Factory)(); } };", Some(false)),
         ("type M = { [Factory in 'a']: Factory };\nconst v = (make as Factory)();", Some(true)),
         ("import type { Factory } from './f';\nconst v = (make as Factory)();", None),
+        // Round 10: one walker for every kind.
+        ("enum E { A = (make as Factory)() }", Some(true)),
+        ("function g() { type Factory = string; enum E { A = (make as Factory)() } }", Some(false)),
+        ("enum E { A = (<Factory,>() => (make as Factory)())() }", Some(false)),
+        ("try {} catch (e) { type Factory = string; const v = (make as Factory)(); }", Some(false)),
+        ("try {} catch (e) { type Factory = string; }\nconst v = (make as Factory)();", Some(true)),
+        ("function g(v = (make as Factory)()) { type Factory = string; }", Some(true)),
+        ("const g = (v = (make as Factory)()) => { type Factory = string; };", Some(true)),
+        ("function g<Factory>(v = (make as Factory)()) {}", Some(false)),
+        ("class K { static { type Factory = string; (make as Factory)(); } }", Some(false)),
+        ("class K { static { type Factory = string; } m() { return (make as Factory)(); } }", Some(true)),
+        (
+            "declare module 'm' { import Factory from 'f'; export function h(): typeof Factory; }\n(make as Factory)();",
+            Some(true),
+        ),
+        ("export = make;\nconst v = (make as Factory)();", Some(true)),
+        ("export declare type Factory = string;\nconst v = (make as Factory)();", None),
+        ("import Factory = require('f');\nconst v = (make as Factory)();", None),
+        ("import type Factory = require('f');\nconst v = (make as Factory)();", None),
+        ("export default interface Factory {}\nconst v = (make as Factory)();", None),
+        ("export default class Factory {}\nconst v = (make as Factory)();", None),
     ] {
         assert_eq!(means(&format!("{alias}{scope}")), expected, "{scope}");
     }

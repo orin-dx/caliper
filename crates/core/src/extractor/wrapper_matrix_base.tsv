@@ -1338,6 +1338,336 @@ wrapper naming the props | returns empty literal, namespace method	Base:ItemProp
 wrapper naming the props | returns generic T	Base:ItemProps
 wrapper naming the props | returns indexed access	Base:ItemProps
 wrapper naming the props | returns conditional	Base:ItemProps
+wrapper with two type arguments | plain	Base:ItemProps Button:Props
+wrapper with two type arguments | parentheses	Base:ItemProps Button:Props
+wrapper with two type arguments | typeof itself	Base:ItemProps Button:wrap2
+wrapper with two type arguments | typeof another	Base:ItemProps Button:wrap2
+wrapper with two type arguments | alias of typeof itself	Base:ItemProps Button:wrap2
+wrapper with two type arguments | unresolved reference	Base:ItemProps Button:wrap2
+wrapper with two type arguments | any	Base:ItemProps Button:wrap2
+wrapper with two type arguments | unknown	Base:ItemProps Button:wrap2
+wrapper with two type arguments | object	Base:ItemProps Button:wrap2
+wrapper with two type arguments | callable literal, FC	Base:ItemProps Button:wrap2
+wrapper with two type arguments | callable literal, object	Base:ItemProps Button:wrap2
+wrapper with two type arguments | callable literal, no result	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, FC	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, ReactElement	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, ReactNode	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, ReactElement | null	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, string	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, string | null	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, object	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, object literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, void	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, unknown	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, unknown[]	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function, literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | generic function, FC	Base:ItemProps Button:wrap2
+wrapper with two type arguments | object, then typeof itself	Base:ItemProps Button:wrap2
+wrapper with two type arguments | typeof itself, then object	Base:ItemProps Button:wrap2
+wrapper with two type arguments | unknown, then function object	Base:ItemProps Button:wrap2
+wrapper with two type arguments | function object, then unknown	Base:ItemProps Button:wrap2
+wrapper with two type arguments | satisfies	Base:ItemProps Button:wrap2
+wrapper with two type arguments | non-null	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns any, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns any, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns any, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns any, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns any[], function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns any[], callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns any[], union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns any[], intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns unknown, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns unknown, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns unknown, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns unknown, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns unknown[], function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns unknown[], callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns unknown[], union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns unknown[], intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns object, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns object, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns object, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns object, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns symbol, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns symbol, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns symbol, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns symbol, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns void, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns void, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns void, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns void, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns never, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns never, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns never, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns never, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns string, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns string, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns string, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns string, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns number, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns number, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns number, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns number, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns null, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns null, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns null, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns null, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns boolean, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns boolean, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns boolean, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns boolean, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ReactNode, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ReactNode, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ReactNode, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ReactNode, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ReactElement, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ReactElement, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ReactElement, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ReactElement, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns JSX.Element, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns JSX.Element, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns JSX.Element, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns JSX.Element, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns FC<P>, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns FC<P>, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns FC<P>, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns FC<P>, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ComponentType<P>, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ComponentType<P>, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ComponentType<P>, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns ComponentType<P>, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns element-shaped literal, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns element-shaped literal, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns element-shaped literal, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns element-shaped literal, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns empty literal, function	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns empty literal, callable literal	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns empty literal, union	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns empty literal, intersection	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns generic T	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns indexed access	Base:ItemProps Button:wrap2
+wrapper with two type arguments | returns conditional	Base:ItemProps Button:wrap2
+Object.assign argument | plain	Item:ItemProps Root:Props
+Object.assign argument | parentheses	Item:ItemProps Root:Props
+Object.assign argument | typeof itself	Root:Props
+Object.assign argument | typeof another	Root:Props
+Object.assign argument | alias of typeof itself	Root:Props
+Object.assign argument | unresolved reference	Root:Props
+Object.assign argument | any	Root:Props
+Object.assign argument | unknown	Root:Props
+Object.assign argument | object	Root:Props
+Object.assign argument | callable literal, FC	Root:Props
+Object.assign argument | callable literal, object	Root:Props
+Object.assign argument | callable literal, no result	Root:Props
+Object.assign argument | function, FC	Root:Props
+Object.assign argument | function, ReactElement	Root:Props
+Object.assign argument | function, ReactNode	Root:Props
+Object.assign argument | function, ReactElement | null	Root:Props
+Object.assign argument | function, string	Root:Props
+Object.assign argument | function, string | null	Root:Props
+Object.assign argument | function, object	Root:Props
+Object.assign argument | function, object literal	Root:Props
+Object.assign argument | function, void	Root:Props
+Object.assign argument | function, unknown	Root:Props
+Object.assign argument | function, unknown[]	Root:Props
+Object.assign argument | function, literal	Root:Props
+Object.assign argument | generic function, FC	Root:Props
+Object.assign argument | object, then typeof itself	Root:Props
+Object.assign argument | typeof itself, then object	Root:Props
+Object.assign argument | unknown, then function object	Root:Props
+Object.assign argument | function object, then unknown	Root:Props
+Object.assign argument | satisfies	Root:Props
+Object.assign argument | non-null	Root:Props
+Object.assign argument | returns any, function	Root:Props
+Object.assign argument | returns any, callable literal	Root:Props
+Object.assign argument | returns any, union	Root:Props
+Object.assign argument | returns any, intersection	Root:Props
+Object.assign argument | returns any[], function	Root:Props
+Object.assign argument | returns any[], callable literal	Root:Props
+Object.assign argument | returns any[], union	Root:Props
+Object.assign argument | returns any[], intersection	Root:Props
+Object.assign argument | returns unknown, function	Root:Props
+Object.assign argument | returns unknown, callable literal	Root:Props
+Object.assign argument | returns unknown, union	Root:Props
+Object.assign argument | returns unknown, intersection	Root:Props
+Object.assign argument | returns unknown[], function	Root:Props
+Object.assign argument | returns unknown[], callable literal	Root:Props
+Object.assign argument | returns unknown[], union	Root:Props
+Object.assign argument | returns unknown[], intersection	Root:Props
+Object.assign argument | returns object, function	Root:Props
+Object.assign argument | returns object, callable literal	Root:Props
+Object.assign argument | returns object, union	Root:Props
+Object.assign argument | returns object, intersection	Root:Props
+Object.assign argument | returns symbol, function	Root:Props
+Object.assign argument | returns symbol, callable literal	Root:Props
+Object.assign argument | returns symbol, union	Root:Props
+Object.assign argument | returns symbol, intersection	Root:Props
+Object.assign argument | returns void, function	Root:Props
+Object.assign argument | returns void, callable literal	Root:Props
+Object.assign argument | returns void, union	Root:Props
+Object.assign argument | returns void, intersection	Root:Props
+Object.assign argument | returns never, function	Root:Props
+Object.assign argument | returns never, callable literal	Root:Props
+Object.assign argument | returns never, union	Root:Props
+Object.assign argument | returns never, intersection	Root:Props
+Object.assign argument | returns string, function	Root:Props
+Object.assign argument | returns string, callable literal	Root:Props
+Object.assign argument | returns string, union	Root:Props
+Object.assign argument | returns string, intersection	Root:Props
+Object.assign argument | returns number, function	Root:Props
+Object.assign argument | returns number, callable literal	Root:Props
+Object.assign argument | returns number, union	Root:Props
+Object.assign argument | returns number, intersection	Root:Props
+Object.assign argument | returns null, function	Root:Props
+Object.assign argument | returns null, callable literal	Root:Props
+Object.assign argument | returns null, union	Root:Props
+Object.assign argument | returns null, intersection	Root:Props
+Object.assign argument | returns boolean, function	Root:Props
+Object.assign argument | returns boolean, callable literal	Root:Props
+Object.assign argument | returns boolean, union	Root:Props
+Object.assign argument | returns boolean, intersection	Root:Props
+Object.assign argument | returns ReactNode, function	Root:Props
+Object.assign argument | returns ReactNode, callable literal	Root:Props
+Object.assign argument | returns ReactNode, union	Root:Props
+Object.assign argument | returns ReactNode, intersection	Root:Props
+Object.assign argument | returns ReactElement, function	Root:Props
+Object.assign argument | returns ReactElement, callable literal	Root:Props
+Object.assign argument | returns ReactElement, union	Root:Props
+Object.assign argument | returns ReactElement, intersection	Root:Props
+Object.assign argument | returns JSX.Element, function	Root:Props
+Object.assign argument | returns JSX.Element, callable literal	Root:Props
+Object.assign argument | returns JSX.Element, union	Root:Props
+Object.assign argument | returns JSX.Element, intersection	Root:Props
+Object.assign argument | returns FC<P>, function	Root:Props
+Object.assign argument | returns FC<P>, callable literal	Root:Props
+Object.assign argument | returns FC<P>, union	Root:Props
+Object.assign argument | returns FC<P>, intersection	Root:Props
+Object.assign argument | returns ComponentType<P>, function	Root:Props
+Object.assign argument | returns ComponentType<P>, callable literal	Root:Props
+Object.assign argument | returns ComponentType<P>, union	Root:Props
+Object.assign argument | returns ComponentType<P>, intersection	Root:Props
+Object.assign argument | returns element-shaped literal, function	Root:Props
+Object.assign argument | returns element-shaped literal, callable literal	Root:Props
+Object.assign argument | returns element-shaped literal, union	Root:Props
+Object.assign argument | returns element-shaped literal, intersection	Root:Props
+Object.assign argument | returns empty literal, function	Root:Props
+Object.assign argument | returns empty literal, callable literal	Root:Props
+Object.assign argument | returns empty literal, union	Root:Props
+Object.assign argument | returns empty literal, intersection	Root:Props
+Object.assign argument | returns generic T	Root:Props
+Object.assign argument | returns indexed access	Root:Props
+Object.assign argument | returns conditional	Root:Props
+memo argument | plain	Button:Props
+memo argument | parentheses	Button:Props
+memo argument | typeof itself	Button:Props
+memo argument | typeof another	Button:Props
+memo argument | alias of typeof itself	Button:Props
+memo argument | unresolved reference	Button:Props
+memo argument | any	Button:Props
+memo argument | unknown	Button:Props
+memo argument | object	Button:Props
+memo argument | callable literal, FC	Button:Props
+memo argument | callable literal, object	Button:Props
+memo argument | callable literal, no result	Button:Props
+memo argument | function, FC	Button:Props
+memo argument | function, ReactElement	Button:Props
+memo argument | function, ReactNode	Button:Props
+memo argument | function, ReactElement | null	Button:Props
+memo argument | function, string	Button:Props
+memo argument | function, string | null	Button:Props
+memo argument | function, object	Button:Props
+memo argument | function, object literal	Button:Props
+memo argument | function, void	Button:Props
+memo argument | function, unknown	Button:Props
+memo argument | function, unknown[]	Button:Props
+memo argument | function, literal	Button:Props
+memo argument | generic function, FC	Button:Props
+memo argument | object, then typeof itself	Button:Props
+memo argument | typeof itself, then object	Button:Props
+memo argument | unknown, then function object	Button:Props
+memo argument | function object, then unknown	Button:Props
+memo argument | satisfies	Button:Props
+memo argument | non-null	Button:Props
+memo argument | returns any, function	Button:Props
+memo argument | returns any, callable literal	Button:Props
+memo argument | returns any, union	Button:Props
+memo argument | returns any, intersection	Button:Props
+memo argument | returns any[], function	Button:Props
+memo argument | returns any[], callable literal	Button:Props
+memo argument | returns any[], union	Button:Props
+memo argument | returns any[], intersection	Button:Props
+memo argument | returns unknown, function	Button:Props
+memo argument | returns unknown, callable literal	Button:Props
+memo argument | returns unknown, union	Button:Props
+memo argument | returns unknown, intersection	Button:Props
+memo argument | returns unknown[], function	Button:Props
+memo argument | returns unknown[], callable literal	Button:Props
+memo argument | returns unknown[], union	Button:Props
+memo argument | returns unknown[], intersection	Button:Props
+memo argument | returns object, function	Button:Props
+memo argument | returns object, callable literal	Button:Props
+memo argument | returns object, union	Button:Props
+memo argument | returns object, intersection	Button:Props
+memo argument | returns symbol, function	Button:Props
+memo argument | returns symbol, callable literal	Button:Props
+memo argument | returns symbol, union	Button:Props
+memo argument | returns symbol, intersection	Button:Props
+memo argument | returns void, function	Button:Props
+memo argument | returns void, callable literal	Button:Props
+memo argument | returns void, union	Button:Props
+memo argument | returns void, intersection	Button:Props
+memo argument | returns never, function	Button:Props
+memo argument | returns never, callable literal	Button:Props
+memo argument | returns never, union	Button:Props
+memo argument | returns never, intersection	Button:Props
+memo argument | returns string, function	Button:Props
+memo argument | returns string, callable literal	Button:Props
+memo argument | returns string, union	Button:Props
+memo argument | returns string, intersection	Button:Props
+memo argument | returns number, function	Button:Props
+memo argument | returns number, callable literal	Button:Props
+memo argument | returns number, union	Button:Props
+memo argument | returns number, intersection	Button:Props
+memo argument | returns null, function	Button:Props
+memo argument | returns null, callable literal	Button:Props
+memo argument | returns null, union	Button:Props
+memo argument | returns null, intersection	Button:Props
+memo argument | returns boolean, function	Button:Props
+memo argument | returns boolean, callable literal	Button:Props
+memo argument | returns boolean, union	Button:Props
+memo argument | returns boolean, intersection	Button:Props
+memo argument | returns ReactNode, function	Button:Props
+memo argument | returns ReactNode, callable literal	Button:Props
+memo argument | returns ReactNode, union	Button:Props
+memo argument | returns ReactNode, intersection	Button:Props
+memo argument | returns ReactElement, function	Button:Props
+memo argument | returns ReactElement, callable literal	Button:Props
+memo argument | returns ReactElement, union	Button:Props
+memo argument | returns ReactElement, intersection	Button:Props
+memo argument | returns JSX.Element, function	Button:Props
+memo argument | returns JSX.Element, callable literal	Button:Props
+memo argument | returns JSX.Element, union	Button:Props
+memo argument | returns JSX.Element, intersection	Button:Props
+memo argument | returns FC<P>, function	Button:Props
+memo argument | returns FC<P>, callable literal	Button:Props
+memo argument | returns FC<P>, union	Button:Props
+memo argument | returns FC<P>, intersection	Button:Props
+memo argument | returns ComponentType<P>, function	Button:Props
+memo argument | returns ComponentType<P>, callable literal	Button:Props
+memo argument | returns ComponentType<P>, union	Button:Props
+memo argument | returns ComponentType<P>, intersection	Button:Props
+memo argument | returns element-shaped literal, function	Button:Props
+memo argument | returns element-shaped literal, callable literal	Button:Props
+memo argument | returns element-shaped literal, union	Button:Props
+memo argument | returns element-shaped literal, intersection	Button:Props
+memo argument | returns empty literal, function	Button:Props
+memo argument | returns empty literal, callable literal	Button:Props
+memo argument | returns empty literal, union	Button:Props
+memo argument | returns empty literal, intersection	Button:Props
+memo argument | returns generic T	Button:Props
+memo argument | returns indexed access	Button:Props
+memo argument | returns conditional	Button:Props
 class | plain	Button:Props
 class | parentheses	Button:Props
 class | typeof itself	-
