@@ -531,13 +531,39 @@ fn chain_names(chain: &str, expr: &Expression<'_>) -> bool {
 /// declaration of the same name shadows it.
 pub(crate) struct TypeofAlias {
     pub(super) chain: CompactString,
+    /// The shadowing scopes, sorted and with nested ones merged into the scope around them: disjoint, as scopes nest
+    /// or are apart and never partly overlap.
     shadowed_in: Vec<oxc_span::Span>,
 }
 
 impl TypeofAlias {
-    /// Whether a reference to the alias at `at` means it: no scope around `at` declares the name again.
+    fn new(chain: &str, mut shadowed_in: Vec<oxc_span::Span>) -> Self {
+        shadowed_in.sort_unstable_by_key(|scope| (scope.start, std::cmp::Reverse(scope.end)));
+        let mut merged: Vec<oxc_span::Span> = Vec::with_capacity(shadowed_in.len());
+        for scope in shadowed_in {
+            match merged.last_mut() {
+                Some(last) if scope.start < last.end => last.end = last.end.max(scope.end),
+                Some(_) | None => merged.push(scope),
+            }
+        }
+        Self { chain: CompactString::from(chain), shadowed_in: merged }
+    }
+
+    /// Whether a reference to the alias at `at` means it: no scope around `at` declares the name again. A binary
+    /// search for the last scope that starts at or before `at`.
     pub(super) fn means_at(&self, at: oxc_span::Span) -> bool {
-        !self.shadowed_in.iter().any(|scope| scope.start <= at.start && at.end <= scope.end)
+        let (mut low, mut high) = (0, self.shadowed_in.len());
+        while low < high {
+            #[cfg(test)]
+            steps::count_probed();
+            let middle = low + (high - low) / 2;
+            if self.shadowed_in[middle].start <= at.start {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        !low.checked_sub(1).is_some_and(|index| at.end <= self.shadowed_in[index].end)
     }
 }
 
@@ -689,14 +715,33 @@ impl<'a> oxc_ast_visit::Visit<'a> for TypeDeclarations<'_> {
 /// declaration of the name in an inner scope shadows the alias only inside that scope ([`TypeofAlias::means_at`]).
 /// The module is walked once ([`TypeDeclarations`]), and only when it has such an alias.
 pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, TypeofAlias> {
-    fn chain(name: &TSTypeName<'_>) -> Option<String> {
-        match name {
-            TSTypeName::IdentifierReference(id) => Some(id.name.as_str().to_owned()),
-            TSTypeName::QualifiedName(qualified) => {
-                Some(format!("{}.{}", chain(&qualified.left)?, qualified.right.name))
+    /// `A.B.C` as one dotted string, written into one buffer left to right, so a long chain costs its length.
+    fn chain(name: &TSTypeName<'_>, last: Option<&str>) -> Option<String> {
+        let mut segments: Vec<&str> = last.into_iter().collect();
+        let mut current = name;
+        loop {
+            match current {
+                TSTypeName::IdentifierReference(id) => {
+                    segments.push(id.name.as_str());
+                    break;
+                }
+                TSTypeName::QualifiedName(qualified) => {
+                    segments.push(qualified.right.name.as_str());
+                    current = &qualified.left;
+                }
+                TSTypeName::ThisExpression(_) => return None,
             }
-            TSTypeName::ThisExpression(_) => None,
         }
+        let mut out = String::with_capacity(segments.iter().map(|segment| segment.len() + 1).sum());
+        for (index, segment) in segments.iter().rev().enumerate() {
+            if index > 0 {
+                out.push('.');
+            }
+            out.push_str(segment);
+            #[cfg(test)]
+            steps::count_written(segment.len() as u64 + 1);
+        }
+        Some(out)
     }
     let mut candidates: Vec<(&str, String)> = Vec::new();
     for statement in &program.body {
@@ -716,7 +761,7 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
         let queried = match &query.expr_name {
             TSTypeQueryExprName::IdentifierReference(id) => Some(id.name.as_str().to_owned()),
             TSTypeQueryExprName::QualifiedName(qualified) => {
-                chain(&qualified.left).map(|left| format!("{left}.{}", qualified.right.name))
+                chain(&qualified.left, Some(qualified.right.name.as_str()))
             }
             TSTypeQueryExprName::ThisExpression(_) | TSTypeQueryExprName::TSImportType(_) => None,
         };
@@ -746,9 +791,7 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
         .zip(module_level)
         .zip(shadowed_in)
         .filter(|((_, module_level), _)| *module_level == 1)
-        .map(|(((name, queried), _), shadowed_in)| {
-            (CompactString::from(*name), TypeofAlias { chain: CompactString::from(queried.as_str()), shadowed_in })
-        })
+        .map(|(((name, queried), _), shadowed_in)| (CompactString::from(*name), TypeofAlias::new(queried, shadowed_in)))
         .collect()
 }
 
@@ -789,6 +832,28 @@ pub(super) mod steps {
 
     pub(in crate::extractor) fn take_examined() -> u64 {
         EXAMINED.with(|examined| examined.replace(0))
+    }
+
+    thread_local!(static WRITTEN: Cell<u64> = const { Cell::new(0) });
+
+    /// Counts the bytes `typeof_aliases` writes to build a queried chain's name.
+    pub(in crate::extractor) fn count_written(n: u64) {
+        WRITTEN.with(|written| written.set(written.get() + n));
+    }
+
+    pub(in crate::extractor) fn take_written() -> u64 {
+        WRITTEN.with(|written| written.replace(0))
+    }
+
+    thread_local!(static PROBED: Cell<u64> = const { Cell::new(0) });
+
+    /// Counts the shadowing scopes `TypeofAlias::means_at` probes.
+    pub(in crate::extractor) fn count_probed() {
+        PROBED.with(|probed| probed.set(probed.get() + 1));
+    }
+
+    pub(in crate::extractor) fn take_probed() -> u64 {
+        PROBED.with(|probed| probed.replace(0))
     }
 }
 

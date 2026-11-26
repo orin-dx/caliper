@@ -1876,6 +1876,574 @@ context | returns empty literal, namespace method	-
 context | returns generic T	-
 context | returns indexed access	-
 context | returns conditional	-
+createElement call | plain	Button:Props Foo:Props
+createElement call | parentheses	Button:Props Foo:Props
+createElement call | typeof itself	Foo:Props
+createElement call | typeof another	Foo:Props
+createElement call | alias of typeof itself	Foo:Props
+createElement call | unresolved reference	Foo:Props
+createElement call | any	Foo:Props
+createElement call | unknown	Foo:Props
+createElement call | object	Foo:Props
+createElement call | callable literal, FC	Foo:Props
+createElement call | callable literal, object	Foo:Props
+createElement call | callable literal, no result	Foo:Props
+createElement call | function, FC	Foo:Props
+createElement call | function, ReactElement	Foo:Props
+createElement call | function, ReactNode	Foo:Props
+createElement call | function, ReactElement | null	Foo:Props
+createElement call | function, string	Foo:Props
+createElement call | function, string | null	Foo:Props
+createElement call | function, object	Foo:Props
+createElement call | function, object literal	Foo:Props
+createElement call | function, void	Foo:Props
+createElement call | function, unknown	Foo:Props
+createElement call | function, unknown[]	Foo:Props
+createElement call | function, literal	Foo:Props
+createElement call | generic function, FC	Foo:Props
+createElement call | object, then typeof itself	Foo:Props
+createElement call | typeof itself, then object	Foo:Props
+createElement call | unknown, then function object	Foo:Props
+createElement call | function object, then unknown	Foo:Props
+createElement call | satisfies	Foo:Props
+createElement call | non-null	Foo:Props
+createElement call | namespace any	Button:Props Foo:Props
+createElement call | namespace object	Button:Props Foo:Props
+createElement call | namespace typeof itself	Button:Props Foo:Props
+createElement call | namespace member typeof itself	Button:Props Foo:Props
+createElement call | namespace member function object	Button:Props Foo:Props
+createElement call | namespace method object	Button:Props Foo:Props
+createElement call | namespace method FC	Button:Props Foo:Props
+createElement call | namespace call signature, member typeof itself	Button:Props Foo:Props
+createElement call | construct Component, call void	Foo:Props
+createElement call | construct object, call FC	Foo:Props
+createElement call | constructor type, object	Foo:Props
+createElement call | constructor type, Component	Foo:Props
+createElement call | namespace member construct Component, call void	Button:Props Foo:Props
+createElement call | returns any, function	Foo:Props
+createElement call | returns any, callable literal	Foo:Props
+createElement call | returns any, union	Foo:Props
+createElement call | returns any, intersection	Foo:Props
+createElement call | returns any, namespace method	Button:Props Foo:Props
+createElement call | returns any[], function	Foo:Props
+createElement call | returns any[], callable literal	Foo:Props
+createElement call | returns any[], union	Foo:Props
+createElement call | returns any[], intersection	Foo:Props
+createElement call | returns any[], namespace method	Button:Props Foo:Props
+createElement call | returns unknown, function	Foo:Props
+createElement call | returns unknown, callable literal	Foo:Props
+createElement call | returns unknown, union	Foo:Props
+createElement call | returns unknown, intersection	Foo:Props
+createElement call | returns unknown, namespace method	Button:Props Foo:Props
+createElement call | returns unknown[], function	Foo:Props
+createElement call | returns unknown[], callable literal	Foo:Props
+createElement call | returns unknown[], union	Foo:Props
+createElement call | returns unknown[], intersection	Foo:Props
+createElement call | returns unknown[], namespace method	Button:Props Foo:Props
+createElement call | returns object, function	Foo:Props
+createElement call | returns object, callable literal	Foo:Props
+createElement call | returns object, union	Foo:Props
+createElement call | returns object, intersection	Foo:Props
+createElement call | returns object, namespace method	Button:Props Foo:Props
+createElement call | returns symbol, function	Foo:Props
+createElement call | returns symbol, callable literal	Foo:Props
+createElement call | returns symbol, union	Foo:Props
+createElement call | returns symbol, intersection	Foo:Props
+createElement call | returns symbol, namespace method	Button:Props Foo:Props
+createElement call | returns void, function	Foo:Props
+createElement call | returns void, callable literal	Foo:Props
+createElement call | returns void, union	Foo:Props
+createElement call | returns void, intersection	Foo:Props
+createElement call | returns void, namespace method	Button:Props Foo:Props
+createElement call | returns never, function	Foo:Props
+createElement call | returns never, callable literal	Foo:Props
+createElement call | returns never, union	Foo:Props
+createElement call | returns never, intersection	Foo:Props
+createElement call | returns never, namespace method	Button:Props Foo:Props
+createElement call | returns string, function	Foo:Props
+createElement call | returns string, callable literal	Foo:Props
+createElement call | returns string, union	Foo:Props
+createElement call | returns string, intersection	Foo:Props
+createElement call | returns string, namespace method	Button:Props Foo:Props
+createElement call | returns number, function	Foo:Props
+createElement call | returns number, callable literal	Foo:Props
+createElement call | returns number, union	Foo:Props
+createElement call | returns number, intersection	Foo:Props
+createElement call | returns number, namespace method	Button:Props Foo:Props
+createElement call | returns null, function	Foo:Props
+createElement call | returns null, callable literal	Foo:Props
+createElement call | returns null, union	Foo:Props
+createElement call | returns null, intersection	Foo:Props
+createElement call | returns null, namespace method	Button:Props Foo:Props
+createElement call | returns boolean, function	Foo:Props
+createElement call | returns boolean, callable literal	Foo:Props
+createElement call | returns boolean, union	Foo:Props
+createElement call | returns boolean, intersection	Foo:Props
+createElement call | returns boolean, namespace method	Button:Props Foo:Props
+createElement call | returns ReactNode, function	Foo:Props
+createElement call | returns ReactNode, callable literal	Foo:Props
+createElement call | returns ReactNode, union	Foo:Props
+createElement call | returns ReactNode, intersection	Foo:Props
+createElement call | returns ReactNode, namespace method	Button:Props Foo:Props
+createElement call | returns ReactElement, function	Foo:Props
+createElement call | returns ReactElement, callable literal	Foo:Props
+createElement call | returns ReactElement, union	Foo:Props
+createElement call | returns ReactElement, intersection	Foo:Props
+createElement call | returns ReactElement, namespace method	Button:Props Foo:Props
+createElement call | returns JSX.Element, function	Foo:Props
+createElement call | returns JSX.Element, callable literal	Foo:Props
+createElement call | returns JSX.Element, union	Foo:Props
+createElement call | returns JSX.Element, intersection	Foo:Props
+createElement call | returns JSX.Element, namespace method	Button:Props Foo:Props
+createElement call | returns FC<P>, function	Foo:Props
+createElement call | returns FC<P>, callable literal	Foo:Props
+createElement call | returns FC<P>, union	Foo:Props
+createElement call | returns FC<P>, intersection	Foo:Props
+createElement call | returns FC<P>, namespace method	Button:Props Foo:Props
+createElement call | returns ComponentType<P>, function	Foo:Props
+createElement call | returns ComponentType<P>, callable literal	Foo:Props
+createElement call | returns ComponentType<P>, union	Foo:Props
+createElement call | returns ComponentType<P>, intersection	Foo:Props
+createElement call | returns ComponentType<P>, namespace method	Button:Props Foo:Props
+createElement call | returns element-shaped literal, function	Foo:Props
+createElement call | returns element-shaped literal, callable literal	Foo:Props
+createElement call | returns element-shaped literal, union	Foo:Props
+createElement call | returns element-shaped literal, intersection	Foo:Props
+createElement call | returns element-shaped literal, namespace method	Button:Props Foo:Props
+createElement call | returns empty literal, function	Foo:Props
+createElement call | returns empty literal, callable literal	Foo:Props
+createElement call | returns empty literal, union	Foo:Props
+createElement call | returns empty literal, intersection	Foo:Props
+createElement call | returns empty literal, namespace method	Button:Props Foo:Props
+createElement call | returns generic T	Foo:Props
+createElement call | returns indexed access	Foo:Props
+createElement call | returns conditional	Foo:Props
+cloneElement call | plain	Button:Props Foo:Props
+cloneElement call | parentheses	Button:Props Foo:Props
+cloneElement call | typeof itself	Foo:Props
+cloneElement call | typeof another	Foo:Props
+cloneElement call | alias of typeof itself	Foo:Props
+cloneElement call | unresolved reference	Foo:Props
+cloneElement call | any	Foo:Props
+cloneElement call | unknown	Foo:Props
+cloneElement call | object	Foo:Props
+cloneElement call | callable literal, FC	Foo:Props
+cloneElement call | callable literal, object	Foo:Props
+cloneElement call | callable literal, no result	Foo:Props
+cloneElement call | function, FC	Foo:Props
+cloneElement call | function, ReactElement	Foo:Props
+cloneElement call | function, ReactNode	Foo:Props
+cloneElement call | function, ReactElement | null	Foo:Props
+cloneElement call | function, string	Foo:Props
+cloneElement call | function, string | null	Foo:Props
+cloneElement call | function, object	Foo:Props
+cloneElement call | function, object literal	Foo:Props
+cloneElement call | function, void	Foo:Props
+cloneElement call | function, unknown	Foo:Props
+cloneElement call | function, unknown[]	Foo:Props
+cloneElement call | function, literal	Foo:Props
+cloneElement call | generic function, FC	Foo:Props
+cloneElement call | object, then typeof itself	Foo:Props
+cloneElement call | typeof itself, then object	Foo:Props
+cloneElement call | unknown, then function object	Foo:Props
+cloneElement call | function object, then unknown	Foo:Props
+cloneElement call | satisfies	Foo:Props
+cloneElement call | non-null	Foo:Props
+cloneElement call | namespace any	Button:Props Foo:Props
+cloneElement call | namespace object	Button:Props Foo:Props
+cloneElement call | namespace typeof itself	Button:Props Foo:Props
+cloneElement call | namespace member typeof itself	Button:Props Foo:Props
+cloneElement call | namespace member function object	Button:Props Foo:Props
+cloneElement call | namespace method object	Button:Props Foo:Props
+cloneElement call | namespace method FC	Button:Props Foo:Props
+cloneElement call | namespace call signature, member typeof itself	Button:Props Foo:Props
+cloneElement call | construct Component, call void	Foo:Props
+cloneElement call | construct object, call FC	Foo:Props
+cloneElement call | constructor type, object	Foo:Props
+cloneElement call | constructor type, Component	Foo:Props
+cloneElement call | namespace member construct Component, call void	Button:Props Foo:Props
+cloneElement call | returns any, function	Foo:Props
+cloneElement call | returns any, callable literal	Foo:Props
+cloneElement call | returns any, union	Foo:Props
+cloneElement call | returns any, intersection	Foo:Props
+cloneElement call | returns any, namespace method	Button:Props Foo:Props
+cloneElement call | returns any[], function	Foo:Props
+cloneElement call | returns any[], callable literal	Foo:Props
+cloneElement call | returns any[], union	Foo:Props
+cloneElement call | returns any[], intersection	Foo:Props
+cloneElement call | returns any[], namespace method	Button:Props Foo:Props
+cloneElement call | returns unknown, function	Foo:Props
+cloneElement call | returns unknown, callable literal	Foo:Props
+cloneElement call | returns unknown, union	Foo:Props
+cloneElement call | returns unknown, intersection	Foo:Props
+cloneElement call | returns unknown, namespace method	Button:Props Foo:Props
+cloneElement call | returns unknown[], function	Foo:Props
+cloneElement call | returns unknown[], callable literal	Foo:Props
+cloneElement call | returns unknown[], union	Foo:Props
+cloneElement call | returns unknown[], intersection	Foo:Props
+cloneElement call | returns unknown[], namespace method	Button:Props Foo:Props
+cloneElement call | returns object, function	Foo:Props
+cloneElement call | returns object, callable literal	Foo:Props
+cloneElement call | returns object, union	Foo:Props
+cloneElement call | returns object, intersection	Foo:Props
+cloneElement call | returns object, namespace method	Button:Props Foo:Props
+cloneElement call | returns symbol, function	Foo:Props
+cloneElement call | returns symbol, callable literal	Foo:Props
+cloneElement call | returns symbol, union	Foo:Props
+cloneElement call | returns symbol, intersection	Foo:Props
+cloneElement call | returns symbol, namespace method	Button:Props Foo:Props
+cloneElement call | returns void, function	Foo:Props
+cloneElement call | returns void, callable literal	Foo:Props
+cloneElement call | returns void, union	Foo:Props
+cloneElement call | returns void, intersection	Foo:Props
+cloneElement call | returns void, namespace method	Button:Props Foo:Props
+cloneElement call | returns never, function	Foo:Props
+cloneElement call | returns never, callable literal	Foo:Props
+cloneElement call | returns never, union	Foo:Props
+cloneElement call | returns never, intersection	Foo:Props
+cloneElement call | returns never, namespace method	Button:Props Foo:Props
+cloneElement call | returns string, function	Foo:Props
+cloneElement call | returns string, callable literal	Foo:Props
+cloneElement call | returns string, union	Foo:Props
+cloneElement call | returns string, intersection	Foo:Props
+cloneElement call | returns string, namespace method	Button:Props Foo:Props
+cloneElement call | returns number, function	Foo:Props
+cloneElement call | returns number, callable literal	Foo:Props
+cloneElement call | returns number, union	Foo:Props
+cloneElement call | returns number, intersection	Foo:Props
+cloneElement call | returns number, namespace method	Button:Props Foo:Props
+cloneElement call | returns null, function	Foo:Props
+cloneElement call | returns null, callable literal	Foo:Props
+cloneElement call | returns null, union	Foo:Props
+cloneElement call | returns null, intersection	Foo:Props
+cloneElement call | returns null, namespace method	Button:Props Foo:Props
+cloneElement call | returns boolean, function	Foo:Props
+cloneElement call | returns boolean, callable literal	Foo:Props
+cloneElement call | returns boolean, union	Foo:Props
+cloneElement call | returns boolean, intersection	Foo:Props
+cloneElement call | returns boolean, namespace method	Button:Props Foo:Props
+cloneElement call | returns ReactNode, function	Foo:Props
+cloneElement call | returns ReactNode, callable literal	Foo:Props
+cloneElement call | returns ReactNode, union	Foo:Props
+cloneElement call | returns ReactNode, intersection	Foo:Props
+cloneElement call | returns ReactNode, namespace method	Button:Props Foo:Props
+cloneElement call | returns ReactElement, function	Foo:Props
+cloneElement call | returns ReactElement, callable literal	Foo:Props
+cloneElement call | returns ReactElement, union	Foo:Props
+cloneElement call | returns ReactElement, intersection	Foo:Props
+cloneElement call | returns ReactElement, namespace method	Button:Props Foo:Props
+cloneElement call | returns JSX.Element, function	Foo:Props
+cloneElement call | returns JSX.Element, callable literal	Foo:Props
+cloneElement call | returns JSX.Element, union	Foo:Props
+cloneElement call | returns JSX.Element, intersection	Foo:Props
+cloneElement call | returns JSX.Element, namespace method	Button:Props Foo:Props
+cloneElement call | returns FC<P>, function	Foo:Props
+cloneElement call | returns FC<P>, callable literal	Foo:Props
+cloneElement call | returns FC<P>, union	Foo:Props
+cloneElement call | returns FC<P>, intersection	Foo:Props
+cloneElement call | returns FC<P>, namespace method	Button:Props Foo:Props
+cloneElement call | returns ComponentType<P>, function	Foo:Props
+cloneElement call | returns ComponentType<P>, callable literal	Foo:Props
+cloneElement call | returns ComponentType<P>, union	Foo:Props
+cloneElement call | returns ComponentType<P>, intersection	Foo:Props
+cloneElement call | returns ComponentType<P>, namespace method	Button:Props Foo:Props
+cloneElement call | returns element-shaped literal, function	Foo:Props
+cloneElement call | returns element-shaped literal, callable literal	Foo:Props
+cloneElement call | returns element-shaped literal, union	Foo:Props
+cloneElement call | returns element-shaped literal, intersection	Foo:Props
+cloneElement call | returns element-shaped literal, namespace method	Button:Props Foo:Props
+cloneElement call | returns empty literal, function	Foo:Props
+cloneElement call | returns empty literal, callable literal	Foo:Props
+cloneElement call | returns empty literal, union	Foo:Props
+cloneElement call | returns empty literal, intersection	Foo:Props
+cloneElement call | returns empty literal, namespace method	Button:Props Foo:Props
+cloneElement call | returns generic T	Foo:Props
+cloneElement call | returns indexed access	Foo:Props
+cloneElement call | returns conditional	Foo:Props
+createRef call | plain	Button:Props Foo:Props
+createRef call | parentheses	Button:Props Foo:Props
+createRef call | typeof itself	Foo:Props
+createRef call | typeof another	Foo:Props
+createRef call | alias of typeof itself	Foo:Props
+createRef call | unresolved reference	Foo:Props
+createRef call | any	Foo:Props
+createRef call | unknown	Foo:Props
+createRef call | object	Foo:Props
+createRef call | callable literal, FC	Foo:Props
+createRef call | callable literal, object	Foo:Props
+createRef call | callable literal, no result	Foo:Props
+createRef call | function, FC	Foo:Props
+createRef call | function, ReactElement	Foo:Props
+createRef call | function, ReactNode	Foo:Props
+createRef call | function, ReactElement | null	Foo:Props
+createRef call | function, string	Foo:Props
+createRef call | function, string | null	Foo:Props
+createRef call | function, object	Foo:Props
+createRef call | function, object literal	Foo:Props
+createRef call | function, void	Foo:Props
+createRef call | function, unknown	Foo:Props
+createRef call | function, unknown[]	Foo:Props
+createRef call | function, literal	Foo:Props
+createRef call | generic function, FC	Foo:Props
+createRef call | object, then typeof itself	Foo:Props
+createRef call | typeof itself, then object	Foo:Props
+createRef call | unknown, then function object	Foo:Props
+createRef call | function object, then unknown	Foo:Props
+createRef call | satisfies	Foo:Props
+createRef call | non-null	Foo:Props
+createRef call | namespace any	Button:Props Foo:Props
+createRef call | namespace object	Button:Props Foo:Props
+createRef call | namespace typeof itself	Button:Props Foo:Props
+createRef call | namespace member typeof itself	Button:Props Foo:Props
+createRef call | namespace member function object	Button:Props Foo:Props
+createRef call | namespace method object	Button:Props Foo:Props
+createRef call | namespace method FC	Button:Props Foo:Props
+createRef call | namespace call signature, member typeof itself	Button:Props Foo:Props
+createRef call | construct Component, call void	Foo:Props
+createRef call | construct object, call FC	Foo:Props
+createRef call | constructor type, object	Foo:Props
+createRef call | constructor type, Component	Foo:Props
+createRef call | namespace member construct Component, call void	Button:Props Foo:Props
+createRef call | returns any, function	Foo:Props
+createRef call | returns any, callable literal	Foo:Props
+createRef call | returns any, union	Foo:Props
+createRef call | returns any, intersection	Foo:Props
+createRef call | returns any, namespace method	Button:Props Foo:Props
+createRef call | returns any[], function	Foo:Props
+createRef call | returns any[], callable literal	Foo:Props
+createRef call | returns any[], union	Foo:Props
+createRef call | returns any[], intersection	Foo:Props
+createRef call | returns any[], namespace method	Button:Props Foo:Props
+createRef call | returns unknown, function	Foo:Props
+createRef call | returns unknown, callable literal	Foo:Props
+createRef call | returns unknown, union	Foo:Props
+createRef call | returns unknown, intersection	Foo:Props
+createRef call | returns unknown, namespace method	Button:Props Foo:Props
+createRef call | returns unknown[], function	Foo:Props
+createRef call | returns unknown[], callable literal	Foo:Props
+createRef call | returns unknown[], union	Foo:Props
+createRef call | returns unknown[], intersection	Foo:Props
+createRef call | returns unknown[], namespace method	Button:Props Foo:Props
+createRef call | returns object, function	Foo:Props
+createRef call | returns object, callable literal	Foo:Props
+createRef call | returns object, union	Foo:Props
+createRef call | returns object, intersection	Foo:Props
+createRef call | returns object, namespace method	Button:Props Foo:Props
+createRef call | returns symbol, function	Foo:Props
+createRef call | returns symbol, callable literal	Foo:Props
+createRef call | returns symbol, union	Foo:Props
+createRef call | returns symbol, intersection	Foo:Props
+createRef call | returns symbol, namespace method	Button:Props Foo:Props
+createRef call | returns void, function	Foo:Props
+createRef call | returns void, callable literal	Foo:Props
+createRef call | returns void, union	Foo:Props
+createRef call | returns void, intersection	Foo:Props
+createRef call | returns void, namespace method	Button:Props Foo:Props
+createRef call | returns never, function	Foo:Props
+createRef call | returns never, callable literal	Foo:Props
+createRef call | returns never, union	Foo:Props
+createRef call | returns never, intersection	Foo:Props
+createRef call | returns never, namespace method	Button:Props Foo:Props
+createRef call | returns string, function	Foo:Props
+createRef call | returns string, callable literal	Foo:Props
+createRef call | returns string, union	Foo:Props
+createRef call | returns string, intersection	Foo:Props
+createRef call | returns string, namespace method	Button:Props Foo:Props
+createRef call | returns number, function	Foo:Props
+createRef call | returns number, callable literal	Foo:Props
+createRef call | returns number, union	Foo:Props
+createRef call | returns number, intersection	Foo:Props
+createRef call | returns number, namespace method	Button:Props Foo:Props
+createRef call | returns null, function	Foo:Props
+createRef call | returns null, callable literal	Foo:Props
+createRef call | returns null, union	Foo:Props
+createRef call | returns null, intersection	Foo:Props
+createRef call | returns null, namespace method	Button:Props Foo:Props
+createRef call | returns boolean, function	Foo:Props
+createRef call | returns boolean, callable literal	Foo:Props
+createRef call | returns boolean, union	Foo:Props
+createRef call | returns boolean, intersection	Foo:Props
+createRef call | returns boolean, namespace method	Button:Props Foo:Props
+createRef call | returns ReactNode, function	Foo:Props
+createRef call | returns ReactNode, callable literal	Foo:Props
+createRef call | returns ReactNode, union	Foo:Props
+createRef call | returns ReactNode, intersection	Foo:Props
+createRef call | returns ReactNode, namespace method	Button:Props Foo:Props
+createRef call | returns ReactElement, function	Foo:Props
+createRef call | returns ReactElement, callable literal	Foo:Props
+createRef call | returns ReactElement, union	Foo:Props
+createRef call | returns ReactElement, intersection	Foo:Props
+createRef call | returns ReactElement, namespace method	Button:Props Foo:Props
+createRef call | returns JSX.Element, function	Foo:Props
+createRef call | returns JSX.Element, callable literal	Foo:Props
+createRef call | returns JSX.Element, union	Foo:Props
+createRef call | returns JSX.Element, intersection	Foo:Props
+createRef call | returns JSX.Element, namespace method	Button:Props Foo:Props
+createRef call | returns FC<P>, function	Foo:Props
+createRef call | returns FC<P>, callable literal	Foo:Props
+createRef call | returns FC<P>, union	Foo:Props
+createRef call | returns FC<P>, intersection	Foo:Props
+createRef call | returns FC<P>, namespace method	Button:Props Foo:Props
+createRef call | returns ComponentType<P>, function	Foo:Props
+createRef call | returns ComponentType<P>, callable literal	Foo:Props
+createRef call | returns ComponentType<P>, union	Foo:Props
+createRef call | returns ComponentType<P>, intersection	Foo:Props
+createRef call | returns ComponentType<P>, namespace method	Button:Props Foo:Props
+createRef call | returns element-shaped literal, function	Foo:Props
+createRef call | returns element-shaped literal, callable literal	Foo:Props
+createRef call | returns element-shaped literal, union	Foo:Props
+createRef call | returns element-shaped literal, intersection	Foo:Props
+createRef call | returns element-shaped literal, namespace method	Button:Props Foo:Props
+createRef call | returns empty literal, function	Foo:Props
+createRef call | returns empty literal, callable literal	Foo:Props
+createRef call | returns empty literal, union	Foo:Props
+createRef call | returns empty literal, intersection	Foo:Props
+createRef call | returns empty literal, namespace method	Button:Props Foo:Props
+createRef call | returns generic T	Foo:Props
+createRef call | returns indexed access	Foo:Props
+createRef call | returns conditional	Foo:Props
+lazy call | plain	Button:Props Foo:Props
+lazy call | parentheses	Button:Props Foo:Props
+lazy call | typeof itself	Foo:Props
+lazy call | typeof another	Foo:Props
+lazy call | alias of typeof itself	Foo:Props
+lazy call | unresolved reference	Foo:Props
+lazy call | any	Foo:Props
+lazy call | unknown	Foo:Props
+lazy call | object	Foo:Props
+lazy call | callable literal, FC	Foo:Props
+lazy call | callable literal, object	Foo:Props
+lazy call | callable literal, no result	Foo:Props
+lazy call | function, FC	Foo:Props
+lazy call | function, ReactElement	Foo:Props
+lazy call | function, ReactNode	Foo:Props
+lazy call | function, ReactElement | null	Foo:Props
+lazy call | function, string	Foo:Props
+lazy call | function, string | null	Foo:Props
+lazy call | function, object	Foo:Props
+lazy call | function, object literal	Foo:Props
+lazy call | function, void	Foo:Props
+lazy call | function, unknown	Foo:Props
+lazy call | function, unknown[]	Foo:Props
+lazy call | function, literal	Foo:Props
+lazy call | generic function, FC	Foo:Props
+lazy call | object, then typeof itself	Foo:Props
+lazy call | typeof itself, then object	Foo:Props
+lazy call | unknown, then function object	Foo:Props
+lazy call | function object, then unknown	Foo:Props
+lazy call | satisfies	Foo:Props
+lazy call | non-null	Foo:Props
+lazy call | namespace any	Button:Props Foo:Props
+lazy call | namespace object	Button:Props Foo:Props
+lazy call | namespace typeof itself	Button:Props Foo:Props
+lazy call | namespace member typeof itself	Button:Props Foo:Props
+lazy call | namespace member function object	Button:Props Foo:Props
+lazy call | namespace method object	Button:Props Foo:Props
+lazy call | namespace method FC	Button:Props Foo:Props
+lazy call | namespace call signature, member typeof itself	Button:Props Foo:Props
+lazy call | construct Component, call void	Foo:Props
+lazy call | construct object, call FC	Foo:Props
+lazy call | constructor type, object	Foo:Props
+lazy call | constructor type, Component	Foo:Props
+lazy call | namespace member construct Component, call void	Button:Props Foo:Props
+lazy call | returns any, function	Foo:Props
+lazy call | returns any, callable literal	Foo:Props
+lazy call | returns any, union	Foo:Props
+lazy call | returns any, intersection	Foo:Props
+lazy call | returns any, namespace method	Button:Props Foo:Props
+lazy call | returns any[], function	Foo:Props
+lazy call | returns any[], callable literal	Foo:Props
+lazy call | returns any[], union	Foo:Props
+lazy call | returns any[], intersection	Foo:Props
+lazy call | returns any[], namespace method	Button:Props Foo:Props
+lazy call | returns unknown, function	Foo:Props
+lazy call | returns unknown, callable literal	Foo:Props
+lazy call | returns unknown, union	Foo:Props
+lazy call | returns unknown, intersection	Foo:Props
+lazy call | returns unknown, namespace method	Button:Props Foo:Props
+lazy call | returns unknown[], function	Foo:Props
+lazy call | returns unknown[], callable literal	Foo:Props
+lazy call | returns unknown[], union	Foo:Props
+lazy call | returns unknown[], intersection	Foo:Props
+lazy call | returns unknown[], namespace method	Button:Props Foo:Props
+lazy call | returns object, function	Foo:Props
+lazy call | returns object, callable literal	Foo:Props
+lazy call | returns object, union	Foo:Props
+lazy call | returns object, intersection	Foo:Props
+lazy call | returns object, namespace method	Button:Props Foo:Props
+lazy call | returns symbol, function	Foo:Props
+lazy call | returns symbol, callable literal	Foo:Props
+lazy call | returns symbol, union	Foo:Props
+lazy call | returns symbol, intersection	Foo:Props
+lazy call | returns symbol, namespace method	Button:Props Foo:Props
+lazy call | returns void, function	Foo:Props
+lazy call | returns void, callable literal	Foo:Props
+lazy call | returns void, union	Foo:Props
+lazy call | returns void, intersection	Foo:Props
+lazy call | returns void, namespace method	Button:Props Foo:Props
+lazy call | returns never, function	Foo:Props
+lazy call | returns never, callable literal	Foo:Props
+lazy call | returns never, union	Foo:Props
+lazy call | returns never, intersection	Foo:Props
+lazy call | returns never, namespace method	Button:Props Foo:Props
+lazy call | returns string, function	Foo:Props
+lazy call | returns string, callable literal	Foo:Props
+lazy call | returns string, union	Foo:Props
+lazy call | returns string, intersection	Foo:Props
+lazy call | returns string, namespace method	Button:Props Foo:Props
+lazy call | returns number, function	Foo:Props
+lazy call | returns number, callable literal	Foo:Props
+lazy call | returns number, union	Foo:Props
+lazy call | returns number, intersection	Foo:Props
+lazy call | returns number, namespace method	Button:Props Foo:Props
+lazy call | returns null, function	Foo:Props
+lazy call | returns null, callable literal	Foo:Props
+lazy call | returns null, union	Foo:Props
+lazy call | returns null, intersection	Foo:Props
+lazy call | returns null, namespace method	Button:Props Foo:Props
+lazy call | returns boolean, function	Foo:Props
+lazy call | returns boolean, callable literal	Foo:Props
+lazy call | returns boolean, union	Foo:Props
+lazy call | returns boolean, intersection	Foo:Props
+lazy call | returns boolean, namespace method	Button:Props Foo:Props
+lazy call | returns ReactNode, function	Foo:Props
+lazy call | returns ReactNode, callable literal	Foo:Props
+lazy call | returns ReactNode, union	Foo:Props
+lazy call | returns ReactNode, intersection	Foo:Props
+lazy call | returns ReactNode, namespace method	Button:Props Foo:Props
+lazy call | returns ReactElement, function	Foo:Props
+lazy call | returns ReactElement, callable literal	Foo:Props
+lazy call | returns ReactElement, union	Foo:Props
+lazy call | returns ReactElement, intersection	Foo:Props
+lazy call | returns ReactElement, namespace method	Button:Props Foo:Props
+lazy call | returns JSX.Element, function	Foo:Props
+lazy call | returns JSX.Element, callable literal	Foo:Props
+lazy call | returns JSX.Element, union	Foo:Props
+lazy call | returns JSX.Element, intersection	Foo:Props
+lazy call | returns JSX.Element, namespace method	Button:Props Foo:Props
+lazy call | returns FC<P>, function	Foo:Props
+lazy call | returns FC<P>, callable literal	Foo:Props
+lazy call | returns FC<P>, union	Foo:Props
+lazy call | returns FC<P>, intersection	Foo:Props
+lazy call | returns FC<P>, namespace method	Button:Props Foo:Props
+lazy call | returns ComponentType<P>, function	Foo:Props
+lazy call | returns ComponentType<P>, callable literal	Foo:Props
+lazy call | returns ComponentType<P>, union	Foo:Props
+lazy call | returns ComponentType<P>, intersection	Foo:Props
+lazy call | returns ComponentType<P>, namespace method	Button:Props Foo:Props
+lazy call | returns element-shaped literal, function	Foo:Props
+lazy call | returns element-shaped literal, callable literal	Foo:Props
+lazy call | returns element-shaped literal, union	Foo:Props
+lazy call | returns element-shaped literal, intersection	Foo:Props
+lazy call | returns element-shaped literal, namespace method	Button:Props Foo:Props
+lazy call | returns empty literal, function	Foo:Props
+lazy call | returns empty literal, callable literal	Foo:Props
+lazy call | returns empty literal, union	Foo:Props
+lazy call | returns empty literal, intersection	Foo:Props
+lazy call | returns empty literal, namespace method	Button:Props Foo:Props
+lazy call | returns generic T	Foo:Props
+lazy call | returns indexed access	Foo:Props
+lazy call | returns conditional	Foo:Props
 class | plain	Button:Props
 class | parentheses	Button:Props
 class | typeof itself	-

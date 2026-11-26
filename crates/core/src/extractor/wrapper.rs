@@ -81,12 +81,14 @@ enum ArgumentEvidence {
 /// also describes `makeLabel<P>("button")`, and a lowercase value describes a context default or a store, so neither
 /// counts.
 fn component_argument_evidence(
-    creates_context: bool,
+    api: Option<super::ReactApi>,
     call: &CallExpression<'_>,
     react: ReactBinding<'_>,
 ) -> Result<ArgumentEvidence, &'static str> {
-    if creates_context {
-        return Err("creates a context");
+    match api {
+        Some(super::ReactApi::CreateContext) => return Err("creates a context"),
+        Some(super::ReactApi::BuildsNoComponent) => return Err("builds an element or a ref, not a component"),
+        Some(super::ReactApi::ForwardRef | super::ReactApi::Memo) | None => {}
     }
     let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::component::peel_expr) else {
         return Err("has no argument that could be a component");
@@ -141,13 +143,18 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let Some(type_arguments) = super::component::call_type_arguments(call) else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        let creates_context = self.react_api(call) == Some(super::ReactApi::CreateContext);
-        let needs_payload = match component_argument_evidence(creates_context, call, &*self) {
+        // Read through the callee's one peeled identity, so a cast that keeps its type is the plain call here too.
+        let api = self.react_api(call);
+        let needs_payload = match component_argument_evidence(api, call, &*self) {
             Ok(ArgumentEvidence::Sufficient) => false,
             Ok(ArgumentEvidence::TagNeedsPayload) => true,
             Err(reason) => {
                 self.decline_reason = Some(format!("'{name}' is a generic call to '{callee}' that {reason}"));
-                self.argument_declined = !creates_context;
+                // A React API that builds no component is the call's verdict, not its argument's.
+                self.argument_declined = match api {
+                    Some(super::ReactApi::CreateContext | super::ReactApi::BuildsNoComponent) => false,
+                    Some(super::ReactApi::ForwardRef | super::ReactApi::Memo) | None => true,
+                };
                 return false;
             }
         };

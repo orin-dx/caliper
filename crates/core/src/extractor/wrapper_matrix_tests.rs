@@ -807,6 +807,28 @@ const DIFFERENTIAL_FORMS: &[(&str, &str, &str)] = &[
     ),
     ("memo argument", "Impl", "function Impl(props: Props) { return <div />; }\nexport const Button = memo({C});"),
     ("context", "React.createContext", "declare const Default: Props;\nexport const Button = {C}<Props>(Default);"),
+    // Round 13: React's factories that build no component, given a component and the props type as a wrapper is.
+    (
+        "createElement call",
+        "React.createElement",
+        "function Foo(props: Props) { return <div />; }\ndeclare const props: Props;\n\
+         export const Button = {C}<Props>(Foo, props);",
+    ),
+    (
+        "cloneElement call",
+        "React.cloneElement",
+        "function Foo(props: Props) { return <div />; }\nexport const Button = {C}<Props>(Foo);",
+    ),
+    (
+        "createRef call",
+        "React.createRef",
+        "function Foo(props: Props) { return <div />; }\nexport const Button = {C}<Props>(Foo);",
+    ),
+    (
+        "lazy call",
+        "React.lazy",
+        "function Foo(props: Props) { return <div />; }\nexport const Button = {C}<Props>(Foo);",
+    ),
     ("class", "React.Component", "export class Button extends {C}<Props> { render() { return <div />; } }"),
     (
         "call-only helper",
@@ -1025,8 +1047,16 @@ fn differential_declines(case: &Case) -> Option<&'static str> {
     if differential_subject(form).is_empty() || ARGUMENT_FORMS.contains(&form) {
         return None;
     }
+    if NO_COMPONENT_FACTORY_FORMS.contains(&form) {
+        return Some("React builds no component");
+    }
     case.closed.or_else(|| (form == "factory" && !case.keeps).then_some("factory callee withheld"))
 }
+
+/// The forms calling React's `createElement`, `cloneElement` or `createRef`, which give an element or a ref, never a
+/// component: declined through every cast as in the plain call. Origin/main documented the result of the plain call
+/// and of every cast it read as transparent as a component with the type argument's props (round 13).
+const NO_COMPONENT_FACTORY_FORMS: &[&str] = &["createElement call", "cloneElement call", "createRef call"];
 
 /// The forms whose wrapped expression is a value handed to a wrapper, not a callee: nothing calls it there, so the
 /// closed list says nothing about it, and the value beneath a cast is read as origin/main read it.
@@ -1043,18 +1073,35 @@ const ARGUMENT_FORMS: &[&str] = &["Object.assign argument", "memo argument"];
 fn the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain_call() {
     let base = base_detections();
     // Round 11 adds `React.createContext<Props>(Default)`, which is no component through any cast.
-    let forms = ["wrapper with two type arguments", "Object.assign argument", "memo argument", "context"];
+    let forms = [
+        "wrapper with two type arguments",
+        "Object.assign argument",
+        "memo argument",
+        "context",
+        "createElement call",
+        "cloneElement call",
+        "createRef call",
+        "lazy call",
+    ];
     let mut failures = Vec::new();
-    let mut main_differs_from_its_plain_call = [0; 4];
+    let mut main_differs_from_its_plain_call = [0; 8];
+    let mut main_documented_no_component = [0; 8];
     for case in differential_cases() {
         let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
         let Some(index) = forms.iter().position(|named| *named == form) else { continue };
         let plain = base.get(format!("{form} | plain").as_str()).copied().unwrap_or("not in the base table");
         let main = base.get(case.id.as_str()).copied().unwrap_or("not in the base table");
         let actual = differential_detections(&case.source);
+        let subject = differential_subject(form);
         if differential_declines(&case).is_some() {
-            if actual.split(' ').any(|d| d.starts_with(differential_subject(form))) {
+            // Everything else the plain call extracts is kept: the component `Foo` handed to the factory.
+            let rest: Vec<&str> = plain.split(' ').filter(|d| !d.starts_with(subject)).collect();
+            let kept = NO_COMPONENT_FACTORY_FORMS.contains(&form) && actual != rest.join(" ");
+            if kept || actual.split(' ').any(|d| d.starts_with(subject)) {
                 failures.push(format!("{} declines: main `{main}`, now `{actual}`", case.id));
+            }
+            if main.split(' ').any(|d| d.starts_with(subject)) {
+                main_documented_no_component[index] += 1;
             }
             continue;
         }
@@ -1066,7 +1113,11 @@ fn the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    assert_eq!(main_differs_from_its_plain_call, [101, 112, 0, 0]);
+    // `React.lazy<Props>(Foo)`: main read the plain call as a wrapper and missed it through every cast.
+    assert_eq!(main_differs_from_its_plain_call, [101, 112, 0, 0, 0, 0, 0, 101]);
+    // Rows where main published `Button`, by form: the closed-list rows it read through, and every row it read as the
+    // plain call to a factory that builds no component.
+    assert_eq!(main_documented_no_component, [11, 0, 0, 0, 30, 30, 30, 6]);
 }
 
 /// Review round 11, finding 2: a namespace read for its name (`React` in `React.createContext`, `Object.assign`,
@@ -1220,11 +1271,18 @@ fn each_closed_list_entry_declines_every_form() {
         .collect();
     // Every base detection given up, by reason: pinned so a new decline is a reviewed change.
     let count = |why: &str| declined.iter().filter(|row| row.ends_with(&format!(": {why}"))).count();
-    let by_reason = ["object", "symbol", "void", "factory callee withheld"].map(|why| (why, count(why)));
+    let by_reason = ["object", "symbol", "void", "factory callee withheld", "React builds no component"]
+        .map(|why| (why, count(why)));
     assert_eq!(by_reason.iter().map(|(_, n)| n).sum::<usize>(), declined.len(), "{}", declined.join("\n"));
     assert_eq!(
         by_reason,
-        [("object", 52), ("symbol", 20), ("void", 40), ("factory callee withheld", 93)],
+        [
+            ("object", 55),
+            ("symbol", 21),
+            ("void", 42),
+            ("factory callee withheld", 93),
+            ("React builds no component", 90)
+        ],
         "{}",
         declined.join("\n")
     );
@@ -1560,6 +1618,9 @@ fn a_redeclaration_around_the_cast_shadows_the_alias() {
         ("const C = class Factory { m() { return (make as Factory)(); } };", Some(false)),
         ("type M = { [Factory in 'a']: Factory };\nconst v = (make as Factory)();", Some(true)),
         ("import type { Factory } from './f';\nconst v = (make as Factory)();", None),
+        // Round 13: a cast after a nested shadowing scope, inside the scope around it.
+        ("function g<Factory>() { function h<Factory>() {} return (make as Factory)(); }", Some(false)),
+        ("function g<Factory>() { function h<Factory>() {} }\nconst v = (make as Factory)();", Some(true)),
         // Round 10: one walker for every kind.
         ("enum E { A = (make as Factory)() }", Some(true)),
         ("function g() { type Factory = string; enum E { A = (make as Factory)() } }", Some(false)),
@@ -1757,4 +1818,103 @@ fn a_heritage_reads_construct_signatures_and_a_call_reads_call_signatures() {
         call("(memo as unknown as { new (c: unknown): React.FC<Props>; (c: unknown): object })"),
         Vec::<serde_json::Value>::new()
     );
+}
+
+/// Round 13, finding 1: React's `createElement`, `cloneElement` and `createRef` give an element or a ref, so a binding
+/// of their result is no component, through a cast that keeps their type exactly as in the plain call, and the skip
+/// says why, once.
+#[test]
+fn a_react_factory_that_builds_no_component_declines_through_every_identity_cast() {
+    let outcome = |callee: &str| {
+        let source = format!(
+            "{HEADER}type CreateElement = typeof React.createElement;\n\
+             function Foo(props: Props) {{ return <div />; }}\ndeclare const props: Props;\n\
+             export const Button = {callee}<Props>(Foo, props);"
+        );
+        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
+        let names: Vec<String> = data.component_mappings.iter().map(|m| m.component_name.clone()).collect();
+        let skips: Vec<String> = data
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.starts_with("'Button'"))
+            .map(|d| d.message.clone())
+            .collect();
+        (names, skips)
+    };
+    let declined = |api: &str| {
+        (
+            vec!["Foo".to_owned()],
+            vec![format!(
+                "'Button' is a generic call to 'React.{api}' that builds an element or a ref, not a component"
+            )],
+        )
+    };
+    for callee in [
+        "React.createElement",
+        "(React.createElement)",
+        "(React.createElement as typeof React.createElement)",
+        "(React.createElement as CreateElement)",
+        "(React.createElement as any)",
+        "(React.createElement as unknown)",
+        "(React as typeof React).createElement",
+        "(React as any).createElement",
+    ] {
+        assert_eq!(outcome(callee), declined("createElement"), "{callee}");
+    }
+    assert_eq!(outcome("React.cloneElement"), declined("cloneElement"));
+    assert_eq!(outcome("(React.cloneElement as typeof React.cloneElement)"), declined("cloneElement"));
+    assert_eq!(outcome("(React.createRef as any)"), declined("createRef"));
+    // A cast to an unread type is no evidence, so the name still says what the call is.
+    assert_eq!(outcome("(React.createElement as Other)"), declined("createElement"));
+}
+
+/// Round 13, finding 2: a `typeof` alias of a long dotted chain is named in one pass over its segments.
+#[test]
+fn a_typeof_alias_of_a_long_chain_is_named_in_linear_steps() {
+    let written = |segments: usize| {
+        let chain: Vec<String> = (0..segments).map(|i| format!("N{i}")).collect();
+        let source = format!("declare const N0: any;\ntype Factory = typeof {};\n", chain.join("."));
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
+        super::component::steps::take_written();
+        let aliases = super::component::typeof_aliases(&parsed.program);
+        assert_eq!(aliases.get("Factory").map(|alias| alias.chain.as_str()), Some(chain.join(".").as_str()));
+        (super::component::steps::take_written(), chain.join(".").len() as u64 + 1)
+    };
+    for segments in [2, 20, 200] {
+        let (bytes, length) = written(segments);
+        assert_eq!(bytes, length, "{segments} segments");
+    }
+}
+
+/// Round 13, finding 3: each cast looks its scope up among the shadowing scopes by binary search, so N scopes and N
+/// casts cost N log N probes, not N squared.
+#[test]
+fn a_cast_finds_its_shadowing_scope_by_binary_search() {
+    let probes = |n: usize| {
+        let mut source = String::from("declare function make(): unknown;\ntype Factory = typeof make;\n");
+        for i in 0..n {
+            source.push_str(&format!("function g{i}<Factory>() {{ return (make as Factory)(); }}\n"));
+            source.push_str(&format!("export const B{i} = (make as Factory)();\n"));
+        }
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
+        let aliases = super::component::typeof_aliases(&parsed.program);
+        let alias = aliases.get("Factory").expect("the alias is kept");
+        super::component::steps::take_probed();
+        let mut shadowed = 0;
+        for (at, _) in source.match_indices("as Factory") {
+            let start = u32::try_from(at + 3).unwrap();
+            if !alias.means_at(oxc_span::Span::new(start, start + 7)) {
+                shadowed += 1;
+            }
+        }
+        assert_eq!(shadowed, n, "the cast inside each generic function is shadowed, the top-level one is not");
+        super::component::steps::take_probed()
+    };
+    for n in [64_usize, 128, 256] {
+        // `2n` casts, each probing at most one more than log2 of the `n` scopes.
+        let bound = 2 * n as u64 * (u64::from(usize::BITS - n.leading_zeros()) + 1);
+        assert!(probes(n) <= bound, "{n}: {} probes, bound {bound}", probes(n));
+    }
 }

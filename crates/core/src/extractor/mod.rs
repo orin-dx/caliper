@@ -49,6 +49,9 @@ pub(super) enum ReactApi {
     ForwardRef,
     Memo,
     CreateContext,
+    /// `createElement`, `cloneElement` and `createRef`: they build an element or a ref, never a component, whatever
+    /// they are given.
+    BuildsNoComponent,
 }
 
 impl ReactApi {
@@ -58,6 +61,7 @@ impl ReactApi {
             "forwardRef" => Some(Self::ForwardRef),
             "memo" => Some(Self::Memo),
             "createContext" => Some(Self::CreateContext),
+            "createElement" | "cloneElement" | "createRef" => Some(Self::BuildsNoComponent),
             _ => None,
         }
     }
