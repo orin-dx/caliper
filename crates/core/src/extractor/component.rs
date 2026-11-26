@@ -77,13 +77,47 @@ fn wrapper<'a, 'b>(expr: &'b Expression<'a>) -> Option<Wrapper<'b, 'a>> {
 /// forwardRef or HOC call to a hand-rolled component type (Fluent UI: "required due to lack of distributive union to
 /// support unions on @types/react"), check it with `satisfies`, or instantiate a generic component (`memo(List<Row>)`,
 /// `(List<Row>)!`). The value is the same function or component beneath an instantiation, so every wrapper is read
-/// through; only a callee or an `extends` target needs the instantiation's type arguments ([`peel`]).
+/// through. A site that makes a component of the value reads the instantiation's type arguments with [`instantiated`];
+/// a callee or an `extends` target with [`peel`].
 pub(super) fn peel_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
     loop {
         expr = match wrapper(expr) {
             Some(Wrapper::Transparent(inner) | Wrapper::Asserted(inner, _)) => inner,
             Some(Wrapper::Instantiation(instantiation)) => &instantiation.expression,
             None => return expr,
+        };
+    }
+}
+
+/// What the instantiations among a value's wrappers give the value beneath them ([`peel_expr`]).
+pub(super) enum Instantiated<'b, 'a> {
+    /// None: the value keeps its own type parameters.
+    No,
+    /// One, of the value itself: `List<Row>`, `(List<Row>)!`, `(List<Row>) as any`.
+    Given(&'b TSTypeParameterInstantiation<'a>),
+    /// One of an asserted value (`(List as any)<Row>`), or more than one: what the arguments bind is not read.
+    Unread,
+}
+
+pub(super) fn instantiated<'a, 'b>(mut expr: &'b Expression<'a>) -> Instantiated<'b, 'a> {
+    let mut found = Instantiated::No;
+    loop {
+        expr = match wrapper(expr) {
+            Some(Wrapper::Transparent(inner)) => inner,
+            Some(Wrapper::Asserted(inner, _)) => {
+                if !matches!(found, Instantiated::No) {
+                    found = Instantiated::Unread;
+                }
+                inner
+            }
+            Some(Wrapper::Instantiation(instantiation)) => {
+                found = match found {
+                    Instantiated::No => Instantiated::Given(&instantiation.type_arguments),
+                    Instantiated::Given(_) | Instantiated::Unread => Instantiated::Unread,
+                };
+                &instantiation.expression
+            }
+            None => return found,
         };
     }
 }
@@ -124,8 +158,9 @@ pub(super) struct Peeled<'b, 'a> {
 }
 
 impl<'b, 'a> Peeled<'b, 'a> {
-    /// `expr`, when what it is called still says what a call expected to give a component is (`forwardRef`, `memo`,
-    /// `Object.assign`, a HOC): always, unless the assertion gives the call a result no component has.
+    /// `expr`, when what it is called still says what a call expected to give a component or an element is
+    /// (`forwardRef`, `memo`, `Object.assign`, a HOC, an element factory, `map` over elements): always, unless the
+    /// assertion gives the call a result no component and no element is, such as a string.
     pub(super) fn named(&self) -> Option<&'b Expression<'a>> {
         match self.evidence {
             Evidence::NoComponent | Evidence::NotRenderable => None,
@@ -133,9 +168,9 @@ impl<'b, 'a> Peeled<'b, 'a> {
         }
     }
 
-    /// `expr`, when what it is called still says what a call whose result is rendered is (a component invoked
-    /// directly, an element factory, `map`): always, unless the assertion gives the call a result React cannot render.
-    /// A string, number or `null` result renders, so it is no evidence against such a call.
+    /// `expr`, when what it is called still says what a component invoked directly is (`return Greeting(props)`):
+    /// always, unless the assertion gives the call a result React cannot render. A component may return a string,
+    /// number or `null`, so such a result is no evidence against the call.
     pub(super) fn renderable(&self) -> Option<&'b Expression<'a>> {
         match self.evidence {
             Evidence::NotRenderable => None,
@@ -253,8 +288,8 @@ fn declarations<'a, 'b>(literal: &'b TSTypeLiteral<'a>, name: &str) -> impl Iter
             Some(match method.kind {
                 TSMethodSignatureKind::Method => MemberDeclaration::Method(written),
                 TSMethodSignatureKind::Get => MemberDeclaration::Typed(written),
-                // A setter's parameter is what is assigned, not what is read.
-                TSMethodSignatureKind::Set => MemberDeclaration::Typed(None),
+                // A setter's parameter is what is assigned; reading the member never calls it, so it answers nothing.
+                TSMethodSignatureKind::Set => return None,
             })
         }
         TSSignature::TSPropertySignature(_)
@@ -421,12 +456,13 @@ enum Returns {
     /// literal or template literal, a type predicate, an array of those, or a union with one of them and nothing that
     /// may be a component.
     Node,
-    /// Neither a component nor a node: the `object`, `symbol` and `never` keywords, an object type with no call or
-    /// construct signature, an array of those or of `unknown`/`any` (TypeScript does not take `unknown` for a node).
+    /// Neither a component nor a node: the `object` and `symbol` keywords, an object type with no call or construct
+    /// signature, an array of those or of `unknown`/`any` (TypeScript does not take `unknown` for a node).
     Neither,
     /// `null` or `undefined`: what a component may return, and no evidence alone.
     Empty,
     /// Anything that may be a component or an element, or that the extractor does not read (a reference, `unknown`).
+    /// `never` is here: a function that never returns is assignable to every function type, so it proves nothing.
     Maybe,
 }
 
@@ -440,7 +476,7 @@ fn result_of(ty: &TSType<'_>) -> Returns {
         | TSType::TSLiteralType(_)
         | TSType::TSTemplateLiteralType(_)
         | TSType::TSTypePredicate(_) => Returns::Node,
-        TSType::TSNeverKeyword(_) | TSType::TSObjectKeyword(_) | TSType::TSSymbolKeyword(_) => Returns::Neither,
+        TSType::TSObjectKeyword(_) | TSType::TSSymbolKeyword(_) => Returns::Neither,
         TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_) => Returns::Empty,
         TSType::TSParenthesizedType(inner) => result_of(&inner.type_annotation),
         TSType::TSTypeLiteral(literal) => {
@@ -459,10 +495,11 @@ fn result_of(ty: &TSType<'_>) -> Returns {
             (_, Returns::Node | Returns::Empty) => Returns::Node,
             (_, Returns::Neither) => Returns::Neither,
         },
-        // The value is one of the members: it may render when one does, and is a candidate when one may be.
+        // The value is one of the members: it may render when one does, and is a candidate when one may be. `never`
+        // adds no value to a union (`string | never` is `string`).
         TSType::TSUnionType(union) => {
             let mut result = Returns::Empty;
-            for member in &union.types {
+            for member in union.types.iter().filter(|member| !matches!(member, TSType::TSNeverKeyword(_))) {
                 result = match (result, result_of(member)) {
                     (Returns::Maybe, _) | (_, Returns::Maybe) => return Returns::Maybe,
                     (Returns::Node, _) | (_, Returns::Node) => Returns::Node,
@@ -474,6 +511,7 @@ fn result_of(ty: &TSType<'_>) -> Returns {
         }
         TSType::TSAnyKeyword(_)
         | TSType::TSUnknownKeyword(_)
+        | TSType::TSNeverKeyword(_)
         | TSType::TSIntrinsicKeyword(_)
         | TSType::TSThisType(_)
         | TSType::TSConditionalType(_)
@@ -530,68 +568,161 @@ fn chain_names(chain: &str, expr: &Expression<'_>) -> bool {
     }
 }
 
-/// Counts every name the file declares in type space, at any depth: type aliases, interfaces, classes, enums,
-/// namespaces, type parameters (`infer` and mapped keys among them) and every import, which may bring a type.
-#[derive(Default)]
-struct TypeNames(FxHashMap<CompactString, u32>);
+/// A module-level `type Factory = typeof createButton`: the dotted chain it queries, and the scopes in which a
+/// declaration of the same name shadows it.
+pub(crate) struct TypeofAlias {
+    pub(super) chain: CompactString,
+    shadowed_in: Vec<oxc_span::Span>,
+}
 
-impl TypeNames {
-    fn declare(&mut self, name: &str) {
-        *self.0.entry(CompactString::from(name)).or_default() += 1;
+impl TypeofAlias {
+    /// Whether a reference to the alias at `at` means it: no scope around `at` declares the name again.
+    pub(super) fn means_at(&self, at: oxc_span::Span) -> bool {
+        !self.shadowed_in.iter().any(|scope| scope.start <= at.start && at.end <= scope.end)
     }
 }
 
-impl<'a> oxc_ast_visit::Visit<'a> for TypeNames {
-    fn visit_ts_type_alias_declaration(&mut self, it: &TSTypeAliasDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_type_alias_declaration(self, it);
+/// The scopes inside the module that declare one of `names` in type space, and so shadow the module's own declaration
+/// of it there. A type parameter shadows only within the function or class that declares it; one of a type (an alias,
+/// an interface, a signature, `infer`, a mapped key) holds no expression, so no cast can sit inside it. A declaration
+/// with no scope around it is the module's own, which `typeof_aliases` counts.
+struct Shadows<'n> {
+    names: &'n [(&'n str, String)],
+    scopes: Vec<oxc_span::Span>,
+    shadowed_in: Vec<Vec<oxc_span::Span>>,
+}
+
+impl Shadows<'_> {
+    fn declare_in(&mut self, name: &str, scope: Option<oxc_span::Span>) {
+        let Some(scope) = scope.or_else(|| self.scopes.last().copied()) else { return };
+        for (index, (candidate, _)) in self.names.iter().enumerate() {
+            if *candidate == name {
+                self.shadowed_in[index].push(scope);
+            }
+        }
     }
 
-    fn visit_ts_interface_declaration(&mut self, it: &TSInterfaceDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_interface_declaration(self, it);
+    fn type_parameters(&mut self, declared: Option<&TSTypeParameterDeclaration<'_>>, scope: oxc_span::Span) {
+        for parameter in declared.into_iter().flat_map(|declared| &declared.params) {
+            self.declare_in(&parameter.name.name, Some(scope));
+        }
+    }
+
+    fn within(&mut self, scope: oxc_span::Span, walk: impl FnOnce(&mut Self)) {
+        self.scopes.push(scope);
+        walk(self);
+        self.scopes.pop();
+    }
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for Shadows<'_> {
+    fn visit_function(&mut self, it: &Function<'a>, flags: oxc_syntax::scope::ScopeFlags) {
+        self.type_parameters(it.type_parameters.as_deref(), it.span);
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_function(this, it, flags));
+    }
+
+    fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
+        self.type_parameters(it.type_parameters.as_deref(), it.span);
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_arrow_function_expression(this, it));
     }
 
     fn visit_class(&mut self, it: &Class<'a>) {
         if let Some(id) = &it.id {
-            self.declare(&id.name);
+            // A class expression's name is in scope only inside the class.
+            self.declare_in(&id.name, (!it.is_declaration()).then_some(it.span));
         }
-        oxc_ast_visit::walk::walk_class(self, it);
+        self.type_parameters(it.type_parameters.as_deref(), it.span);
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_class(this, it));
+    }
+
+    fn visit_block_statement(&mut self, it: &BlockStatement<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_block_statement(this, it));
+    }
+
+    fn visit_switch_statement(&mut self, it: &SwitchStatement<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_switch_statement(this, it));
+    }
+
+    fn visit_static_block(&mut self, it: &StaticBlock<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_static_block(this, it));
+    }
+
+    fn visit_ts_type_alias_declaration(&mut self, it: &TSTypeAliasDeclaration<'a>) {
+        self.declare_in(&it.id.name, None);
+    }
+
+    fn visit_ts_interface_declaration(&mut self, it: &TSInterfaceDeclaration<'a>) {
+        self.declare_in(&it.id.name, None);
     }
 
     fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_enum_declaration(self, it);
-    }
-
-    fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_namespace_declaration(self, it);
-    }
-
-    fn visit_ts_type_parameter(&mut self, it: &TSTypeParameter<'a>) {
-        self.declare(&it.name.name);
-        oxc_ast_visit::walk::walk_ts_type_parameter(self, it);
-    }
-
-    fn visit_ts_mapped_type(&mut self, it: &TSMappedType<'a>) {
-        self.declare(&it.key.name);
-        oxc_ast_visit::walk::walk_ts_mapped_type(self, it);
-    }
-
-    fn visit_import_declaration_specifier(&mut self, it: &ImportDeclarationSpecifier<'a>) {
-        self.declare(&it.local().name);
+        self.declare_in(&it.id.name, None);
     }
 
     fn visit_ts_import_equals_declaration(&mut self, it: &TSImportEqualsDeclaration<'a>) {
-        self.declare(&it.id.name);
+        self.declare_in(&it.id.name, None);
     }
+
+    fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
+        self.declare_in(&it.id.name, None);
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_namespace_declaration(this, it));
+    }
+
+    fn visit_ts_external_module_declaration(&mut self, it: &TSExternalModuleDeclaration<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_external_module_declaration(this, it));
+    }
+
+    fn visit_ts_global_declaration(&mut self, it: &TSGlobalDeclaration<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_global_declaration(this, it));
+    }
+
+    // A type holds no expression, so nothing declared in one encloses a cast.
+    fn visit_ts_type(&mut self, _it: &TSType<'a>) {}
 }
 
-/// The module-level aliases of a value's type, `type Factory = typeof createButton`, as alias name to the dotted chain
-/// it queries. Only a name the file declares once in type space is kept: an import, an interface merged with it, a
-/// type parameter or a namespace's own type of that name may be what a use means, and which one is not read here.
-pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, CompactString> {
+/// How many declarations of `name` the module itself makes in type space: an import, a type alias, an interface, a
+/// class, an enum, a namespace or an `import =`. A value (`const`, `function`) declares no type.
+fn declares(statement: &Statement<'_>, name: &str) -> usize {
+    let declaration = match statement {
+        Statement::ImportDeclaration(import) => {
+            return import.specifiers.iter().flatten().filter(|specifier| specifier.local().name == name).count();
+        }
+        Statement::ExportDeclaration(export) => Some(&export.declaration),
+        Statement::ExportDefaultDeclaration(export) => {
+            let declared = match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => class.id.as_ref().map(|id| &id.name),
+                ExportDefaultDeclarationKind::TSInterfaceDeclaration(interface) => Some(&interface.id.name),
+                // A function or an expression is a value.
+                ExportDefaultDeclarationKind::FunctionDeclaration(_) => None,
+                kind => kind.as_expression().and(None),
+            };
+            return usize::from(declared.is_some_and(|declared| declared == name));
+        }
+        _ => statement.as_declaration(),
+    };
+    let declared = match declaration {
+        Some(Declaration::ClassDeclaration(class)) => class.id.as_ref().map(|id| &id.name),
+        Some(Declaration::TSTypeAliasDeclaration(alias)) => Some(&alias.id.name),
+        Some(Declaration::TSInterfaceDeclaration(interface)) => Some(&interface.id.name),
+        Some(Declaration::TSEnumDeclaration(declaration)) => Some(&declaration.id.name),
+        Some(Declaration::TSNamespaceDeclaration(namespace)) => Some(&namespace.id.name),
+        Some(Declaration::TSImportEqualsDeclaration(import)) => Some(&import.id.name),
+        Some(
+            Declaration::VariableDeclaration(_)
+            | Declaration::FunctionDeclaration(_)
+            | Declaration::TSExternalModuleDeclaration(_)
+            | Declaration::TSGlobalDeclaration(_),
+        )
+        | None => None,
+    };
+    usize::from(declared.is_some_and(|declared| declared == name))
+}
+
+/// The module-level aliases of a value's type, `type Factory = typeof createButton`, by alias name. Only a name the
+/// module declares once in type space is kept: an import or an interface of the same name may be what a use means. A
+/// declaration of the name in an inner scope shadows the alias only inside that scope ([`TypeofAlias::means_at`]).
+/// The scopes are walked only when the module has such an alias.
+pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, TypeofAlias> {
     fn chain(name: &TSTypeName<'_>) -> Option<String> {
         match name {
             TSTypeName::IdentifierReference(id) => Some(id.name.as_str().to_owned()),
@@ -601,9 +732,7 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
             TSTypeName::ThisExpression(_) => None,
         }
     }
-    let mut declared = TypeNames::default();
-    oxc_ast_visit::Visit::visit_program(&mut declared, program);
-    let mut aliases = FxHashMap::default();
+    let mut candidates: Vec<(&str, String)> = Vec::new();
     for statement in &program.body {
         let declaration = match statement {
             Statement::ExportDeclaration(export) => Some(&export.declaration),
@@ -614,25 +743,37 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
         while let TSType::TSParenthesizedType(inner) = ty {
             ty = &inner.type_annotation;
         }
-        let queried = match ty {
-            TSType::TSTypeQuery(query) if declaration.type_parameters.is_none() && query.type_arguments.is_none() => {
-                match &query.expr_name {
-                    TSTypeQueryExprName::IdentifierReference(id) => Some(id.name.as_str().to_owned()),
-                    TSTypeQueryExprName::QualifiedName(qualified) => {
-                        chain(&qualified.left).map(|left| format!("{left}.{}", qualified.right.name))
-                    }
-                    TSTypeQueryExprName::ThisExpression(_) | TSTypeQueryExprName::TSImportType(_) => None,
-                }
+        let TSType::TSTypeQuery(query) = ty else { continue };
+        if declaration.type_parameters.is_some() || query.type_arguments.is_some() {
+            continue;
+        }
+        let queried = match &query.expr_name {
+            TSTypeQueryExprName::IdentifierReference(id) => Some(id.name.as_str().to_owned()),
+            TSTypeQueryExprName::QualifiedName(qualified) => {
+                chain(&qualified.left).map(|left| format!("{left}.{}", qualified.right.name))
             }
-            _ => None,
+            TSTypeQueryExprName::ThisExpression(_) | TSTypeQueryExprName::TSImportType(_) => None,
         };
-        if let Some(queried) = queried
-            && declared.0.get(declaration.id.name.as_str()) == Some(&1)
-        {
-            aliases.insert(CompactString::from(declaration.id.name.as_str()), CompactString::from(queried));
+        if let Some(queried) = queried {
+            candidates.push((declaration.id.name.as_str(), queried));
         }
     }
-    aliases
+    if candidates.is_empty() {
+        return FxHashMap::default();
+    }
+    #[cfg(test)]
+    steps::count_walk();
+    let mut shadows =
+        Shadows { names: &candidates, scopes: Vec::new(), shadowed_in: vec![Vec::new(); candidates.len()] };
+    oxc_ast_visit::Visit::visit_program(&mut shadows, program);
+    candidates
+        .iter()
+        .zip(shadows.shadowed_in)
+        .filter(|((name, _), _)| program.body.iter().map(|statement| declares(statement, name)).sum::<usize>() == 1)
+        .map(|((name, queried), shadowed_in)| {
+            (CompactString::from(*name), TypeofAlias { chain: CompactString::from(queried.as_str()), shadowed_in })
+        })
+        .collect()
 }
 
 /// Counts the wrapper layers `peel` reads, so a test can show that a chain of assertions is read in one pass.
@@ -648,6 +789,18 @@ pub(super) mod steps {
 
     pub(in crate::extractor) fn take() -> u64 {
         STEPS.with(|steps| steps.replace(0))
+    }
+
+    thread_local!(static WALKS: Cell<u64> = const { Cell::new(0) });
+
+    /// Counts the walks `typeof_aliases` makes of a whole module, so a test can show a module without an alias makes
+    /// none.
+    pub(in crate::extractor) fn count_walk() {
+        WALKS.with(|walks| walks.set(walks.get() + 1));
+    }
+
+    pub(in crate::extractor) fn take_walks() -> u64 {
+        WALKS.with(|walks| walks.replace(0))
     }
 }
 
@@ -693,11 +846,62 @@ pub(crate) struct AliasCall {
     forward_ref: bool,
 }
 
+/// What `const Button = Inner` or `memo(Inner)` re-binds, read before `Inner` needs to be known.
+pub(crate) struct AliasShape {
+    inner: String,
+    call: Option<AliasCall>,
+    type_arguments: AliasTypeArguments,
+}
+
+/// An alias whose component an instantiation gives type arguments, bound once the file is read.
+pub(crate) struct PendingInstantiation {
+    name: String,
+    inner: String,
+    type_arguments: AliasTypeArguments,
+    span: oxc_span::Span,
+}
+
+/// The type arguments an instantiation gives the aliased component ([`instantiated`]).
+#[derive(Clone)]
+enum AliasTypeArguments {
+    No,
+    Given(Vec<crate::types::CollectedType>),
+    Unread,
+}
+
+/// `mapping` with its type parameters bound to `arguments` in its props type's arguments, as `List<Row>` binds `List`'s
+/// `T` to `Row`. `Err` with the reason when not all can be: a count other than the parameters', or a parameter used
+/// inside a props type argument rather than as one.
+fn instantiate(mapping: &mut ComponentMapping, arguments: &[crate::types::CollectedType]) -> Result<(), String> {
+    let parameters = &mapping.type_params;
+    if arguments.len() != parameters.len() {
+        return Err(format!("{} type argument(s) for {} type parameter(s)", arguments.len(), parameters.len()));
+    }
+    let mut bound = Vec::with_capacity(mapping.props_type_args.len());
+    for ty in &mapping.props_type_args {
+        let parameter = match ty {
+            crate::types::CollectedType::Named { name, args } if args.is_empty() => {
+                parameters.iter().position(|parameter| parameter == name)
+            }
+            _ => None,
+        };
+        match parameter {
+            Some(index) => bound.push(arguments[index].clone()),
+            None if ty.referenced_names().iter().any(|name| parameters.contains(name)) => {
+                return Err("a type parameter is used inside a props type argument".to_owned());
+            }
+            None => bound.push(ty.clone()),
+        }
+    }
+    mapping.props_type_args = bound;
+    mapping.type_params.clear();
+    Ok(())
+}
+
 /// An alias of a component that was not collected yet when the alias was read.
 pub(crate) struct PendingAlias {
     name: String,
-    inner: String,
-    call: Option<AliasCall>,
+    shape: AliasShape,
     span: oxc_span::Span,
 }
 
@@ -798,18 +1002,20 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Whether the callee's declaration describes the call, so `resolver::callee` may read it: the evidence is the
-    /// identity, or a reference to a module-level `type F = typeof <the callee>` whose name means nothing else in the
-    /// file ([`typeof_aliases`]). Any other assertion may hide what the declaration says (`(wrap as <T>(r: FC<T>) =>
-    /// FC<T>)<P>(…)` drops the props `wrap`'s result adds).
+    /// identity, or a reference to a module-level `type F = typeof <the callee>` that the module declares once and no
+    /// scope around the cast declares again ([`typeof_aliases`]). Any other assertion may hide what the declaration
+    /// says (`(wrap as <T>(r: FC<T>) => FC<T>)<P>(…)` drops the props `wrap`'s result adds).
     pub(super) fn describes_call(&self, peeled: &Peeled<'_, '_>) -> bool {
         match peeled.evidence {
             Evidence::Identity => true,
             Evidence::Reference(reference) => {
-                let chain = match &reference.type_name {
+                let alias = match &reference.type_name {
                     TSTypeName::IdentifierReference(alias) => self.typeof_aliases.get(alias.name.as_str()),
                     TSTypeName::QualifiedName(_) | TSTypeName::ThisExpression(_) => None,
                 };
-                reference.type_arguments.is_none() && chain.is_some_and(|chain| chain_names(chain, peeled.expr))
+                reference.type_arguments.is_none()
+                    && alias
+                        .is_some_and(|alias| alias.means_at(reference.span) && chain_names(&alias.chain, peeled.expr))
             }
             Evidence::NoComponent | Evidence::NotRenderable | Evidence::Unknown => false,
         }
@@ -1377,15 +1583,15 @@ impl<'src> SourceDataCollector<'src> {
     /// own (implementation-only) name is filtered out of the final output in
     /// `finish()` via `aliased_away`.
     pub(super) fn try_rename_identifier_wrapped_component<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> bool {
-        let Some((inner, call)) = self.alias_shape(decl) else { return false };
-        match self.alias_outcome(name, &inner, call) {
+        let Some(shape) = self.alias_shape(decl) else { return false };
+        match self.alias_outcome(name, &shape, decl.span) {
             AliasOutcome::Done => true,
             AliasOutcome::Declined(reason) => {
                 self.decline_reason = Some(reason);
                 false
             }
             AliasOutcome::NoBase => {
-                self.alias_candidate = Some((inner, call));
+                self.alias_candidate = Some(shape);
                 false
             }
         }
@@ -1393,17 +1599,26 @@ impl<'src> SourceDataCollector<'src> {
 
     /// The component `decl` re-binds, `const Button = Inner` or `memo(Inner)`, and what the call is, read before `Inner`
     /// needs to be known. `None` when the initializer is not that shape, or the call names the props it builds with.
-    fn alias_shape<'a>(&mut self, decl: &Binding<'_, 'a>) -> Option<(String, Option<AliasCall>)> {
+    fn alias_shape<'a>(&mut self, decl: &Binding<'_, 'a>) -> Option<AliasShape> {
         let init = decl.init.as_ref()?;
-        let (inner, call) = match peel_expr(init) {
-            Expression::CallExpression(call) => match aliased_component(call) {
-                Some(Expression::Identifier(id)) => (id.name.as_str().to_owned(), Some(&**call)),
+        let (inner, call, value) = match peel_expr(init) {
+            Expression::CallExpression(call) => match (aliased_component(call), call.arguments.first()) {
+                (Some(Expression::Identifier(id)), Some(value)) => {
+                    (id.name.as_str().to_owned(), Some(&**call), value.as_expression()?)
+                }
                 _ => return None,
             },
-            Expression::Identifier(id) => (id.name.as_str().to_owned(), None),
+            Expression::Identifier(id) => (id.name.as_str().to_owned(), None, *init),
             _ => return None,
         };
-        let Some(call) = call else { return Some((inner, None)) };
+        let type_arguments = match instantiated(value) {
+            Instantiated::No => AliasTypeArguments::No,
+            Instantiated::Given(given) => {
+                AliasTypeArguments::Given(given.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect())
+            }
+            Instantiated::Unread => AliasTypeArguments::Unread,
+        };
+        let Some(call) = call else { return Some(AliasShape { inner, call: None, type_arguments }) };
         // The component it receives is not the one it builds when a type argument names the props.
         if self.call_names_props_type(call) {
             return None;
@@ -1413,11 +1628,14 @@ impl<'src> SourceDataCollector<'src> {
         // `Object.assign(Impl, { Item })` returns `Impl` itself with the statics attached.
         let wrapper = is_component_alias_call(&*self, call);
         // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
-        Some((inner, Some(AliasCall { wrapper, forward_ref: self.is_forward_ref_call(call) })))
+        let call = Some(AliasCall { wrapper, forward_ref: self.is_forward_ref_call(call) });
+        Some(AliasShape { inner, call, type_arguments })
     }
 
-    /// Bind `name` to a clone of the component `inner` once that is collected.
-    fn alias_outcome(&mut self, name: &str, inner: &str, call: Option<AliasCall>) -> AliasOutcome {
+    /// Bind `name` to a clone of the component `shape.inner` once that is collected, its type parameters bound to the
+    /// type arguments the alias gives it (`memo(List<Row>)`). Arguments it cannot bind are reported, once, at `span`.
+    fn alias_outcome(&mut self, name: &str, shape: &AliasShape, span: oxc_span::Span) -> AliasOutcome {
+        let (inner, call) = (shape.inner.as_str(), shape.call);
         let Some(base) = self.data.component_mappings.iter().find(|m| m.is_binding_named(inner)) else {
             return AliasOutcome::NoBase;
         };
@@ -1433,15 +1651,51 @@ impl<'src> SourceDataCollector<'src> {
         alias.component_name = name.to_owned();
         self.data.component_mappings.push(alias);
         self.aliased_away.insert(inner.into());
+        if !matches!(shape.type_arguments, AliasTypeArguments::No) {
+            self.pending_instantiations.push(PendingInstantiation {
+                name: name.to_owned(),
+                inner: shape.inner.clone(),
+                type_arguments: shape.type_arguments.clone(),
+                span,
+            });
+        }
         AliasOutcome::Done
+    }
+
+    /// Bind each instantiated alias's type parameters (`memo(List<Row>)`), once `finish` has given every mapping the
+    /// type parameters of the functions it spans; report, once per alias, the arguments that cannot be bound.
+    pub(super) fn bind_alias_instantiations(&mut self) {
+        for pending in std::mem::take(&mut self.pending_instantiations) {
+            let Some(alias) =
+                self.data.component_mappings.iter_mut().find(|m| m.bound && m.component_name == pending.name)
+            else {
+                continue;
+            };
+            let unbound = match &pending.type_arguments {
+                AliasTypeArguments::No => None,
+                AliasTypeArguments::Given(arguments) => instantiate(alias, arguments).err(),
+                AliasTypeArguments::Unread => Some("they instantiate an asserted value or an instantiation".to_owned()),
+            };
+            if let Some(reason) = unbound {
+                let PendingInstantiation { name, inner, span, .. } = pending;
+                self.record_degraded(
+                    DiagnosticCode::GenericArgumentMismatch,
+                    format!(
+                        "'{name}' gives component '{inner}' type arguments that are not applied to its props \
+                         ({reason}): the props keep '{inner}''s type parameters"
+                    ),
+                    span,
+                );
+            }
+        }
     }
 
     /// Hold back `const Button = Inner` whose `Inner` is not collected yet: it may be declared further down the file.
     /// Only the alias shape `try_rename_identifier_wrapped_component` just read, and only after every other rule
     /// declined it.
     pub(super) fn try_defer_identifier_alias(&mut self, name: &str, span: oxc_span::Span) -> bool {
-        let Some((inner, call)) = self.alias_candidate.take() else { return false };
-        self.pending_aliases.push(PendingAlias { name: name.to_owned(), inner, call, span });
+        let Some(shape) = self.alias_candidate.take() else { return false };
+        self.pending_aliases.push(PendingAlias { name: name.to_owned(), shape, span });
         true
     }
 
@@ -1456,7 +1710,7 @@ impl<'src> SourceDataCollector<'src> {
                 if self.data.component_mappings.iter().any(|m| m.is_binding_named(&alias.name)) {
                     continue;
                 }
-                match self.alias_outcome(&alias.name, &alias.inner, alias.call) {
+                match self.alias_outcome(&alias.name, &alias.shape, alias.span) {
                     AliasOutcome::Done => {}
                     AliasOutcome::Declined(reason) => {
                         self.record_skip(DiagnosticCode::SkippedCandidate, reason, alias.span);
@@ -1513,6 +1767,17 @@ impl<'src> SourceDataCollector<'src> {
             }
             _ => return false,
         };
+        // `ComponentProps<typeof Imported>` names the value, which has no type arguments of its own.
+        if !matches!(instantiated(init), Instantiated::No) {
+            self.record_degraded(
+                DiagnosticCode::GenericArgumentMismatch,
+                format!(
+                    "'{name}' gives imported component '{target}' type arguments that are not applied to its props: \
+                     the props keep '{target}''s type parameters"
+                ),
+                decl.span,
+            );
+        }
         self.push_imported_alias(name, target, decl.span);
         true
     }

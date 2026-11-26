@@ -694,8 +694,8 @@ fn a_hook_called_through_an_assertion_is_still_a_hook_call() {
 }
 
 /// Finding 2: an initializer, a wrapper's argument and `Object.assign`'s first argument are read through an
-/// instantiation beneath any other wrapper, as through the others: `memo(List<Row>)` is `List` memoized. The type
-/// arguments are not applied to the props, which stay `List`'s own.
+/// instantiation beneath any other wrapper, as through the others: `memo(List<Row>)` is `List` memoized. The props the
+/// type arguments give are pinned by `an_instantiated_component_binds_its_type_parameters_or_says_it_did_not`.
 #[test]
 fn an_instantiated_value_is_read_through_at_every_initializer_and_argument_site() {
     let prelude = "interface ListProps<T> { items?: T[] }\n\
@@ -729,7 +729,7 @@ fn an_instantiated_value_is_read_through_at_every_initializer_and_argument_site(
             "((List as any)<string>)!",
         ] {
             let actual = tsx(&format!("{prelude}{}", site.replace("{V}", value)));
-            if actual != plain {
+            if sorted(&actual) != sorted(&plain) {
                 failures.push(format!("{site} with {value}: {:?}", sorted(&actual)));
             }
         }
@@ -748,29 +748,6 @@ fn an_instantiated_value_is_read_through_at_every_initializer_and_argument_site(
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Finding 4: an alias is the callee's own type only when its name means nothing else in the file's type space.
-#[test]
-fn a_typeof_alias_counts_only_when_its_name_is_declared_once() {
-    let factory = "function createButton(): React.FC<Props> { return (props) => <div />; }\n\
-                   type Factory = typeof createButton;\n";
-    let plain = tsx(&format!("{factory}export const Button = createButton();"));
-    assert_eq!(plain.len(), 1, "{plain:#?}");
-    let asserted = |other: &str| tsx(&format!("{factory}{other}\nexport const Button = (createButton as Factory)();"));
-    // A value of the same name declares no type.
-    assert_eq!(asserted("const Factory = 1;"), plain);
-    for other in [
-        "import type { Factory } from './factory';",
-        "import { Factory as Factory } from './factory';",
-        "namespace N { export type Factory = () => string; }",
-        "declare module 'm' { type Factory = () => string; }",
-        "interface Factory { (): string }",
-        "function g<Factory>(f: Factory) { return f; }",
-        "type Mapped = { [Factory in 'a']: Factory };",
-    ] {
-        assert_eq!(asserted(other), Vec::<serde_json::Value>::new(), "{other}");
-    }
-}
-
 /// Finding 5: a type literal's member has every type declared for its name, so it declines only when each one does.
 #[test]
 fn a_namespace_member_declared_several_times_declines_only_when_every_declaration_does() {
@@ -784,7 +761,6 @@ fn a_namespace_member_declared_several_times_declines_only_when_every_declaratio
         "{ forwardRef(...a: any[]): string; forwardRef: typeof React.forwardRef }",
         "{ forwardRef: (...a: any[]) => object; forwardRef: any }",
         "{ get forwardRef(): typeof React.forwardRef }",
-        "{ forwardRef(...a: any[]): object; set forwardRef(v: (...a: any[]) => object) }",
     ] {
         assert_eq!(with(literal), plain, "{literal}");
     }
@@ -978,9 +954,9 @@ fn every_form_the_base_detected_is_still_detected_unless_the_assertion_says_it_i
         };
         let actual = differential_detections(source);
         let found: Vec<&str> = actual.split(' ').collect();
-        // A call whose result is rendered (returned, or an element factory) may give a string or a number: only a
-        // result React cannot render declines it.
-        let rendered = matches!(form, "PascalCase call returned" | "element factory");
+        // A component invoked directly may give a string or a number: only a result React cannot render declines it.
+        // An element factory asserted to give a string gives no element.
+        let rendered = form == "PascalCase call returned";
         let declined = match differential_class(assertion) {
             "NotRenderable" => !subject.is_empty(),
             "NoComponent" => !subject.is_empty() && !rendered,
@@ -1415,3 +1391,329 @@ const BASE_DETECTIONS: &[(&str, &str)] = &[
     ("call-only helper | satisfies", "Button:Props Helper:Props"),
     ("call-only helper | non-null", "Button:Props"),
 ];
+
+// Review round 6.
+
+const LIST: &str = "interface ListProps<T> { items?: T[] }\n\
+                    interface ItemProps { size?: string }\n\
+                    interface Row { id: string }\n\
+                    declare function withTheme<C>(c: C): C;\n\
+                    function List<T>(props: ListProps<T>) { return <div />; }\n";
+
+/// The mappings of `source` after `HEADER`, by name, and the messages of its `GenericArgumentMismatch` diagnostics.
+fn with_mismatches(source: &str) -> (Vec<serde_json::Value>, Vec<String>) {
+    let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &format!("{HEADER}{source}"));
+    let mismatches = data
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == DiagnosticCode::GenericArgumentMismatch)
+        .map(|diagnostic| format!("{:?}: {}", diagnostic.severity, diagnostic.message))
+        .collect();
+    let mut mappings = tsx(source);
+    mappings.sort_by(|a, b| a["component_name"].as_str().cmp(&b["component_name"].as_str()));
+    (mappings, mismatches)
+}
+
+/// Finding 1: `List<Row>` binds `List`'s type parameter at every site that makes a component of it, so the props are
+/// `ListProps<Row>`; a form whose arguments cannot be bound keeps `ListProps<T>` and says so once.
+#[test]
+fn an_instantiated_component_binds_its_type_parameters_or_says_it_did_not() {
+    let sites = [
+        "export const RowList = {V};",
+        "export const RowList = memo({V});",
+        "export const RowList = withTheme({V});",
+        "export const RowList = Object.assign({V}, { Item: (props: ItemProps) => <div /> });",
+    ];
+    let row = serde_json::json!([{ "n": "Row", "a": [] }]);
+    let mut failures = Vec::new();
+    for site in sites {
+        let (plain, none) = with_mismatches(&format!("{LIST}{}", site.replace("{V}", "List")));
+        let list = plain.iter().find(|m| m["component_name"] == "RowList").unwrap().clone();
+        assert_eq!(list["props_type_name"], "ListProps", "{list:#}");
+        assert_eq!(list["props_type_args"], serde_json::json!([{ "n": "T", "a": [] }]), "{list:#}");
+        assert_eq!(list["type_params"], serde_json::json!(["T"]), "{list:#}");
+        assert_eq!(none, Vec::<String>::new());
+        let mut bound = plain.clone();
+        for mapping in &mut bound {
+            if mapping["component_name"] == "RowList" {
+                mapping["props_type_args"] = row.clone();
+                mapping["type_params"] = serde_json::json!([]);
+            }
+        }
+        for value in ["List<Row>", "(List<Row>)", "(List<Row>)!", "(List<Row>) satisfies unknown", "(List<Row>) as any"]
+        {
+            let actual = with_mismatches(&format!("{LIST}{}", site.replace("{V}", value)));
+            if actual != (bound.clone(), Vec::new()) {
+                failures.push(format!("{site} with {value}: {actual:#?}"));
+            }
+        }
+        for value in ["((List as any)<Row>)!", "List<Row, Row>"] {
+            let (mappings, mismatches) = with_mismatches(&format!("{LIST}{}", site.replace("{V}", value)));
+            if mappings != plain || mismatches.len() != 1 || !mismatches[0].starts_with("Warning: 'RowList' gives") {
+                failures.push(format!("{site} with {value}: {mappings:#?} {mismatches:?}"));
+            }
+        }
+    }
+    // A type parameter used inside a props type argument is not bound.
+    let grid = "interface GridProps<T> { rows?: T }\nfunction Grid<T>(props: GridProps<T[]>) { return <div />; }\n";
+    let (plain, _) = with_mismatches(&format!("{grid}export const RowGrid = Grid;"));
+    let (mappings, mismatches) = with_mismatches(&format!("{grid}export const RowGrid = Grid<string>;"));
+    assert_eq!(mappings, plain);
+    assert_eq!(
+        mismatches,
+        ["Warning: 'RowGrid' gives component 'Grid' type arguments that are not applied to its props (a type \
+          parameter is used inside a props type argument): the props keep 'Grid''s type parameters"]
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Finding 1, the imported sibling: `ComponentProps<typeof Imported>` cannot carry type arguments, so it says so.
+#[test]
+fn an_instantiated_imported_component_says_its_type_arguments_are_not_applied() {
+    let import = "import { List } from './list';\n";
+    let (plain, none) = with_mismatches(&format!("{import}export const RowList = List;"));
+    assert_eq!(none, Vec::<String>::new());
+    let (mappings, mismatches) = with_mismatches(&format!("{import}export const RowList = List<string>;"));
+    assert_eq!(mappings, plain);
+    assert_eq!(
+        mismatches,
+        ["Warning: 'RowList' gives imported component 'List' type arguments that are not applied to its props: the \
+          props keep 'List''s type parameters"]
+    );
+}
+
+/// Finding 3: a name declared again in an inner scope shadows the module's `typeof` alias only there; the module's
+/// own second declaration of it makes it ambiguous everywhere.
+#[test]
+fn a_typeof_alias_is_shadowed_only_where_its_name_is_declared_again() {
+    let factory = "function createButton(): React.FC<Props> { return (props) => <div />; }\n\
+                   type Factory = typeof createButton;\n";
+    let plain = tsx(&format!("{factory}export const Button = createButton();"));
+    assert_eq!(plain.len(), 1, "{plain:#?}");
+    let asserted = |other: &str| tsx(&format!("{factory}{other}\nexport const Button = (createButton as Factory)();"));
+    for other in [
+        "const Factory = 1;",
+        "function g<Factory>(f: Factory) { return f; }",
+        "const h = <Factory,>(f: Factory) => f;",
+        "class K<Factory> { f?: Factory }",
+        "type Mapped = { [Factory in 'a']: Factory };",
+        "type G<Factory> = Factory;",
+        "type I<T> = T extends Array<infer Factory> ? Factory : never;",
+        "namespace N { export type Factory = () => string; }",
+        "namespace N.M { interface Factory { (): string } }",
+        "declare module 'm' { type Factory = () => string; }",
+        "function f() { type Factory = () => string; }",
+    ] {
+        assert_eq!(asserted(other), plain, "{other}");
+    }
+    for other in [
+        "import type { Factory } from './factory';",
+        "import { Factory as Factory } from './factory';",
+        "import * as Factory from './factory';",
+        "interface Factory { (): string }",
+        "class Factory {}",
+        "export enum Factory { A }",
+        "namespace Factory {}",
+    ] {
+        assert_eq!(asserted(other), Vec::<serde_json::Value>::new(), "{other}");
+        // The declined factory call is the skip any unmatched PascalCase binding is, not silence.
+        let source = format!("{HEADER}{factory}{other}\nexport const Button = (createButton as Factory)();");
+        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
+        let skipped: Vec<&str> = data
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.starts_with("'Button'"))
+            .map(|d| d.message.as_str())
+            .collect();
+        assert_eq!(
+            skipped,
+            [
+                "'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC \
+              wrapper, or identifier alias)"
+            ],
+            "{other}"
+        );
+    }
+}
+
+/// Finding 4: a function that never returns is assignable to every function type, so a `never` result is no evidence:
+/// the named reader, the rendered reader and a namespace member all keep the call.
+#[test]
+fn a_never_result_is_no_evidence_against_a_call() {
+    let plain = tsx("export const Button = memo((props: Props) => <div />);");
+    assert_eq!(plain.len(), 1, "{plain:#?}");
+    for callee in
+        ["(memo as (c: any) => never)", "(memo as { (c: any): never })", "(memo as (c: any) => string | never)"]
+    {
+        let source = format!("export const Button = {callee}((props: Props) => <div />);");
+        let expected = if callee.contains("string") { Vec::new() } else { plain.clone() };
+        assert_eq!(tsx(&source), expected, "{callee}");
+    }
+    let render = "<HTMLButtonElement, Props>((props, ref) => <div />);";
+    let forward = tsx(&format!("export const Button = React.forwardRef{render}"));
+    let member =
+        tsx(&format!("export const Button = (React as {{ forwardRef: (...a: any[]) => never }}).forwardRef{render}"));
+    assert_eq!(member, forward);
+    let rendered = |callee: &str| {
+        tsx(&format!(
+            "function Greeting(props: Props) {{ return <div />; }}\n\
+             export const Button = (props: Props) => {callee}(props);\nexport {{ Greeting }};"
+        ))
+        .iter()
+        .map(|m| m["component_name"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(rendered("Greeting"), ["Greeting", "Button"]);
+    assert_eq!(rendered("(Greeting as (p: Props) => never)"), ["Greeting", "Button"]);
+    assert_eq!(rendered("(Greeting as (p: Props) => object)"), ["Greeting"]);
+}
+
+/// Finding 5: a setter is never what a read of the member calls, so it answers nothing; an untyped declaration that
+/// could answer the call keeps it unknown.
+#[test]
+fn a_setter_answers_nothing_and_an_untyped_declaration_stays_unknown() {
+    let render = "<HTMLButtonElement, Props>((props, ref) => <div />);";
+    let plain = tsx(&format!("export const Button = React.forwardRef{render}"));
+    assert_eq!(plain.len(), 1, "{plain:#?}");
+    let with = |literal: &str| tsx(&format!("export const Button = (React as {literal}).forwardRef{render}"));
+    for literal in [
+        "{ get forwardRef(): (...a: any[]) => object; set forwardRef(v: (...a: any[]) => object) }",
+        "{ set forwardRef(v: unknown); get forwardRef(): (...a: any[]) => object }",
+        "{ forwardRef(...a: any[]): object; set forwardRef(v: (...a: any[]) => object) }",
+    ] {
+        assert_eq!(with(literal), Vec::<serde_json::Value>::new(), "{literal}");
+    }
+    for literal in [
+        "{ forwardRef(...a: any[]): object; forwardRef }",
+        "{ forwardRef(...a: any[]): object; forwardRef(...a: any[]) }",
+        "{ get forwardRef(); set forwardRef(v: unknown) }",
+        "{ set forwardRef(v: (...a: any[]) => object) }",
+    ] {
+        assert_eq!(with(literal), plain, "{literal}");
+    }
+}
+
+/// Finding 6, as the output shows it: an element factory asserted to give a string renders nothing, so a ref-taking
+/// function passed only to it is a render callback, as when nothing renders it.
+#[test]
+fn an_element_factory_asserted_to_a_string_renders_nothing() {
+    let names = |call: &str| {
+        tsx(&format!(
+            "import {{ createElement }} from 'react';\n\
+             function Foo(props: Props, ref: unknown) {{ return <div />; }}\n\
+             export const el = {call}(Foo);"
+        ))
+        .iter()
+        .map(|m| m["component_name"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(names("createElement"), ["Foo"]);
+    assert_eq!(names("(createElement as typeof createElement)"), ["Foo"]);
+    assert_eq!(names("(createElement as (t: any) => React.ReactElement)"), ["Foo"]);
+    assert_eq!(names("(createElement as (t: any) => string)"), Vec::<String>::new());
+    assert_eq!(names("(createElement as (t: any) => object)"), Vec::<String>::new());
+    assert_eq!(names("String"), Vec::<String>::new());
+}
+
+/// Finding 6's sibling: a function returning an element factory's result asserted to a string returns no element.
+#[test]
+fn a_function_returning_a_factory_result_asserted_to_a_string_returns_no_element() {
+    let names = |call: &str| {
+        tsx(&format!("import {{ createElement }} from 'react';\nexport const Button = (props: Props) => {call};"))
+            .iter()
+            .map(|m| m["component_name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names("createElement('div')"), ["Button"]);
+    assert_eq!(names("(createElement as (t: any) => React.ReactElement)('div')"), ["Button"]);
+    assert_eq!(names("(createElement as (t: any) => string)('div')"), Vec::<String>::new());
+    assert_eq!(names("([1].map as (f: unknown) => string)(() => <div />)"), Vec::<String>::new());
+    assert_eq!(names("([1].map as (f: unknown) => unknown)(() => <div />)"), ["Button"]);
+}
+
+/// Finding 7, dismissed: calling a hook is the evidence that a function is a component, whatever an assertion says the
+/// hook returns, `never` included.
+#[test]
+fn a_hook_called_through_a_never_assertion_is_still_a_hook_call() {
+    let names = |hook: &str| {
+        let source = format!(
+            "declare function useThing(): object;\n\
+             export const Panel = (props: Props) => {{ {hook}(); return props.label; }};"
+        );
+        tsx(&source).iter().map(|m| m["component_name"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
+    };
+    assert_eq!(names("(useThing as () => never)"), ["Panel"]);
+    assert_eq!(names("(useThing as () => string)"), ["Panel"]);
+}
+
+/// Finding 2: a module without a `typeof` alias is not walked for the names that could shadow one; a module with one is
+/// walked once.
+#[test]
+fn only_a_module_with_a_typeof_alias_is_walked_for_shadowing_names() {
+    let walks = |source: &str| {
+        super::component::steps::take_walks();
+        parse_file(Utf8Path::new("/fixtures/Button.tsx"), &format!("{HEADER}{source}"));
+        super::component::steps::take_walks()
+    };
+    let generic = "function g<Factory>(f: Factory) { return f; }\ntype Mapped = { [K in 'a']: K };\n\
+                   export const Button = memo((props: Props) => <div />);";
+    assert_eq!(walks(generic), 0);
+    assert_eq!(walks(&format!("type Size = typeof size;\ndeclare const size: number;\n{generic}")), 1);
+}
+
+/// Finding 3: a type parameter or a declaration of the alias's name in a scope around the cast shadows the alias there,
+/// and only there.
+#[test]
+fn a_redeclaration_around_the_cast_shadows_the_alias() {
+    let means = |source: &str| {
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, source, oxc_span::SourceType::tsx()).parse();
+        let aliases = super::component::typeof_aliases(&parsed.program);
+        let at = u32::try_from(source.rfind("as Factory").unwrap() + 3).unwrap();
+        aliases.get("Factory").map(|alias| alias.means_at(oxc_span::Span::new(at, at + 7)))
+    };
+    let alias = "declare function make(): unknown;\ntype Factory = typeof make;\n";
+    for (scope, expected) in [
+        ("const v = (make as Factory)();", Some(true)),
+        ("function g<T>() { return (make as Factory)(); }", Some(true)),
+        ("function g<Factory>() { return (make as Factory)(); }", Some(false)),
+        ("function g<Factory>() {}\nconst v = (make as Factory)();", Some(true)),
+        ("const g = <Factory,>() => (make as Factory)();", Some(false)),
+        ("class K<Factory> { m() { return (make as Factory)(); } }", Some(false)),
+        ("class K { m<Factory>() { return (make as Factory)(); } }", Some(false)),
+        ("namespace N { type Factory = string; const v = (make as Factory)(); }", Some(false)),
+        ("namespace N { type Factory = string; }\nconst v = (make as Factory)();", Some(true)),
+        ("function f() { interface Factory {} return (make as Factory)(); }", Some(false)),
+        ("function f() { { class Factory {} } return (make as Factory)(); }", Some(true)),
+        ("const C = class Factory { m() { return (make as Factory)(); } };", Some(false)),
+        ("type M = { [Factory in 'a']: Factory };\nconst v = (make as Factory)();", Some(true)),
+        ("import type { Factory } from './f';\nconst v = (make as Factory)();", None),
+    ] {
+        assert_eq!(means(&format!("{alias}{scope}")), expected, "{scope}");
+    }
+}
+
+/// Finding 6: the exact render counts of the element factory reader, through each assertion.
+#[test]
+fn an_element_factory_renders_its_argument_unless_asserted_to_give_no_element() {
+    let rendered = |call: &str| {
+        let source = format!("{HEADER}import {{ createElement }} from 'react';\nconst el = {call}(Foo);");
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
+        let mut collector = SourceDataCollector::new(Utf8Path::new("/fixtures/Button.tsx"), &source, true);
+        oxc_ast_visit::Visit::visit_program(&mut collector, &parsed.program);
+        collector.name_uses.get("Foo").map_or(0, super::uses::NameUses::rendered)
+    };
+    assert_eq!(rendered("createElement"), 1);
+    assert_eq!(rendered("React.createElement"), 1);
+    assert_eq!(rendered("(createElement as typeof createElement)"), 1);
+    assert_eq!(rendered("(createElement as any)"), 1);
+    assert_eq!(rendered("(createElement as CreateElement)"), 1);
+    assert_eq!(rendered("(createElement as (t: any) => unknown)"), 1);
+    assert_eq!(rendered("(createElement as (t: any) => string)"), 0);
+    assert_eq!(rendered("(createElement as (t: any) => number | boolean)"), 0);
+    assert_eq!(rendered("(createElement as (t: any) => object)"), 0);
+    assert_eq!(rendered("(React as { createElement: (t: any) => string }).createElement"), 0);
+    // A component wrapper renders its argument by its name, whatever it returns.
+    assert_eq!(rendered("memo"), 1);
+}

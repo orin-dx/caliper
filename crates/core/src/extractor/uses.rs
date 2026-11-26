@@ -21,6 +21,13 @@ pub(crate) struct NameUses {
     rendered: u32,
 }
 
+#[cfg(test)]
+impl NameUses {
+    pub(super) fn rendered(&self) -> u32 {
+        self.rendered
+    }
+}
+
 /// Which component an export or attachment is of. A named component is the module's binding of that name. An inline
 /// sub-component (`Parent.Sub = (props: P) => …`) and an anonymous default export are no binding, and `A.Item = …`
 /// beside `B.Item = …`, or a default export named after its file beside a binding of that name, give two mappings one
@@ -203,8 +210,10 @@ impl<'src> SourceDataCollector<'src> {
         if let Expression::Identifier(callee) = peeled.expr {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
+        // An element factory asserted to give a string (`(createElement as (t: any) => string)(Foo)`) builds no
+        // element of its argument.
         let renders_argument = super::component::is_component_wrapper(&*self, call)
-            || peeled.renderable().is_some_and(|callee| super::evidence::is_element_factory_callee(callee, &*self));
+            || peeled.named().is_some_and(|callee| super::evidence::is_element_factory_callee(callee, &*self));
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;
         }

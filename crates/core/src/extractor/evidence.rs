@@ -139,8 +139,9 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        // The call's result is part of the value, so only a result React cannot render declines it.
-        let callee = super::component::rendered_callee(it);
+        // The call's result is part of the value, and it is an element only while no assertion says it is no element
+        // (`(createElement as (t: any) => string)(…)`).
+        let callee = super::component::callee_of(it);
         let name = callee.and_then(callee_name);
         let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
         if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, self.scope)) {
