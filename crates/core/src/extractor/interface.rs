@@ -406,22 +406,15 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     fn scan_object_assign_call<'a>(&mut self, call: &CallExpression<'a>) {
-        // The same predicate and argument reads as `record_object_assign_declarator` and `aliased_component`, which
+        // The arguments as `assign_roles` reads them, as for `record_object_assign_declarator` and the alias rule, which
         // record `Root` as the alias this scan attaches the inline members to.
-        if !super::component::is_object_assign_call(call) {
+        let Some(roles) = self.assign_roles(call, true, None) else { return };
+        let (Some(parent), Some(obj)) = (roles.target, roles.objects.first()) else { return };
+        if !is_pascal_case(parent) {
             return;
         }
-        let Some(Expression::Identifier(parent_id)) = super::component::aliased_component(call) else { return };
-        let recognition = super::component::Recognition::of_object_assign(call, true);
-        if !is_pascal_case(parent_id.name.as_str()) || !self.trusts_object_assign(recognition, parent_id.name.as_str())
-        {
-            return;
-        }
-        let Some(second_arg) = call.arguments.get(1) else { return };
-        let Some(Expression::ObjectExpression(obj)) = second_arg.as_expression().map(super::component::peel_expr)
-        else {
-            return;
-        };
+        let recognition = roles.recognition;
+        let parent_id = parent;
 
         for prop in &obj.properties {
             let ObjectPropertyKind::ObjectProperty(op) = prop else { continue };
@@ -438,13 +431,13 @@ impl<'src> SourceDataCollector<'src> {
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
                 Expression::Identifier(sub) => {
                     if self.trusts_member(recognition, sub.name.as_str()) {
-                        self.record_attached(Subject::local(sub.name.as_str()), parent_id.name.as_str(), &key_name);
+                        self.record_attached(Subject::local(sub.name.as_str()), parent_id, &key_name);
                     }
                     continue;
                 }
                 _ => continue,
             };
-            self.record_attached(Subject::Inline(span_start), parent_id.name.as_str(), &key_name);
+            self.record_attached(Subject::Inline(span_start), parent_id, &key_name);
             self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);
         }
     }

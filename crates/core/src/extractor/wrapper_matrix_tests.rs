@@ -2265,6 +2265,79 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "well-known Object.assign, assigned in the file | peeled",
             "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign = ((root: unknown) => root) as typeof Object.assign;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
         ),
+        // Round 32: what an `Object.assign` call's arguments are, as `assign_roles` reads them.
+        (
+            "Object.assign roles, a source declared once (finding 1) | plain",
+            "interface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return <div />; }\nexport const Widget = Object.assign({}, Item);",
+        ),
+        (
+            "Object.assign roles, a source declared once (finding 1) | peeled",
+            "interface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return <div />; }\nexport const Widget = (Object.assign as typeof Object.assign)({}, Item);",
+        ),
+        (
+            "Object.assign roles, a source declared twice | plain",
+            "interface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return <div />; }\nnamespace N { const Item = 1; }\nexport const Widget = Object.assign({}, Item);",
+        ),
+        (
+            "Object.assign roles, a source declared twice | peeled",
+            "interface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return <div />; }\nnamespace N { const Item = 1; }\nexport const Widget = (Object.assign as typeof Object.assign)({}, Item);",
+        ),
+        (
+            "Object.assign roles, an imported source | plain",
+            "import { Item } from './item';\nexport const Widget = Object.assign({}, Item);",
+        ),
+        (
+            "Object.assign roles, an imported source | peeled",
+            "import { Item } from './item';\nexport const Widget = (Object.assign as typeof Object.assign)({}, Item);",
+        ),
+        (
+            "Object.assign roles, a target declared once | plain",
+            "export function Root(props: Props) { return <div />; }\nexport const Compound = Object.assign(Root, {});",
+        ),
+        (
+            "Object.assign roles, a target declared once | peeled",
+            "export function Root(props: Props) { return <div />; }\nexport const Compound = (Object.assign as typeof Object.assign)(Root, {});",
+        ),
+        (
+            "Object.assign roles, a target declared twice (finding 2) | plain",
+            "export function Root(props: Props) { return <div />; }\nnamespace N { const Root = {}; export const Compound = Object.assign(Root, {}); }",
+        ),
+        (
+            "Object.assign roles, a target declared twice (finding 2) | peeled",
+            "export function Root(props: Props) { return <div />; }\nnamespace N { const Root = {}; export const Compound = (Object.assign as typeof Object.assign)(Root, {}); }",
+        ),
+        (
+            "Object.assign roles, a private target declared twice, bound at module level | plain",
+            "function Root(props: Props) { return <div />; }\nnamespace N { const Root = 1; }\nexport const Compound = Object.assign(Root, {});",
+        ),
+        (
+            "Object.assign roles, a private target declared twice, bound at module level | peeled",
+            "function Root(props: Props) { return <div />; }\nnamespace N { const Root = 1; }\nexport const Compound = (Object.assign as typeof Object.assign)(Root, {});",
+        ),
+        (
+            "Object.assign roles, an imported target | plain",
+            "import { Root } from './root';\nexport const Compound = Object.assign(Root, {});",
+        ),
+        (
+            "Object.assign roles, an imported target | peeled",
+            "import { Root } from './root';\nexport const Compound = (Object.assign as typeof Object.assign)(Root, {});",
+        ),
+        (
+            "Object.assign roles, a default export of a target declared once | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nexport default Object.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign roles, a default export of a target declared once | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nexport default (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign roles, a default export of a target declared twice | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nnamespace N { const Root = 1; }\nexport default Object.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign roles, a default export of a target declared twice | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nnamespace N { const Root = 1; }\nexport default (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -2289,12 +2362,30 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             ),
         ));
     }
+    // Round 32: `react_api` behind a `<T>x` assertion, a `.ts` file's form.
+    cases.push((
+        "react_api behind a type assertion, an import declared once | plain".to_owned(),
+        "// ts\nimport * as React from 'react';\ninterface Props { label?: string }\nexport const Button = React.forwardRef<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "react_api behind a type assertion, an import declared once | peeled".to_owned(),
+        "// ts\nimport * as React from 'react';\ninterface Props { label?: string }\nexport const Button = (<typeof React>React).forwardRef<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "react_api behind a type assertion, a parameter of its name | plain".to_owned(),
+        "// ts\nimport * as React from 'react';\ninterface Props { label?: string }\nfunction f(React: unknown) { return React; }\nexport const Button = React.forwardRef<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "react_api behind a type assertion, a parameter of its name | peeled".to_owned(),
+        "// ts\nimport * as React from 'react';\ninterface Props { label?: string }\nfunction f(React: unknown) { return React; }\nexport const Button = (<typeof React>React).forwardRef<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
     cases
 }
 
 /// Every mapping of a row and every diagnostic, sorted, as `parity_output` prints them.
 fn factory_parity_output(source: &str) -> String {
-    let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), source);
+    let path = if source.starts_with("// ts\n") { "/fixtures/Button.ts" } else { "/fixtures/Button.tsx" };
+    let data = parse_file(Utf8Path::new(path), source);
     let mut lines: Vec<String> = data
         .component_mappings
         .iter()
@@ -2395,8 +2486,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // (`every_receiver_read_through_a_cast_is_read_only_when_declared_once`). Round 30 adds four: a peeled base or
     // `Object.assign` whose names are trusted (`a_peeled_candidate_is_accepted_only_when_its_names_are_trusted`).
     // Round 31 adds three: a peeled receiver that resolves to its well-known global or import
-    // (`a_well_known_name_on_a_peeled_path_must_resolve_to_it`).
-    assert_eq!(read_as_the_plain_call, 59);
+    // (`a_well_known_name_on_a_peeled_path_must_resolve_to_it`). Round 32 adds two: a peeled `Object.assign` whose
+    // target is trusted, bound and exported by default (`an_object_assign_call_is_read_by_its_argument_roles`).
+    assert_eq!(read_as_the_plain_call, 61);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2454,6 +2546,37 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
     ] {
         let plain = format!("recognition: {row} | plain");
         let peeled = format!("recognition: {row} | peeled");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 32: an `Object.assign` call's arguments are read in one place (`assign_roles`): a call main never read aliases
+/// its result to its first argument only, a target the file declares once, at module level; a later identifier argument
+/// is a source, never an alias. And `react_api` behind a `<T>x` assertion (a `.ts` form) matches React only when the
+/// receiver resolves to the import. Each plain form is origin/main's; each peeled form reads as the plain form where
+/// trusted, and as origin/main read it otherwise.
+#[test]
+fn an_object_assign_call_is_read_by_its_argument_roles() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, trusted) in [
+        ("Object.assign roles, a source declared once (finding 1)", false),
+        ("Object.assign roles, a source declared twice", false),
+        ("Object.assign roles, an imported source", false),
+        ("Object.assign roles, a target declared once", true),
+        ("Object.assign roles, a target declared twice (finding 2)", false),
+        ("Object.assign roles, a private target declared twice, bound at module level", false),
+        ("Object.assign roles, an imported target", true),
+        ("Object.assign roles, a default export of a target declared once", true),
+        ("Object.assign roles, a default export of a target declared twice", false),
+        ("react_api behind a type assertion, an import declared once", true),
+        ("react_api behind a type assertion, a parameter of its name", false),
+    ] {
+        let plain = format!("{row} | plain");
+        let peeled = format!("{row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");

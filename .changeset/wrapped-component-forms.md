@@ -21,6 +21,7 @@ npm/caliper-docgen: patch
 - Limit: a name read only because a wrapper was looked through counts only when it cannot mean another declaration in the file. Names written plainly are read as before.
   - A base class written through a wrapper, such as `extends (Component as typeof Component)<Props>`, is a React class component only when the file does not declare `Component`, or imports it once. A local `class Component` there is not React's.
   - An `Object.assign(Root, { Item })` written through a wrapper (around the callee, `Root`, or the object as in `{ … } as const`) attaches its members only at module level. `Root` and each member named by an identifier must be declared exactly once in the file.
+  - Such an `Object.assign` stands for its first argument only, the object it returns, and only when the file declares that name once. `(Object.assign as typeof Object.assign)({}, Item)` is not `Item`.
   - A receiver written through a wrapper, as in `(Ui as typeof Ui).Button`, is read only when the file declares `Ui` exactly once.
   - A well-known name read through a wrapper must resolve to the global or import it names. `(Preact as typeof Preact).h(…)` counts as Preact's `h` only when the import is the file's one `Preact`, so a parameter named `Preact` breaks it. `(Object.assign as typeof Object.assign)(…)` counts as the built-in only when the file neither declares `Object` nor assigns `Object.assign`.
 

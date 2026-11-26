@@ -1571,7 +1571,14 @@ impl<'src> SourceDataCollector<'src> {
         // `getDisplayName(Card)` has the same shape as `memo(Card)` but returns a string; only a call that follows the
         // component-wrapper conventions produces a component.
         // `Object.assign(Impl, { Item })` returns `Impl` itself with the statics attached.
-        let wrapper = is_component_alias_call(&*self, call);
+        // An `Object.assign` returns its target only as `assign_roles` reads it: for a call main never read, a target
+        // the file declares once, at module level. Otherwise the call is no wrapper, as origin/main judged it.
+        let wrapper = if is_object_assign_call(call) {
+            self.assign_roles(call, false, None)
+                .is_some_and(|roles| roles.target == Some(inner.as_str()) && roles.aliases.contains(&inner.as_str()))
+        } else {
+            is_component_alias_call(&*self, call)
+        };
         // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
         let call = Some(AliasCall { wrapper, forward_ref: self.is_forward_ref_call(call) });
         Some(AliasShape { inner, call })
