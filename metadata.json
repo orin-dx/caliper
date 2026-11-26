@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M8AP41DM0BEQV4E63EFVG0KD",
+  "strategy": "manual-commit",
+  "branch": "fix-oxc7",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".changeset/wrapped-component-forms.md",
+    "crates/core/src/extractor/wrapper_matrix_tests.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 17722,
+    "cache_read_tokens": 1259405,
+    "output_tokens": 5058,
+    "api_call_count": 5,
+    "subagent_tokens": {
+      "input_tokens": 166,
+      "cache_creation_tokens": 172806,
+      "cache_read_tokens": 22200795,
+      "output_tokens": 110272,
+      "api_call_count": 83
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 368,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 364,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
