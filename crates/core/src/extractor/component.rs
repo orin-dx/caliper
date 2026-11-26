@@ -508,7 +508,8 @@ impl TypeofAlias {
 /// expression, so nothing declared in one (an alias's or interface's type parameters, `infer`, a mapped key) encloses
 /// a cast.
 struct TypeDeclarations<'n> {
-    names: &'n [(&'n str, String)],
+    /// The candidate slots of each name, so a declaration visits only the aliases it can shadow.
+    slots: FxHashMap<&'n str, Vec<usize>>,
     scopes: Vec<oxc_span::Span>,
     /// Per candidate name, how many declarations the module itself makes.
     module_level: Vec<usize>,
@@ -519,13 +520,18 @@ struct TypeDeclarations<'n> {
 impl TypeDeclarations<'_> {
     /// Records a declaration of `name` in `scope`, or in the innermost open scope when `None`.
     fn declare(&mut self, name: &str, scope: Option<oxc_span::Span>) {
+        let Some(slots) = self.slots.get(name) else {
+            #[cfg(test)]
+            steps::count_examined(1);
+            return;
+        };
+        #[cfg(test)]
+        steps::count_examined(1 + slots.len() as u64);
         let scope = scope.or_else(|| self.scopes.last().copied());
-        for (index, (candidate, _)) in self.names.iter().enumerate() {
-            if *candidate == name {
-                match scope {
-                    None => self.module_level[index] += 1,
-                    Some(scope) => self.shadowed_in[index].push(scope),
-                }
+        for &index in slots {
+            match scope {
+                None => self.module_level[index] += 1,
+                Some(scope) => self.shadowed_in[index].push(scope),
             }
         }
     }
@@ -682,8 +688,12 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
     }
     #[cfg(test)]
     steps::count_walk();
+    let mut slots: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
+    for (index, (name, _)) in candidates.iter().enumerate() {
+        slots.entry(*name).or_default().push(index);
+    }
     let mut declarations = TypeDeclarations {
-        names: &candidates,
+        slots,
         scopes: Vec::new(),
         module_level: vec![0; candidates.len()],
         shadowed_in: vec![Vec::new(); candidates.len()],
@@ -727,12 +737,25 @@ pub(super) mod steps {
     pub(in crate::extractor) fn take_walks() -> u64 {
         WALKS.with(|walks| walks.replace(0))
     }
+
+    thread_local!(static EXAMINED: Cell<u64> = const { Cell::new(0) });
+
+    /// Counts the name lookups and candidate slots a declaration examines in `typeof_aliases`'s walk, so a test can
+    /// show the work grows with the declarations, not with declarations times aliases.
+    pub(in crate::extractor) fn count_examined(n: u64) {
+        EXAMINED.with(|examined| examined.set(examined.get() + n));
+    }
+
+    pub(in crate::extractor) fn take_examined() -> u64 {
+        EXAMINED.with(|examined| examined.replace(0))
+    }
 }
 
-/// A value read for its name (a callee, the namespace a member is read from), when that name still describes it: see
-/// [`Peeled::named`]. `(forwardRef as typeof forwardRef)(…)` and `(React as any).memo` keep it.
-pub(super) fn named<'a, 'b>(expr: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
-    peel(expr).named()
+/// A value read only for its name (the namespace a member is read from, a link of a heritage chain), beneath every
+/// wrapper. Nothing calls it, so its own type's call signatures are no evidence: what calling `ns.member` gives is the
+/// member's evidence, which [`peel`] of the member reads from the namespace's assertion.
+pub(super) fn beneath<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    peel(expr).expr
 }
 
 /// What a call invokes, when its name still describes the call: `(forwardRef as F)(…)` and `(forwardRef<R, P>)(…)`
@@ -1576,7 +1599,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(init) = decl.init.as_ref() else { return false };
         let target = match peel_expr(init) {
             Expression::StaticMemberExpression(member) => {
-                let Some(Expression::Identifier(object)) = named(&member.object) else { return false };
+                let Expression::Identifier(object) = beneath(&member.object) else { return false };
                 let property = member.property.name.as_str();
                 if !self.imported_names.contains(object.name.as_str()) || !is_pascal_case(property) {
                     return false;
@@ -1680,7 +1703,7 @@ pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<
 pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
     matches!(callee_of(call), Some(Expression::StaticMemberExpression(callee))
         if callee.property.name == "assign"
-            && matches!(named(&callee.object), Some(Expression::Identifier(object)) if object.name == "Object"))
+            && matches!(beneath(&callee.object), Expression::Identifier(object) if object.name == "Object"))
 }
 
 /// Whether a call wrapping a component returns a component, by the ecosystem's conventions:

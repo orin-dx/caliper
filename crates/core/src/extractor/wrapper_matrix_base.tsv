@@ -146,6 +146,7 @@ React.memo | namespace member typeof itself	Button:Props
 React.memo | namespace member function object	Button:Props
 React.memo | namespace method object	Button:Props
 React.memo | namespace method FC	Button:Props
+React.memo | namespace call signature, member typeof itself	Button:Props
 React.memo | returns any, function	Button:Props
 React.memo | returns any, callable literal	Button:Props
 React.memo | returns any, union	Button:Props
@@ -392,6 +393,7 @@ React.forwardRef, typed render | namespace member typeof itself	Button:Props
 React.forwardRef, typed render | namespace member function object	Button:Props
 React.forwardRef, typed render | namespace method object	Button:Props
 React.forwardRef, typed render | namespace method FC	Button:Props
+React.forwardRef, typed render | namespace call signature, member typeof itself	Button:Props
 React.forwardRef, typed render | returns any, function	Button:Props
 React.forwardRef, typed render | returns any, callable literal	Button:Props
 React.forwardRef, typed render | returns any, union	Button:Props
@@ -638,6 +640,7 @@ Object.assign | namespace member typeof itself	Impl:Props
 Object.assign | namespace member function object	Impl:Props
 Object.assign | namespace method object	Impl:Props
 Object.assign | namespace method FC	Impl:Props
+Object.assign | namespace call signature, member typeof itself	Impl:Props
 Object.assign | returns any, function	Impl:Props
 Object.assign | returns any, callable literal	Impl:Props
 Object.assign | returns any, union	Impl:Props
@@ -884,6 +887,7 @@ element factory | namespace member typeof itself	Button:Props
 element factory | namespace member function object	Button:Props
 element factory | namespace method object	Button:Props
 element factory | namespace method FC	Button:Props
+element factory | namespace call signature, member typeof itself	Button:Props
 element factory | returns any, function	-
 element factory | returns any, callable literal	-
 element factory | returns any, union	-
@@ -1240,6 +1244,7 @@ wrapper naming the props | namespace member typeof itself	Base:ItemProps Button:
 wrapper naming the props | namespace member function object	Base:ItemProps Button:Props
 wrapper naming the props | namespace method object	Base:ItemProps Button:Props
 wrapper naming the props | namespace method FC	Base:ItemProps Button:Props
+wrapper naming the props | namespace call signature, member typeof itself	Base:ItemProps Button:Props
 wrapper naming the props | returns any, function	Base:ItemProps
 wrapper naming the props | returns any, callable literal	Base:ItemProps
 wrapper naming the props | returns any, union	Base:ItemProps
@@ -1668,6 +1673,143 @@ memo argument | returns empty literal, intersection	Button:Props
 memo argument | returns generic T	Button:Props
 memo argument | returns indexed access	Button:Props
 memo argument | returns conditional	Button:Props
+context | plain	-
+context | parentheses	-
+context | typeof itself	-
+context | typeof another	-
+context | alias of typeof itself	-
+context | unresolved reference	-
+context | any	-
+context | unknown	-
+context | object	-
+context | callable literal, FC	-
+context | callable literal, object	-
+context | callable literal, no result	-
+context | function, FC	-
+context | function, ReactElement	-
+context | function, ReactNode	-
+context | function, ReactElement | null	-
+context | function, string	-
+context | function, string | null	-
+context | function, object	-
+context | function, object literal	-
+context | function, void	-
+context | function, unknown	-
+context | function, unknown[]	-
+context | function, literal	-
+context | generic function, FC	-
+context | object, then typeof itself	-
+context | typeof itself, then object	-
+context | unknown, then function object	-
+context | function object, then unknown	-
+context | satisfies	-
+context | non-null	-
+context | namespace any	-
+context | namespace object	-
+context | namespace typeof itself	-
+context | namespace member typeof itself	-
+context | namespace member function object	-
+context | namespace method object	-
+context | namespace method FC	-
+context | namespace call signature, member typeof itself	-
+context | returns any, function	-
+context | returns any, callable literal	-
+context | returns any, union	-
+context | returns any, intersection	-
+context | returns any, namespace method	-
+context | returns any[], function	-
+context | returns any[], callable literal	-
+context | returns any[], union	-
+context | returns any[], intersection	-
+context | returns any[], namespace method	-
+context | returns unknown, function	-
+context | returns unknown, callable literal	-
+context | returns unknown, union	-
+context | returns unknown, intersection	-
+context | returns unknown, namespace method	-
+context | returns unknown[], function	-
+context | returns unknown[], callable literal	-
+context | returns unknown[], union	-
+context | returns unknown[], intersection	-
+context | returns unknown[], namespace method	-
+context | returns object, function	-
+context | returns object, callable literal	-
+context | returns object, union	-
+context | returns object, intersection	-
+context | returns object, namespace method	-
+context | returns symbol, function	-
+context | returns symbol, callable literal	-
+context | returns symbol, union	-
+context | returns symbol, intersection	-
+context | returns symbol, namespace method	-
+context | returns void, function	-
+context | returns void, callable literal	-
+context | returns void, union	-
+context | returns void, intersection	-
+context | returns void, namespace method	-
+context | returns never, function	-
+context | returns never, callable literal	-
+context | returns never, union	-
+context | returns never, intersection	-
+context | returns never, namespace method	-
+context | returns string, function	-
+context | returns string, callable literal	-
+context | returns string, union	-
+context | returns string, intersection	-
+context | returns string, namespace method	-
+context | returns number, function	-
+context | returns number, callable literal	-
+context | returns number, union	-
+context | returns number, intersection	-
+context | returns number, namespace method	-
+context | returns null, function	-
+context | returns null, callable literal	-
+context | returns null, union	-
+context | returns null, intersection	-
+context | returns null, namespace method	-
+context | returns boolean, function	-
+context | returns boolean, callable literal	-
+context | returns boolean, union	-
+context | returns boolean, intersection	-
+context | returns boolean, namespace method	-
+context | returns ReactNode, function	-
+context | returns ReactNode, callable literal	-
+context | returns ReactNode, union	-
+context | returns ReactNode, intersection	-
+context | returns ReactNode, namespace method	-
+context | returns ReactElement, function	-
+context | returns ReactElement, callable literal	-
+context | returns ReactElement, union	-
+context | returns ReactElement, intersection	-
+context | returns ReactElement, namespace method	-
+context | returns JSX.Element, function	-
+context | returns JSX.Element, callable literal	-
+context | returns JSX.Element, union	-
+context | returns JSX.Element, intersection	-
+context | returns JSX.Element, namespace method	-
+context | returns FC<P>, function	-
+context | returns FC<P>, callable literal	-
+context | returns FC<P>, union	-
+context | returns FC<P>, intersection	-
+context | returns FC<P>, namespace method	-
+context | returns ComponentType<P>, function	-
+context | returns ComponentType<P>, callable literal	-
+context | returns ComponentType<P>, union	-
+context | returns ComponentType<P>, intersection	-
+context | returns ComponentType<P>, namespace method	-
+context | returns element-shaped literal, function	-
+context | returns element-shaped literal, callable literal	-
+context | returns element-shaped literal, union	-
+context | returns element-shaped literal, intersection	-
+context | returns element-shaped literal, namespace method	-
+context | returns empty literal, function	-
+context | returns empty literal, callable literal	-
+context | returns empty literal, union	-
+context | returns empty literal, intersection	-
+context | returns empty literal, namespace method	-
+context | returns generic T	-
+context | returns indexed access	-
+context | returns conditional	-
 class | plain	Button:Props
 class | parentheses	Button:Props
 class | typeof itself	-
@@ -1706,6 +1848,7 @@ class | namespace member typeof itself	-
 class | namespace member function object	-
 class | namespace method object	-
 class | namespace method FC	-
+class | namespace call signature, member typeof itself	-
 class | returns any, function	-
 class | returns any, callable literal	-
 class | returns any, union	-

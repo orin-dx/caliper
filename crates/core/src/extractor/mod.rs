@@ -745,7 +745,8 @@ impl<'src> SourceDataCollector<'src> {
                 None => ReactApi::of_export(id.name.as_str()),
             },
             Expression::StaticMemberExpression(member) => {
-                let Expression::Identifier(object) = component::named(&member.object)? else { return None };
+                // `callee_of` judged the member; the namespace is only read for its name.
+                let Expression::Identifier(object) = component::beneath(&member.object) else { return None };
                 let api = ReactApi::of_export(member.property.name.as_str())?;
                 match import_of(object.name.as_str()) {
                     Some(import)
@@ -1313,9 +1314,9 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     pub(super) fn expression_to_ident_name<'a>(&self, expr: &Expression<'a>) -> String {
-        match component::named(expr) {
-            Some(Expression::Identifier(id)) => id.name.as_str().to_owned(),
-            Some(Expression::StaticMemberExpression(me)) => {
+        match component::beneath(expr) {
+            Expression::Identifier(id) => id.name.as_str().to_owned(),
+            Expression::StaticMemberExpression(me) => {
                 format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str())
             }
             _ => "unknown".to_owned(),

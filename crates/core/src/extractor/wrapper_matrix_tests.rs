@@ -791,6 +791,7 @@ const DIFFERENTIAL_FORMS: &[(&str, &str, &str)] = &[
          export const Root = Object.assign({C}, { Item: (props: ItemProps) => <div /> });",
     ),
     ("memo argument", "Impl", "function Impl(props: Props) { return <div />; }\nexport const Button = memo({C});"),
+    ("context", "React.createContext", "declare const Default: Props;\nexport const Button = {C}<Props>(Default);"),
     ("class", "React.Component", "export class Button extends {C}<Props> { render() { return <div />; } }"),
     (
         "call-only helper",
@@ -844,6 +845,14 @@ const DIFFERENTIAL_ASSERTIONS: &[(&str, &str, &str, bool, Option<&str>)] = &[
     ("namespace member function object", "", "({o} as { {m}: (...args: any[]) => object }).{m}", false, Some("object")),
     ("namespace method object", "", "({o} as { {m}(...args: any[]): object }).{m}", false, Some("object")),
     ("namespace method FC", "", "({o} as { {m}(...args: any[]): React.FC<Props> }).{m}", false, None),
+    // The namespace's own call signature is not the member's: only the member's type says what calling it gives.
+    (
+        "namespace call signature, member typeof itself",
+        "",
+        "({o} as unknown as { (): void; {m}: typeof {b} }).{m}",
+        true,
+        None,
+    ),
 ];
 
 /// The closed list as the oracle states it: the call results TypeScript cannot assign to `ReactNode | ComponentType |
@@ -983,9 +992,10 @@ const ARGUMENT_FORMS: &[&str] = &["Object.assign argument", "memo argument"];
 #[test]
 fn the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain_call() {
     let base = base_detections();
-    let forms = ["wrapper with two type arguments", "Object.assign argument", "memo argument"];
+    // Round 11 adds `React.createContext<Props>(Default)`, which is no component through any cast.
+    let forms = ["wrapper with two type arguments", "Object.assign argument", "memo argument", "context"];
     let mut failures = Vec::new();
-    let mut main_differs_from_its_plain_call = [0; 3];
+    let mut main_differs_from_its_plain_call = [0; 4];
     for case in differential_cases() {
         let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
         let Some(index) = forms.iter().position(|named| *named == form) else { continue };
@@ -1006,7 +1016,76 @@ fn the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    assert_eq!(main_differs_from_its_plain_call, [98, 108, 0]);
+    assert_eq!(main_differs_from_its_plain_call, [98, 108, 0, 0]);
+}
+
+/// Review round 11, finding 2: a namespace read for its name (`React` in `React.createContext`, `Object.assign`,
+/// `React.Component`, an imported namespace's member) has no evidence of its own; an unrelated call signature on it
+/// does not hide the member, whose own type alone says what calling it gives.
+#[test]
+fn a_namespace_read_for_its_name_has_no_evidence_of_its_own() {
+    let shape = "(React as unknown as { (): void; {m}: typeof React.{m} })";
+    let names_of = |source: &str| names(source);
+    let context = |receiver: &str| {
+        names_of(&format!(
+            "declare const Default: Props;\nexport const Context = {receiver}.createContext<Props>(Default);"
+        ))
+    };
+    assert_eq!(context("React"), Vec::<String>::new());
+    assert_eq!(context(&shape.replace("{m}", "createContext")), Vec::<String>::new());
+    let object_member = "(React as { createContext: (d: unknown) => object })";
+    assert_eq!(context(object_member), Vec::<String>::new());
+    // The same receiver in front of the other members read by name: each equals its plain form.
+    let class = |receiver: &str| {
+        tsx(&format!("export class Button extends {receiver}.Component<Props> {{ render() {{ return <div />; }} }}"))
+    };
+    let plain_class = class("React");
+    assert_eq!(plain_class.len(), 1, "{plain_class:#?}");
+    assert_eq!(class(&shape.replace("{m}", "Component")), plain_class);
+    let assign = |receiver: &str| {
+        names_of(&format!(
+            "function Impl(props: Props) {{ return <div />; }}\n\
+             export const Root = {receiver}.assign(Impl, {{ Item: (props: Props) => <div /> }});"
+        ))
+    };
+    assert_eq!(assign("Object"), ["Item", "Root"]);
+    assert_eq!(assign("(Object as unknown as { (): void; assign: typeof Object.assign })"), ["Item", "Root"]);
+    let imported =
+        |receiver: &str| names_of(&format!("import * as Ui from './ui';\nexport const Button = {receiver}.Button;"));
+    assert_eq!(imported("Ui"), ["Button"]);
+    assert_eq!(imported("(Ui as unknown as { (): void; Button: unknown })"), ["Button"]);
+    let rendered = |receiver: &str| {
+        names_of(&format!(
+            "function Foo(props: Props, ref: unknown) {{ return <div />; }}\n\
+             export const el = {receiver}.createElement(Foo);"
+        ))
+    };
+    assert_eq!(rendered("React"), ["Foo"]);
+    assert_eq!(rendered(&shape.replace("{m}", "createElement")), ["Foo"]);
+}
+
+/// Review round 11, finding 1: each type declaration the alias walk meets visits only the aliases of its name, so N
+/// aliases and N generic functions cost work proportional to N, not N squared.
+#[test]
+fn the_typeof_alias_walk_grows_with_the_declarations_not_with_the_aliases() {
+    let work = |n: usize| {
+        let mut source = String::from(HEADER);
+        for i in 0..n {
+            source.push_str(&format!(
+                "declare function make{i}(): unknown;\ntype Factory{i} = typeof make{i};\nfunction g{i}<T>(t: T) {{ return t; }}\n"
+            ));
+        }
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
+        super::component::steps::take_examined();
+        assert_eq!(super::component::typeof_aliases(&parsed.program).len(), n);
+        super::component::steps::take_examined()
+    };
+    // Per alias: its own declaration (a lookup and its slot) and a type parameter (a lookup); the header's five
+    // imported names and its interface are a lookup each.
+    assert_eq!(work(10), 6 + 3 * 10);
+    assert_eq!(work(20) - 6, 2 * (work(10) - 6));
+    assert_eq!(work(40) - 6, 2 * (work(20) - 6));
 }
 
 /// The forms where origin/main read a cast differently from its own plain call; the differential holds their rows to
