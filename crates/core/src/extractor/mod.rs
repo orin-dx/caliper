@@ -59,47 +59,70 @@ pub(super) enum ReactApi {
 /// Where the binding a known factory is read from comes from.
 #[derive(Clone, Copy)]
 enum FactorySource {
-    /// An import from React (`react`, a subpath of it, `preact/compat`, `@types/react`).
+    /// React: `react` and its subpaths (`react/jsx-runtime`), `@types/react`, `preact/compat`.
     React,
-    /// An import from Preact itself.
+    /// Preact itself: `preact` and its subpaths (`preact/jsx-runtime`).
     Preact,
-    /// An import from any other module.
+    /// `react-dom`, for `createPortal`.
+    ReactDom,
+    /// Emotion's JSX: `@emotion/react` and its subpaths, `@emotion/core`.
+    Emotion,
+    /// Any other module, a relative one included: none of its exports is a known factory.
     Other,
     /// No binding in the file: a global, or the global `React` namespace's member.
     Global,
-    /// A member of a global that is not `React` (`document.createElement`).
+    /// A member of a value that is not a known namespace (`document.createElement`, a named import's member).
     GlobalObject,
 }
 
+/// `react-dom` and its subpaths.
+fn is_react_dom_module(specifier: &str) -> bool {
+    specifier == "react-dom" || specifier.starts_with("react-dom/")
+}
+
+/// Emotion's JSX: `@emotion/react` and its subpaths, and `@emotion/core`.
+fn is_emotion_module(specifier: &str) -> bool {
+    specifier == "@emotion/core" || specifier == "@emotion/react" || specifier.starts_with("@emotion/react/")
+}
+
+/// Whether an import specifier names a module.
+type ModuleMatcher = fn(&str) -> bool;
+
+/// The closed list of modules whose exports can be known factories, by the predicates main already read imports
+/// with (`is_react_module`: `react` and its subpaths, `@types/react`, `preact/compat`; `is_preact_module`: `preact` and
+/// its subpaths). The first match wins, so `preact/compat` is React's API. Every other module, a relative path
+/// included, exports no known factory.
+const FACTORY_SOURCES: &[(ModuleMatcher, FactorySource)] = &[
+    (is_react_module, FactorySource::React),
+    (crate::react_types::is_preact_module, FactorySource::Preact),
+    (is_react_dom_module, FactorySource::ReactDom),
+    (is_emotion_module, FactorySource::Emotion),
+];
+
 impl FactorySource {
     fn of(specifier: &str) -> Self {
-        if is_react_module(specifier) {
-            Self::React
-        } else if crate::react_types::is_preact_module(specifier) {
-            Self::Preact
-        } else {
-            Self::Other
-        }
+        FACTORY_SOURCES.iter().find(|(matches, _)| matches(specifier)).map_or(Self::Other, |(_, source)| *source)
     }
 }
 
 impl ReactApi {
-    /// The factory `source` exports under `name`. The element builders keep the names any module exports them under,
-    /// as before; React's component and context APIs are React's, and `h` is Preact's.
+    /// The factory `source` exports under `name`. React's component and context APIs are React's, `h` is Preact's,
+    /// and the element builders are the closed list of sources' (a global and a non-namespace receiver keep the names,
+    /// as before).
     fn of_export(source: FactorySource, name: &str) -> Option<Self> {
-        use FactorySource::{Global, GlobalObject, Other, Preact, React};
+        use FactorySource::{Emotion, Global, GlobalObject, Other, Preact, React, ReactDom};
         match (source, name) {
             (React | Global, "forwardRef") => Some(Self::ForwardRef),
             (React | Global, "memo") => Some(Self::Memo),
             (React | Preact | Global, "createContext") => Some(Self::CreateContext),
             (React | Preact | Global, "createRef") => Some(Self::Ref),
-            (_, "createElement" | "cloneElement" | "jsx" | "jsxs" | "jsxDEV" | "createPortal") => Some(Self::Element),
-            (Preact, "h") => Some(Self::Element),
-            (Preact | Other | GlobalObject, "forwardRef" | "memo")
-            | (Other | GlobalObject, "createContext" | "createRef")
-            | (React | Other | Global | GlobalObject, "h") => None,
-            // Any other name is no factory the extractor knows.
-            (_, _) => None,
+            (React | Preact | Global | GlobalObject, "createElement" | "cloneElement")
+            | (React | Preact | Emotion | Global | GlobalObject, "jsx" | "jsxs" | "jsxDEV")
+            | (React | ReactDom | Global | GlobalObject, "createPortal")
+            | (Preact, "h") => Some(Self::Element),
+            (Other, _) => None,
+            // Any other pair is no factory the extractor knows.
+            (React | Preact | ReactDom | Emotion | Global | GlobalObject, _) => None,
         }
     }
 }
@@ -813,37 +836,90 @@ impl<'src> SourceDataCollector<'src> {
     /// itself under the name, at module level or in a scope around the call (a parameter, a local `const`), is the
     /// file's own and never a known factory. A name nothing binds is a global, read as written.
     pub(super) fn known_factory(&self, callee: &Expression<'_>, at: Span) -> Option<ReactApi> {
-        let (binding, member) = match callee {
-            Expression::Identifier(id) => (id.name.as_str(), None),
+        match callee {
+            Expression::Identifier(id) => self.factory_named(id.name.as_str(), at, 0),
             // `callee_of` judged the member; the namespace is only read for its name.
             Expression::StaticMemberExpression(member) => match component::beneath(&member.object) {
-                Expression::Identifier(object) => (object.name.as_str(), Some(member.property.name.as_str())),
-                _ => return None,
+                Expression::Identifier(object) => {
+                    let source = self.namespace_source(object.name.as_str(), at, 0)?;
+                    ReactApi::of_export(source, member.property.name.as_str())
+                }
+                _ => None,
             },
-            _ => return None,
-        };
-        if self.local_values.get(binding).is_some_and(|local| local.module_level > 0 || local.shadowed_in.contains(at))
-        {
+            _ => None,
+        }
+    }
+
+    /// The origin of the file's own value under `name` at `at`: `None` when the file declares none there, so the
+    /// name is an import's or a global. A scope around `at` that declares it as its own value wins; then a scope
+    /// that declares it from a factory's origin; then the module-level declarations, which give an origin only when
+    /// there is exactly one.
+    fn local_origin(&self, name: &str, at: Span) -> Option<&component::Origin> {
+        const OWN: &component::Origin = &component::Origin::Own;
+        let local = self.local_values.get(name)?;
+        if local.shadowed_in.contains(at) {
+            return Some(OWN);
+        }
+        let scoped = local
+            .scoped_origins
+            .iter()
+            .filter(|(scope, _)| scope.start <= at.start && at.end <= scope.end)
+            .min_by_key(|(scope, _)| scope.end - scope.start);
+        if let Some((_, origin)) = scoped {
+            return Some(origin);
+        }
+        match local.module_level.as_slice() {
+            [] => None,
+            [origin] => Some(origin),
+            [_, _, ..] => Some(OWN),
+        }
+    }
+
+    /// The factory a name called at `at` resolves to, following the file's own aliases and destructurings of a
+    /// namespace or a `require` (`ReactApi::of_export`): `depth` bounds a cycle.
+    fn factory_named(&self, name: &str, at: Span, depth: u8) -> Option<ReactApi> {
+        if depth > 8 {
             return None;
         }
-        let import = self.data.imports.iter().find(|import| import.local_name.as_str() == binding);
-        let namespace = |exported: &str| matches!(exported, "*" | "default");
-        let (source, name) = match (import, member) {
-            (Some(import), None) if !namespace(&import.exported_name) => {
-                (FactorySource::of(&import.specifier), import.exported_name.as_str())
+        match self.local_origin(name, at) {
+            Some(component::Origin::Own | component::Origin::ModuleNamespace(_)) => None,
+            Some(component::Origin::Alias(target)) => self.factory_named(target, at, depth + 1),
+            Some(component::Origin::Member { object, property }) => {
+                ReactApi::of_export(self.namespace_source(object, at, depth + 1)?, property)
             }
-            (Some(import), Some(property)) if namespace(&import.exported_name) => {
-                (FactorySource::of(&import.specifier), property)
+            Some(component::Origin::Module { specifier, name }) => {
+                ReactApi::of_export(FactorySource::of(specifier), name)
             }
-            // A namespace called is no factory.
-            (Some(_), None) => return None,
-            // A member of an imported value is read like any object's member.
-            (Some(_), Some(property)) => (FactorySource::GlobalObject, property),
-            (None, None) => (FactorySource::Global, binding),
-            (None, Some(property)) if binding == "React" => (FactorySource::Global, property),
-            (None, Some(property)) => (FactorySource::GlobalObject, property),
-        };
-        ReactApi::of_export(source, name)
+            None => match self.data.imports.iter().find(|import| import.local_name.as_str() == name) {
+                // A namespace called is no factory.
+                Some(import) if matches!(import.exported_name.as_str(), "*" | "default") => None,
+                Some(import) => ReactApi::of_export(FactorySource::of(&import.specifier), &import.exported_name),
+                None => ReactApi::of_export(FactorySource::Global, name),
+            },
+        }
+    }
+
+    /// Where the namespace `name`, read at `at` for a member, comes from: a namespace or default import, a
+    /// `require`, the file's alias of one, or a global (`React`, or any other object, whose members keep the element
+    /// builders' names). The file's own value of another origin is no namespace a factory is read from.
+    fn namespace_source(&self, name: &str, at: Span, depth: u8) -> Option<FactorySource> {
+        if depth > 8 {
+            return None;
+        }
+        match self.local_origin(name, at) {
+            Some(component::Origin::ModuleNamespace(specifier)) => Some(FactorySource::of(specifier)),
+            Some(component::Origin::Alias(target)) => self.namespace_source(target, at, depth + 1),
+            Some(component::Origin::Own | component::Origin::Member { .. } | component::Origin::Module { .. }) => None,
+            None => match self.data.imports.iter().find(|import| import.local_name.as_str() == name) {
+                Some(import) if matches!(import.exported_name.as_str(), "*" | "default") => {
+                    Some(FactorySource::of(&import.specifier))
+                }
+                // A member of an imported value is read like any object's member.
+                Some(_) => Some(FactorySource::GlobalObject),
+                None if name == "React" => Some(FactorySource::Global),
+                None => Some(FactorySource::GlobalObject),
+            },
+        }
     }
 
     /// The name React exports a type under, for a type or class name as written (`FC`, `React.FC`, `R.FC`), by where

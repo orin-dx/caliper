@@ -580,17 +580,34 @@ impl ShadowScopes {
     }
 }
 
-/// What a module itself declares as a value under a name: how many declarations it makes at module level, and the
-/// scopes inside it that declare the name (a parameter, a local `const`, a nested function). An import is the
-/// module's binding of another module's value, not its own declaration.
-pub(crate) struct LocalValue {
-    pub(super) module_level: usize,
-    pub(super) shadowed_in: ShadowScopes,
+/// Where a value the module declares comes from, as far as a known factory can: read from another binding's member
+/// (`const { createElement } = React`, `const ce = React.createElement`), from a module (`const { createElement } =
+/// require('react')`), a module's namespace (`const React = require('react')`) or another binding (`const ce =
+/// createElement`). Anything else, a function declaration or a value of unknown origin, is the module's own.
+#[derive(Clone, Debug)]
+pub(crate) enum Origin {
+    Own,
+    Member { object: CompactString, property: CompactString },
+    Module { specifier: CompactString, name: CompactString },
+    ModuleNamespace(CompactString),
+    Alias(CompactString),
 }
 
-/// Every value declaration of one of `names` in the module, from one walk ([`LocalValue`]). A function, an arrow, a
-/// class, a block (a `catch` body included), a `catch` clause, a `for` statement, a `switch`, a static block, a
-/// namespace and a `declare module`/`declare global` body are scopes; a `var` is read in the block that declares it.
+/// What a module itself declares as a value under a name: its module-level declarations by origin, the scopes inside
+/// it that declare the name as their own value (a parameter, a local `const`, a nested function), and the scopes that
+/// declare it from a factory's origin. An import is the module's binding of another module's value, not its own
+/// declaration.
+pub(crate) struct LocalValue {
+    pub(super) module_level: Vec<Origin>,
+    pub(super) shadowed_in: ShadowScopes,
+    pub(super) scoped_origins: Vec<(oxc_span::Span, Origin)>,
+}
+
+/// Every value declaration of one of `names`, or of any name declared from a factory's origin, in the module, from
+/// one walk ([`LocalValue`]). A function, an arrow, a class, a block (a `catch` body included), a `catch` clause, a
+/// `for` statement, a `switch`, a static block, a namespace and a `declare module`/`declare global` body are scopes; a
+/// function's parameters cover the whole function and its body's declarations only the body, so a parameter default
+/// sees the scope around the function. A `var` is read in the block that declares it.
 pub(super) fn local_values(
     program: &Program<'_>,
     names: &rustc_hash::FxHashSet<&str>,
@@ -600,27 +617,84 @@ pub(super) fn local_values(
     declarations
         .found
         .into_iter()
-        .map(|(name, (module_level, scopes))| {
-            (CompactString::from(name), LocalValue { module_level, shadowed_in: ShadowScopes::new(scopes) })
+        .map(|(name, found)| {
+            (
+                CompactString::from(name),
+                LocalValue {
+                    module_level: found.module_level,
+                    shadowed_in: ShadowScopes::new(found.own_scopes),
+                    scoped_origins: found.scoped_origins,
+                },
+            )
         })
         .collect()
+}
+
+#[derive(Default)]
+struct Found {
+    module_level: Vec<Origin>,
+    own_scopes: Vec<oxc_span::Span>,
+    scoped_origins: Vec<(oxc_span::Span, Origin)>,
 }
 
 struct ValueDeclarations<'n> {
     names: &'n rustc_hash::FxHashSet<&'n str>,
     scopes: Vec<oxc_span::Span>,
-    found: FxHashMap<String, (usize, Vec<oxc_span::Span>)>,
+    found: FxHashMap<String, Found>,
+}
+
+/// The factory origin of a declarator's initializer, for a declared name or a destructured key (`key`).
+fn origin_of(init: &Expression<'_>, key: Option<&str>) -> Origin {
+    let require = |call: &CallExpression<'_>| match (&call.callee, call.arguments.as_slice()) {
+        (Expression::Identifier(callee), [Argument::StringLiteral(specifier)]) if callee.name == "require" => {
+            specifier.value.as_str().map(CompactString::from)
+        }
+        _ => None,
+    };
+    let member = |object: &str, property: &str| Origin::Member { object: object.into(), property: property.into() };
+    match (peel_expr(init), key) {
+        (Expression::Identifier(id), None) => Origin::Alias(id.name.as_str().into()),
+        (Expression::Identifier(id), Some(key)) => member(id.name.as_str(), key),
+        (Expression::StaticMemberExpression(read), None) => match peel_expr(&read.object) {
+            Expression::Identifier(object) => member(object.name.as_str(), read.property.name.as_str()),
+            Expression::CallExpression(call) => require(call).map_or(Origin::Own, |specifier| Origin::Module {
+                specifier,
+                name: read.property.name.as_str().into(),
+            }),
+            _ => Origin::Own,
+        },
+        (Expression::CallExpression(call), None) => require(call).map_or(Origin::Own, Origin::ModuleNamespace),
+        (Expression::CallExpression(call), Some(key)) => {
+            require(call).map_or(Origin::Own, |specifier| Origin::Module { specifier, name: key.into() })
+        }
+        (_, _) => Origin::Own,
+    }
 }
 
 impl ValueDeclarations<'_> {
     fn declare(&mut self, name: &str) {
-        if !self.names.contains(name) {
+        self.declare_from(name, Origin::Own);
+    }
+
+    /// Records a declaration of `name`: always for one of `names`, and for another name only when it comes from a
+    /// factory's origin, which a call through it may need.
+    fn declare_from(&mut self, name: &str, origin: Origin) {
+        let wanted = self.names.contains(name)
+            || match &origin {
+                Origin::Own => false,
+                Origin::Alias(target) => {
+                    self.names.contains(target.as_str()) || self.found.contains_key(target.as_str())
+                }
+                Origin::Member { .. } | Origin::Module { .. } | Origin::ModuleNamespace(_) => true,
+            };
+        if !wanted {
             return;
         }
         let entry = self.found.entry(name.to_owned()).or_default();
-        match self.scopes.last() {
-            None => entry.0 += 1,
-            Some(scope) => entry.1.push(*scope),
+        match (self.scopes.last(), origin) {
+            (None, origin) => entry.module_level.push(origin),
+            (Some(scope), Origin::Own) => entry.own_scopes.push(*scope),
+            (Some(scope), origin) => entry.scoped_origins.push((*scope, origin)),
         }
     }
 
@@ -643,6 +717,37 @@ impl<'a> oxc_ast_visit::Visit<'a> for ValueDeclarations<'_> {
 
     fn visit_binding_identifier(&mut self, it: &BindingIdentifier<'a>) {
         self.declare(&it.name);
+    }
+
+    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
+        // `const ce = …` and `const { createElement, createElement: h } = …`: each name with its origin. Any other
+        // pattern declares its names as the module's own.
+        let Some(init) = &it.init else { return oxc_ast_visit::walk::walk_variable_declarator(self, it) };
+        match &it.id {
+            BindingPattern::BindingIdentifier(id) => self.declare_from(&id.name, origin_of(init, None)),
+            BindingPattern::ObjectPattern(pattern) => {
+                for property in &pattern.properties {
+                    let key = property.key.static_name();
+                    match (&property.value, key) {
+                        (BindingPattern::BindingIdentifier(id), Some(key)) => {
+                            self.declare_from(&id.name, origin_of(init, Some(&super::js_text::property_name(&key))));
+                        }
+                        (value, _) => self.visit_binding_pattern(value),
+                    }
+                }
+                if let Some(rest) = &pattern.rest {
+                    self.visit_binding_rest_element(rest);
+                }
+            }
+            BindingPattern::ArrayPattern(_) | BindingPattern::AssignmentPattern(_) => {
+                self.visit_binding_pattern(&it.id);
+            }
+        }
+        self.visit_expression(init);
+    }
+
+    fn visit_function_body(&mut self, it: &FunctionBody<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_function_body(this, it));
     }
 
     fn visit_function(&mut self, it: &Function<'a>, flags: oxc_syntax::scope::ScopeFlags) {

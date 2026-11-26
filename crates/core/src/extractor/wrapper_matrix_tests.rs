@@ -1381,6 +1381,155 @@ fn an_instantiated_value_is_read_as_origin_main_reads_it() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+// BEGIN FACTORY PARITY CASES. Copied verbatim into a scratch test on origin/main (oxc 0.158) to print
+// `factory_parity_base.tsv`; keep the two in step.
+
+/// A known factory's provenance: its name, the declaration that binds it, the callee as called (a member callee
+/// includes its namespace).
+const FACTORY_PROVENANCE: &[(&str, &str, &str)] = &[
+    ("named import", "import { createElement } from 'react';", "createElement"),
+    ("namespace import", "import * as R from 'react';", "R.createElement"),
+    ("default import", "import React from 'react';", "React.createElement"),
+    (
+        "destructured from the namespace",
+        "import React from 'react';\nconst { createElement } = React;",
+        "createElement",
+    ),
+    ("renamed from the namespace", "import React from 'react';\nconst { createElement: h } = React;", "h"),
+    ("aliased member", "import React from 'react';\nconst ce = React.createElement;", "ce"),
+    ("aliased import", "import { createElement } from 'react';\nconst ce = createElement;", "ce"),
+    ("destructured require", "const { createElement } = require('react');", "createElement"),
+    ("required namespace", "const R = require('react');", "R.createElement"),
+    ("local function", "function createElement(tag: string, ...rest: unknown[]) { return tag; }", "createElement"),
+    ("relative module", "import { createElement } from './widgets';", "createElement"),
+    ("Preact's h", "import { h } from 'preact';", "h"),
+    ("emotion's jsx", "import { jsx } from '@emotion/react';", "jsx"),
+    ("relative jsx", "import { jsx } from './widgets';", "jsx"),
+];
+
+/// The call written through each cast kind, with `{f}` for the callee.
+const FACTORY_CASTS: &[(&str, &str)] = &[
+    ("plain", "{f}"),
+    ("typeof itself", "({f} as typeof {f})"),
+    ("alias of typeof itself", "({f} as Alias)"),
+    ("any", "({f} as any)"),
+    ("unknown", "({f} as unknown)"),
+];
+
+/// Every (provenance, use, cast) row: a function rendering the factory's result, and a binding of a generic call to
+/// it with a component and the props type, as a wrapper is called. Then the parameter-default row of finding 3.
+fn factory_parity_cases() -> Vec<(String, String)> {
+    let mut cases = Vec::new();
+    let uses = [
+        ("rendered", "export const Button = (props: Props) => {C}('button', null, props.label);"),
+        ("wrapper", "function Base(props: Props) { return <div />; }\nexport const Button = {C}<Props>(Base);"),
+    ];
+    for (provenance, binding, callee) in FACTORY_PROVENANCE {
+        for (usage, template) in uses {
+            for (cast, wrapped) in FACTORY_CASTS {
+                let source = format!(
+                    "{binding}\ninterface Props {{ label?: string }}\ntype Alias = typeof {callee};\n{}",
+                    template.replace("{C}", &wrapped.replace("{f}", callee))
+                );
+                cases.push((format!("{provenance} | {usage} | {cast}"), source));
+            }
+        }
+    }
+    cases.push((
+        "a body declaration does not reach a parameter default".to_owned(),
+        "import React from 'react';\ninterface Props { label?: string }\n\
+         function Foo(props: Props, ref: unknown) { return <div />; }\n\
+         export function build(el = React.createElement(Foo)) { const React = {}; return el; }"
+            .to_owned(),
+    ));
+    cases
+}
+
+/// Every mapping of a row and every diagnostic, sorted, as `parity_output` prints them.
+fn factory_parity_output(source: &str) -> String {
+    let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), source);
+    let mut lines: Vec<String> = data
+        .component_mappings
+        .iter()
+        .map(|m| {
+            format!("{}:{}{}", m.component_name, m.props_type_name, serde_json::to_string(&m.rule).unwrap_or_default())
+        })
+        .chain(data.diagnostics.iter().map(|d| format!("{:?} {:?}: {}", d.severity, d.code, d.message)))
+        .collect();
+    lines.sort();
+    lines.join(" | ")
+}
+
+// END FACTORY PARITY CASES.
+
+/// What a row must give, by its provenance and use: `Some(true)` publishes `Button`, `Some(false)` does not, `None`
+/// is what origin/main gives for the plain call of that provenance and use, exactly.
+fn factory_parity_expectation(id: &str) -> (Option<bool>, &'static str) {
+    let mut parts = id.split(" | ");
+    let (provenance, usage) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let known = !matches!(provenance, "local function" | "relative module" | "relative jsx");
+    match (known, usage) {
+        // An element builder's result is an element, so a function returning it renders.
+        (true, "rendered") => (Some(true), "a known builder's result renders"),
+        // ... and is no component itself.
+        (true, "wrapper") => (Some(false), "an element is no component"),
+        // The file's own function or an unknown module's builds nothing the extractor knows.
+        (false, "rendered") => (Some(false), "an unknown function builds no element"),
+        (false, _) | (true, _) => (None, "as main's plain call"),
+    }
+}
+
+/// Round 15: a known factory is known through its provenance, followed through the file's destructurings, aliases
+/// and `require`s, from a closed list of sources; the plain call and every cast that keeps its type read the same.
+/// Origin/main (`factory_parity_base.tsv`, printed from the block above on origin/main) is the oracle where it was
+/// right: an unknown function's generic call, and the parameter-default row, equal main's plain call exactly. Where
+/// main was wrong (it took any `createElement`, `jsx` or `h` by its name, missed a renamed or aliased one and every cast,
+/// and documented an element as a component), the row's expectation says what is right, and the rows where main
+/// differs are counted by reason.
+#[test]
+fn a_known_factory_is_known_through_its_provenance() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases = factory_parity_cases();
+    assert_eq!(base.len(), cases.len(), "the base table and the cases are out of step");
+    let button = |output: &str| output.split(" | ").any(|line| line.starts_with("Button:"));
+    let mut failures = Vec::new();
+    let mut main_differs: FxHashMap<&str, usize> = FxHashMap::default();
+    for (id, source) in &cases {
+        let now = factory_parity_output(source);
+        let main = base.get(id.as_str()).copied().unwrap_or("not in the base table");
+        let plain_id = id.rsplit_once(" | ").map_or(id.clone(), |(row, _)| format!("{row} | plain"));
+        let main_plain = base.get(plain_id.as_str()).copied().unwrap_or(main);
+        let (expected, why) = factory_parity_expectation(id);
+        let holds = match expected {
+            Some(listed) => button(&now) == listed,
+            None => now == main_plain,
+        };
+        if !holds {
+            failures.push(format!("{id} ({why}):\n  main {main}\n  now  {now}"));
+        }
+        let main_right = match expected {
+            Some(listed) => button(main) == listed,
+            None => main == main_plain,
+        };
+        if !main_right {
+            *main_differs.entry(why).or_default() += 1;
+        }
+    }
+    assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
+    let mut main_differs: Vec<(&str, usize)> = main_differs.into_iter().collect();
+    main_differs.sort();
+    assert_eq!(
+        main_differs,
+        [
+            ("a known builder's result renders", 47),
+            ("an element is no component", 23),
+            ("an unknown function builds no element", 3),
+            ("as main's plain call", 12)
+        ]
+    );
+}
+
 /// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing
 /// scopes found in one walk of the module, however many aliases there are; a module with none is not walked.
 #[test]
