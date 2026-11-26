@@ -479,12 +479,22 @@ impl Revision {
                 if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
                     // An edit makes every walk past a file that could not be read due, whichever file it was: each is
                     // followed again, as a lazy session follows it on its next request.
+                    // A walk of an import this edit removed is not one: a fresh run would not follow it.
                     let mut missing = layer.missing(&demands);
-                    missing.extend(layer.due_walks(dependency_types::Retry::Always));
+                    let removed = |walk: &dependency_types::Demand| {
+                        walk.from == changed
+                            && !demands.iter().any(|now| now.specifier == walk.specifier && now.name == walk.name)
+                    };
+                    missing.extend(
+                        layer.due_walks(dependency_types::Retry::Always).into_iter().filter(|walk| !removed(walk)),
+                    );
                     missing.sort();
                     missing.dedup();
                     if !missing.is_empty() {
                         let extended = dependency_types::load(missing, options, Some(layer));
+                        // What the load added that declares into React (a retry that read an augmentation) can change
+                        // every answer that reads React's augmentations, whichever file it was.
+                        react_namespace |= extended.declares_into_react();
                         named_types.fallback = Some(extended.named_types.clone());
                         dependencies = Some(Arc::new(extended));
                     }

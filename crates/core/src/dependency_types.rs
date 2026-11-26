@@ -428,6 +428,14 @@ impl DependencyLayer {
         self.totals.files
     }
 
+    /// Whether a file this layer loaded itself, not one below it, declares into the `React` namespace: React's own
+    /// types or an augmentation of them, which every answer that reads React's augmentations depends on.
+    pub(crate) fn declares_into_react(&self) -> bool {
+        self.files.iter().any(|file| {
+            self.named_types.declares_react_namespace(Utf8Path::new(std::borrow::Borrow::<str>::borrow(file)))
+        })
+    }
+
     pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
         self.chain().any(|layer| layer.files.contains(file.as_str()))
     }

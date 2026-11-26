@@ -408,6 +408,73 @@ fn the_retry_counts_from_the_failure_not_from_the_start_of_its_load() {
     assert_eq!(layer.missing_at(std::slice::from_ref(&demand), at(59)), [demand]);
 }
 
+const AUGMENTATION: &str = "import type {} from 'react';\n\
+                            declare module 'react' { interface HTMLAttributes<T> { tw?: string } }\n";
+const BOX: &str = "import * as React from 'react';\n\
+                   export const Box = (props: React.ComponentProps<'div'> & { own?: boolean }) => <div />;\n";
+
+/// A project inside the crate, so React's own types resolve from the workspace's `node_modules`, with `aug-kit`'s React
+/// augmentation unreadable.
+fn react_project(files: &[(&str, &str)]) -> (tempfile::TempDir, Utf8PathBuf) {
+    let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    write(
+        &root,
+        "node_modules/aug-kit/package.json",
+        r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+    );
+    std::fs::create_dir_all(root.join("node_modules/aug-kit")).unwrap();
+    std::fs::write(root.join("node_modules/aug-kit/index.d.ts"), UNREADABLE).unwrap();
+    for (path, body) in files {
+        write(&root, path, body);
+    }
+    (tmp, root)
+}
+
+fn react_options(root: &Utf8Path) -> PipelineOptions {
+    PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(root) }
+}
+
+/// The eager revision: only `setup.ts` imports `aug-kit`, whose React augmentation could not be read. It reads on
+/// disk, and an edit to `Plain` follows the walk again and loads it: `Box`, untouched and never reaching `setup.ts`,
+/// is resolved again and has the augmented attribute, as a fresh session does.
+#[test]
+fn an_eager_retry_that_loads_an_augmentation_resolves_every_reader_of_augmentations_again() {
+    let plain = "export function Plain(props: { title: string }) { return null; }\n";
+    let setup = "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n";
+    let (_tmp, root) =
+        react_project(&[("src/setup.ts", setup), ("src/box/Box.tsx", BOX), ("src/plain/Plain.tsx", plain)]);
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    assert!(!names(&session.component("Box")).contains(&"tw".to_owned()));
+    std::fs::write(root.join("node_modules/aug-kit/index.d.ts"), AUGMENTATION).unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+
+    let fresh = WatchSession::new(react_options(&root));
+    drop(fresh.initialize());
+    assert!(names(&fresh.component("Box")).contains(&"tw".to_owned()), "the fixture reaches the augmentation");
+    assert!(session.component("Box") == fresh.component("Box"), "{:?}", names(&session.component("Box")));
+}
+
+/// The eager revision: `Box` is the only importer of `aug-kit`, whose augmentation could not be read. One edit removes
+/// the import while the file becomes readable: the walk of the removed import is not followed again, so `Box` has no
+/// augmented attribute, as a fresh session over the edited project.
+#[test]
+fn an_eager_edit_that_removes_the_only_import_does_not_follow_its_walk_again() {
+    let importer = format!("import * as Aug from 'aug-kit';\nexport const aug = Aug;\n{BOX}");
+    let (_tmp, root) = react_project(&[("src/box/Box.tsx", importer.as_str())]);
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    std::fs::write(root.join("node_modules/aug-kit/index.d.ts"), AUGMENTATION).unwrap();
+    std::fs::write(root.join("src/box/Box.tsx"), BOX).unwrap();
+    drop(session.update_file(&root.join("src/box/Box.tsx")));
+
+    let fresh = WatchSession::new(react_options(&root));
+    drop(fresh.initialize());
+    assert!(!names(&fresh.component("Box")).contains(&"tw".to_owned()), "nothing imports the augmentation now");
+    assert!(session.component("Box") == fresh.component("Box"), "{:?}", names(&session.component("Box")));
+}
+
 /// Once a walk is followed again and reads, its newest mark is clean: the chain has no due walk, though the layer
 /// below still holds the unread mark it superseded.
 #[test]

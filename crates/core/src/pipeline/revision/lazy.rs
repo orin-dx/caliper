@@ -146,6 +146,9 @@ pub(super) struct Lazy {
     /// The demands the session's first load follows for every component ([`shared_demands`]): React's names and the
     /// modules the project imports, whose augmentations any component reading React's interfaces reads.
     shared: Arc<[Demand]>,
+    /// The unread walks `shared` leads to in one layer, and that layer: asked once per layer, not once per resolution
+    /// that reads React's augmentations.
+    shared_unread: Mutex<Option<SharedUnread>>,
     /// Components by name, in output order, with their position in `GlobalSourceData::component_mappings`.
     by_name: FxHashMap<String, Vec<(ComponentId, usize)>>,
     memo: DashMap<ComponentId, Arc<Resolved>, FxBuildHasher>,
@@ -174,10 +177,16 @@ pub(super) struct Lazy {
     /// How many times the layer was loaded, whether or not it grew, for tests.
     #[cfg(test)]
     loads: std::sync::atomic::AtomicUsize,
+    /// How many times [`Lazy::shared_unread`] asked a layer, for tests.
+    #[cfg(test)]
+    shared_unread_builds: std::sync::atomic::AtomicUsize,
     /// Run once by the next [`Revision::lazy_component`] between its resolution and its diagnostics, for tests.
     #[cfg(test)]
     between: Mutex<Option<Between>>,
 }
+
+/// A layer, and the unread walks the shared demands lead to in it ([`Lazy::shared_unread`]).
+type SharedUnread = (Arc<dependency_types::DependencyLayer>, Arc<[Demand]>);
 
 /// What a test runs inside a request ([`Lazy::between`]).
 #[cfg(test)]
@@ -187,6 +196,21 @@ impl Lazy {
     /// When this revision follows again a walk that passed a file it could not read: once it is due.
     fn retry(&self) -> dependency_types::Retry {
         dependency_types::Retry::Due(self.moment())
+    }
+
+    /// The unread walks the shared demands lead to in `layer` ([`Lazy::shared_unread`]).
+    fn shared_unread(&self, layer: &Arc<dependency_types::DependencyLayer>) -> Arc<[Demand]> {
+        let mut held = self.shared_unread.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((at, unread)) = held.as_ref()
+            && Arc::ptr_eq(at, layer)
+        {
+            return unread.clone();
+        }
+        #[cfg(test)]
+        self.shared_unread_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let unread: Arc<[Demand]> = Arc::from(layer.unread(&self.shared));
+        *held = Some((layer.clone(), unread.clone()));
+        unread
     }
 
     fn moment(&self) -> dependency_types::Moment {
@@ -307,6 +331,7 @@ impl Revision {
         .collect();
         let lazy = Lazy {
             shared: shared_demands(file_demands.iter().map(|(_, demands)| demands.as_slice())),
+            shared_unread: Mutex::new(None),
             demands: demands_by_file(file_demands),
             by_name: group_by_name(&global, options),
             memo: DashMap::default(),
@@ -323,6 +348,8 @@ impl Revision {
             resolutions: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             loads: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            shared_unread_builds: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             between: Mutex::new(None),
         };
@@ -458,6 +485,7 @@ impl Revision {
             keys: FxHashMap::default(),
             lazy: Some(Lazy {
                 shared: shared_demands(file_demands.values().map(|demands| demands.as_ref())),
+                shared_unread: Mutex::new(None),
                 demands: file_demands,
                 by_name,
                 memo,
@@ -475,6 +503,8 @@ impl Revision {
                 resolutions: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 loads: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                shared_unread_builds: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 between: Mutex::new(None),
             }),
@@ -581,7 +611,7 @@ impl Revision {
                     // the first load followed those for every component. Asked of the ledger only, which answers at
                     // once while no walk is unread.
                     if depends_on.reads_augmentations {
-                        unread.extend(layer.unread(&lazy.shared));
+                        unread.extend(lazy.shared_unread(layer).iter().cloned());
                         unread.sort();
                         unread.dedup();
                     }
@@ -1165,6 +1195,40 @@ mod read_retry_tests {
         let cold = Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), "Box").unwrap();
         assert!(props(&cold).contains(&"tw".to_owned()), "the fixture reaches the augmentation");
         assert!(answer == cold, "after the retry: {:?}", props(&answer).contains(&"tw".to_owned()));
+    }
+
+    /// Two hundred files import a package whose React augmentation could not be read, and two hundred components read
+    /// React's augmentations: the shared walks are asked of each layer once, not once per resolution.
+    #[test]
+    fn the_shared_walks_are_asked_once_per_layer() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &[u8]| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write(
+            "node_modules/aug-kit/package.json",
+            br#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        );
+        write("node_modules/aug-kit/index.d.ts", &[0xff; 8]);
+        for n in 0..200 {
+            write(&format!("src/setup{n}/setup.ts"), b"import * as Aug from 'aug-kit';\nexport const aug = Aug;\n");
+            let component = format!(
+                "import * as React from 'react';\nexport const Box{n} = (props: React.ComponentProps<'div'>) => <div />;\n"
+            );
+            write(&format!("src/box{n}/Box.tsx"), component.as_bytes());
+        }
+        let options = options(&root, false);
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        for n in 0..200 {
+            assert!(!warned(&revision.lazy_component(&options, &format!("Box{n}")).unwrap()).is_empty());
+        }
+        let lazy = revision.lazy.as_ref().unwrap();
+        let (builds, loads) = (lazy.shared_unread_builds.load(Relaxed), lazy.loads.load(Relaxed));
+        assert!(builds <= loads + 1, "{builds} builds for {loads} loads");
     }
 
     fn project() -> (tempfile::TempDir, Utf8PathBuf) {
