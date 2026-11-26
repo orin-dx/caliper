@@ -412,7 +412,9 @@ impl<'src> SourceDataCollector<'src> {
             return;
         }
         let Some(Expression::Identifier(parent_id)) = super::component::aliased_component(call) else { return };
-        if !is_pascal_case(parent_id.name.as_str()) || !self.reads_object_assign(call, parent_id.name.as_str()) {
+        let recognition = super::component::Recognition::of_object_assign(call, true);
+        if !is_pascal_case(parent_id.name.as_str()) || !self.trusts_object_assign(recognition, parent_id.name.as_str())
+        {
             return;
         }
         let Some(second_arg) = call.arguments.get(1) else { return };
@@ -435,7 +437,9 @@ impl<'src> SourceDataCollector<'src> {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
                 Expression::Identifier(sub) => {
-                    self.record_attached(Subject::local(sub.name.as_str()), parent_id.name.as_str(), &key_name);
+                    if self.trusts_member(recognition, sub.name.as_str()) {
+                        self.record_attached(Subject::local(sub.name.as_str()), parent_id.name.as_str(), &key_name);
+                    }
                     continue;
                 }
                 _ => continue,

@@ -18,5 +18,10 @@ npm/caliper-docgen: patch
   - An alias counts only when the file declares its name exactly once as a type, anywhere in the file. A second declaration anywhere makes the alias stop counting: an import, an interface, a type parameter, a mapped key or a namespace member, in any scope. That includes a declaration TypeScript would keep apart from the alias, so such a cast gets the props of its render function.
   - Through such a cast, `wrap`'s own declaration counts only when the file declares the name `wrap` exactly once, anywhere. An overload, a parameter, an import or a namespace member of the same name means the render function's props only, as before.
 
+- Limit: a name read only because a wrapper was looked through counts only when it cannot mean another declaration in the file. Names written plainly are read as before.
+  - A base class written through a wrapper, such as `extends (Component as typeof Component)<Props>`, is a React class component only when the file does not declare `Component`, or imports it once. A local `class Component` there is not React's.
+  - An `Object.assign(Root, { Item })` written through a wrapper (around the callee, `Root`, or the object as in `{ … } as const`) attaches its members only at module level. `Root` and each member named by an identifier must be declared exactly once in the file.
+  - A receiver written through a wrapper, as in `(Ui as typeof Ui).Button`, is read only when the file declares `Ui` exactly once.
+
 - Limit: React's and Preact's factories (`createElement`, `cloneElement`, `createRef`, the JSX runtime's `jsx`, Preact's `h`, `createContext`, `memo`, `forwardRef`) are recognised exactly as before. An element or ref builder written through an alias, a destructuring, a `require` or a shadowed name is listed as before.
   - A generic call to an element or ref builder, such as `React.createElement<ButtonProps>(Base, props)`, is still listed as a component when written plainly, as before. Through a cast, such as `(React.createElement as typeof React.createElement)<ButtonProps>(Base, props)`, it is still left out, as before.

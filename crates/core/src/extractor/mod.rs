@@ -229,7 +229,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     collector.element_helpers = evidence::element_helpers(&ret.program);
     let names = component::file_names(&ret.program);
     collector.typeof_aliases = component::typeof_aliases(&ret.program, &names);
-    collector.unique_cast_names = names.unique_cast_names();
+    collector.binding_counts = names.into_counts();
     collector.visit_program(&ret.program);
     let mut data = collector.finish();
     data.jsx_usages = body_facts::attach(&ret.program, &mut data.component_mappings, source_type.is_jsx());
@@ -261,8 +261,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) element_helpers: FxHashSet<String>,
     /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
-    /// The names read through a cast that the file declares exactly once (`component::FileNames`).
-    pub(super) unique_cast_names: FxHashSet<CompactString>,
+    /// How many times the file declares each name, any kind in any scope (`component::FileNames`).
+    pub(super) binding_counts: FxHashMap<CompactString, u32>,
     /// Tracks which JSDoc comment spans have already been consumed (by span_end).
     /// Prevents the same comment from leaking to both a component description and its first prop.
     pub(super) consumed_jsdoc: FxHashSet<u32>,
@@ -362,7 +362,7 @@ impl<'src> SourceDataCollector<'src> {
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
             typeof_aliases: FxHashMap::default(),
-            unique_cast_names: FxHashSet::default(),
+            binding_counts: FxHashMap::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
             scope_path: Vec::new(),
@@ -1332,17 +1332,31 @@ impl<'src> SourceDataCollector<'src> {
 
     /// The identifier a member expression's receiver is, the one read every peeled receiver goes through: written
     /// plainly (`Ui.Button`), as origin/main read it; written through a wrapper (`(Ui as typeof Ui).Button`), only when
-    /// the file declares it exactly once (`unique_cast_names`), as a second declaration may be the one meant. `None`
+    /// the file declares it exactly once (`unique_binding`), as a second declaration may be the one meant. `None`
     /// otherwise, which is origin/main's answer: no receiver.
     pub(super) fn receiver_identifier<'a>(&self, object: &Expression<'a>) -> Option<&'a str> {
         match object {
             Expression::Identifier(id) => Some(id.name.as_str()),
             _ => match component::beneath(object) {
-                Expression::Identifier(id) if self.unique_cast_names.contains(id.name.as_str()) => {
-                    Some(id.name.as_str())
-                }
+                Expression::Identifier(id) if self.unique_binding(id.name.as_str()) => Some(id.name.as_str()),
                 _ => None,
             },
+        }
+    }
+
+    /// Whether a bare name a `Peeled` candidate relies on can mean one declaration: the file declares it exactly once
+    /// (`component::Recognition`).
+    pub(super) fn unique_binding(&self, name: &str) -> bool {
+        self.binding_counts.get(name) == Some(&1)
+    }
+
+    /// Whether a name a `Peeled` candidate expects to be React's, a global (`Component`) or an import, is no local
+    /// declaration: the file declares it nowhere, or once as an import (`component::Recognition`).
+    pub(super) fn not_a_local_declaration(&self, name: &str) -> bool {
+        match self.binding_counts.get(name) {
+            None => true,
+            Some(1) => self.imported_names.contains(name),
+            Some(_) => false,
         }
     }
 

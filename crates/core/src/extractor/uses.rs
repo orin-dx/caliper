@@ -120,32 +120,42 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Whether this head reads an `Object.assign` call's members onto `parent`, which export propagation finds by its
-    /// bare name. As origin/main did for one written plainly; for one main did not read (`object_assign_beyond_main`),
-    /// only at module level and only when the file declares `parent` exactly once (`unique_cast_names`).
-    pub(super) fn reads_object_assign(&self, call: &CallExpression<'_>, parent: &str) -> bool {
-        !super::component::object_assign_beyond_main(call)
-            || (self.function_depth == 0 && self.unique_cast_names.contains(parent))
+    /// bare name: a `Plain` call as origin/main did; a `Peeled` one only at module level and only when the file declares
+    /// `parent` exactly once.
+    pub(super) fn trusts_object_assign(&self, recognition: super::component::Recognition, parent: &str) -> bool {
+        recognition == super::component::Recognition::Plain || (self.function_depth == 0 && self.unique_binding(parent))
+    }
+
+    /// Whether an identifier member of an `Object.assign` call is attached: always for a `Plain` call, for a `Peeled` one
+    /// only when the file declares it exactly once, as a second declaration may be the one export propagation finds.
+    pub(super) fn trusts_member(&self, recognition: super::component::Recognition, member: &str) -> bool {
+        recognition == super::component::Recognition::Plain || self.unique_binding(member)
     }
 
     /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is
     /// the root under another name, with `Sub` attached.
     pub(super) fn record_object_assign_declarator(&mut self, parent: &str, init: Option<&Expression<'_>>) {
         let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
-        if !super::component::is_object_assign_call(call) || !self.reads_object_assign(call, parent) {
+        let recognition = super::component::Recognition::of_object_assign(call, false);
+        if !super::component::is_object_assign_call(call) || !self.trusts_object_assign(recognition, parent) {
             return;
         }
         for argument in &call.arguments {
             match argument.as_expression().map(super::component::peel_expr) {
-                Some(Expression::Identifier(root)) => self.attached_to.push(Attachment {
-                    sub: Subject::local(root.name.as_str()),
-                    parent: CompactString::from(parent),
-                    property: None,
-                }),
+                Some(Expression::Identifier(root)) if self.trusts_member(recognition, root.name.as_str()) => {
+                    self.attached_to.push(Attachment {
+                        sub: Subject::local(root.name.as_str()),
+                        parent: CompactString::from(parent),
+                        property: None,
+                    });
+                }
                 Some(Expression::ObjectExpression(object)) => {
                     for property in &object.properties {
                         let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
                         let Some(key) = property.key.static_name() else { continue };
-                        if let Expression::Identifier(sub) = super::component::peel_expr(&property.value) {
+                        if let Expression::Identifier(sub) = super::component::peel_expr(&property.value)
+                            && self.trusts_member(recognition, sub.name.as_str())
+                        {
                             self.record_attached(
                                 Subject::local(sub.name.as_str()),
                                 parent,

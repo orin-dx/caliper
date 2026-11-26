@@ -385,10 +385,12 @@ impl<'src> SourceDataCollector<'src> {
         }
         let type_arguments = super::component::call_type_arguments(call)?;
         let name = self.extract_callee_name(call)?;
-        // Through a cast main read no callee through, the name is looked up by itself (`resolver::callee`), so it is
-        // kept only when it can mean one declaration: the file declares its root once (`unique_cast_names`).
-        if super::component::wrapped_beyond_main(&call.callee)
-            && !super::component::peeled_callee_root(call).is_some_and(|root| self.unique_cast_names.contains(root))
+        // A callee main did not read is looked up by its bare name (`resolver::callee`), so it is kept only when its
+        // root can mean one declaration. A member callee's receiver is already read that way (`receiver_identifier`),
+        // and named as main named it (`unknown.wrap`) otherwise.
+        if super::component::Recognition::of_name(&call.callee) == super::component::Recognition::Peeled
+            && !matches!(call.callee, Expression::StaticMemberExpression(_))
+            && !super::component::chain_root(&call.callee).is_some_and(|root| self.unique_binding(root))
         {
             return None;
         }
@@ -510,6 +512,12 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let peeled = super::component::called(call);
         let Expression::Identifier(callee) = peeled.expr else { return false };
+        // A callee main's factory rule did not read is looked up by its bare name, so only when it means one declaration.
+        if super::component::Recognition::of_factory_callee(call) == super::component::Recognition::Peeled
+            && !self.unique_binding(callee.name.as_str())
+        {
+            return false;
+        }
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
         let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);

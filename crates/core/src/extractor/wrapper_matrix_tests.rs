@@ -2090,6 +2090,87 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "finding: a namespace-local receiver read through a cast",
             "import * as Ui from './ui';\nnamespace N { const Ui = { Button: 123 }; export const PublicButton = (Ui as typeof Ui).Button; }",
         ),
+        // Round 30: Recognition. Each pair is written plainly and in a shape only a peel makes readable.
+        (
+            "recognition: heritage, a local class (finding 1) | plain",
+            "class Component<P> {}\nexport class Record extends Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "recognition: heritage, a local class (finding 1) | peeled",
+            "class Component<P> {}\nexport class Record extends (Component as typeof Component)<Props> { render() { return <div />; } }",
+        ),
+        (
+            "recognition: heritage, an import declared once | plain",
+            "import { Component } from 'react';\nexport class Record extends Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "recognition: heritage, an import declared once | peeled",
+            "import { Component } from 'react';\nexport class Record extends (Component as typeof Component)<Props> { render() { return <div />; } }",
+        ),
+        (
+            "recognition: heritage, a global | plain",
+            "export class Record extends Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "recognition: heritage, a global | peeled",
+            "export class Record extends (Component as typeof Component)<Props> { render() { return <div />; } }",
+        ),
+        (
+            "recognition: Object.assign member, declared twice (finding 2) | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction Item(props: ItemProps) { return <div />; }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item });",
+        ),
+        (
+            "recognition: Object.assign member, declared twice (finding 2) | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction Item(props: ItemProps) { return <div />; }\nnamespace N { const Item = 123; }\n(Object.assign as typeof Object.assign)(Root, { Item });",
+        ),
+        (
+            "recognition: Object.assign member, declared once | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction Item(props: ItemProps) { return <div />; }\nObject.assign(Root, { Item });",
+        ),
+        (
+            "recognition: Object.assign member, declared once | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction Item(props: ItemProps) { return <div />; }\n(Object.assign as typeof Object.assign)(Root, { Item });",
+        ),
+        (
+            "recognition: Object.assign object behind as const, a shadowing local (finding 3) | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction build() { function Root(props: Props) { return <span />; } Object.assign(Root, { Item: (p: ItemProps) => <div /> }); }",
+        ),
+        (
+            "recognition: Object.assign object behind as const, a shadowing local (finding 3) | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction build() { function Root(props: Props) { return <span />; } Object.assign(Root, { Item: (p: ItemProps) => <div /> } as const); }",
+        ),
+        (
+            "recognition: Object.assign object behind as const, at module level | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "recognition: Object.assign object behind as const, at module level | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> } as const);",
+        ),
+        (
+            "recognition: Object.assign object behind satisfies, a shadowing local | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction build() { function Root(props: Props) { return <span />; } Object.assign(Root, { Item: (p: ItemProps) => <div /> }); }",
+        ),
+        (
+            "recognition: Object.assign object behind satisfies, a shadowing local | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction build() { function Root(props: Props) { return <span />; } Object.assign(Root, { Item: (p: ItemProps) => <div /> } satisfies object); }",
+        ),
+        (
+            "recognition: factory callee behind an instantiation, declared once | plain",
+            "function createButton<T>(): React.FC<Props> { return (props) => <div />; }\nexport const Card = createButton();",
+        ),
+        (
+            "recognition: factory callee behind an instantiation, declared once | peeled",
+            "function createButton<T>(): React.FC<Props> { return (props) => <div />; }\nexport const Card = (createButton<unknown>)();",
+        ),
+        (
+            "recognition: factory callee behind an instantiation, a parameter of its name | plain",
+            "function createButton<T>(): React.FC<Props> { return (props) => <div />; }\nfunction g(createButton: unknown) { return createButton; }\nexport const Card = createButton();",
+        ),
+        (
+            "recognition: factory callee behind an instantiation, a parameter of its name | peeled",
+            "function createButton<T>(): React.FC<Props> { return (props) => <div />; }\nfunction g(createButton: unknown) { return createButton; }\nexport const Card = (createButton<unknown>)();",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -2217,8 +2298,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // member callee's receiver read through a cast when declared once
     // (`a_receiver_through_a_cast_is_read_only_for_a_callee_and_only_when_declared_once`). Round 29 adds three: an
     // alias, a callee and a heritage whose receiver is declared once
-    // (`every_receiver_read_through_a_cast_is_read_only_when_declared_once`).
-    assert_eq!(read_as_the_plain_call, 52);
+    // (`every_receiver_read_through_a_cast_is_read_only_when_declared_once`). Round 30 adds four: a peeled base or
+    // `Object.assign` whose names are trusted (`a_peeled_candidate_is_accepted_only_when_its_names_are_trusted`).
+    assert_eq!(read_as_the_plain_call, 56);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2251,6 +2333,69 @@ fn a_receiver_through_a_cast_is_read_only_for_a_callee_and_only_when_declared_on
     }
     // The finding: through the cast, a parameter's `defaultProps` does not reach the exported `Button`.
     assert!(!main("static defaultProps shadowed by a parameter | typeof itself").contains("defaults"));
+}
+
+/// Round 30: a candidate only a peel makes readable (`Recognition::Peeled`) is accepted only when every bare name it relies
+/// on can mean one declaration, and a base expected to be React's is no local declaration. Each pair's plain form is
+/// origin/main's; the peeled form reads as the plain form where its names are trusted, and as origin/main read it
+/// (not at all) otherwise.
+#[test]
+fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, trusted) in [
+        ("heritage, a local class (finding 1)", false),
+        ("heritage, an import declared once", true),
+        ("heritage, a global", true),
+        ("Object.assign member, declared twice (finding 2)", false),
+        ("Object.assign member, declared once", true),
+        ("Object.assign object behind as const, a shadowing local (finding 3)", false),
+        ("Object.assign object behind as const, at module level", true),
+        ("Object.assign object behind satisfies, a shadowing local", false),
+        ("factory callee behind an instantiation, declared once", true),
+        ("factory callee behind an instantiation, a parameter of its name", false),
+    ] {
+        let plain = format!("recognition: {row} | plain");
+        let peeled = format!("recognition: {row} | peeled");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 30: origin/main's factory rule read a callee through `as`, `satisfies`, `!`, parentheses and instantiations, so
+/// those are `Plain`; only a `<T>x` assertion (a `.ts` file's) is `Peeled`, and then its name must be declared once.
+#[test]
+fn a_factory_callee_behind_a_type_assertion_is_peeled() {
+    let recognition = |callee: &str| {
+        let source = format!("declare function f(): unknown;\nconst X = {callee}();");
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::ts()).parse();
+        let Some(Statement::VariableDeclaration(declaration)) = parsed.program.body.get(1) else { panic!("{callee}") };
+        let Some(Expression::CallExpression(call)) = declaration.declarations[0].init.as_ref() else {
+            panic!("{callee}")
+        };
+        super::component::Recognition::of_factory_callee(call)
+    };
+    use super::component::Recognition::{Peeled, Plain};
+    for (callee, expected) in [
+        ("f", Plain),
+        ("(f as typeof f)", Plain),
+        ("(f satisfies unknown)", Plain),
+        ("f!", Plain),
+        ("(f<never>)", Plain),
+        ("(<typeof f>f)", Peeled),
+    ] {
+        assert_eq!(recognition(callee), expected, "{callee}");
+    }
+    let shadowed = parse_file(
+        Utf8Path::new("/fixtures/Button.ts"),
+        "import React from 'react';\ninterface Props { label?: string }\n\
+         function createButton(): React.FC<Props> { return null as any; }\n\
+         function g(createButton: unknown) { return createButton; }\nexport const Card = (<typeof createButton>createButton)();",
+    );
+    assert!(!shadowed.component_mappings.iter().any(|m| m.component_name == "Card"), "a parameter of its name");
 }
 
 /// Round 29: every receiver read through a wrapper, for an imported member alias (`X = (Ui as typeof Ui).Button`), a

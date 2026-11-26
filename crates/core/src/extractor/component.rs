@@ -548,12 +548,9 @@ pub(crate) struct TypeofAlias {
 
 /// What one flat pass over the file finds: how many times each name is declared, by any binding of any kind in any
 /// scope (a variable, function, parameter, class, import, alias, interface, enum, namespace, type parameter, mapped
-/// key, …: type and value names in one map), and the names a call written through a cast main read no callee through
-/// makes this head look up by themselves: the root of such a callee (`peeled_callee_root`), and the parent of an
-/// `Object.assign` written through a cast (`object_assign_beyond_main`). It knows no scopes.
+/// key, …: type and value names in one map). It knows no scopes.
 pub(super) struct FileNames<'p> {
-    counts: FxHashMap<&'p str, usize>,
-    cast_names: Vec<&'p str>,
+    counts: FxHashMap<&'p str, u32>,
 }
 
 impl FileNames<'_> {
@@ -562,9 +559,9 @@ impl FileNames<'_> {
         self.counts.get(name) == Some(&1)
     }
 
-    /// The names read through a cast that the file declares exactly once (`SourceDataCollector::unique_cast_names`).
-    pub(super) fn unique_cast_names(&self) -> rustc_hash::FxHashSet<CompactString> {
-        self.cast_names.iter().filter(|name| self.declared_once(name)).map(|name| CompactString::from(*name)).collect()
+    /// The counts, owned, for `SourceDataCollector::binding_counts`.
+    pub(super) fn into_counts(self) -> FxHashMap<CompactString, u32> {
+        self.counts.into_iter().map(|(name, count)| (CompactString::from(name), count)).collect()
     }
 }
 
@@ -572,7 +569,7 @@ impl FileNames<'_> {
 pub(super) fn file_names<'p>(program: &Program<'p>) -> FileNames<'p> {
     #[cfg(test)]
     steps::count_walk();
-    let mut names = FileNames { counts: FxHashMap::default(), cast_names: Vec::new() };
+    let mut names = FileNames { counts: FxHashMap::default() };
     oxc_ast_visit::Visit::visit_program(&mut names, program);
     names
 }
@@ -583,64 +580,67 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
         steps::count_examined(1);
         *self.counts.entry(it.name.as_str()).or_default() += 1;
     }
+}
 
-    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if let Some(root) = peeled_callee_root(it) {
-            self.cast_names.push(root);
+/// Whether origin/main read a candidate as it is written (`Plain`), or only a peel somewhere makes it readable
+/// (`Peeled`): a wrapper around the callee, the base class, a receiver or an argument. Computed once per candidate, by
+/// the read origin/main made on that path. A `Plain` candidate keeps origin/main's behaviour exactly; a `Peeled` one is
+/// accepted only when every bare name it relies on can mean one declaration (`SourceDataCollector::unique_binding`,
+/// `SourceDataCollector::not_a_local_declaration`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Recognition {
+    Plain,
+    Peeled,
+}
+
+impl Recognition {
+    /// A name as origin/main read a callee, a base class or a receiver: an identifier or a chain of static members on
+    /// one, with no wrapper anywhere.
+    pub(super) fn of_name(expr: &Expression<'_>) -> Self {
+        match expr {
+            Expression::Identifier(_) => Self::Plain,
+            Expression::StaticMemberExpression(member) => Self::of_name(&member.object),
+            _ => Self::Peeled,
         }
-        if object_assign_beyond_main(it)
-            && let Some(Expression::Identifier(parent)) = aliased_component(it)
-        {
-            self.cast_names.push(parent.name.as_str());
-        }
-        oxc_ast_visit::walk::walk_call_expression(self, it);
     }
 
-    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        // `const Compound = (Object.assign as …)(Root, { … })`: `Compound` is the parent its members attach to.
-        if let (BindingPattern::BindingIdentifier(id), Some(Expression::CallExpression(call))) =
-            (&it.id, it.init.as_ref().map(peel_expr))
-            && object_assign_beyond_main(call)
-        {
-            self.cast_names.push(id.name.as_str());
+    /// A factory callee as origin/main's factory rule read it: an identifier beneath `as`, `satisfies`, `!`,
+    /// parentheses and instantiations, not beneath a `<T>x` assertion.
+    pub(super) fn of_factory_callee(call: &CallExpression<'_>) -> Self {
+        let mut callee = &call.callee;
+        loop {
+            callee = match callee {
+                Expression::ParenthesizedExpression(inner) => &inner.expression,
+                Expression::TSAsExpression(inner) => &inner.expression,
+                Expression::TSSatisfiesExpression(inner) => &inner.expression,
+                Expression::TSNonNullExpression(inner) => &inner.expression,
+                Expression::TSInstantiationExpression(inner) => &inner.expression,
+                Expression::Identifier(_) => return Self::Plain,
+                _ => return Self::Peeled,
+            };
         }
-        oxc_ast_visit::walk::walk_variable_declarator(self, it);
     }
 
-    fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
-        // A receiver written through a wrapper (`(Ui as typeof Ui).Button`): `receiver_identifier` reads it only when
-        // the file declares it once.
-        if !matches!(it.object, Expression::Identifier(_))
-            && let Expression::Identifier(receiver) = beneath(&it.object)
-        {
-            self.cast_names.push(receiver.name.as_str());
-        }
-        oxc_ast_visit::walk::walk_static_member_expression(self, it);
+    /// An `Object.assign` call, by the path that reads it. Both read only a bare `Object.assign` callee; the
+    /// inline-member scan (`inline`) also only a bare first argument and a bare object literal, while the named-member
+    /// read (`record_object_assign_declarator`) read its arguments through `peel_expr`.
+    pub(super) fn of_object_assign(call: &CallExpression<'_>, inline: bool) -> Self {
+        let callee = matches!(&call.callee, Expression::StaticMemberExpression(callee)
+            if callee.property.name == "assign"
+                && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"));
+        let arguments = !inline
+            || (matches!(call.arguments.first(), Some(Argument::Identifier(_)))
+                && matches!(call.arguments.get(1), Some(Argument::ObjectExpression(_))));
+        if callee && arguments { Self::Plain } else { Self::Peeled }
     }
 }
 
-/// Whether a call is an `Object.assign` that origin/main did not read: written through an assertion, `satisfies` or
-/// `!` around the callee, its object or its first argument.
-pub(super) fn object_assign_beyond_main(call: &CallExpression<'_>) -> bool {
-    is_object_assign_call(call)
-        && (wrapped_beyond_main(&call.callee)
-            || matches!(callee_of(call), Some(Expression::StaticMemberExpression(member))
-                if wrapped_beyond_main(&member.object))
-            || call.arguments.first().and_then(Argument::as_expression).is_some_and(wrapped_beyond_main))
-}
-
-/// The identifier a callee written through a cast main read no callee through is rooted at: `wrap` for `(wrap as
-/// typeof wrap)<P>(…)`, `ui` for `(ui as T).withContext<P>(…)`. `None` for any other callee.
-pub(super) fn peeled_callee_root<'a>(call: &CallExpression<'a>) -> Option<&'a str> {
-    if !wrapped_beyond_main(&call.callee) {
-        return None;
-    }
-    let mut expr = called(call).expr;
-    while let Expression::StaticMemberExpression(member) = expr {
-        expr = peel_expr(&member.object);
-    }
-    match expr {
+/// The identifier a name is rooted at, read through every wrapper: `wrap` for `(wrap as typeof wrap)`, `ui` for
+/// `(ui as T).withContext`.
+pub(super) fn chain_root<'a>(expr: &Expression<'a>) -> Option<&'a str> {
+    match beneath(expr) {
         Expression::Identifier(root) => Some(root.name.as_str()),
+        Expression::StaticMemberExpression(member) => chain_root(&member.object),
         _ => None,
     }
 }
@@ -1407,6 +1407,12 @@ impl<'src> SourceDataCollector<'src> {
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
         let super_name = self.receiver_name(super_class(class)?.named()?);
+        // A base main did not read is React's only when its root is no local declaration: a global, or an import.
+        if Recognition::of_name(&class.heritage.as_ref()?.expression) == Recognition::Peeled
+            && !self.not_a_local_declaration(super_name.split('.').next()?)
+        {
+            return None;
+        }
         match self.react_type_export(&super_name)?.as_str() {
             "Component" => Some("Component"),
             "PureComponent" => Some("PureComponent"),
