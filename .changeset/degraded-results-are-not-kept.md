@@ -14,6 +14,7 @@ npm/caliper-docgen: patch
 **What you see now**
 
 - Every answer a checker failure affects carries a warning that says so.
+- A component the checker failed on now gets a warning, not an info note, so Storybook's `fallback: 'degraded'` takes the configured fallback for it.
 - The checker is asked about the component again 30 seconds after it failed, or after the next source-file change.
 - Until then, a request gets the structural props and the warning at once, without waiting on the checker.
 - A component the checker skipped because it passed its memory budget is asked again the same way.

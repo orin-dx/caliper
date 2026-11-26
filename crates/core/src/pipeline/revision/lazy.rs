@@ -143,6 +143,9 @@ const WHOLE_DEMAND_AFTER_GROWTHS: usize = 3;
 pub(super) struct Lazy {
     /// Each project file's dependency demands; files that demand nothing are absent.
     demands: FxHashMap<PathKey, Arc<[Demand]>>,
+    /// The demands the session's first load follows for every component ([`shared_demands`]): React's names and the
+    /// modules the project imports, whose augmentations any component reading React's interfaces reads.
+    shared: Arc<[Demand]>,
     /// Components by name, in output order, with their position in `GlobalSourceData::component_mappings`.
     by_name: FxHashMap<String, Vec<(ComponentId, usize)>>,
     memo: DashMap<ComponentId, Arc<Resolved>, FxBuildHasher>,
@@ -199,6 +202,12 @@ pub(super) struct RetryClock {
 }
 
 impl RetryClock {
+    /// This clock as a load reads it at each failed read.
+    fn reader(clock: &Arc<RetryClock>) -> dependency_types::Clock {
+        let clock = clock.clone();
+        Arc::new(move || clock.now())
+    }
+
     fn now(&self) -> Instant {
         #[cfg(test)]
         if let Some(now) = *self.set.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
@@ -224,6 +233,19 @@ fn touch(ids: impl Iterator<Item = ComponentId>, touched: &mut FxHashSet<String>
         touched.insert(id.name);
         affected.push(id.file);
     }
+}
+
+/// The demands every component may read through: React's names and each module a project file imports.
+fn shared_demands<'a>(file_demands: impl IntoIterator<Item = &'a [Demand]>) -> Arc<[Demand]> {
+    let mut shared: Vec<Demand> = file_demands
+        .into_iter()
+        .flatten()
+        .filter(|demand| &*demand.specifier == "react" || demand.name.is_empty())
+        .cloned()
+        .collect();
+    shared.sort();
+    shared.dedup();
+    Arc::from(shared)
 }
 
 fn demands_by_file(file_demands: Vec<(Utf8PathBuf, Vec<Demand>)>) -> FxHashMap<PathKey, Arc<[Demand]>> {
@@ -271,7 +293,8 @@ impl Revision {
         let layer = options.load_dependencies.then(|| {
             let moment = dependency_types::Moment { at: clock.now(), edits };
             let stamp = dependency_types::Stamp { moment, load: load_ids.next() };
-            Arc::new(dependency_types::load_at(react, options, None, dependency_types::Retry::Always, stamp))
+            let clock = RetryClock::reader(&clock);
+            Arc::new(dependency_types::load_timed(react, options, None, dependency_types::Retry::Always, stamp, clock))
         });
         let engine = Engine::new(&global, options, &ambient_global_files, &named_types, layer, &react_types);
         lib_diagnostics.extend(engine.ctx.tsconfig_diagnostic.clone());
@@ -283,6 +306,7 @@ impl Revision {
         .into_iter()
         .collect();
         let lazy = Lazy {
+            shared: shared_demands(file_demands.iter().map(|(_, demands)| demands.as_slice())),
             demands: demands_by_file(file_demands),
             by_name: group_by_name(&global, options),
             memo: DashMap::default(),
@@ -433,6 +457,7 @@ impl Revision {
             output: Arc::new(empty_output()),
             keys: FxHashMap::default(),
             lazy: Some(Lazy {
+                shared: shared_demands(file_demands.values().map(|demands| demands.as_ref())),
                 demands: file_demands,
                 by_name,
                 memo,
@@ -551,7 +576,15 @@ impl Revision {
                         .flat_map(|demands| demands.iter().cloned())
                         .collect();
                     let retry = lazy.retry();
-                    let unread = layer.unread(&roots);
+                    let mut unread = layer.unread(&roots);
+                    // React's augmentations come from every module the project imports, whichever file imports it, and
+                    // the first load followed those for every component. Asked of the ledger only, which answers at
+                    // once while no walk is unread.
+                    if depends_on.reads_augmentations {
+                        unread.extend(layer.unread(&lazy.shared));
+                        unread.sort();
+                        unread.dedup();
+                    }
                     let mut missing = layer.missing_at(&roots, retry);
                     missing.extend(layer.missing_at(&unread, retry));
                     missing.sort();
@@ -667,7 +700,9 @@ impl Revision {
             return;
         }
         let stamp = dependency_types::Stamp { moment, load: lazy.load_ids.next() };
-        let extended = Arc::new(off_pool(|| dependency_types::load_at(missing, options, Some(layer), retry, stamp)));
+        let clock = RetryClock::reader(&lazy.clock);
+        let extended =
+            Arc::new(off_pool(|| dependency_types::load_timed(missing, options, Some(layer), retry, stamp, clock)));
         #[cfg(test)]
         lazy.loads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
@@ -1084,6 +1119,52 @@ mod read_retry_tests {
         let (next, update) = revision.rebuilt_lazy(&options).unwrap();
         assert!(update.updated_keys.contains(&"A".to_owned()), "{:?}", update.updated_keys);
         assert_eq!(next.lazy_component(&options, "A").unwrap(), cold(&root, "A"));
+    }
+
+    /// `setup.ts` imports a package whose React augmentation could not be read; `Box` never reaches `setup.ts` but
+    /// reads React's augmentations. Its answer is held only until the retry: once the file reads and the retry is due,
+    /// it has the augmented attribute, equal to a cold run.
+    #[test]
+    fn a_component_reading_augmentations_waits_on_the_shared_augmentation_walks() {
+        // Inside the crate, so React's own types resolve from the workspace's `node_modules`.
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let augmentation = "import type {} from 'react';\n\
+                            declare module 'react' { interface HTMLAttributes<T> { tw?: string } }\n";
+        let files = [
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", augmentation),
+            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
+            (
+                "src/box/Box.tsx",
+                "import * as React from 'react';\n\
+                 export const Box = (props: React.ComponentProps<'div'> & { own?: boolean }) => <div />;\n",
+            ),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let options = |use_cache| PipelineOptions {
+            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
+            ..options(&root, use_cache)
+        };
+        let aug = root.join("node_modules/aug-kit/index.d.ts");
+        std::fs::write(&aug, [0xff; 8]).unwrap();
+        let revision = Revision::cold_lazy(&options(true), 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        assert!(!props(&revision.lazy_component(&options(true), "Box").unwrap()).contains(&"tw".to_owned()));
+        std::fs::write(&aug, augmentation).unwrap();
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let answer = revision.lazy_component(&options(true), "Box").unwrap();
+        let cold = Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), "Box").unwrap();
+        assert!(props(&cold).contains(&"tw".to_owned()), "the fixture reaches the augmentation");
+        assert!(answer == cold, "after the retry: {:?}", props(&answer).contains(&"tw".to_owned()));
     }
 
     fn project() -> (tempfile::TempDir, Utf8PathBuf) {

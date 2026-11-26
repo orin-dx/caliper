@@ -12,7 +12,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
@@ -28,7 +28,7 @@ use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 mod ledger;
-pub(crate) use ledger::{DEGRADED_RETRY, Edits, Footprint, LoadIds, Moment, Retry, Stamp, UnreadWalks};
+pub(crate) use ledger::{Clock, DEGRADED_RETRY, Edits, Footprint, LoadIds, Moment, Retry, Stamp, UnreadWalks};
 use ledger::{LedgerBuilder, Node, ReadLedger};
 
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
@@ -1383,6 +1383,19 @@ pub(crate) fn load_at(
     retry: Retry,
     stamp: Stamp,
 ) -> DependencyLayer {
+    load_timed(demands, options, previous, retry, stamp, Arc::new(Instant::now))
+}
+
+/// [`load_at`], each failed read timed by `clock` when it fails: a session's own clock, so a slow load does not make
+/// a failure near its end due early.
+pub(crate) fn load_timed(
+    demands: Vec<Demand>,
+    options: &PipelineOptions,
+    previous: Option<&Arc<DependencyLayer>>,
+    retry: Retry,
+    stamp: Stamp,
+    clock: Clock,
+) -> DependencyLayer {
     // Its own resolvers, never another consumer's: `oxc_resolver` keeps a config reached through another's
     // `references` without that config's own references, so a shared cache would make what this load resolves depend
     // on what was resolved first.
@@ -1394,6 +1407,7 @@ pub(crate) fn load_at(
     let mut loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
     loader.ledger.retry = retry;
     loader.ledger.stamp = stamp;
+    loader.ledger.clock = clock;
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
     match (previous, flatten) {

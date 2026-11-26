@@ -82,17 +82,26 @@ pub(crate) enum Retry {
     Due(Moment),
 }
 
-/// A read that failed, and the stamp of the load that made it.
+/// When a read failed, by the session's clock at the failure, not at the start of the load that made it: a walk past
+/// it is due again [`DEGRADED_RETRY`] after this, however long the load ran first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FailedAt(Instant);
+
+/// The session's time, read when a read fails.
+pub(crate) type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
+
+/// A read that failed: the stamp of the load that made it, and when it failed.
 #[derive(Clone, Debug)]
 struct FailedRead {
     warning: Diagnostic,
     stamp: Stamp,
+    at: FailedAt,
 }
 
 impl FailedRead {
     /// When a walk that met this failure is due again by time; `None` when an edit since already made it due.
     fn retry_at(&self, edits: Edits) -> Option<Instant> {
-        (self.stamp.moment.edits >= edits).then(|| self.stamp.moment.at + DEGRADED_RETRY)
+        (self.stamp.moment.edits >= edits).then(|| self.at.0 + DEGRADED_RETRY)
     }
 }
 
@@ -201,11 +210,12 @@ impl UnreadWalks {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Footprint(Box<[Unreadable]>);
 
-/// A file an answer's walks could not read, and the stamp of the failed read the answer saw.
+/// A file an answer's walks could not read, and the stamp and time of the failed read the answer saw.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Unreadable {
     path: PathKey,
     read: Stamp,
+    at: FailedAt,
 }
 
 /// One layer's entries: what its load read again or could not read, and the marks its follows left.
@@ -295,7 +305,7 @@ impl DependencyLayer {
                 let Some(Read::Failed(failed)) = self.latest_read(std::borrow::Borrow::borrow(path)) else {
                     return None;
                 };
-                files.push(Unreadable { path: path.clone(), read: failed.stamp });
+                files.push(Unreadable { path: path.clone(), read: failed.stamp, at: failed.at });
             }
         }
         files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -306,10 +316,10 @@ impl DependencyLayer {
     /// Whether an answer with `footprint` still holds: every file in it is still the failed read the answer saw (no
     /// load read it since, whichever walk), its retry has not passed, and no edit arrived since.
     pub(crate) fn footprint_holds(&self, footprint: &Footprint, now: Moment) -> bool {
-        footprint.0.iter().all(|Unreadable { path, read }| {
+        footprint.0.iter().all(|Unreadable { path, read, at }| {
             let same = matches!(self.latest_read(std::borrow::Borrow::borrow(path)),
-                Some(Read::Failed(failed)) if failed.stamp == *read);
-            same && read.moment.edits >= now.edits && now.at < read.moment.at + DEGRADED_RETRY
+                Some(Read::Failed(failed)) if failed.stamp == *read && failed.at == *at);
+            same && read.moment.edits >= now.edits && now.at < at.0 + DEGRADED_RETRY
         })
     }
 
@@ -446,6 +456,8 @@ pub(super) struct LedgerBuilder<'a> {
     pub(super) retry: Retry,
     /// What its failed reads are recorded with.
     pub(super) stamp: Stamp,
+    /// The session's time, read at each failure.
+    pub(super) clock: Clock,
 }
 
 impl<'a> LedgerBuilder<'a> {
@@ -453,6 +465,7 @@ impl<'a> LedgerBuilder<'a> {
         LedgerBuilder {
             retry: Retry::Always,
             stamp: Stamp::unsessioned(),
+            clock: Arc::new(Instant::now),
             parent,
             inherited: ReadLedger::default(),
             reads: DashMap::default(),
@@ -488,7 +501,8 @@ impl<'a> LedgerBuilder<'a> {
     }
 
     pub(super) fn read_failed(&self, file: &Utf8Path, warning: Diagnostic) {
-        self.reads.insert(PathKey::from(file), Read::Failed(FailedRead { warning, stamp: self.stamp }));
+        let at = FailedAt((self.clock)());
+        self.reads.insert(PathKey::from(file), Read::Failed(FailedRead { warning, stamp: self.stamp, at }));
     }
 
     /// `from` reached `to`, whether it followed `to` itself or found it followed already.
@@ -520,7 +534,7 @@ impl<'a> LedgerBuilder<'a> {
     /// in is merged into it and what is clean is dropped.
     pub(super) fn finish(self) -> ReadLedger {
         let has_earlier = self.has_earlier_marks();
-        let LedgerBuilder { parent, inherited, reads, edges, unread, retried, retry: _, stamp: _ } = self;
+        let LedgerBuilder { parent, inherited, reads, edges, unread, retried, retry: _, stamp: _, clock: _ } = self;
         let reads: FxHashMap<PathKey, Read> = reads.into_iter().collect();
         let earlier = |node: &Node| inherited.marks.get(node).or_else(|| parent.and_then(|parent| parent.mark(node)));
         let unread: FxHashMap<Node, (Demand, Vec<PathKey>)> =

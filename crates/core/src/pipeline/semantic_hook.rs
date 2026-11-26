@@ -30,8 +30,8 @@ use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::options::CollapseContext;
 use crate::types::semantic::{
     Delivery, Layering, MergedProps, Priority, PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome,
-    SemanticProp, SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, Unavailable,
-    drop_superseded, merge_semantic_props, unread_diagnostic,
+    SemanticProp, SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, drop_superseded,
+    fallback_severity, merge_semantic_props, unread_diagnostic,
 };
 
 /// What one request of the checker made of a component: the component it found, if any, and what the checker said
@@ -54,10 +54,6 @@ enum Settled {
     /// ([`AnswerCache::degraded`]) until [`DEGRADED_RETRY`] passes or a file changes, and the request after that asks
     /// the checker again.
     Degraded(Vec<Diagnostic>),
-    /// The checker was unavailable for every target ([`SemanticOutcome::unavailable`]: not running, timed out,
-    /// crashed): what it said. Held for every component at once ([`AnswerCache::outage`]), so a batch of components
-    /// asks it once, not once each.
-    Unavailable(Vec<Diagnostic>),
     /// The checker stopped without answering. Held as a refusal like [`Settled::Degraded`], with the warning that says
     /// so ([`stopped_warning`]): a checker that keeps stopping would otherwise be asked by every request.
     Stopped,
@@ -111,9 +107,6 @@ struct AnswerCache {
     degraded: FxHashMap<(String, u64), (Instant, Vec<Diagnostic>)>,
     /// The size of `degraded` at which the expired refusals are dropped next.
     prune_at: usize,
-    /// When the checker was last unavailable for every target ([`Settled::Unavailable`]), and what it said: until
-    /// [`DEGRADED_RETRY`] passes, every request without a kept answer is refused with it.
-    outage: Option<(Instant, Vec<Diagnostic>)>,
     /// The one copy of each prop the kept answers hold, for this generation.
     props: PropInterner,
 }
@@ -197,9 +190,6 @@ pub(crate) struct SemanticHook {
     wait_empty: Duration,
     answers: Arc<Answers>,
     now: Clock,
-    /// The mark of an outcome unavailable for every target, as [`SemanticOutcome::unavailable`] makes it: built once,
-    /// so reading an outcome compares marks without building one.
-    every_target: Option<Unavailable>,
 }
 
 impl SemanticHook {
@@ -210,7 +200,6 @@ impl SemanticHook {
             wait_empty: DEFAULT_WAIT_EMPTY,
             answers: Arc::new(Mutex::new(AnswerCache::default())),
             now: Arc::new(Instant::now),
-            every_target: SemanticOutcome::unavailable(String::new()).unavailable,
         }
     }
 
@@ -242,7 +231,6 @@ impl SemanticHook {
         cache.generation += 1;
         cache.answers.clear();
         cache.degraded.clear();
-        cache.outage = None;
         for pending in cache.pending.values() {
             pending.priority.cancel();
         }
@@ -304,9 +292,7 @@ impl SemanticHook {
 
         match pending.wait(self.wait_for(&answer, priority)) {
             Some(Settled::Answered(answered)) => self.apply(&mut answer, answered, mode, cx),
-            Some(Settled::Degraded(diagnostics) | Settled::Unavailable(diagnostics)) => {
-                answer.diagnostics.extend(diagnostics)
-            }
+            Some(Settled::Degraded(diagnostics)) => answer.diagnostics.extend(diagnostics),
             Some(Settled::Stopped) => answer.diagnostics.push(stopped_warning(&answer.key)),
             Some(Settled::Cancelled) | None => {
                 let mut pending =
@@ -337,13 +323,6 @@ impl SemanticHook {
                 Some(_) => drop(cache.degraded.remove(key)),
                 None => {}
             }
-            match &cache.outage {
-                Some((at, said)) if now.saturating_duration_since(*at) < DEGRADED_RETRY => {
-                    return (Found::Degraded(said.clone()), generation);
-                }
-                Some(_) => cache.outage = None,
-                None => {}
-            }
             if let Some(pending) = cache.pending.get(key) {
                 pending.priority.raise_to(priority);
                 return (Found::Joined(pending.clone()), generation);
@@ -365,10 +344,9 @@ impl SemanticHook {
         let asked = target.key.clone();
         let settling = pending.clone();
         let now = self.now.clone();
-        let every_target = self.every_target.clone();
         let delivery = Delivery::new(move |outcome| {
             let mut settled = match outcome {
-                Some(outcome) => read_outcome(&asked, outcome, every_target.as_ref()),
+                Some(outcome) => read_outcome(&asked, outcome),
                 None if settling.priority.is_cancelled() => Settled::Cancelled,
                 None => Settled::Stopped,
             };
@@ -384,7 +362,6 @@ impl SemanticHook {
                             cache.answers.insert(key, answered.clone());
                         }
                         Settled::Degraded(said) => cache.hold_degraded(key, now(), said.clone()),
-                        Settled::Unavailable(said) => cache.outage = Some((now(), said.clone())),
                         Settled::Stopped => cache.hold_degraded(key, now(), vec![stopped_warning(&asked)]),
                         // Not an answer, nor one the checker failed to give: the next request asks.
                         Settled::Cancelled => {}
@@ -488,9 +465,10 @@ fn target_of(answer: &ComponentAnswer, mode: HtmlAttributeMode, layering: Layeri
 /// the component kept its structural result. An outcome marked unavailable ([`SemanticOutcome::unavailable`]), or with
 /// a transient fallback for `asked` (the checker failed on it), answers nothing: it is [`Settled::Degraded`]. Decided
 /// from those marks alone: an outcome with no entry for `asked` (a target the pass skipped, a run past its heap budget)
-/// is the checker's answer, kept like any other. An answer or fallback for another key is not this component's. A mark
-/// equal to `every_target` is unavailable for every target: [`Settled::Unavailable`], held for every component.
-fn read_outcome(asked: &str, outcome: SemanticOutcome, every_target: Option<&Unavailable>) -> Settled {
+/// is the checker's answer, kept like any other. An answer or fallback for another key is not this component's.
+/// An outcome unavailable for every target is refused for the asked key alone: a request-scoped failure (one
+/// component's program timing out) reports the same mark, and must not refuse a healthy component.
+fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Settled {
     let SemanticOutcome { components, fallbacks, diagnostics: reported, unavailable } = outcome;
     let mut diagnostics: Vec<Diagnostic> = reported
         .into_iter()
@@ -499,9 +477,6 @@ fn read_outcome(asked: &str, outcome: SemanticOutcome, every_target: Option<&Una
             diagnostic
         })
         .collect();
-    if unavailable.is_some() && unavailable.as_ref() == every_target {
-        return Settled::Unavailable(diagnostics);
-    }
     if unavailable.is_some_and(|unasked| unasked.covers(asked)) {
         return Settled::Degraded(diagnostics);
     }
@@ -512,13 +487,13 @@ fn read_outcome(asked: &str, outcome: SemanticOutcome, every_target: Option<&Una
             continue;
         }
         failed |= transient;
-        let mut info = Diagnostic::new(
-            DiagnosticSeverity::Info,
+        let mut kept = Diagnostic::new(
+            fallback_severity(transient),
             DiagnosticCode::SemanticBackend,
             format!("1 component(s) kept their structural result: {reason}"),
         );
-        info.affects = vec![key];
-        diagnostics.push(info);
+        kept.affects = vec![key];
+        diagnostics.push(kept);
     }
     if failed {
         return Settled::Degraded(diagnostics);
@@ -739,8 +714,9 @@ mod tests {
         assert!((0..DEGRADED_HELD).all(|n| cache.degraded.contains_key(&key(3 * DEGRADED_HELD + n))));
     }
 
-    /// A batch of 300 components while the checker is down asks it once, and while one rejects each component asks
-    /// once per component; the same batch again within the retry asks nothing either way.
+    /// A batch of 300 components while the checker is down or rejects each one asks once per component: an outcome
+    /// unavailable for every target is also what one component's timed-out program reports, so it refuses that
+    /// component alone. The same batch again within the retry asks nothing.
     #[test]
     fn a_batch_larger_than_the_prune_size_repeated_within_the_retry_asks_nothing() {
         use std::sync::atomic::Ordering::SeqCst;
@@ -752,7 +728,7 @@ mod tests {
         drop(structural.initialize());
         let answer = structural.component("Button").unwrap();
         let cx = CollapseContext::of(&options);
-        for (reply, first) in [(Reply::Down, 1), (Reply::Rejected, 300)] {
+        for (reply, first) in [(Reply::Down, 300), (Reply::Rejected, 300)] {
             let checker = Arc::new(Replies { reply, recovered: false.into(), asked: 0.into() });
             let mut hook = SemanticHook::new(checker.clone(), Duration::from_secs(60));
             let start = Instant::now();
@@ -769,6 +745,33 @@ mod tests {
             batch();
             assert_eq!(checker.asked.load(SeqCst), first, "{reply:?}: the repeat asks nothing");
         }
+    }
+
+    /// One component's request fails with an outcome unavailable for every target (its program timed out); an
+    /// unrelated component asked right after is answered by the checker, not refused.
+    #[test]
+    fn a_failed_request_refuses_only_its_own_component() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(root.join("Button.tsx"), BUTTON).unwrap();
+        std::fs::write(root.join("Card.tsx"), CARD).unwrap();
+        let options = crate::pipeline::PipelineOptions { src_dirs: vec![root], ..Default::default() };
+        let structural = crate::pipeline::WatchSession::lazy(options.clone());
+        drop(structural.initialize());
+        let cx = CollapseContext::of(&options);
+        let checker = Arc::new(Holding::default());
+        let hook = SemanticHook::new(checker.clone(), Duration::ZERO);
+        let ask = |key: &str| {
+            hook.refine(structural.component(key).unwrap(), options.html_attributes, cx, Priority::Background)
+        };
+        drop(ask("Button"));
+        let delivery = checker.0.lock().unwrap()[0].2.take().unwrap();
+        delivery.deliver(Some(SemanticOutcome::unavailable("the checker stopped answering: timed out")));
+        drop(ask("Card"));
+        let asked: Vec<String> = checker.asked().into_iter().map(|(key, _, _)| key).collect();
+        assert_eq!(asked, ["Button", "Card"], "the unrelated component is asked");
+        drop(ask("Button"));
+        assert_eq!(checker.asked().len(), 2, "the failed one is held for its retry");
     }
 
     /// What [`Replies`] answers while the checker has not recovered.
@@ -878,6 +881,9 @@ mod tests {
                 assert_eq!(props(answer), ["label"], "{reply:?}");
                 assert_eq!(said(answer), 1, "{reply:?}: every answer says why: {:?}", answer.diagnostics);
                 assert!(!awaits_checker(answer), "{reply:?}");
+                // What a host counts as degrading the answer (Storybook's `degradedBy`): a warning or an error.
+                let warns = answer.diagnostics.iter().any(|d| d.severity != DiagnosticSeverity::Info);
+                assert!(!degraded || warns, "{reply:?}: a degraded answer warns: {:?}", answer.diagnostics);
             }
             assert_eq!(checker.asked.load(SeqCst), 1, "{reply:?}: five requests ask once");
             at(DEGRADED_RETRY - Duration::from_millis(1));

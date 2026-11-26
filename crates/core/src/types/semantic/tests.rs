@@ -370,6 +370,32 @@ fn provenance_names_the_resolved_components_and_each_fallback_reason() {
     );
 }
 
+/// A fallback the checker gave because it failed (transient) is a warning, which hosts count as degrading the answer;
+/// the same reason as a verdict stays info. Storybook's `degradedBy` reads only warnings and errors.
+#[test]
+fn a_transient_fallback_is_a_warning_and_a_verdict_is_info() {
+    let mut out = output();
+    let fallback =
+        |key: &str, transient| SemanticFallback { key: key.to_string(), reason: "why".to_string(), transient };
+    let outcome = SemanticOutcome {
+        components: vec![],
+        fallbacks: vec![fallback("Button", true), fallback("Card", false)],
+        diagnostics: vec![],
+        unavailable: None,
+    };
+
+    merge_semantic(&mut out, outcome);
+
+    let summary: Vec<_> = out.diagnostics.iter().map(|d| (d.severity.clone(), d.affects.clone())).collect();
+    assert_eq!(
+        summary,
+        [
+            (DiagnosticSeverity::Info, vec!["Card".to_string()]),
+            (DiagnosticSeverity::Warning, vec!["Button".to_string()])
+        ]
+    );
+}
+
 #[test]
 fn an_unavailable_backend_changes_nothing_but_adds_one_warning() {
     let mut out = output();

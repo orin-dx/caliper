@@ -274,7 +274,9 @@ fn an_answer_holds_only_while_every_file_it_could_not_read_is_unchanged() {
     let at = |at, edits| Moment { at, edits: Edits(edits) };
     let stamp = |moment, load| Stamp { moment, load: Load(load) };
     let first =
-        Arc::new(load_at(vec![demand.clone()], &options, None, Retry::Due(at(start, 0)), stamp(at(start, 0), 1)));
+        Arc::new(load_timed(vec![demand.clone()], &options, None, Retry::Due(at(start, 0)), stamp(at(start, 0), 1), {
+            Arc::new(move || start)
+        }));
     let footprint = first.footprint(&first.unread(std::slice::from_ref(&demand))).unwrap();
     assert!(first.footprint_holds(&footprint, at(start, 0)));
     assert!(!first.footprint_holds(&footprint, at(start + DEGRADED_RETRY, 0)), "not past its retry");
@@ -285,7 +287,8 @@ fn an_answer_holds_only_while_every_file_it_could_not_read_is_unchanged() {
 
     std::fs::write(&one, augments).unwrap();
     let retry = at(start + DEGRADED_RETRY, 0);
-    let recovered = load_at(vec![demand.clone()], &options, Some(&first), Retry::Due(retry), stamp(retry, 3));
+    let clock: Clock = Arc::new(move || retry.at);
+    let recovered = load_timed(vec![demand.clone()], &options, Some(&first), Retry::Due(retry), stamp(retry, 3), clock);
     assert!(recovered.is_dependency_file(&one), "the retry loads the file it read again");
     let latest = recovered.footprint(&recovered.unread(std::slice::from_ref(&demand))).unwrap();
     assert!(recovered.footprint_holds(&latest, retry), "the walk's latest mark alone still looks unexpired");
@@ -341,6 +344,23 @@ fn an_eager_edit_to_any_file_follows_every_unread_walk_again() {
     for name in ["Card", "Tag", "Plain"] {
         assert_eq!(session.component(name), fresh.component(name), "{name}");
     }
+}
+
+/// A slow load: it starts at `start` and its read fails 29 s later. The walk is due again 30 s after the failure, not
+/// after the load started: asked at `start + 31 s` it is not followed again, at `start + 59 s` it is.
+#[test]
+fn the_retry_counts_from_the_failure_not_from_the_start_of_its_load() {
+    let (_tmp, root) = project(SOLO);
+    std::fs::write(root.join("node_modules/solo-kit/props.d.ts"), UNREADABLE).unwrap();
+    let demand = Demand { from: root.join("src/Card.tsx"), specifier: "solo-kit".into(), name: "SoloProps".into() };
+    let start = std::time::Instant::now();
+    let moment = Moment { at: start, edits: Edits::default() };
+    let failure: Clock = Arc::new(move || start + std::time::Duration::from_secs(29));
+    let stamp = Stamp { moment, load: Load(1) };
+    let layer = load_timed(vec![demand.clone()], &options(&root), None, Retry::Due(moment), stamp, failure);
+    let at = |secs| Retry::Due(Moment { at: start + std::time::Duration::from_secs(secs), edits: Edits::default() });
+    assert_eq!(layer.missing_at(std::slice::from_ref(&demand), at(31)), Vec::<Demand>::new(), "not due yet");
+    assert_eq!(layer.missing_at(std::slice::from_ref(&demand), at(59)), [demand]);
 }
 
 /// Once a walk is followed again and reads, its newest mark is clean: the chain has no due walk, though the layer

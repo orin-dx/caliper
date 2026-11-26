@@ -1235,6 +1235,15 @@ fn replace_props<'a>(
     MergedProps { kept, unread, diagnostics: Vec::new() }
 }
 
+/// The severity of the diagnostic a fallback gives: a warning when the checker failed on the component (transient), so
+/// a host that counts warnings as degrading the answer (Storybook's `degradedBy`) does; info for the checker's verdict.
+pub(crate) fn fallback_severity(transient: bool) -> DiagnosticSeverity {
+    match transient {
+        true => DiagnosticSeverity::Warning,
+        false => DiagnosticSeverity::Info,
+    }
+}
+
 /// Merge the checker's props over `output`, component by component.
 ///
 /// Per `docs/type-checker-integration.md`: the checker decides which props exist, their types, whether they are
@@ -1313,16 +1322,16 @@ pub fn merge_semantic_in(
         });
     }
 
-    let mut by_reason: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for SemanticFallback { key, reason, transient: _ } in fallbacks {
+    let mut by_reason: BTreeMap<(bool, String), Vec<String>> = BTreeMap::new();
+    for SemanticFallback { key, reason, transient } in fallbacks {
         if output.components.contains_key(&key) {
-            by_reason.entry(reason).or_default().push(key);
+            by_reason.entry((transient, reason)).or_default().push(key);
         }
     }
-    for (reason, mut keys) in by_reason {
+    for ((transient, reason), mut keys) in by_reason {
         keys.sort();
         let mut diagnostic = Diagnostic::new(
-            DiagnosticSeverity::Info,
+            fallback_severity(transient),
             DiagnosticCode::SemanticBackend,
             format!("{} component(s) kept their structural result: {reason}", keys.len()),
         );
