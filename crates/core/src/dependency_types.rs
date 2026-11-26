@@ -346,15 +346,39 @@ const AUGMENTATION_SCAN_FILES: usize = 64;
 /// and the chain starts again.
 const MAX_CHAIN_DEPTH: usize = 8;
 
+/// A set of facts as its size and an order-free hash of its members, kept as facts are added and removed.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct Fingerprint {
+    len: usize,
+    hash: u64,
+}
+
+impl Fingerprint {
+    fn of(fact: &impl std::hash::Hash) -> u64 {
+        use std::hash::BuildHasher;
+        rustc_hash::FxBuildHasher.hash_one(fact)
+    }
+
+    fn add(&mut self, fact: &impl std::hash::Hash) {
+        self.len += 1;
+        self.hash = self.hash.wrapping_add(Self::of(fact));
+    }
+
+    fn remove(&mut self, fact: &impl std::hash::Hash) {
+        self.len = self.len.wrapping_sub(1);
+        self.hash = self.hash.wrapping_sub(Self::of(fact));
+    }
+}
+
 /// The sizes of a layer and its parents together, for [`DependencyLayer::resolves_like`] and `file_count`.
 #[derive(Clone, Copy, Default)]
 struct Totals {
     files: usize,
     react_files: usize,
     exports: usize,
-    /// Partial mappings a layer added or changed from the chain's ([`DependencyLayer::partial_exports`]): the resolver
-    /// reads them, so a load that only adds one is a change.
-    partial_exports: usize,
+    /// The partial mappings the resolver reads, the newest of each in the chain ([`DependencyLayer::partial_export`]):
+    /// a count of entries per layer stays equal when a flatten collapses two of one name and adds another.
+    partial_exports: Fingerprint,
     resolutions: usize,
     unresolved: usize,
 }
@@ -395,9 +419,9 @@ pub(crate) struct DependencyLayer {
     /// to the answers whose live demands reach the module ([`DependencyLayer::served_types`]), never indexed, never
     /// written, so nothing they hold outlives the module's next search, complete or not.
     provisional: FxHashMap<PathKey, ProvisionalFiles>,
-    /// The declarations of each module's provisional files, [`serve`]d as an indexed file is, in module order; their
-    /// imports are in `import_map`.
-    provisional_types: Vec<(PathKey, Arc<NamedTypeIndex>)>,
+    /// The declarations of each provisional file the layer does not index, [`serve`]d once as an indexed file is,
+    /// however many modules' searches read it; their imports are in `import_map`.
+    provisional_types: FxHashMap<PathKey, Arc<NamedTypeIndex>>,
     demands: FxHashSet<DemandKey>,
     unresolved: FxHashMap<DemandKey, Unresolved>,
     /// The `(file, name)` declarations whose references were followed.
@@ -463,20 +487,22 @@ impl DependencyLayer {
     /// augmentations of each module those demands reach over it. A module no live demand reaches is not served, as a
     /// fresh run would not search it.
     pub(crate) fn served_types<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Arc<NamedTypeIndex> {
-        let live = self.served_modules(roots);
         let mut served = self.named_types.clone();
-        for (_, types) in self.provisional_types.iter().filter(|(module, _)| live.contains(module)) {
-            served = Arc::new(types.with_fallback(served));
+        for file in self.served_files(roots) {
+            if let Some(types) = self.provisional_types.get(file.as_str()) {
+                served = Arc::new(types.with_fallback(served));
+            }
         }
         served
     }
 
-    /// The provisional files [`Self::served_types`] serves to `roots`, sorted.
+    /// The provisional files [`Self::served_types`] serves to `roots`, each once, sorted.
     pub(crate) fn served_files<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<&Utf8PathBuf> {
         let live = self.served_modules(roots);
         let served = self.provisional.iter().filter(|(module, _)| live.contains(*module));
         let mut files: Vec<&Utf8PathBuf> = served.flat_map(|(_, files)| files.iter().map(|(file, _)| file)).collect();
         files.sort();
+        files.dedup();
         files
     }
 
@@ -586,8 +612,8 @@ impl DependencyLayer {
     }
 
     /// Whether `other`, a layer this one was extended from, resolves every name the way this one does: extending only
-    /// adds, so equal counts mean nothing was added. A partial mapping counts only where it differs from the chain's;
-    /// provisional augmentations are not counted, so they are compared.
+    /// adds, so equal counts mean nothing was added. Partial mappings can be replaced, so their effective set is
+    /// compared by fingerprint; provisional augmentations are not counted, so they are compared.
     pub(crate) fn resolves_like(&self, other: &DependencyLayer) -> bool {
         let (a, b) = (self.totals, other.totals);
         self.provisional_files() == other.provisional_files()
@@ -1651,19 +1677,19 @@ fn load_with(
         })
         .unwrap_or_default();
     provisional.extend(std::mem::take(&mut loader.provisional));
-    // Each module's provisional files, served as an indexed file is, each module apart: which are served depends on
-    // the live demands of the revision that reads the layer.
-    let mut provisional_types: Vec<(PathKey, Arc<NamedTypeIndex>)> = provisional
-        .iter()
-        .map(|(module, files)| {
-            let mut types = NamedTypeIndex::default();
-            for (file, data) in files.iter() {
-                serve(&mut types, &mut imports, file, data);
-            }
-            (module.clone(), Arc::new(types))
-        })
-        .collect();
-    provisional_types.sort_by(|a, b| a.0.cmp(&b.0));
+    // Each provisional file, served as an indexed file is, once however many searches read it and not at all when the
+    // layer indexes it: which are served depends on the live demands of the revision that reads the layer.
+    let mut provisional_types: FxHashMap<PathKey, Arc<NamedTypeIndex>> = FxHashMap::default();
+    for (file, data) in provisional.values().flat_map(|files| files.iter()) {
+        let indexed = loader.declaring.contains(file.as_str())
+            || parent.as_ref().is_some_and(|layer| layer.is_dependency_file(file));
+        if indexed || provisional_types.contains_key(file.as_str()) {
+            continue;
+        }
+        let mut types = NamedTypeIndex::default();
+        serve(&mut types, &mut imports, file, data);
+        provisional_types.insert(PathKey::from(file.as_path()), Arc::new(types));
+    }
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
     // declarations stay out of `named_types`.
     let react_files: FxHashSet<PathKey> = loader.react_files.iter().map(|file| file.clone()).collect();
@@ -1693,11 +1719,21 @@ fn load_with(
         })
         .collect();
     let below = parent.as_ref().map(|layer| layer.totals).unwrap_or_default();
+    // The mappings a partial walk found, as the resolver reads them: the newest of each name, a tombstone none.
+    let mut partial_facts = below.partial_exports;
+    for (key, found) in &partial_exports {
+        if let Some(Some(old)) = parent.as_ref().and_then(|layer| layer.partial_export(key)) {
+            partial_facts.remove(&(key, old));
+        }
+        if let Some(found) = found {
+            partial_facts.add(&(key, found));
+        }
+    }
     let totals = Totals {
         files: below.files + files.len(),
         react_files: below.react_files + react_files.len(),
         exports: below.exports + exports.len(),
-        partial_exports: below.partial_exports + partial_exports.len(),
+        partial_exports: partial_facts,
         resolutions: below.resolutions + resolutions.len(),
         unresolved: below.unresolved + unresolved.len(),
     };

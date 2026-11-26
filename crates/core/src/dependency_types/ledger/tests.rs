@@ -878,6 +878,129 @@ fn a_served_augmentation_brings_what_it_imports() {
     assert!(recovered == fresh());
 }
 
+/// The partial mappings the resolver reads are compared as a set, not counted per layer. `walk-kit`'s barrel walks
+/// `bad`, `a`, `bad2`, `b`. `AProps` is mapped past `bad` (unreadable), then, once `bad` reads, the retry ends that
+/// mapping: two entries for one name. A flatten then maps `BProps` past `bad2`, with `b.d.ts`, every resolution and
+/// what each file exports already loaded (through `alt`): the flattened layer holds one entry per name, as many as the
+/// chain did, and does not resolve like it.
+#[test]
+fn a_flatten_that_adds_a_partial_mapping_is_a_change() {
+    let (_tmp, root) = project(&[
+        ("node_modules/walk-kit/package.json", r#"{ "name": "walk-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/walk-kit/index.d.ts",
+            "export * from './bad';\nexport * from './a';\nexport * from './bad2';\nexport * from './b';\n",
+        ),
+        ("node_modules/walk-kit/alt.d.ts", "export * from './bad';\nexport * from './a';\nexport * from './b';\n"),
+        ("node_modules/walk-kit/a.d.ts", "export interface AProps { a: string }\n"),
+        ("node_modules/walk-kit/b.d.ts", "export interface BProps { b: string }\n"),
+        (
+            "node_modules/other-kit/package.json",
+            r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+    ]);
+    let other: String = (0..=MAX_CHAIN_DEPTH).map(|n| format!("export interface O{n} {{ o{n}: string }}\n")).collect();
+    write(&root, "node_modules/other-kit/index.d.ts", &other);
+    let (bad, bad2) = (root.join("node_modules/walk-kit/bad.d.ts"), root.join("node_modules/walk-kit/bad2.d.ts"));
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    std::fs::write(&bad2, UNREADABLE).unwrap();
+    let options = PipelineOptions { use_cache: false, ..options(&root) };
+    let demand = |specifier: &str, name: &str| Demand {
+        from: root.join("src/Card.tsx"),
+        specifier: specifier.into(),
+        name: name.into(),
+    };
+    let first = vec![demand("walk-kit", "AProps"), demand("walk-kit", "Missing"), demand("walk-kit/b", "BProps")];
+    let mut layer = Arc::new(load(first.clone(), &options, None));
+    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
+    // `alt` walks the same files but `bad2`, so what each file exports as `BProps` is known before the flatten asks.
+    let mut retry = layer.missing(&first[..1]);
+    retry.push(demand("walk-kit/alt", "BProps"));
+    layer = Arc::new(load(retry, &options, Some(&layer)));
+    let index = root.join("node_modules/walk-kit/index.d.ts");
+    let entries = |layer: &DependencyLayer| -> usize {
+        let key = (PathKey::from(index.as_path()), CompactString::from("AProps"));
+        layer.chain().filter(|layer| layer.partial_exports.contains_key(&key)).count()
+    };
+    assert_eq!(entries(&layer), 2, "a mapping, and the tombstone that ended it");
+    for n in 2..=MAX_CHAIN_DEPTH {
+        layer = Arc::new(load(vec![demand("other-kit", &format!("O{n}"))], &options, Some(&layer)));
+    }
+    let flattened = load(vec![demand("walk-kit", "BProps")], &options, Some(&layer));
+    assert!(flattened.parent.is_none(), "the depth limit flattened the chain");
+    let b = (root.join("node_modules/walk-kit/b.d.ts"), CompactString::from("BProps"));
+    assert_eq!(layer.export_for_resolver(&index, "BProps"), None);
+    assert_eq!(flattened.export_for_resolver(&index, "BProps"), Some(Some(b)));
+    assert!(!flattened.resolves_like(&layer), "a mapping the resolver reads was added");
+}
+
+/// What a layer serves holds each provisional file once: seventy module demands whose searches all read `aug` past an
+/// unreadable `bad` serve one `React.HTMLAttributes` augmentation.
+#[test]
+fn the_served_index_holds_each_provisional_file_once() {
+    let mut files: Vec<(String, String)> = vec![
+        ("node_modules/multi-kit/package.json".into(), r#"{ "name": "multi-kit", "version": "1.0.0" }"#.into()),
+        ("node_modules/multi-kit/aug.d.ts".into(), AUGMENTATION.into()),
+    ];
+    files.extend((0..70).map(|n| {
+        (format!("node_modules/multi-kit/e{n}.d.ts"), "export * from './bad';\nexport * from './aug';\n".into())
+    }));
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = project(&files);
+    std::fs::write(root.join("node_modules/multi-kit/bad.d.ts"), UNREADABLE).unwrap();
+    let demands: Vec<Demand> = (0..70)
+        .map(|n| Demand {
+            from: root.join(format!("src/c{n}/Card.tsx")),
+            specifier: format!("multi-kit/e{n}").into(),
+            name: "".into(),
+        })
+        .collect();
+    let layer = load(demands.clone(), &PipelineOptions { use_cache: false, ..options(&root) }, None);
+    assert_eq!(layer.served_files(&demands), [&root.join("node_modules/multi-kit/aug.d.ts")]);
+    let served = layer.served_types(&demands);
+    assert_eq!(served.react_augmentations(&root.join("react.d.ts"), "React.HTMLAttributes").len(), 1);
+}
+
+/// Seventy entry points of one package each search past the same unreadable file and reach the same augmentation,
+/// whose `HTMLAttributes` extends a chain of its own: it is served once, so no copy spends the attribute traversal's
+/// bounded steps, and `Box`'s props equal a run that imports one entry point.
+#[test]
+fn an_augmentation_many_searches_reach_is_served_once() {
+    let augmentation = "import type {} from 'react';\ndeclare module 'react' {\n\
+                        interface HTMLAttributes<T> extends Extra { tw?: string }\n\
+                        interface Extra extends Deeper { extra?: string }\n\
+                        interface Deeper { deeper?: string }\n}\n";
+    let run = |entries: usize| {
+        let mut files: Vec<(String, String)> = vec![
+            (
+                "node_modules/multi-kit/package.json".into(),
+                r#"{ "name": "multi-kit", "version": "1.0.0", "types": "e0.d.ts" }"#.into(),
+            ),
+            ("node_modules/multi-kit/aug.d.ts".into(), augmentation.into()),
+            ("src/box/Box.tsx".into(), BOX.into()),
+        ];
+        files.extend((0..70).map(|n| {
+            (format!("node_modules/multi-kit/e{n}.d.ts"), "export * from './bad';\nexport * from './aug';\n".into())
+        }));
+        let imports: String = (0..entries)
+            .map(|n| format!("import * as E{n} from 'multi-kit/e{n}';\nexport const e{n} = E{n};\n"))
+            .collect();
+        files.push(("src/setup.ts".into(), imports));
+        let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+        let (tmp, root) = react_project(&files);
+        std::fs::write(root.join("node_modules/multi-kit/bad.d.ts"), UNREADABLE).unwrap();
+        let session = WatchSession::new(react_options(&root));
+        drop(session.initialize());
+        let props = names(&session.component("Box"));
+        drop(tmp);
+        props
+    };
+    let one = run(1);
+    let has = |name: &str| one.contains(&name.to_owned());
+    assert!(has("tw") && has("extra") && has("deeper"), "{one:?}");
+    assert_eq!(run(70), one);
+}
+
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
 /// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
 /// augmentation did add one.
