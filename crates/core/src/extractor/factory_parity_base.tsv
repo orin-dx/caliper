@@ -191,6 +191,22 @@ callee name a parameter elsewhere | typeof itself	Base:Props"functionDeclaration
 callee imported and declared | plain	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button via wrap
 callee imported and declared | typeof itself	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button
 finding: a namespace's own wrap called through typeof itself	Base:Props"functionDeclaration" | Inner:Props"hocWrapper" exported as Inner
+Object.assign a shadowing local Root in a function | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is declared inside a function body, so no module can import it | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+Object.assign a shadowing local Root in a function | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is declared inside a function body, so no module can import it | Root:Props"functionDeclaration" exported as Root
+Object.assign at module level | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+Object.assign at module level | typeof itself	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+Object.assign in a nested function | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+Object.assign in a nested function | typeof itself	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+Object.assign in an arrow initializer | plain	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+Object.assign in an arrow initializer | typeof itself	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+Object.assign in a class method | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+Object.assign in a class method | typeof itself	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+Object.assign as the default export | plain	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root,default
+Object.assign as the default export | typeof itself	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+Object.assign as an exported declaration's initializer | plain	Base:Props"functionDeclaration" | Compound:Props"functionDeclaration" exported as Compound | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+Object.assign as an exported declaration's initializer | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Compound' passes component 'Root' to a call that does not look like a component wrapper | Root:Props"functionDeclaration" exported as Root
+Object.assign with a second module-level Root | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+Object.assign with a second module-level Root | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Root:Props"functionDeclaration" exported as Root
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via toolkit.createElement
 an element built from forwardRef, plain	Button:Props"forwardRef" exported as Button

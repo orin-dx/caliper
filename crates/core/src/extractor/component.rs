@@ -548,11 +548,12 @@ pub(crate) struct TypeofAlias {
 
 /// What one flat pass over the file finds: how many times each name is declared, by any binding of any kind in any
 /// scope (a variable, function, parameter, class, import, alias, interface, enum, namespace, type parameter, mapped
-/// key, …: type and value names in one map), and the root names of the callees written through a cast main read no
-/// callee through (`wrapped_beyond_main`). It knows no scopes.
+/// key, …: type and value names in one map), and the names a call written through a cast main read no callee through
+/// makes this head look up by themselves: the root of such a callee (`peeled_callee_root`), and the parent of an
+/// `Object.assign` written through a cast (`object_assign_beyond_main`). It knows no scopes.
 pub(super) struct FileNames<'p> {
     counts: FxHashMap<&'p str, usize>,
-    peeled_callees: Vec<&'p str>,
+    cast_names: Vec<&'p str>,
 }
 
 impl FileNames<'_> {
@@ -561,13 +562,9 @@ impl FileNames<'_> {
         self.counts.get(name) == Some(&1)
     }
 
-    /// The roots of the peeled callees the file declares exactly once (`SourceDataCollector::wrapper_callee`).
-    pub(super) fn unique_peeled_callees(&self) -> rustc_hash::FxHashSet<CompactString> {
-        self.peeled_callees
-            .iter()
-            .filter(|name| self.declared_once(name))
-            .map(|name| CompactString::from(*name))
-            .collect()
+    /// The names read through a cast that the file declares exactly once (`SourceDataCollector::unique_cast_names`).
+    pub(super) fn unique_cast_names(&self) -> rustc_hash::FxHashSet<CompactString> {
+        self.cast_names.iter().filter(|name| self.declared_once(name)).map(|name| CompactString::from(*name)).collect()
     }
 }
 
@@ -575,7 +572,7 @@ impl FileNames<'_> {
 pub(super) fn file_names<'p>(program: &Program<'p>) -> FileNames<'p> {
     #[cfg(test)]
     steps::count_walk();
-    let mut names = FileNames { counts: FxHashMap::default(), peeled_callees: Vec::new() };
+    let mut names = FileNames { counts: FxHashMap::default(), cast_names: Vec::new() };
     oxc_ast_visit::Visit::visit_program(&mut names, program);
     names
 }
@@ -589,10 +586,36 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         if let Some(root) = peeled_callee_root(it) {
-            self.peeled_callees.push(root);
+            self.cast_names.push(root);
+        }
+        if object_assign_beyond_main(it)
+            && let Some(Expression::Identifier(parent)) = aliased_component(it)
+        {
+            self.cast_names.push(parent.name.as_str());
         }
         oxc_ast_visit::walk::walk_call_expression(self, it);
     }
+
+    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
+        // `const Compound = (Object.assign as …)(Root, { … })`: `Compound` is the parent its members attach to.
+        if let (BindingPattern::BindingIdentifier(id), Some(Expression::CallExpression(call))) =
+            (&it.id, it.init.as_ref().map(peel_expr))
+            && object_assign_beyond_main(call)
+        {
+            self.cast_names.push(id.name.as_str());
+        }
+        oxc_ast_visit::walk::walk_variable_declarator(self, it);
+    }
+}
+
+/// Whether a call is an `Object.assign` that origin/main did not read: written through an assertion, `satisfies` or
+/// `!` around the callee, its object or its first argument.
+pub(super) fn object_assign_beyond_main(call: &CallExpression<'_>) -> bool {
+    is_object_assign_call(call)
+        && (wrapped_beyond_main(&call.callee)
+            || matches!(callee_of(call), Some(Expression::StaticMemberExpression(member))
+                if wrapped_beyond_main(&member.object))
+            || call.arguments.first().and_then(Argument::as_expression).is_some_and(wrapped_beyond_main))
 }
 
 /// The identifier a callee written through a cast main read no callee through is rooted at: `wrap` for `(wrap as

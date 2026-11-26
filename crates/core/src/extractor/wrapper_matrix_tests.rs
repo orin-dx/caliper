@@ -1842,6 +1842,72 @@ fn factory_parity_cases() -> Vec<(String, String)> {
              export const Inner = (wrap as typeof wrap)<Props>((props: Props) => <div />);\n\
              }",
         ),
+        // Round 27: an Object.assign written through a cast attaches its members only at module level and only when
+        // the file declares the parent once.
+        (
+            "Object.assign a shadowing local Root in a function | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction build() { function Root(props: Props) { return <span />; } Object.assign(Root, { Item: (p: ItemProps) => <div /> }); }",
+        ),
+        (
+            "Object.assign a shadowing local Root in a function | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction build() { function Root(props: Props) { return <span />; } (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> }); }",
+        ),
+        (
+            "Object.assign at module level | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign at module level | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign in a nested function | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction build() { function inner() { Object.assign(Root, { Item: (p: ItemProps) => <div /> }); } return inner; }",
+        ),
+        (
+            "Object.assign in a nested function | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction build() { function inner() { (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> }); } return inner; }",
+        ),
+        (
+            "Object.assign in an arrow initializer | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nexport const build = () => Object.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign in an arrow initializer | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nexport const build = () => (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign in a class method | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nclass K { m() { Object.assign(Root, { Item: (p: ItemProps) => <div /> }); } }",
+        ),
+        (
+            "Object.assign in a class method | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nclass K { m() { (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> }); } }",
+        ),
+        (
+            "Object.assign as the default export | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nexport default Object.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign as the default export | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nexport default (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign as an exported declaration's initializer | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nexport const Compound = Object.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign as an exported declaration's initializer | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nexport const Compound = (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign with a second module-level Root | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nnamespace N { export const Root = 1; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "Object.assign with a second module-level Root | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nnamespace N { export const Root = 1; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -1877,7 +1943,16 @@ fn factory_parity_output(source: &str) -> String {
         .iter()
         .map(|m| {
             // The export names too, so a default export that falls back to the component its call wraps is compared.
-            let exports: Vec<&str> = m.exports.iter().map(|export| export.name.as_str()).collect();
+            let exports: Vec<String> = m
+                .exports
+                .iter()
+                .map(|export| {
+                    std::iter::once(export.name.as_str())
+                        .chain(export.members.iter().map(String::as_str))
+                        .collect::<Vec<_>>()
+                        .join(".")
+                })
+                .collect();
             let rule = serde_json::to_string(&m.rule).unwrap_or_default();
             let exported =
                 if exports.is_empty() { String::new() } else { format!(" exported as {}", exports.join(",")) };
@@ -1949,8 +2024,41 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
     // Round 26 adds one: `(wrap as typeof wrap)<Props>(render)` with `wrap` declared once keeps the callee, as main's
-    // plain call does (`a_callee_through_a_cast_is_attached_only_when_its_name_is_declared_once`).
-    assert_eq!(read_as_the_plain_call, 45);
+    // plain call does (`a_callee_through_a_cast_is_attached_only_when_its_name_is_declared_once`). Round 27 adds three:
+    // an `Object.assign` through a cast at module level
+    // (`an_object_assign_through_a_cast_attaches_only_at_module_level_to_a_parent_declared_once`).
+    assert_eq!(read_as_the_plain_call, 48);
+}
+
+/// Round 27: export propagation finds an `Object.assign`'s parent by its bare name, so one written through a cast,
+/// which origin/main never read, attaches its members only at module level (a statement there, an exported
+/// declaration's initializer or the default export) and only when the file declares the parent exactly once. Written
+/// plainly, it is origin/main's wherever it is, a shadowing local included.
+#[test]
+fn an_object_assign_through_a_cast_attaches_only_at_module_level_to_a_parent_declared_once() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (form, attaches) in [
+        ("a shadowing local Root in a function", false),
+        ("at module level", true),
+        ("in a nested function", false),
+        ("in an arrow initializer", false),
+        ("in a class method", false),
+        ("as the default export", true),
+        ("as an exported declaration's initializer", true),
+        ("with a second module-level Root", false),
+    ] {
+        let plain = format!("Object.assign {form} | plain");
+        let cast = format!("Object.assign {form} | typeof itself");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if attaches { base[plain.as_str()] } else { base[cast.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&cast]), expected, "{cast}");
+    }
+    // The finding: written plainly main attaches the shadowing local's member to the public `Root`; through the cast
+    // main attached nothing, and neither does this head.
+    assert!(base["Object.assign a shadowing local Root in a function | plain"].contains("exported as Root.Item"));
+    assert!(!base["Object.assign a shadowing local Root in a function | typeof itself"].contains("Root.Item"));
 }
 
 /// Round 26: a callee written through a cast is looked up by its bare name (`resolver::callee`), so it is attached only

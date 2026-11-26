@@ -386,9 +386,9 @@ impl<'src> SourceDataCollector<'src> {
         let type_arguments = super::component::call_type_arguments(call)?;
         let name = self.extract_callee_name(call)?;
         // Through a cast main read no callee through, the name is looked up by itself (`resolver::callee`), so it is
-        // kept only when it can mean one declaration: the file declares its root once (`unique_peeled_callees`).
+        // kept only when it can mean one declaration: the file declares its root once (`unique_cast_names`).
         if super::component::wrapped_beyond_main(&call.callee)
-            && !super::component::peeled_callee_root(call).is_some_and(|root| self.unique_peeled_callees.contains(root))
+            && !super::component::peeled_callee_root(call).is_some_and(|root| self.unique_cast_names.contains(root))
         {
             return None;
         }

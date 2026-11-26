@@ -119,11 +119,19 @@ impl<'src> SourceDataCollector<'src> {
         });
     }
 
+    /// Whether this head reads an `Object.assign` call's members onto `parent`, which export propagation finds by its
+    /// bare name. As origin/main did for one written plainly; for one main did not read (`object_assign_beyond_main`),
+    /// only at module level and only when the file declares `parent` exactly once (`unique_cast_names`).
+    pub(super) fn reads_object_assign(&self, call: &CallExpression<'_>, parent: &str) -> bool {
+        !super::component::object_assign_beyond_main(call)
+            || (self.function_depth == 0 && self.unique_cast_names.contains(parent))
+    }
+
     /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is
     /// the root under another name, with `Sub` attached.
     pub(super) fn record_object_assign_declarator(&mut self, parent: &str, init: Option<&Expression<'_>>) {
         let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
-        if !super::component::is_object_assign_call(call) {
+        if !super::component::is_object_assign_call(call) || !self.reads_object_assign(call, parent) {
             return;
         }
         for argument in &call.arguments {

@@ -412,7 +412,7 @@ impl<'src> SourceDataCollector<'src> {
             return;
         }
         let Some(Expression::Identifier(parent_id)) = super::component::aliased_component(call) else { return };
-        if !is_pascal_case(parent_id.name.as_str()) {
+        if !is_pascal_case(parent_id.name.as_str()) || !self.reads_object_assign(call, parent_id.name.as_str()) {
             return;
         }
         let Some(second_arg) = call.arguments.get(1) else { return };
