@@ -241,7 +241,7 @@ struct Unreadable {
 pub(super) struct ReadLedger {
     reads: FxHashMap<PathKey, Read>,
     marks: FxHashMap<Node, Mark>,
-    /// How many earlier nodes `finish` walked the ledger from to learn whether they reach an unread walk, for tests.
+    /// How many reverse traversals of earlier marks `finish` made (one for a flatten, none over a parent), for tests.
     #[cfg(test)]
     traversals: usize,
 }
@@ -257,6 +257,30 @@ impl ReadLedger {
         self.reads.extend(newer.reads.iter().map(|(path, read)| (path.clone(), read.clone())));
         self.marks.extend(newer.marks.iter().map(|(node, mark)| (node.clone(), mark.clone())));
     }
+}
+
+/// The nodes among `marks` (each node's latest mark) that reach an unread walk, their own or one their marks reach: one
+/// reverse traversal, each node once.
+fn nodes_reaching_unread<'m>(marks: impl Iterator<Item = (&'m Node, &'m Mark)>) -> FxHashSet<&'m Node> {
+    let mut reached_by: FxHashMap<&Node, Vec<&Node>> = FxHashMap::default();
+    let mut reaching: FxHashSet<&Node> = FxHashSet::default();
+    let mut queue: Vec<&Node> = Vec::new();
+    for (node, mark) in marks {
+        for to in mark.reaches.iter() {
+            reached_by.entry(to).or_default().push(node);
+        }
+        if mark.unread.is_some() && reaching.insert(node) {
+            queue.push(node);
+        }
+    }
+    while let Some(node) = queue.pop() {
+        for &from in reached_by.get(node).into_iter().flatten() {
+            if reaching.insert(from) {
+                queue.push(from);
+            }
+        }
+    }
+    reaching
 }
 
 /// The demands whose own walk is unread, among `start` and the nodes their marks reach, sorted.
@@ -497,7 +521,9 @@ impl DependencyLayer {
 
     /// [`Self::unread`] over borrowed roots, which it does not iterate while no walk is unread.
     pub(crate) fn unread_from<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Demand> {
-        if !self.has_marks() {
+        // Marks outlive the walks they record: once every walk recovered, the chain still holds clean ones. Whether a
+        // walk is unread now is the layer's cached answer, so a recovered chain does not visit the roots.
+        if !self.has_marks() || self.unread_walks().demands.is_empty() {
             return Vec::new();
         }
         unread_below(roots.into_iter().map(|demand| Node::Demand(demand.key())), |node| self.mark(node))
@@ -630,7 +656,6 @@ impl<'a> LedgerBuilder<'a> {
             suspect_lists: _,
         } = self;
         let reads: FxHashMap<PathKey, Read> = reads.into_iter().collect();
-        let earlier = |node: &Node| inherited.marks.get(node).or_else(|| parent.and_then(|parent| parent.mark(node)));
         let unread: FxHashMap<Node, (Demand, Arc<[PathKey]>)> =
             unread.into_iter().map(|(key, walk)| (Node::Demand(key), walk)).collect();
         let mut marks: FxHashMap<Node, Mark> = FxHashMap::default();
@@ -644,16 +669,18 @@ impl<'a> LedgerBuilder<'a> {
                     || matches!(node, Node::Demand(key) if retried.contains(key))
             };
             // The walks that are unread: this load's own, and the earlier ones this load met without following. Over a
-            // parent, whether an earlier node reaches one is the parent's cached answer, asked once per layer; only a
-            // flatten, whose earlier marks it took in itself, walks from each.
+            // parent, whether an earlier node reaches one is the parent's cached answer, asked once per layer; a flatten
+            // took the chain's marks in itself, and one reverse traversal of them answers the same for it.
             let below = parent.filter(|_| inherited.marks.is_empty()).map(DependencyLayer::unread_walks);
-            let reaches_earlier = |node: &Node| match &below {
-                Some(walks) => walks.nodes.contains(node),
-                None => {
-                    #[cfg(test)]
-                    traversals.set(traversals.get() + 1);
-                    earlier(node).is_some() && !unread_below([node.clone()], earlier).is_empty()
-                }
+            let flattened = (below.is_none() && !inherited.marks.is_empty()).then(|| {
+                #[cfg(test)]
+                traversals.set(traversals.get() + 1);
+                nodes_reaching_unread(inherited.marks.iter())
+            });
+            let reaches_earlier = |node: &Node| match (&below, &flattened) {
+                (Some(walks), _) => walks.nodes.contains(node),
+                (None, Some(reaching)) => reaching.contains(node),
+                (None, None) => false,
             };
             let mut marked: FxHashSet<&Node> = unread.keys().collect();
             let mut queue: Vec<&Node> = marked.iter().copied().collect();

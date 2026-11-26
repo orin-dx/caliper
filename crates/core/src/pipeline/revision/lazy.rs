@@ -771,6 +771,9 @@ impl Revision {
         // rebuilding them for every growth was most of what a session reading across a project spent.
         let named_types = Arc::new(self.named_types.with_fallback(extended.named_types.clone()));
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
+        // What the load added that declares into React (an augmentation a retry read, React's own types) changes what
+        // every resolution that reads React's augmentations sees, whichever files it recorded.
+        let augmentations_changed = extended.declares_into_react();
         let next = Engine { layer: Some(extended), ctx };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them. So does one that
@@ -791,9 +794,17 @@ impl Revision {
                 && !unread_project.contains(file)
                 && !unread.declared_in(file)
         };
-        next.ctx.inherit_memos(&engine.ctx, |deps, read_in| {
-            kept(read_in) && deps.files.iter().all(|file| kept(std::borrow::Borrow::<str>::borrow(file)))
-        });
+        // The one rule for every cache a growth carries over, the context's memos and the session's answers alike.
+        let still_valid = |deps: &crate::resolver::Dependencies, read_in: &str| {
+            !(augmentations_changed && deps.reads_augmentations)
+                && kept(read_in)
+                && deps.files.iter().all(|file| kept(std::borrow::Borrow::<str>::borrow(file)))
+        };
+        next.ctx.inherit_memos(&engine.ctx, still_valid);
+        if augmentations_changed {
+            lazy.memo.retain(|_, resolved| !resolved.depends_on.reads_augmentations);
+            lazy.provisional.retain(|_, (resolved, _)| !resolved.depends_on.reads_augmentations);
+        }
         lazy.engine.store(Arc::new(next));
     }
 
@@ -1180,6 +1191,63 @@ mod read_retry_tests {
     /// it has the augmented attribute, equal to a cold run.
     #[test]
     fn a_component_reading_augmentations_waits_on_the_shared_augmentation_walks() {
+        shared_augmentation_scenario();
+    }
+
+    /// Full HTML mode: two props interfaces extend `React.AriaAttributes`, whose augmentation (imported only by
+    /// `setup.ts`) could not be read, so the interface chain the first resolution cached lacks it. Once it reads and
+    /// the retry loads it, no memo that read React's augmentations is carried into the larger context: both
+    /// components equal a cold run, with the augmented attribute.
+    #[test]
+    fn a_retry_that_loads_an_augmentation_drops_every_memo_that_read_augmentations() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let augmentation = "import type {} from 'react';\n\
+                            declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\n";
+        let aria = |name: &str| {
+            format!(
+                "import * as React from 'react';\ninterface {name}Props extends React.AriaAttributes {{ own?: boolean }}\n\
+                 export const {name} = (props: {name}Props) => <div />;\n"
+            )
+        };
+        let (first, second) = (aria("First"), aria("Second"));
+        let files = [
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", augmentation),
+            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
+            ("src/first/First.tsx", first.as_str()),
+            ("src/second/Second.tsx", second.as_str()),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let options = |use_cache| PipelineOptions {
+            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
+            ..options(&root, use_cache)
+        };
+        let aug = root.join("node_modules/aug-kit/index.d.ts");
+        std::fs::write(&aug, [0xff; 8]).unwrap();
+        let revision = Revision::cold_lazy(&options(true), 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        drop(revision.lazy_component(&options(true), "First"));
+        drop(revision.lazy_component(&options(true), "Second"));
+        std::fs::write(&aug, augmentation).unwrap();
+        set_clock(&revision, start + DEGRADED_RETRY);
+        for name in ["First", "Second"] {
+            let answer = revision.lazy_component(&options(true), name).unwrap();
+            let cold = Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
+            assert!(props(&cold).contains(&"aria-tw".to_owned()), "the fixture reaches the augmentation");
+            assert!(answer == cold, "{name}: {}", props(&answer).contains(&"aria-tw".to_owned()));
+        }
+    }
+
+    fn shared_augmentation_scenario() {
         // Inside the crate, so React's own types resolve from the workspace's `node_modules`.
         let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
         let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();

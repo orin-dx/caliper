@@ -275,6 +275,75 @@ fn the_unread_walks_are_built_once_per_layer_that_changed_the_ledger() {
     assert_eq!(layer.unread_walk_builds(), 1, "one build for the chain");
 }
 
+/// The same chain, at the depth limit: the load that asks for the other claims flattens the chain, so it has no
+/// parent to ask. It takes in the chain's marks and answers which nodes reach the unread walk with one reverse
+/// traversal of them, not one walk of the ledger per claim; each claim still leads there.
+#[test]
+fn a_flatten_that_meets_many_earlier_claims_traverses_the_marks_once() {
+    let mut files: Vec<(String, String)> = vec![(
+        "node_modules/chain-kit/package.json".into(),
+        r#"{ "name": "chain-kit", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
+    )];
+    let mut index = String::new();
+    for n in 0..200 {
+        index.push_str(&format!("export {{ D{n} }} from './d{n}';\n"));
+        let (next, from) = if n == 199 {
+            ("Leaf".to_owned(), "leaf".to_owned())
+        } else {
+            (format!("D{}", n + 1), format!("d{}", n + 1))
+        };
+        let body = format!(
+            "import type {{ {next} }} from './{from}';\nexport interface D{n} extends {next} {{ f{n}: string }}\n"
+        );
+        files.push((format!("node_modules/chain-kit/d{n}.d.ts"), body));
+    }
+    files.push(("node_modules/chain-kit/index.d.ts".into(), index));
+    files.push(("node_modules/chain-kit/leaf.d.ts".into(), "export interface Leaf { leaf: string }\n".into()));
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = project(&files);
+    std::fs::write(root.join("node_modules/chain-kit/leaf.d.ts"), UNREADABLE).unwrap();
+    let demand = |n: usize| Demand {
+        from: root.join("src/Card.tsx"),
+        specifier: "chain-kit".into(),
+        name: format!("D{n}").into(),
+    };
+    let options = options(&root);
+    let now = Moment { at: std::time::Instant::now(), edits: Edits::default() };
+    let stamp = |load| Stamp { moment: now, load: Load(load) };
+    let mut layer = Arc::new(load_at(vec![demand(0)], &options, None, Retry::Due(now), stamp(1)));
+    for n in 1..=MAX_CHAIN_DEPTH {
+        layer = Arc::new(load_at(vec![demand(n)], &options, Some(&layer), Retry::Due(now), stamp(n as u64 + 1)));
+    }
+    let rest: Vec<Demand> = (MAX_CHAIN_DEPTH + 1..200).map(demand).collect();
+    let flattened = load_at(rest, &options, Some(&layer), Retry::Due(now), stamp(100));
+    assert!(flattened.parent.is_none(), "the depth limit flattened the chain");
+    assert_eq!(flattened.ledger.traversals, 1, "one reverse traversal, not one walk per claim");
+    assert!(!flattened.unread(&[demand(150)]).is_empty(), "a claim met still leads to the unread walk");
+}
+
+/// Once the last unread walk is followed again and reads, the chain still holds its (clean) marks; asking which
+/// unread walks 1000 live demands lead to visits none of them.
+#[test]
+fn a_recovered_chain_visits_no_root() {
+    let (_tmp, root) = project(SOLO);
+    let props = root.join("node_modules/solo-kit/props.d.ts");
+    let text = std::fs::read_to_string(&props).unwrap();
+    std::fs::write(&props, UNREADABLE).unwrap();
+    let demand = |n: usize| Demand {
+        from: root.join(format!("src/c{n}/Card.tsx")),
+        specifier: "solo-kit".into(),
+        name: "SoloProps".into(),
+    };
+    let failed = Arc::new(load(vec![demand(0)], &options(&root), None));
+    std::fs::write(&props, text).unwrap();
+    let recovered = load(failed.due_walks(Retry::Always), &options(&root), Some(&failed));
+    assert!(recovered.has_marks(), "the recovered walk's marks stay");
+    let roots: Vec<Demand> = (0..1000).map(demand).collect();
+    let visited = std::cell::Cell::new(0);
+    assert_eq!(recovered.unread_from(roots.iter().inspect(|_| visited.set(visited.get() + 1))), Vec::<Demand>::new());
+    assert_eq!(visited.get(), 0, "no root visited once no walk is unread");
+}
+
 /// A chain of 200 declarations ends at one file that could not be read. A later load asks for each of the other 199
 /// by name: each is a claim the first load made, which this load meets without walking it. Whether each reaches the
 /// unread walk is the parent's answer, computed once: no walk of the ledger per claim, and each still leads there.
