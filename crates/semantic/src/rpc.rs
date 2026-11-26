@@ -1347,57 +1347,95 @@ mod tests {
         PinCheck::Checked
     }
 
-    /// The lockfile is the one Cargo resolves the package with: the workspace's only when it lists the package, else the
-    /// package's own, else none; an unrelated `Cargo.lock` above an unpacked crate is never read.
+    /// The lockfile is the one Cargo resolves the package with, by Cargo's own workspace resolution: the workspace's
+    /// for a member (listed, globbed or taken in as a path dependency of one), else the package's own, else none; an
+    /// unrelated `Cargo.lock` above an unpacked crate is never read.
     #[test]
     fn the_lockfile_is_the_one_cargo_resolves_the_package_with() {
         use std::fs::{create_dir_all, write};
         use std::path::Path;
 
-        let layout = |root: &Path, package: &str, manifest: Option<&str>, root_lock: bool, own_lock: bool| {
-            create_dir_all(root.join(package)).unwrap();
-            if let Some(manifest) = manifest {
-                write(root.join("Cargo.toml"), manifest).unwrap();
-            }
-            if root_lock {
-                write(root.join("Cargo.lock"), "root").unwrap();
-            }
-            if own_lock {
-                write(root.join(package).join("Cargo.lock"), "own").unwrap();
-            }
-            build_script::lockfile_in(&root.join(package)).map(|lock| std::fs::read_to_string(lock).unwrap())
+        // A package at `root/at` with `deps` as path dependencies, so Cargo reads a real manifest.
+        let package = |root: &Path, at: &str, deps: &[&str]| {
+            let dir = root.join(at);
+            create_dir_all(dir.join("src")).unwrap();
+            write(dir.join("src/lib.rs"), "").unwrap();
+            let deps: String = deps.iter().map(|dep| format!("{dep} = {{ path = \"../{dep}\" }}\n")).collect();
+            let name = at.replace('/', "-");
+            write(
+                dir.join("Cargo.toml"),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\n[dependencies]\n{deps}"),
+            )
+            .unwrap();
         };
-        let members =
-            |list: &str| format!("[workspace]\nmembers = [\n    \"crates/core\",\n{list}]\nresolver = \"2\"\n");
+        // The lockfile `lockfile_in` picks for the package at `root/at`, by what is written in it.
+        let picked = |root: &Path, at: &str| {
+            build_script::lockfile_in(&root.join(at)).map(|lock| std::fs::read_to_string(lock).unwrap())
+        };
         let dir = tempfile::tempdir().unwrap();
-        let case = |name: &str| dir.path().join(name);
+        let case = |name: &str| {
+            let root = dir.path().join(name);
+            create_dir_all(&root).unwrap();
+            write(root.join("Cargo.lock"), "root").unwrap();
+            root
+        };
+        let workspace =
+            |root: &Path, table: &str| write(root.join("Cargo.toml"), format!("[workspace]\n{table}\n")).unwrap();
 
-        // (a) The workspace layout reads the workspace lockfile, by name, by glob and with a comment around.
-        let named = members("    \"crates/semantic\", # the checker\n");
-        assert_eq!(layout(&case("a1"), "crates/semantic", Some(&named), true, false).as_deref(), Some("root"));
-        let globbed = "[workspace]\nmembers = [\"crates/*\"]\n[workspace.package]\nversion = \"1\"\n";
-        assert_eq!(layout(&case("a2"), "crates/semantic", Some(globbed), true, false).as_deref(), Some("root"));
-        assert_eq!(layout(&case("a3"), "crates/semantic", Some(&named), true, true).as_deref(), Some("root"));
+        // (a) The workspace's lockfile, for a package listed by path, by glob, taken in as a path dependency of a
+        // member while `members` does not list it, and with a lockfile of its own beside.
+        let root = case("a1");
+        package(&root, "crates/core", &[]);
+        package(&root, "crates/semantic", &[]);
+        workspace(&root, "members = [\"crates/core\", \"crates/semantic\"] # listed");
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("root"));
+        let root = case("a2");
+        package(&root, "crates/core", &[]);
+        package(&root, "crates/semantic", &[]);
+        workspace(&root, "members = [\"crates/*\"]");
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("root"));
+        let root = case("a3");
+        package(&root, "crates/semantic", &[]);
+        package(&root, "crates/cli", &["semantic"]);
+        workspace(&root, "members = [\"crates/cli\"]");
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("root"));
+        write(root.join("crates/semantic/Cargo.lock"), "own").unwrap();
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("root"));
 
-        // (b) An unpacked crate beside an unrelated lockfile reads its own, never the unrelated one: whatever the
-        // ancestor's manifest, if any, does not list this package.
-        let other = members("    \"crates/binding\",\n");
-        let excluded = "[workspace]\nmembers = [\"crates/*\"]\nexclude = [\"crates/semantic\"]\n";
-        let single = "[package]\nname = \"x\"\n";
-        for (name, manifest) in
-            [("b1", None), ("b2", Some(other.as_str())), ("b3", Some(excluded)), ("b4", Some(single))]
-        {
-            assert_eq!(layout(&case(name), "downloads/pkg", manifest, true, true).as_deref(), Some("own"), "{name}");
-            assert_eq!(layout(&case(name), "crates/semantic", manifest, true, true).as_deref(), Some("own"), "{name}");
-        }
-        let nested = members("    \"crates/semantic\",\n");
-        assert_eq!(layout(&case("b5"), "downloads/pkg", Some(&nested), true, true).as_deref(), Some("own"));
+        // (b) An unpacked crate with a lockfile of its own beside an unrelated lockfile reads its own: the ancestor
+        // may be no project, a single package, or a workspace that does not include the crate (an error to Cargo), or
+        // one that excludes it.
+        let root = case("b1");
+        package(&root, "downloads/pkg", &[]);
+        write(root.join("downloads/pkg/Cargo.lock"), "own").unwrap();
+        assert_eq!(picked(&root, "downloads/pkg").as_deref(), Some("own"));
+        write(root.join("Cargo.toml"), "[package]\nname = \"top\"\nversion = \"0.0.0\"\n").unwrap();
+        create_dir_all(root.join("src")).unwrap();
+        write(root.join("src/lib.rs"), "").unwrap();
+        assert_eq!(picked(&root, "downloads/pkg").as_deref(), Some("own"));
+        workspace(&root, "members = [\"crates/binding\"]");
+        package(&root, "crates/binding", &[]);
+        assert_eq!(picked(&root, "downloads/pkg").as_deref(), Some("own"));
+        let root = case("b2");
+        package(&root, "crates/binding", &[]);
+        package(&root, "crates/semantic", &[]);
+        workspace(&root, "members = [\"crates/*\"]\nexclude = [\"crates/semantic\"]");
+        write(root.join("crates/semantic/Cargo.lock"), "own").unwrap();
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("own"));
 
-        // (c) Neither a listing workspace nor the package's own lockfile: none, so the pin check says it skipped.
-        for (name, manifest) in [("c1", None), ("c2", Some(other.as_str())), ("c3", Some(nested.as_str()))] {
-            assert_eq!(layout(&case(name), "downloads/pkg", manifest, true, false), None, "{name}");
-        }
-        assert_eq!(layout(&case("c4"), "crates/semantic", Some(&named), false, false), None);
+        // (c) No workspace that claims the crate and no lockfile of its own: none, so the pin check says it skipped.
+        let root = case("c1");
+        package(&root, "downloads/pkg", &[]);
+        assert_eq!(picked(&root, "downloads/pkg"), None);
+        workspace(&root, "members = [\"crates/binding\"]");
+        package(&root, "crates/binding", &[]);
+        assert_eq!(picked(&root, "downloads/pkg"), None);
+        let root = case("c2");
+        package(&root, "crates/core", &[]);
+        package(&root, "crates/semantic", &[]);
+        workspace(&root, "members = [\"crates/*\"]");
+        std::fs::remove_file(root.join("Cargo.lock")).unwrap();
+        assert_eq!(picked(&root, "crates/semantic"), None);
     }
 
     /// Without a lockfile the pin check says it did not run; with one it runs and fails on a moved version.

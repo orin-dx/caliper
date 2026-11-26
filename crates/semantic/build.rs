@@ -1,8 +1,10 @@
 //! Fingerprints the code that makes the checker's answer, so an answer kept on disk (`src/kept.rs`) is discarded
 //! whenever it changes: this crate's sources and the locked dependency versions (the workspace's lockfile, else the one
-//! a published crate ships), which pin the built-in checker (`tsrs`). `caliper-docgen-core`'s stored outcome carries that crate's own fingerprint.
+//! a published crate ships), which pin the built-in checker (`tsrs`). `caliper-docgen-core`'s stored outcome carries
+//! that crate's own fingerprint.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// FNV-1a: stable across Rust versions and platforms, unlike `std`'s `DefaultHasher`.
 struct Fnv(u64);
@@ -29,51 +31,23 @@ fn source_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// The one rule for where the locked versions are read from, shared with the tests through `CALIPER_SEMANTIC_LOCKFILE`:
-/// the lockfile Cargo resolves this package with. That is the workspace's when the workspace two levels up lists this
-/// package as a member, else the package's own (`cargo package` ships one), else none; a `Cargo.lock` of some other
-/// project in an ancestor directory is never taken. Paths come back joined onto `package`.
+/// the lockfile Cargo resolves this package with. Cargo itself says where the workspace root is, which covers members
+/// listed by path or glob and crates it takes in as path dependencies of a member; a package that no workspace claims
+/// (Cargo then reports an error) reads its own, as a published crate ships one. Without either there is none, and the
+/// tests say they skipped. A `Cargo.lock` of some other project in an ancestor directory is never taken.
 pub(crate) fn lockfile_in(package: &Path) -> Option<PathBuf> {
-    let workspace = package.join("../..");
-    let shared = workspace.join("Cargo.lock");
-    if lists_member(&workspace.join("Cargo.toml"), package) && shared.is_file() {
-        return Some(shared);
-    }
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let root = Command::new(cargo)
+        .args(["locate-project", "--workspace", "--message-format", "plain"])
+        .current_dir(package)
+        .env("CARGO_NET_OFFLINE", "true")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|manifest| Path::new(manifest.trim()).parent().map(|root| root.join("Cargo.lock")));
     let own = package.join("Cargo.lock");
-    own.is_file().then_some(own)
-}
-
-/// Whether the manifest has a `[workspace]` that lists `package` (a directory two levels below it) in `members`, by its
-/// path or a `parent/*` glob, and does not `exclude` it. Reads only that table's arrays; unsure means no.
-fn lists_member(manifest: &Path, package: &Path) -> bool {
-    let (Ok(text), Ok(package)) = (std::fs::read_to_string(manifest), package.canonicalize()) else { return false };
-    let (Some(name), Some(parent)) = (package.file_name(), package.parent().and_then(Path::file_name)) else {
-        return false;
-    };
-    let (name, parent) = (name.to_string_lossy(), parent.to_string_lossy());
-    let member = format!("{parent}/{name}");
-
-    let mut table = String::new();
-    let mut in_workspace = false;
-    for line in text.lines() {
-        let line = line.split('#').next().unwrap_or_default().trim();
-        if line.starts_with('[') {
-            in_workspace = line == "[workspace]";
-        } else if in_workspace {
-            table.push_str(line);
-            table.push('\n');
-        }
-    }
-    let array = |key: &str| -> Vec<String> {
-        let rest = table.lines().skip_while(|line| !is_key(line, key)).collect::<Vec<_>>().join("\n");
-        let inside = rest.split_once('[').map_or("", |(_, inside)| inside.split(']').next().unwrap_or_default());
-        inside.split('"').skip(1).step_by(2).map(str::to_string).collect()
-    };
-    let glob = format!("{parent}/*");
-    array("members").iter().any(|m| *m == member || *m == glob) && !array("exclude").contains(&member)
-}
-
-fn is_key(line: &str, key: &str) -> bool {
-    line.strip_prefix(key).is_some_and(|rest| rest.trim_start().starts_with('='))
+    root.filter(|lock| lock.is_file()).or_else(|| own.is_file().then_some(own))
 }
 
 fn lockfile() -> Option<PathBuf> {
@@ -100,7 +74,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src");
     if let Some(lock) = &lock {
         println!("cargo:rerun-if-changed={}", lock.display());
-        // Relative to the manifest directory, so the build machine's path is not compiled in.
         println!("cargo:rustc-env=CALIPER_SEMANTIC_LOCKFILE={}", lock.display());
     }
     println!("cargo:rustc-env=CALIPER_SEMANTIC_FINGERPRINT={:016x}", hash.0);
