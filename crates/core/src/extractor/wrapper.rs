@@ -81,16 +81,12 @@ enum ArgumentEvidence {
 /// also describes `makeLabel<P>("button")`, and a lowercase value describes a context default or a store, so neither
 /// counts.
 fn component_argument_evidence(
-    api: Option<super::ReactApi>,
+    creates_context: bool,
     call: &CallExpression<'_>,
     react: ReactBinding<'_>,
 ) -> Result<ArgumentEvidence, &'static str> {
-    match api {
-        Some(super::ReactApi::CreateContext) => return Err("creates a context"),
-        Some(super::ReactApi::Element | super::ReactApi::Ref) => {
-            return Err("builds an element or a ref, not a component");
-        }
-        Some(super::ReactApi::ForwardRef | super::ReactApi::Memo) | None => {}
+    if creates_context {
+        return Err("creates a context");
     }
     let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::component::peel_expr) else {
         return Err("has no argument that could be a component");
@@ -145,18 +141,25 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let Some(type_arguments) = super::component::call_type_arguments(call) else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        // Read through the callee's one peeled identity, so a cast that keeps its type is the plain call here too.
-        let api = self.react_api(call);
-        let needs_payload = match component_argument_evidence(api, call, &*self) {
+        let creates_context = self.react_api(call) == Some(super::ReactApi::CreateContext);
+        // React's element and ref builders, by main's own predicates on the peeled callee: written as main read a
+        // callee (a name or a member, parentheses or not), the call is read exactly as main read it; written through
+        // an assertion, `satisfies` or `!`, which main read no callee through, it stays declined as main declined it,
+        // with main's skip.
+        let builder = super::component::callee_of(call).is_some_and(|peeled| {
+            super::evidence::is_element_factory_callee(peeled, &*self)
+                || matches!(peeled, Expression::Identifier(id) if id.name == "createRef")
+                || matches!(peeled, Expression::StaticMemberExpression(member) if member.property.name == "createRef")
+        });
+        if builder && super::component::wrapped_beyond_main(&call.callee) {
+            return false;
+        }
+        let needs_payload = match component_argument_evidence(creates_context, call, &*self) {
             Ok(ArgumentEvidence::Sufficient) => false,
             Ok(ArgumentEvidence::TagNeedsPayload) => true,
             Err(reason) => {
                 self.decline_reason = Some(format!("'{name}' is a generic call to '{callee}' that {reason}"));
-                // A React API that builds no component is the call's verdict, not its argument's.
-                self.argument_declined = match api {
-                    Some(super::ReactApi::CreateContext | super::ReactApi::Element | super::ReactApi::Ref) => false,
-                    Some(super::ReactApi::ForwardRef | super::ReactApi::Memo) | None => true,
-                };
+                self.argument_declined = !creates_context;
                 return false;
             }
         };
@@ -208,10 +211,11 @@ impl<'src> SourceDataCollector<'src> {
         });
         let has_config =
             matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
-        if self.extract_callee_name(call).is_none() {
-            return false;
-        }
-        let element_builder = matches!(self.react_api(call), Some(super::ReactApi::Element));
+        let Some(callee) = self.extract_callee_name(call) else { return false };
+        let element_builder = match callee.rsplit_once('.') {
+            Some((receiver, name)) => super::evidence::is_element_factory_name(name, Some(receiver), &*self),
+            None => super::evidence::is_element_factory_name(&callee, None, &*self),
+        };
         if !is_tag || !has_config || element_builder {
             return false;
         }
@@ -507,8 +511,8 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::Identifier(callee) = peeled.expr else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
-        // React's own APIs, element builders among them, are other rules' business (`react_api`, by binding).
-        if super::is_constant_name(name) || explained || self.react_api(call).is_some() {
+        let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);
+        if super::is_constant_name(name) || explained || element_builder || self.react_api(call).is_some() {
             return false;
         }
         // The callee's declared result is what the resolver reads, so a callee asserted to another type is not one.

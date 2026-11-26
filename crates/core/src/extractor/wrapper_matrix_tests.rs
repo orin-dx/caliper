@@ -1047,15 +1047,13 @@ fn differential_declines(case: &Case) -> Option<&'static str> {
     if differential_subject(form).is_empty() || ARGUMENT_FORMS.contains(&form) {
         return None;
     }
-    if NO_COMPONENT_FACTORY_FORMS.contains(&form) {
-        return Some("React builds no component");
-    }
     case.closed.or_else(|| (form == "factory" && !case.keeps).then_some("factory callee withheld"))
 }
 
-/// The forms calling React's `createElement`, `cloneElement` or `createRef`, which give an element or a ref, never a
-/// component: declined through every cast as in the plain call. Origin/main documented the result of the plain call
-/// and of every cast it read as transparent as a component with the type argument's props (round 13).
+/// The forms calling React's `createElement`, `cloneElement` or `createRef` as a generic wrapper is called. Parity
+/// (round 17): each row extracts exactly what origin/main extracts for that row. Main documented the plain call and
+/// every cast it read through as a component (a known wrong answer, left for the follow-up); a cast main read no callee
+/// through (an assertion, `satisfies`, `!`) stays declined.
 const NO_COMPONENT_FACTORY_FORMS: &[&str] = &["createElement call", "cloneElement call", "createRef call"];
 
 /// The forms whose wrapped expression is a value handed to a wrapper, not a callee: nothing calls it there, so the
@@ -1093,11 +1091,17 @@ fn the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain
         let main = base.get(case.id.as_str()).copied().unwrap_or("not in the base table");
         let actual = differential_detections(&case.source);
         let subject = differential_subject(form);
+        if NO_COMPONENT_FACTORY_FORMS.contains(&form) && differential_declines(&case).is_none() {
+            if actual != main {
+                failures.push(format!("{}: main `{main}`, now `{actual}`", case.id));
+            }
+            if main.split(' ').any(|d| d.starts_with(subject)) {
+                main_documented_no_component[index] += 1;
+            }
+            continue;
+        }
         if differential_declines(&case).is_some() {
-            // Everything else the plain call extracts is kept: the component `Foo` handed to the factory.
-            let rest: Vec<&str> = plain.split(' ').filter(|d| !d.starts_with(subject)).collect();
-            let kept = NO_COMPONENT_FACTORY_FORMS.contains(&form) && actual != rest.join(" ");
-            if kept || actual.split(' ').any(|d| d.starts_with(subject)) {
+            if actual.split(' ').any(|d| d.starts_with(subject)) {
                 failures.push(format!("{} declines: main `{main}`, now `{actual}`", case.id));
             }
             if main.split(' ').any(|d| d.starts_with(subject)) {
@@ -1271,18 +1275,11 @@ fn each_closed_list_entry_declines_every_form() {
         .collect();
     // Every base detection given up, by reason: pinned so a new decline is a reviewed change.
     let count = |why: &str| declined.iter().filter(|row| row.ends_with(&format!(": {why}"))).count();
-    let by_reason = ["object", "symbol", "void", "factory callee withheld", "React builds no component"]
-        .map(|why| (why, count(why)));
+    let by_reason = ["object", "symbol", "void", "factory callee withheld"].map(|why| (why, count(why)));
     assert_eq!(by_reason.iter().map(|(_, n)| n).sum::<usize>(), declined.len(), "{}", declined.join("\n"));
     assert_eq!(
         by_reason,
-        [
-            ("object", 55),
-            ("symbol", 21),
-            ("void", 42),
-            ("factory callee withheld", 93),
-            ("React builds no component", 90)
-        ],
+        [("object", 64), ("symbol", 24), ("void", 48), ("factory callee withheld", 93)],
         "{}",
         declined.join("\n")
     );
@@ -1480,6 +1477,34 @@ fn factory_parity_cases() -> Vec<(String, String)> {
          export const Button = (props: Props) => { const React = {}; return createElement('button', null, props.label); };"
             .to_owned(),
     ));
+    let base = "import React from 'react';\ninterface Props { label?: string }\n\
+                function Base(props: Props) { return <div />; }\n";
+    for (id, body) in [
+        (
+            "finding: a builder aliased under a withX name",
+            "const withElement = React.createElement;\nexport const Button = withElement(Base);",
+        ),
+        (
+            "finding: a parameter shadowing an alias of the builder",
+            "const ce = React.createElement;\nexport const Button = (props: Props, ce: (t: string) => string) => ce('button');",
+        ),
+        (
+            "finding: a var in a block, used after it",
+            "export const Button = (props: Props) => { { var createElement = (t: string) => t; } return createElement('button'); };",
+        ),
+        // OXC 0.158 moved these type arguments onto the call, so main read the callee as written plainly.
+        ("an instantiation in parentheses", "export const Button = (React.createElement<Props>)(Base);"),
+        (
+            "finding: a require's member",
+            "export const Button = (props: Props) => require('react').createElement('button');",
+        ),
+        (
+            "finding: a named import's member from a relative module",
+            "import { toolkit } from './widgets';\nexport const Button = toolkit.createElement<Props>(Base);",
+        ),
+    ] {
+        cases.push((id.to_owned(), format!("{base}{body}")));
+    }
     for (id, inner) in [
         ("an element built from forwardRef, plain", "React.forwardRef<HTMLElement, Props>((props, ref) => <div />)"),
         ("an element built from forwardRef, aliased", "fr<HTMLElement, Props>((props, ref) => <div />)"),
@@ -1494,29 +1519,6 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         ));
     }
     cases
-}
-
-/// The round 16 rows whose answer is a component's presence: the row, the component, whether it is listed.
-fn factory_parity_special(id: &str) -> Option<(&'static str, bool, &'static str)> {
-    match id {
-        "nearest: an inner factory binding inside a parameter"
-        | "nearest: an inner factory binding inside a module function of the name"
-        | "nearest: an inner factory binding inside a module factory binding" => {
-            Some(("Foo:", true, "the nearest binding is React's builder, which renders Foo"))
-        }
-        "nearest: an inner parameter inside a factory binding"
-        | "nearest: an inner function of the name inside a factory binding"
-        | "nearest: a parameter, after an inner factory binding" => {
-            Some(("Foo:", false, "the nearest binding is the file's own, which renders nothing"))
-        }
-        "an alias's namespace is read where the alias is declared" => {
-            Some(("Button:", true, "the alias is React's builder, whatever the call site shadows"))
-        }
-        "an element built from forwardRef, plain"
-        | "an element built from forwardRef, aliased"
-        | "an element built from memo, aliased" => Some(("Button:", false, "an element is no component")),
-        _ => None,
-    }
 }
 
 /// Every mapping of a row and every diagnostic, sorted, as `parity_output` prints them.
@@ -1536,76 +1538,39 @@ fn factory_parity_output(source: &str) -> String {
 
 // END FACTORY PARITY CASES.
 
-/// What a row must give, by its provenance and use: `Some(true)` publishes `Button`, `Some(false)` does not, `None`
-/// is what origin/main gives for the plain call of that provenance and use, exactly.
-fn factory_parity_expectation(id: &str) -> (Option<bool>, &'static str) {
-    let mut parts = id.split(" | ");
-    let (provenance, usage) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-    let known = !matches!(provenance, "local function" | "relative module" | "relative jsx");
-    match (known, usage) {
-        // An element builder's result is an element, so a function returning it renders.
-        (true, "rendered") => (Some(true), "a known builder's result renders"),
-        // ... and is no component itself.
-        (true, "wrapper") => (Some(false), "an element is no component"),
-        // The file's own function or an unknown module's builds nothing the extractor knows.
-        (false, "rendered") => (Some(false), "an unknown function builds no element"),
-        (false, _) | (true, _) => (None, "as main's plain call"),
-    }
-}
-
-/// Round 15: a known factory is known through its provenance, followed through the file's destructurings, aliases
-/// and `require`s, from a closed list of sources; the plain call and every cast that keeps its type read the same.
-/// Origin/main (`factory_parity_base.tsv`, printed from the block above on origin/main) is the oracle where it was
-/// right: an unknown function's generic call, and the parameter-default row, equal main's plain call exactly. Where
-/// main was wrong (it took any `createElement`, `jsx` or `h` by its name, missed a renamed or aliased one and every cast,
-/// and documented an element as a component), the row's expectation says what is right, and the rows where main
-/// differs are counted by reason.
+/// Round 17, parity: a known factory is recognised exactly as origin/main recognised it, by main's own predicates on
+/// the callee, and a cast never makes a call a factory main did not know. The oracle is `factory_parity_base.tsv`,
+/// printed from the block above on origin/main f4a88f93 (oxc 0.158). Every row written without a cast extracts exactly
+/// what main extracts, right or wrong; the rows that pin a known wrong answer of main's are the follow-up's. A row
+/// written through a cast either equals main's row or, where main read no callee through the cast, main's plain call
+/// (the one linear peel reads a cast that keeps the callee's type as the plain call); those rows are counted.
 #[test]
-fn a_known_factory_is_known_through_its_provenance() {
+fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     let base: FxHashMap<&str, &str> =
         include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
     let cases = factory_parity_cases();
     assert_eq!(base.len(), cases.len(), "the base table and the cases are out of step");
-    let button = |output: &str| output.split(" | ").any(|line| line.starts_with("Button:"));
     let mut failures = Vec::new();
-    let mut main_differs: FxHashMap<&str, usize> = FxHashMap::default();
+    let mut read_as_the_plain_call = 0;
     for (id, source) in &cases {
         let now = factory_parity_output(source);
         let main = base.get(id.as_str()).copied().unwrap_or("not in the base table");
-        let plain_id = id.rsplit_once(" | ").map_or(id.clone(), |(row, _)| format!("{row} | plain"));
-        let main_plain = base.get(plain_id.as_str()).copied().unwrap_or(main);
-        let listed = |output: &str, subject: &str| output.split(" | ").any(|line| line.starts_with(subject));
-        let (holds, main_right, why) = match factory_parity_special(id) {
-            Some((subject, present, why)) => (listed(&now, subject) == present, listed(main, subject) == present, why),
-            None => {
-                let (expected, why) = factory_parity_expectation(id);
-                match expected {
-                    Some(present) => (button(&now) == present, button(main) == present, why),
-                    None => (now == main_plain, main == main_plain, why),
-                }
+        let cast = id.rsplit_once(" | ").filter(|(_, cast)| *cast != "plain");
+        let holds = match cast {
+            None => now == main,
+            Some((row, _)) => {
+                let main_plain = base.get(format!("{row} | plain").as_str()).copied().unwrap_or(main);
+                now == main || (main != main_plain && now == main_plain)
             }
         };
         if !holds {
-            failures.push(format!("{id} ({why}):\n  main {main}\n  now  {now}"));
-        }
-        if !main_right {
-            *main_differs.entry(why).or_default() += 1;
+            failures.push(format!("{id}:\n  main {main}\n  now  {now}"));
+        } else if now != main {
+            read_as_the_plain_call += 1;
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    let mut main_differs: Vec<(&str, usize)> = main_differs.into_iter().collect();
-    main_differs.sort();
-    assert_eq!(
-        main_differs,
-        [
-            ("a known builder's result renders", 47),
-            ("an element is no component", 24),
-            ("an unknown function builds no element", 3),
-            ("as main's plain call", 12),
-            ("the nearest binding is React's builder, which renders Foo", 1),
-            ("the nearest binding is the file's own, which renders nothing", 3)
-        ]
-    );
+    assert_eq!(read_as_the_plain_call, 56);
 }
 
 /// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing
@@ -2047,54 +2012,6 @@ fn a_heritage_reads_construct_signatures_and_a_call_reads_call_signatures() {
     );
 }
 
-/// Round 13, finding 1: React's `createElement`, `cloneElement` and `createRef` give an element or a ref, so a binding
-/// of their result is no component, through a cast that keeps their type exactly as in the plain call, and the skip
-/// says why, once.
-#[test]
-fn a_react_factory_that_builds_no_component_declines_through_every_identity_cast() {
-    let outcome = |callee: &str| {
-        let source = format!(
-            "{HEADER}type CreateElement = typeof React.createElement;\n\
-             function Foo(props: Props) {{ return <div />; }}\ndeclare const props: Props;\n\
-             export const Button = {callee}<Props>(Foo, props);"
-        );
-        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
-        let names: Vec<String> = data.component_mappings.iter().map(|m| m.component_name.clone()).collect();
-        let skips: Vec<String> = data
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.starts_with("'Button'"))
-            .map(|d| d.message.clone())
-            .collect();
-        (names, skips)
-    };
-    let declined = |api: &str| {
-        (
-            vec!["Foo".to_owned()],
-            vec![format!(
-                "'Button' is a generic call to 'React.{api}' that builds an element or a ref, not a component"
-            )],
-        )
-    };
-    for callee in [
-        "React.createElement",
-        "(React.createElement)",
-        "(React.createElement as typeof React.createElement)",
-        "(React.createElement as CreateElement)",
-        "(React.createElement as any)",
-        "(React.createElement as unknown)",
-        "(React as typeof React).createElement",
-        "(React as any).createElement",
-    ] {
-        assert_eq!(outcome(callee), declined("createElement"), "{callee}");
-    }
-    assert_eq!(outcome("React.cloneElement"), declined("cloneElement"));
-    assert_eq!(outcome("(React.cloneElement as typeof React.cloneElement)"), declined("cloneElement"));
-    assert_eq!(outcome("(React.createRef as any)"), declined("createRef"));
-    // A cast to an unread type is no evidence, so the name still says what the call is.
-    assert_eq!(outcome("(React.createElement as Other)"), declined("createElement"));
-}
-
 /// Round 13, finding 2: a `typeof` alias of a long dotted chain is named in one pass over its segments.
 #[test]
 fn a_typeof_alias_of_a_long_chain_is_named_in_linear_steps() {
@@ -2143,125 +2060,5 @@ fn a_cast_finds_its_shadowing_scope_by_binary_search() {
         // `2n` casts, each probing at most one more than log2 of the `n` scopes.
         let bound = 2 * n as u64 * (u64::from(usize::BITS - n.leading_zeros()) + 1);
         assert!(probes(n) <= bound, "{n}: {} probes, bound {bound}", probes(n));
-    }
-}
-
-/// Round 14: a known factory is known by the binding its callee resolves to, never by its name. Each factory name,
-/// crossed with each way the file can bind it and each way the call can be written: an import from React or Preact
-/// (named, namespace, default) makes it the factory; a declaration in the file, at module level or in a scope around
-/// the call, makes it the file's own function. A cast that keeps the callee's type reads the same binding.
-#[test]
-fn a_known_factory_is_known_by_its_binding_not_its_name() {
-    // (factory, the import that binds it, the call as written with `{F}` for the callee).
-    let builders: &[(&str, &str, &str)] = &[
-        ("createElement", "import { createElement } from 'react';", "{F}<Props>(Base, props)"),
-        ("cloneElement", "import { cloneElement } from 'react';", "{F}<Props>(Base)"),
-        ("createRef", "import { createRef } from 'react';", "{F}<Props>(Base)"),
-        ("h", "import { h } from 'preact';", "{F}<Props>(Base, props)"),
-        ("createElement", "import { createElement } from 'preact/compat';", "{F}<Props>(Base, props)"),
-        ("jsx", "import { jsx } from 'react/jsx-runtime';", "{F}<Props>(Base, props)"),
-        // The element builders under the names any module exports them under, as before: Preact's own, emotion's.
-        ("createElement", "import { createElement } from 'preact';", "{F}<Props>(Base, props)"),
-        ("jsx", "import { jsx } from '@emotion/react';", "{F}<Props>(Base, props)"),
-    ];
-    let casts = ["{f}", "({f} as typeof {f})", "({f} as Alias)", "({f} as any)", "({f} as unknown)"];
-    let outcome = |source: &str| {
-        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), source);
-        let mut names: Vec<String> = data.component_mappings.iter().map(|m| m.component_name.clone()).collect();
-        names.sort();
-        names
-    };
-    let base = "interface Props { label?: string }\nfunction Base(props: Props) { return <div />; }\n\
-                declare const props: Props;\n";
-    let mut failures = Vec::new();
-    for (factory, import, call) in builders {
-        for cast in casts {
-            let callee = cast.replace("{f}", factory);
-            let alias = format!("type Alias = typeof {factory};\n");
-            let row = |prelude: &str, expected: &[&str]| {
-                let source = format!("{prelude}\n{base}{alias}export const Button = {};", call.replace("{F}", &callee));
-                let actual = outcome(&source);
-                (actual != expected).then(|| format!("{factory} {cast} {prelude:?}: {actual:?}"))
-            };
-            // Imported: the factory, which builds an element or a ref and no component.
-            failures.extend(row(import, &["Base"]));
-            // Declared in the file: the file's own generic function, which may build a component, as any wrapper.
-            let local =
-                format!("function {factory}<P>(c: React.ComponentType<P>, p?: P): React.FC<P> {{ return c as any; }}");
-            failures.extend(row(&format!("import React from 'react';\n{local}"), &["Base", "Button"]));
-        }
-    }
-    // A namespace import's member is the module's factory; a local namespace of the same name is not.
-    for (namespace, expected) in [
-        ("import * as React from 'react';", &["Base"][..]),
-        ("import React from 'react';", &["Base"][..]),
-        ("import * as Preact from 'preact';", &["Base"][..]),
-    ] {
-        let receiver = if namespace.contains("Preact") { "Preact.h" } else { "React.createElement" };
-        for cast in casts {
-            let callee = cast.replace("{f}", receiver);
-            let source = format!(
-                "{namespace}\n{base}type Alias = typeof {receiver};\nexport const Button = {callee}<Props>(Base, props);"
-            );
-            if outcome(&source) != expected {
-                failures.push(format!("{namespace} {callee}: {:?}", outcome(&source)));
-            }
-        }
-    }
-    let local_react = format!(
-        "const React = {{ createElement<P>(c: unknown, p?: P): unknown {{ return c; }} }};\n{base}\
-         export const Button = React.createElement<Props>(Base, props);"
-    );
-    if outcome(&local_react) != ["Base", "Button"] {
-        failures.push(format!("a local React namespace: {:?}", outcome(&local_react)));
-    }
-    // A named import's member is that value's member, not React's API: `Children.createRef` is no `createRef`.
-    let member =
-        format!("import {{ Children }} from 'react';\n{base}export const Button = Children.createRef<Props>(Base);");
-    if outcome(&member) != ["Base", "Button"] {
-        failures.push(format!("a named import's member: {:?}", outcome(&member)));
-    }
-    // Finding 2: a local factory function with React's name keeps its real result.
-    let factory = "import React from 'react';\ninterface Props { label?: string }\n\
-                   function createRef(): React.FC<Props> { return (props) => <div />; }\nexport const Button = createRef();";
-    let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), factory);
-    let button = data.component_mappings.iter().find(|m| m.component_name == "Button").map(|m| m.rule);
-    if button != Some(crate::types::DetectionRule::FactoryResult) {
-        failures.push(format!("a local createRef factory: {button:?}"));
-    }
-    // A parameter of the factory's name in a scope around the call is the caller's value, not the import.
-    let shadowed = format!(
-        "import {{ h }} from 'preact';\n{base}export function make(h: <P>(c: unknown, p?: P) => React.FC<P>) {{\n\
-         return <Base />;\n}}\nexport const Button = h<Props>(Base, props);\n\
-         export function render(h: (c: unknown) => unknown) {{ return h(Base); }}\n\
-         export const Card = (props: Props, h: (c: unknown) => string) => h(Base);"
-    );
-    if outcome(&shadowed) != ["Base"] {
-        failures.push(format!("an import used where a parameter shadows it elsewhere: {:?}", outcome(&shadowed)));
-    }
-    assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-}
-
-/// Round 16, finding 1: a call finds the declaration of its callee's name by a binary search of the name's scope
-/// tree, so N functions that each alias React's builder and call it cost N log N probes, not N squared.
-#[test]
-fn a_call_finds_its_nearest_declaration_by_binary_search() {
-    let probes = |n: usize| {
-        let mut source = String::from("import React from 'react';\ninterface Props { label?: string }\n");
-        for i in 0..n {
-            source.push_str(&format!(
-                "export const B{i} = (props: Props) => {{ const ce = React.createElement; return ce('div'); }};\n"
-            ));
-        }
-        super::component::steps::take_probed();
-        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
-        assert_eq!(data.component_mappings.len(), n, "every function renders through its alias");
-        super::component::steps::take_probed()
-    };
-    for n in [64_usize, 128, 256] {
-        // A few lookups per call (render evidence, call uses), each probing at most log2 of the n scopes and up the tree.
-        let bound = 8 * n as u64 * (u64::from(usize::BITS - n.leading_zeros()) + 2);
-        let found = probes(n);
-        assert!(found <= bound, "{n}: {found} probes, bound {bound}");
     }
 }

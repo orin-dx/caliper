@@ -213,7 +213,7 @@ impl<'src> SourceDataCollector<'src> {
         // An element factory asserted to give a string (`(createElement as (t: any) => string)(Foo)`) builds no
         // element of its argument.
         let renders_argument = super::component::is_component_wrapper(&*self, call)
-            || matches!(self.react_api(call), Some(super::ReactApi::Element));
+            || peeled.named().is_some_and(|callee| super::evidence::is_element_factory_callee(callee, &*self));
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;
         }

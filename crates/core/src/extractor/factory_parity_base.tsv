@@ -146,6 +146,12 @@ nearest: an inner function of the name inside a factory binding	Foo:Props"functi
 nearest: a parameter, after an inner factory binding	Foo:Props"functionDeclaration"
 nearest: an inner factory binding inside a module factory binding	Info SkippedCandidate: 'Foo' takes a second parameter (a ref) and is never rendered or passed to a component wrapper in this file, so it is a render callback, not a component
 an alias's namespace is read where the alias is declared	Button:Props"typedFunctionExpression"
+finding: a builder aliased under a withX name	Button:Props"functionDeclaration"
+finding: a parameter shadowing an alias of the builder	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+finding: a var in a block, used after it	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression"
+an instantiation in parentheses	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument"
+finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression"
+finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument"
 an element built from forwardRef, plain	Button:Props"forwardRef"
 an element built from forwardRef, aliased	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 an element built from memo, aliased	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)

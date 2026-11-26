@@ -49,100 +49,19 @@ pub(super) enum ReactApi {
     ForwardRef,
     Memo,
     CreateContext,
-    /// Builds an element (`createElement`, `cloneElement`, the JSX runtime's `jsx`, `createPortal`, Preact's `h`):
-    /// rendering evidence, and never a component whatever it is given.
-    Element,
-    /// `createRef`: a ref, never a component.
-    Ref,
-}
-
-/// Where the binding a known factory is read from comes from.
-#[derive(Clone, Copy)]
-enum FactorySource {
-    /// React: `react` and its subpaths (`react/jsx-runtime`), `@types/react`, `preact/compat`.
-    React,
-    /// Preact itself: `preact` and its subpaths (`preact/jsx-runtime`).
-    Preact,
-    /// `react-dom`, for `createPortal`.
-    ReactDom,
-    /// Emotion's JSX: `@emotion/react` and its subpaths, `@emotion/core`.
-    Emotion,
-    /// Any other module, a relative one included: none of its exports is a known factory.
-    Other,
-    /// No binding in the file: a global, or the global `React` namespace's member.
-    Global,
-    /// A member of a value that is not a known namespace (`document.createElement`, a named import's member).
-    GlobalObject,
-}
-
-/// `react-dom` and its subpaths.
-fn is_react_dom_module(specifier: &str) -> bool {
-    specifier == "react-dom" || specifier.starts_with("react-dom/")
-}
-
-/// Emotion's JSX: `@emotion/react` and its subpaths, and `@emotion/core`.
-fn is_emotion_module(specifier: &str) -> bool {
-    specifier == "@emotion/core" || specifier == "@emotion/react" || specifier.starts_with("@emotion/react/")
-}
-
-/// Whether an import specifier names a module.
-type ModuleMatcher = fn(&str) -> bool;
-
-/// The closed list of modules whose exports can be known factories, by the predicates main already read imports
-/// with (`is_react_module`: `react` and its subpaths, `@types/react`, `preact/compat`; `is_preact_module`: `preact` and
-/// its subpaths). The first match wins, so `preact/compat` is React's API. Every other module, a relative path
-/// included, exports no known factory.
-const FACTORY_SOURCES: &[(ModuleMatcher, FactorySource)] = &[
-    (is_react_module, FactorySource::React),
-    (crate::react_types::is_preact_module, FactorySource::Preact),
-    (is_react_dom_module, FactorySource::ReactDom),
-    (is_emotion_module, FactorySource::Emotion),
-];
-
-impl FactorySource {
-    fn of(specifier: &str) -> Self {
-        FACTORY_SOURCES.iter().find(|(matches, _)| matches(specifier)).map_or(Self::Other, |(_, source)| *source)
-    }
 }
 
 impl ReactApi {
-    /// The factory `source` exports under `name`. React's component and context APIs are React's, `h` is Preact's,
-    /// and the element builders are the closed list of sources' (a global and a non-namespace receiver keep the names,
-    /// as before).
-    fn of_export(source: FactorySource, name: &str) -> Option<Self> {
-        use FactorySource::{Emotion, Global, GlobalObject, Other, Preact, React, ReactDom};
-        match (source, name) {
-            (React | Global, "forwardRef") => Some(Self::ForwardRef),
-            (React | Global, "memo") => Some(Self::Memo),
-            (React | Preact | Global, "createContext") => Some(Self::CreateContext),
-            (React | Preact | Global, "createRef") => Some(Self::Ref),
-            (React | Preact | Global | GlobalObject, "createElement" | "cloneElement")
-            | (React | Preact | Emotion | Global | GlobalObject, "jsx" | "jsxs" | "jsxDEV")
-            | (React | ReactDom | Global | GlobalObject, "createPortal")
-            | (Preact, "h") => Some(Self::Element),
-            (Other, _) => None,
-            // Any other pair is no factory the extractor knows.
-            (React | Preact | ReactDom | Emotion | Global | GlobalObject, _) => None,
+    /// The API a module exports under this name.
+    fn of_export(name: &str) -> Option<Self> {
+        match name {
+            "forwardRef" => Some(Self::ForwardRef),
+            "memo" => Some(Self::Memo),
+            "createContext" => Some(Self::CreateContext),
+            _ => None,
         }
     }
 }
-
-/// The names `ReactApi::of_export` knows, and the global namespace it reads: the file's own declarations of these are
-/// collected before the walk (`component::local_values`).
-const FACTORY_NAMES: &[&str] = &[
-    "forwardRef",
-    "memo",
-    "createContext",
-    "createRef",
-    "createElement",
-    "cloneElement",
-    "jsx",
-    "jsxs",
-    "jsxDEV",
-    "createPortal",
-    "h",
-    "React",
-];
 
 use crate::react_types::is_react_module;
 
@@ -309,15 +228,6 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     collector.comments = comments;
     collector.element_helpers = evidence::element_helpers(&ret.program);
     collector.typeof_aliases = component::typeof_aliases(&ret.program);
-    // The file's own values under a known factory's name or an import's: they are never the factory.
-    let mut factory_bindings: FxHashSet<&str> = FACTORY_NAMES.iter().copied().collect();
-    for statement in &ret.program.body {
-        if let Statement::ImportDeclaration(import) = statement {
-            factory_bindings
-                .extend(import.specifiers.iter().flatten().map(|specifier| specifier.local().name.as_str()));
-        }
-    }
-    collector.local_values = component::local_values(&ret.program, &factory_bindings);
     collector.visit_program(&ret.program);
     let mut data = collector.finish();
     data.jsx_usages = body_facts::attach(&ret.program, &mut data.component_mappings, source_type.is_jsx());
@@ -349,8 +259,6 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) element_helpers: FxHashSet<String>,
     /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
-    /// The file's own values under a known factory's name or an import's: see `component::local_values`.
-    pub(super) local_values: FxHashMap<CompactString, component::LocalValue>,
     /// Tracks which JSDoc comment spans have already been consumed (by span_end).
     /// Prevents the same comment from leaking to both a component description and its first prop.
     pub(super) consumed_jsdoc: FxHashSet<u32>,
@@ -450,7 +358,6 @@ impl<'src> SourceDataCollector<'src> {
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
             typeof_aliases: FxHashMap::default(),
-            local_values: FxHashMap::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
             scope_path: Vec::new(),
@@ -828,93 +735,31 @@ impl<'src> SourceDataCollector<'src> {
     /// all name the same one, while a `forwardRef` imported from another module is not React's. A name no import binds
     /// (the global `React`, or `const { forwardRef } = React`) is read as written.
     pub(super) fn react_api(&self, call: &CallExpression<'_>) -> Option<ReactApi> {
-        self.known_factory(component::callee_of(call)?, call.span)
-    }
-
-    /// The factory a callee beneath its wrappers is, by the binding it resolves to at `at` (the call): an import's
-    /// source and exported name, or a namespace import's member (`ReactApi::of_export`). A value the file declares
-    /// itself under the name, at module level or in a scope around the call (a parameter, a local `const`), is the
-    /// file's own and never a known factory. A name nothing binds is a global, read as written.
-    pub(super) fn known_factory(&self, callee: &Expression<'_>, at: Span) -> Option<ReactApi> {
-        match callee {
-            Expression::Identifier(id) => self.factory_named(id.name.as_str(), at, 0),
-            // `callee_of` judged the member; the namespace is only read for its name.
-            Expression::StaticMemberExpression(member) => match component::beneath(&member.object) {
-                Expression::Identifier(object) => {
-                    let source = self.namespace_source(object.name.as_str(), at, 0)?;
-                    ReactApi::of_export(source, member.property.name.as_str())
+        let import_of = |local: &str| self.data.imports.iter().find(|import| import.local_name.as_str() == local);
+        match component::callee_of(call)? {
+            Expression::Identifier(id) => match import_of(id.name.as_str()) {
+                Some(import) if is_react_module(&import.specifier) => {
+                    ReactApi::of_export(import.exported_name.as_str())
                 }
-                _ => None,
+                Some(_) => None,
+                None => ReactApi::of_export(id.name.as_str()),
             },
+            Expression::StaticMemberExpression(member) => {
+                // `callee_of` judged the member; the namespace is only read for its name.
+                let Expression::Identifier(object) = component::beneath(&member.object) else { return None };
+                let api = ReactApi::of_export(member.property.name.as_str())?;
+                match import_of(object.name.as_str()) {
+                    Some(import)
+                        if is_react_module(&import.specifier)
+                            && matches!(import.exported_name.as_str(), "*" | "default") =>
+                    {
+                        Some(api)
+                    }
+                    Some(_) => None,
+                    None => (object.name == "React").then_some(api),
+                }
+            }
             _ => None,
-        }
-    }
-
-    /// The file's own declaration of `name` that a use at `at` means: the nearest one in a scope around `at`,
-    /// whatever its origin (one walk up the name's scope tree), else the module-level one when there is exactly one.
-    /// `None` when the file declares none there, so the name is an import's or a global. The declaration's site is
-    /// where the names its origin reads are resolved, never the use's.
-    fn local_declaration(&self, name: &str, at: Span) -> Option<(&component::Origin, Span)> {
-        const OWN: &component::Origin = &component::Origin::Own;
-        let local = self.local_values.get(name)?;
-        if let Some(declared) = local.innermost(at) {
-            return Some((&declared.origin, declared.site));
-        }
-        match local.module_level.as_slice() {
-            [] => None,
-            [declared] => Some((&declared.origin, declared.site)),
-            [_, _, ..] => Some((OWN, at)),
-        }
-    }
-
-    /// The factory a name called at `at` resolves to, following the file's own aliases and destructurings of a
-    /// namespace or a `require` (`ReactApi::of_export`), each resolved at its own declaration's site: `depth` bounds a
-    /// cycle.
-    fn factory_named(&self, name: &str, at: Span, depth: u8) -> Option<ReactApi> {
-        if depth > 8 {
-            return None;
-        }
-        match self.local_declaration(name, at) {
-            Some((component::Origin::Own | component::Origin::ModuleNamespace(_), _)) => None,
-            Some((component::Origin::Alias(target), site)) => self.factory_named(target, site, depth + 1),
-            Some((component::Origin::Member { object, property }, site)) => {
-                ReactApi::of_export(self.namespace_source(object, site, depth + 1)?, property)
-            }
-            Some((component::Origin::Module { specifier, name }, _)) => {
-                ReactApi::of_export(FactorySource::of(specifier), name)
-            }
-            None => match self.data.imports.iter().find(|import| import.local_name.as_str() == name) {
-                // A namespace called is no factory.
-                Some(import) if matches!(import.exported_name.as_str(), "*" | "default") => None,
-                Some(import) => ReactApi::of_export(FactorySource::of(&import.specifier), &import.exported_name),
-                None => ReactApi::of_export(FactorySource::Global, name),
-            },
-        }
-    }
-
-    /// Where the namespace `name`, read at `at` for a member, comes from: a namespace or default import, a
-    /// `require`, the file's alias of one (resolved at the alias's site), or a global (`React`, or any other object,
-    /// whose members keep the element builders' names). The file's own value of another origin is no namespace a
-    /// factory is read from.
-    fn namespace_source(&self, name: &str, at: Span, depth: u8) -> Option<FactorySource> {
-        if depth > 8 {
-            return None;
-        }
-        match self.local_declaration(name, at) {
-            Some((component::Origin::ModuleNamespace(specifier), _)) => Some(FactorySource::of(specifier)),
-            Some((component::Origin::Alias(target), site)) => self.namespace_source(target, site, depth + 1),
-            Some((component::Origin::Own | component::Origin::Member { .. } | component::Origin::Module { .. }, _)) => {
-                None
-            }
-            None => match self.data.imports.iter().find(|import| import.local_name.as_str() == name) {
-                Some(import) if matches!(import.exported_name.as_str(), "*" | "default") => {
-                    Some(FactorySource::of(&import.specifier))
-                }
-                // A member of an imported value is read like any object's member.
-                Some(_) => Some(FactorySource::GlobalObject),
-                None if name == "React" => Some(FactorySource::Global),
-                None => Some(FactorySource::GlobalObject),
-            },
         }
     }
 
@@ -1711,7 +1556,15 @@ impl evidence::Scope for SourceDataCollector<'_> {
         matches!(self.react_api(call), Some(ReactApi::Memo | ReactApi::ForwardRef))
     }
 
-    fn builds_element(&self, callee: &Expression<'_>, at: Span) -> bool {
-        matches!(self.known_factory(callee, at), Some(ReactApi::Element))
+    fn is_preact_h(&self, receiver: Option<&str>) -> bool {
+        self.data.imports.iter().any(|import| {
+            let binds = match receiver {
+                None => import.local_name.as_str() == "h" && import.exported_name.as_str() == "h",
+                Some(object) => {
+                    import.local_name.as_str() == object && matches!(import.exported_name.as_str(), "*" | "default")
+                }
+            };
+            binds && crate::react_types::is_preact_module(&import.specifier)
+        })
     }
 }
