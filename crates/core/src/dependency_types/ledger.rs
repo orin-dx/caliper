@@ -669,8 +669,8 @@ impl<'a> LedgerBuilder<'a> {
                     || matches!(node, Node::Demand(key) if retried.contains(key))
             };
             // The walks that are unread: this load's own, and the earlier ones this load met without following. Over a
-            // parent, whether an earlier node reaches one is the parent's cached answer, asked once per layer; a flatten
-            // took the chain's marks in itself, and one reverse traversal of them answers the same for it.
+            // parent, whether an earlier node reaches one is the parent's cached answer, asked once per layer; a
+            // flatten took the chain's marks in itself, and one reverse traversal of them answers the same for it.
             let below = parent.filter(|_| inherited.marks.is_empty()).map(DependencyLayer::unread_walks);
             let flattened = (below.is_none() && !inherited.marks.is_empty()).then(|| {
                 #[cfg(test)]
