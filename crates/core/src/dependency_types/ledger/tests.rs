@@ -317,6 +317,47 @@ fn an_eager_edit_resolves_again_every_component_that_reached_a_walk_it_followed_
     assert_eq!(names(&session.component("Tag")), ["label", "own", "tone"]);
 }
 
+/// The eager revision: `Tag` reaches a walk that could not read a file, which then reads on disk. An edit to a file
+/// that reaches no unread walk (`Plain`) follows every unread walk again, as an edit makes each one due in a lazy
+/// session: `Tag` answers as a fresh session does.
+#[test]
+fn an_eager_edit_to_any_file_follows_every_unread_walk_again() {
+    let tag = "import type { NestProps } from 'nest-kit';\ninterface TagProps extends NestProps { label: string }\n\
+               export function Tag(props: TagProps) { return null; }\n";
+    let plain = "export function Plain(props: { title: string }) { return null; }\n";
+    let (_tmp, root) = project(&[NESTED, &[("src/tag/Tag.tsx", tag), ("src/plain/Plain.tsx", plain)]].concat());
+    let base = root.join("node_modules/nest-kit/base.d.ts");
+    let text = std::fs::read_to_string(&base).unwrap();
+    std::fs::write(&base, UNREADABLE).unwrap();
+    let session = WatchSession::new(options(&root));
+    drop(session.initialize());
+    assert_eq!(names(&session.component("Tag")), ["label", "own"]);
+    std::fs::write(&base, text).unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+
+    let fresh = WatchSession::new(options(&root));
+    drop(fresh.initialize());
+    assert_eq!(names(&session.component("Tag")), ["label", "own", "tone"]);
+    for name in ["Card", "Tag", "Plain"] {
+        assert_eq!(session.component(name), fresh.component(name), "{name}");
+    }
+}
+
+/// Once a walk is followed again and reads, its newest mark is clean: the chain has no due walk, though the layer
+/// below still holds the unread mark it superseded.
+#[test]
+fn a_walk_followed_again_that_reads_is_no_longer_due() {
+    let (_tmp, root) = project(SOLO);
+    let props = root.join("node_modules/solo-kit/props.d.ts");
+    std::fs::write(&props, UNREADABLE).unwrap();
+    let demand = Demand { from: root.join("src/Card.tsx"), specifier: "solo-kit".into(), name: "SoloProps".into() };
+    let failed = Arc::new(load(vec![demand.clone()], &options(&root), None));
+    assert_eq!(failed.due_walks(Retry::Always), std::slice::from_ref(&demand));
+    std::fs::write(&props, "export interface SoloProps { tone: string }\n").unwrap();
+    let recovered = load(failed.due_walks(Retry::Always), &options(&root), Some(&failed));
+    assert_eq!(recovered.due_walks(Retry::Always), Vec::<Demand>::new());
+}
+
 /// A re-export stub an augmentation search only scans (it names neither React nor `"react"`) and could not read is
 /// reported until a load reads it again, and not after: the scan's read clears it as a parse's does.
 #[test]

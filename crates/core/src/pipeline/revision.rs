@@ -477,9 +477,10 @@ impl Revision {
                 }
                 // Only names no earlier revision loaded cost a load; the new layer keeps everything the old one had.
                 if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
-                    // The unread walks the file's demands lead to inside packages are followed again too.
+                    // An edit makes every walk past a file that could not be read due, whichever file it was: each is
+                    // followed again, as a lazy session follows it on its next request.
                     let mut missing = layer.missing(&demands);
-                    missing.extend(layer.unread(&demands));
+                    missing.extend(layer.due_walks(dependency_types::Retry::Always));
                     missing.sort();
                     missing.dedup();
                     if !missing.is_empty() {

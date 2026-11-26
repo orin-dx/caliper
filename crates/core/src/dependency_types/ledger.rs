@@ -393,6 +393,31 @@ impl DependencyLayer {
         (walks, visits)
     }
 
+    /// Every demand of the chain whose own walk is unread and that a load under `retry` follows again, sorted. An edit
+    /// makes each such walk due ([`Mark::is_due`]), whatever file it was: the eager revision follows these on every
+    /// edit.
+    pub(crate) fn due_walks(&self, retry: Retry) -> Vec<Demand> {
+        if !self.has_marks() {
+            return Vec::new();
+        }
+        let mut seen: FxHashSet<&Node> = FxHashSet::default();
+        let mut due: Vec<Demand> = Vec::new();
+        for layer in self.chain() {
+            for (node, mark) in &layer.ledger.marks {
+                // The newest mark of a node is its latest follow; an older one below it is superseded.
+                if seen.insert(node)
+                    && let Some(demand) = &mark.unread
+                    && mark.is_due(retry, |path| self.latest_read(path))
+                {
+                    due.push(demand.clone());
+                }
+            }
+        }
+        due.sort();
+        due.dedup();
+        due
+    }
+
     /// The demands that `roots` lead to, themselves included, whose walk passed a file that could not be read and has
     /// not been followed since, sorted. Following them again is what may answer more; while there are any, what was
     /// resolved from `roots` holds for one request only.

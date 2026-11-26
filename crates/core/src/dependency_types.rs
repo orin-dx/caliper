@@ -432,8 +432,9 @@ impl DependencyLayer {
         self.chain().any(|layer| layer.files.contains(file.as_str()))
     }
 
-    /// The declaring `(file, name)` of `name` exported from `module`, when a walk that read every file answered it: what
-    /// the index writes. The resolver reads [`Self::export_for_resolver`], which a partial walk's answer also reaches.
+    /// The declaring `(file, name)` of `name` exported from `module`, when a walk that read every file answered it:
+    /// what the index writes. The resolver reads [`Self::export_for_resolver`], which a partial walk's answer also
+    /// reaches.
     #[cfg(test)]
     pub(crate) fn export_of_complete(
         &self,
@@ -443,8 +444,8 @@ impl DependencyLayer {
         self.export_entry(&(PathKey::from(module), CompactString::from(name)))
     }
 
-    /// [`Self::export_of_complete`] for the resolver: a complete answer, else one a walk found past a file it could not read
-    /// (`partial_exports`), which holds for this layer while that walk is unread.
+    /// [`Self::export_of_complete`] for the resolver: a complete answer, else one a walk found past a file it could not
+    /// read (`partial_exports`), which holds for this layer while that walk is unread.
     pub(crate) fn export_for_resolver(
         &self,
         module: &Utf8Path,

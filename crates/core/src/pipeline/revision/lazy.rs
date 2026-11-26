@@ -567,6 +567,9 @@ impl Revision {
                 let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes });
                 // A walk past a file that could not be read answers more once it is followed again: until then the
                 // answer holds only provisionally, and never in the memo an edit carries over.
+                // With no footprint, a file one of the walks could not read was read since in this same layer, so the
+                // walk is due: this pass already asked for it (`missing == asked_for`) and the load left it as it was.
+                // The answer and its warnings both come from `engine`; held nowhere, the next request asks again.
                 if !unread.is_empty() {
                     if let Some(footprint) = engine.layer.as_ref().and_then(|layer| layer.footprint(&unread)) {
                         lazy.provisional.insert(id.clone(), (resolved.clone(), footprint));
@@ -880,8 +883,8 @@ mod read_retry_tests {
 
     /// A walk that passes an unreadable `export *` target and finds the name in a later one gives the resolver that
     /// barrel's mapping for this layer: the props are in the answer, with the warning. The mapping is kept nowhere a
-    /// complete answer is (`export_of_complete`, which the index writes). Once the file reads and an edit arrives, the answer is
-    /// a cold run's.
+    /// complete answer is (`export_of_complete`, which the index writes). Once the file reads and an edit arrives, the
+    /// answer is a cold run's.
     #[test]
     fn an_export_found_past_an_unreadable_star_target_reaches_the_resolver_for_its_layer() {
         let (_tmp, root) = project();

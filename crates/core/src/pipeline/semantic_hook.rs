@@ -30,8 +30,8 @@ use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::options::CollapseContext;
 use crate::types::semantic::{
     Delivery, Layering, MergedProps, Priority, PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome,
-    SemanticProp, SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, drop_superseded,
-    merge_semantic_props, unread_diagnostic,
+    SemanticProp, SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, Unavailable,
+    drop_superseded, merge_semantic_props, unread_diagnostic,
 };
 
 /// What one request of the checker made of a component: the component it found, if any, and what the checker said
@@ -125,8 +125,8 @@ const DEGRADED_HELD: usize = 256;
 impl AnswerCache {
     /// Hold `key`'s refusal from `at`. Once the map reaches `prune_at`, the refusals past [`DEGRADED_RETRY`] are
     /// dropped and the next prune waits until the map doubles. A refusal is never dropped before its retry: the map
-    /// holds at most twice the refusals of one retry interval, and a batch larger than [`DEGRADED_HELD`] repeated within
-    /// it asks nothing.
+    /// holds at most twice the refusals of one retry interval, and a batch larger than [`DEGRADED_HELD`] repeated
+    /// within it asks nothing.
     fn hold_degraded(&mut self, key: (String, u64), at: Instant, said: Vec<Diagnostic>) {
         if self.degraded.len() >= self.prune_at.max(DEGRADED_HELD) {
             self.degraded.retain(|_, (held, _)| at.saturating_duration_since(*held) < DEGRADED_RETRY);
@@ -197,6 +197,9 @@ pub(crate) struct SemanticHook {
     wait_empty: Duration,
     answers: Arc<Answers>,
     now: Clock,
+    /// The mark of an outcome unavailable for every target, as [`SemanticOutcome::unavailable`] makes it: built once,
+    /// so reading an outcome compares marks without building one.
+    every_target: Option<Unavailable>,
 }
 
 impl SemanticHook {
@@ -207,6 +210,7 @@ impl SemanticHook {
             wait_empty: DEFAULT_WAIT_EMPTY,
             answers: Arc::new(Mutex::new(AnswerCache::default())),
             now: Arc::new(Instant::now),
+            every_target: SemanticOutcome::unavailable(String::new()).unavailable,
         }
     }
 
@@ -361,9 +365,10 @@ impl SemanticHook {
         let asked = target.key.clone();
         let settling = pending.clone();
         let now = self.now.clone();
+        let every_target = self.every_target.clone();
         let delivery = Delivery::new(move |outcome| {
             let mut settled = match outcome {
-                Some(outcome) => read_outcome(&asked, outcome),
+                Some(outcome) => read_outcome(&asked, outcome, every_target.as_ref()),
                 None if settling.priority.is_cancelled() => Settled::Cancelled,
                 None => Settled::Stopped,
             };
@@ -483,8 +488,9 @@ fn target_of(answer: &ComponentAnswer, mode: HtmlAttributeMode, layering: Layeri
 /// the component kept its structural result. An outcome marked unavailable ([`SemanticOutcome::unavailable`]), or with
 /// a transient fallback for `asked` (the checker failed on it), answers nothing: it is [`Settled::Degraded`]. Decided
 /// from those marks alone: an outcome with no entry for `asked` (a target the pass skipped, a run past its heap budget)
-/// is the checker's answer, kept like any other. An answer or fallback for another key is not this component's.
-fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Settled {
+/// is the checker's answer, kept like any other. An answer or fallback for another key is not this component's. A mark
+/// equal to `every_target` is unavailable for every target: [`Settled::Unavailable`], held for every component.
+fn read_outcome(asked: &str, outcome: SemanticOutcome, every_target: Option<&Unavailable>) -> Settled {
     let SemanticOutcome { components, fallbacks, diagnostics: reported, unavailable } = outcome;
     let mut diagnostics: Vec<Diagnostic> = reported
         .into_iter()
@@ -493,8 +499,7 @@ fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Settled {
             diagnostic
         })
         .collect();
-    // The mark for every target is the one `SemanticOutcome::unavailable` makes; a listed mark is per key.
-    if unavailable.is_some() && unavailable == SemanticOutcome::unavailable(String::new()).unavailable {
+    if unavailable.is_some() && unavailable.as_ref() == every_target {
         return Settled::Unavailable(diagnostics);
     }
     if unavailable.is_some_and(|unasked| unasked.covers(asked)) {
