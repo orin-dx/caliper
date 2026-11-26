@@ -1109,7 +1109,8 @@ fn the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain
             }
             continue;
         }
-        if actual != plain {
+        // Main's plain call, or main's own row where a cast is left to the rule main ran (round 19).
+        if actual != plain && actual != main {
             failures.push(format!("{}: main's plain call `{plain}`, main `{main}`, now `{actual}`", case.id));
         }
         if main != plain {
@@ -1217,9 +1218,11 @@ fn every_form_the_base_detected_is_still_detected_unless_its_result_is_on_the_cl
     for case in &cases {
         let Some(&row) = base.get(case.id.as_str()) else { panic!("{} is not in the base table", case.id) };
         let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
-        let expected = match base.get(format!("{form} | plain").as_str()) {
-            Some(plain) if MAIN_DIFFERS_FROM_ITS_PLAIN_CALL.contains(&form) => plain,
-            Some(_) | None => row,
+        // A form where main read a cast differently from its plain call holds to either: main's row (the cast left to
+        // the rule main ran) or main's plain call (the cast read as the plain call).
+        let plain = match base.get(format!("{form} | plain").as_str()) {
+            Some(plain) if MAIN_DIFFERS_FROM_ITS_PLAIN_CALL.contains(&form) => Some(*plain),
+            Some(_) | None => None,
         };
         let subject = differential_subject(form);
         let actual = differential_detections(&case.source);
@@ -1231,9 +1234,16 @@ fn every_form_the_base_detected_is_still_detected_unless_its_result_is_on_the_cl
             found.contains(&detection)
                 || (detection == "Impl:Props" && declined.is_none() && found.contains(&"Root:Props"))
         };
-        let holds = actual != "parse error"
-            && expected.split(' ').filter(|d| *d != "-" && !(declined.is_some() && d.starts_with(subject))).all(kept)
-            && !(declined.is_some() && found.iter().any(|d| d.starts_with(subject)));
+        let holds_for = |expected: &str| {
+            actual != "parse error"
+                && expected
+                    .split(' ')
+                    .filter(|d| *d != "-" && !(declined.is_some() && d.starts_with(subject)))
+                    .all(kept)
+                && !(declined.is_some() && found.iter().any(|d| d.starts_with(subject)))
+        };
+        let expected = plain.unwrap_or(row);
+        let holds = holds_for(row) || plain.is_some_and(holds_for);
         if !holds {
             failures.push(format!(
                 "{} (declined: {declined:?}): base `{expected}`, now `{actual}`\n{}",
@@ -1523,6 +1533,46 @@ fn factory_parity_cases() -> Vec<(String, String)> {
              export const Button = makeX<HTMLDivElement, Other>('div');",
         ),
         (
+            "generic wrapper, no type argument names props | rendered | typeof itself",
+            "function makeX<E, T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = (makeX as typeof makeX)<HTMLDivElement, Other>('div');",
+        ),
+        // Round 19: a payload whose `props` member is no named type; a wrapper call before the component it wraps; an
+        // anonymous default export of a wrapper call.
+        (
+            "unusable payload | rendered | plain",
+            "interface Box<T> { payload?: T }\ntype Payload = Box<{ props: { label: string } }>;\n\
+             function makeX<T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = makeX<Payload>('div');",
+        ),
+        (
+            "unusable payload | rendered | typeof itself",
+            "interface Box<T> { payload?: T }\ntype Payload = Box<{ props: { label: string } }>;\n\
+             function makeX<T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = (makeX as typeof makeX)<Payload>('div');",
+        ),
+        (
+            "wrapper call before its component | rendered | plain",
+            "function withThing<T>(c: unknown): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = withThing<unknown>(Base2);\nfunction Base2(props: Props) { return <div />; }",
+        ),
+        (
+            "wrapper call before its component | rendered | typeof itself",
+            "function withThing<T>(c: unknown): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = (withThing as typeof withThing)<unknown>(Base2);\n\
+             function Base2(props: Props) { return <div />; }",
+        ),
+        (
+            "anonymous default wrapper call | rendered | plain",
+            "function makeX<T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
+             export default makeX<unknown>('div');",
+        ),
+        (
+            "anonymous default wrapper call | rendered | typeof itself",
+            "function makeX<T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
+             export default (makeX as typeof makeX)<unknown>('div');",
+        ),
+        (
             "tagged factory, a props type names the tag | rendered | typeof itself",
             "interface ButtonProps extends React.ComponentProps<'button'> {}\n\
              function make<T>(tag: T, config: object): React.FC<Props> { return (props) => <div />; }\n\
@@ -1600,13 +1650,6 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
         };
         let loses = mappings(main).iter().any(|mapping| !mappings(&now).contains(mapping));
         let holds = match cast {
-            // Round 18: main dropped a component its tagged factory call declares (`FC<Props>`) because no props type
-            // names the tag; the claim now falls through to the factory call, as a cast of it did on main.
-            None if id == "tagged factory, no props type names the tag | rendered | plain"
-                || id == "generic wrapper, no type argument names props | rendered | plain" =>
-            {
-                !loses && now.contains("factoryResult")
-            }
             None => now == main,
             Some((row, _)) => {
                 let main_plain = base.get(format!("{row} | plain").as_str()).copied().unwrap_or(main);
@@ -1625,7 +1668,7 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    assert_eq!(read_as_the_plain_call, 61);
+    assert_eq!(read_as_the_plain_call, 44);
 }
 
 /// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing

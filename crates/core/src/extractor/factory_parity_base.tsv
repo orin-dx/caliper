@@ -155,6 +155,13 @@ tagged factory, no props type names the tag | rendered | typeof itself	Base:Prop
 tagged factory, no props type names the tag | rendered | any	Base:Props"functionDeclaration" | Button:make"factoryResult"
 tagged factory, a props type names the tag | rendered | plain	Base:Props"functionDeclaration" | Button:ButtonProps"taggedFactory"
 generic wrapper, no type argument names props | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props
+generic wrapper, no type argument names props | rendered | typeof itself	Base:Props"functionDeclaration" | Button:makeX"factoryResult"
+unusable payload | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is built from the factory payload 'Payload', whose `props` member is not a named type
+unusable payload | rendered | typeof itself	Base:Props"functionDeclaration" | Button:makeX"factoryResult"
+wrapper call before its component | rendered | plain	Base2:Props"functionDeclaration" | Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props
+wrapper call before its component | rendered | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration"
+anonymous default wrapper call | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a factory payload, which a tag-name argument needs
+anonymous default wrapper call | rendered | typeof itself	Base:Props"functionDeclaration"
 tagged factory, a props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult"
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression"
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument"

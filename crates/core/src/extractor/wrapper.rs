@@ -36,9 +36,6 @@ pub(crate) struct PendingWrapper {
     tag: Option<String>,
     type_args: Vec<WrapperTypeArg>,
     callee: Option<WrapperCallee>,
-    /// The call read as a factory call of its callee (`try_record_factory_call`), which the candidate falls through to
-    /// when its promotion finds no props type: the rule's claim on the call holds only once it can make a mapping.
-    fallback: Option<WrapperCallee>,
     rule: DetectionRule,
     description: String,
     tags: BTreeMap<String, String>,
@@ -138,6 +135,26 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// Whether this rule leaves the call, before any side effect, to the rules main ran after it (the alias deferral
+    /// and the factory rule), as main did: main read no callee name through an assertion, `satisfies` or `!`, so the
+    /// generic wrapper and tagged factory rules never claimed such a call there. Only a cast that keeps the callee's
+    /// type is left, since the factory rule reads that callee's declaration as main did; through one that replaces it,
+    /// whose declaration the factory rule withholds, the rule keeps the props the call's own type arguments name.
+    /// React's element and ref builders, by main's own predicates on the peeled callee, are left the same way
+    /// whatever the cast says: main read none through a cast, and they build no component (round 17).
+    fn left_to_the_factory_rule(&self, call: &CallExpression<'_>) -> bool {
+        if !super::component::wrapped_beyond_main(&call.callee) {
+            return false;
+        }
+        let peeled = super::component::called(call);
+        let builder = peeled.named().is_some_and(|callee| {
+            super::evidence::is_element_factory_callee(callee, self)
+                || matches!(callee, Expression::Identifier(id) if id.name == "createRef")
+                || matches!(callee, Expression::StaticMemberExpression(member) if member.property.name == "createRef")
+        });
+        builder || self.describes_call(&peeled)
+    }
+
     /// Record `const Name = callee<...>(first, ...)` as a candidate. Returns whether it was recorded.
     pub(super) fn try_record_wrapper_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
@@ -145,16 +162,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(type_arguments) = super::component::call_type_arguments(call) else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
         let creates_context = self.react_api(call) == Some(super::ReactApi::CreateContext);
-        // React's element and ref builders, by main's own predicates on the peeled callee: written as main read a
-        // callee (a name or a member, parentheses or not), the call is read exactly as main read it; written through
-        // an assertion, `satisfies` or `!`, which main read no callee through, it stays declined as main declined it,
-        // with main's skip.
-        let builder = super::component::callee_of(call).is_some_and(|peeled| {
-            super::evidence::is_element_factory_callee(peeled, &*self)
-                || matches!(peeled, Expression::Identifier(id) if id.name == "createRef")
-                || matches!(peeled, Expression::StaticMemberExpression(member) if member.property.name == "createRef")
-        });
-        if builder && super::component::wrapped_beyond_main(&call.callee) {
+        if self.left_to_the_factory_rule(call) {
             return false;
         }
         let needs_payload = match component_argument_evidence(creates_context, call, &*self) {
@@ -175,14 +183,12 @@ impl<'src> SourceDataCollector<'src> {
         // name the props: the candidate stays, without the callee.
         let callee = self.wrapper_callee(call);
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
-        let fallback = self.factory_callee(call, name);
         self.pending_wrappers.push(PendingWrapper {
             name: name.to_owned(),
             needs_payload,
             tag: None,
             type_args,
             callee,
-            fallback,
             rule: DetectionRule::WrapperTypeArgument,
             description,
             tags,
@@ -202,7 +208,9 @@ impl<'src> SourceDataCollector<'src> {
     ) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        if super::component::call_type_arguments(call).is_some() {
+        // Main's claim, as in `try_record_wrapper_call`: a callee written through an assertion, `satisfies` or `!` is
+        // left to the later rules.
+        if super::component::call_type_arguments(call).is_some() || self.left_to_the_factory_rule(call) {
             return false;
         }
         let [tag, config] = call.arguments.as_slice() else { return false };
@@ -225,14 +233,12 @@ impl<'src> SourceDataCollector<'src> {
             return false;
         }
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
-        let fallback = self.factory_callee(call, name);
         self.pending_wrappers.push(PendingWrapper {
             name: name.to_owned(),
             needs_payload: false,
             tag: tag_name,
             type_args: Vec::new(),
             callee: None,
-            fallback,
             rule: DetectionRule::TaggedFactory,
             description,
             tags,
@@ -276,8 +282,6 @@ impl<'src> SourceDataCollector<'src> {
             }
             if let Some(tag) = &pending.tag {
                 let Some((props_name, props_args)) = self.tagged_factory_props(&pending.name, tag, shared_tag) else {
-                    // The skip says why the tagged rule declined; the factory call may still list it from its callee's
-                    // result, and stays silent when the resolver finds none.
                     self.record_skip(
                         DiagnosticCode::SkippedCandidate,
                         format!(
@@ -286,15 +290,6 @@ impl<'src> SourceDataCollector<'src> {
                         ),
                         pending.span,
                     );
-                    if let Some(callee) = pending.fallback {
-                        self.push_factory_mapping(
-                            pending.name,
-                            callee,
-                            pending.description,
-                            pending.tags,
-                            pending.span,
-                        );
-                    }
                     continue;
                 };
                 self.data.component_mappings.push(
@@ -342,9 +337,6 @@ impl<'src> SourceDataCollector<'src> {
                     ),
                     pending.span,
                 );
-                if let Some(callee) = pending.fallback {
-                    self.push_factory_mapping(pending.name, callee, pending.description, pending.tags, pending.span);
-                }
                 continue;
             };
             let mut mapping = ComponentMapping::new(
@@ -528,31 +520,13 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_factory_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        let Some(callee) = self.factory_callee(call, name) else { return false };
-        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
-        // `const X = withX(Inner)` is also an alias of `Inner`, which may be declared further down the file.
-        self.try_defer_identifier_alias(name, decl.span);
-        self.pending_factory_calls.push(PendingFactoryCall {
-            name: name.to_owned(),
-            callee,
-            description,
-            tags,
-            span: decl.span,
-        });
-        true
-    }
-
-    /// The callee a call bound to `name` is a factory call of, when it can be one: a plain function, not React's own
-    /// API, an element builder or a constant's initializer, and not asserted to another type, whose declaration would
-    /// no longer describe the call.
-    fn factory_callee(&mut self, call: &CallExpression<'_>, name: &str) -> Option<WrapperCallee> {
         let peeled = super::component::called(call);
-        let Expression::Identifier(callee) = peeled.expr else { return None };
+        let Expression::Identifier(callee) = peeled.expr else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
         let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);
         if super::is_constant_name(name) || explained || element_builder || self.react_api(call).is_some() {
-            return None;
+            return false;
         }
         // The callee's declared result is what the resolver reads, so a callee asserted to another type is not one.
         // Unless the assertion says the call gives no component (`NotRenderable`), the binding may still be one, so
@@ -565,35 +539,22 @@ impl<'src> SourceDataCollector<'src> {
                     callee.name
                 ));
             }
-            return None;
+            return false;
         }
         let type_args = super::component::call_type_arguments(call)
             .map(|arguments| arguments.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect())
             .unwrap_or_default();
-        Some(WrapperCallee { name: callee.name.as_str().into(), type_args })
-    }
-
-    /// A component a factory call builds, its props read from the callee's result (`resolver::callee`).
-    fn push_factory_mapping(
-        &mut self,
-        name: String,
-        callee: WrapperCallee,
-        description: String,
-        tags: BTreeMap<String, String>,
-        span: Span,
-    ) {
-        self.data.component_mappings.push(
-            ComponentMapping::new(
-                name,
-                callee.name.clone(),
-                self.file_path.clone(),
-                span.start,
-                span.end,
-                DetectionRule::FactoryResult,
-            )
-            .with_wrapper_callee(callee)
-            .with_doc(description, tags),
-        );
+        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+        // `const X = withX(Inner)` is also an alias of `Inner`, which may be declared further down the file.
+        self.try_defer_identifier_alias(name, decl.span);
+        self.pending_factory_calls.push(PendingFactoryCall {
+            name: name.to_owned(),
+            callee: WrapperCallee { name: callee.name.as_str().into(), type_args },
+            description,
+            tags,
+            span: decl.span,
+        });
+        true
     }
 
     /// Turn the recorded factory calls into mappings, now that every alias in the file has had its chance.
