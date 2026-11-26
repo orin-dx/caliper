@@ -467,7 +467,8 @@ fn an_answer_holds_only_while_every_file_it_could_not_read_is_unchanged() {
     let retry = at(start + DEGRADED_RETRY, 0);
     let clock: Clock = Arc::new(move || retry.at);
     let recovered = load_timed(vec![demand.clone()], &options, Some(&first), Retry::Due(retry), stamp(retry, 3), clock);
-    assert!(recovered.is_dependency_file(&one), "the retry loads the file it read again");
+    assert!(!recovered.is_dependency_file(&one), "a search that could not read `two` loads nothing");
+    assert_eq!(recovered.provisional_files(), [&one], "it serves the file it read again");
     let latest = recovered.footprint(&recovered.unread(std::slice::from_ref(&demand))).unwrap();
     assert!(recovered.footprint_holds(&latest, retry), "the walk's latest mark alone still looks unexpired");
     assert!(!recovered.footprint_holds(&footprint, retry), "the earlier answer does not hold: one of its files reads");
@@ -736,6 +737,54 @@ fn an_augmentation_past_an_unreadable_file_is_kept() {
     assert_eq!(names(&session.component("Box")), names(&fresh.component("Box")));
     assert_eq!(names(&session.component("Box")), while_unread, "the complete search adds nothing stale");
     assert!(session.component("Box") == fresh.component("Box"));
+}
+
+/// Two unreadable re-exports ahead of `mid`, which re-exports `late`, an augmentation of React. With both unreadable
+/// the search serves `late`; once `bad1` reads, its 64 files fill the search's bound first, and once `bad2` reads the
+/// search is complete without `late`. After each recovery and an edit, `Box` equals a fresh run: what an earlier
+/// search served is never kept, since nothing it served was indexed.
+#[test]
+fn each_search_of_a_module_serves_only_what_it_read() {
+    let fillers: String = (0..64).map(|n| format!("export * from './f{n}';\n")).collect();
+    let mut files: Vec<(String, String)> = vec![
+        (
+            "node_modules/scan-kit/package.json".into(),
+            r#"{ "name": "scan-kit", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
+        ),
+        (
+            "node_modules/scan-kit/index.d.ts".into(),
+            "export * from './bad1';\nexport * from './bad2';\nexport * from './mid';\n".into(),
+        ),
+        ("node_modules/scan-kit/mid.d.ts".into(), "export * from './late';\n".into()),
+        ("node_modules/scan-kit/late.d.ts".into(), AUGMENTATION.into()),
+        ("src/setup.ts".into(), "import * as Scan from 'scan-kit';\nexport const scan = Scan;\n".into()),
+        ("src/box/Box.tsx".into(), BOX.into()),
+        ("src/plain/Plain.tsx".into(), "export function Plain(props: { title: string }) { return null; }\n".into()),
+    ];
+    files
+        .extend((0..64).map(|n| (format!("node_modules/scan-kit/f{n}.d.ts"), format!("export interface F{n} {{}}\n"))));
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = react_project(&files);
+    let (bad1, bad2) = (root.join("node_modules/scan-kit/bad1.d.ts"), root.join("node_modules/scan-kit/bad2.d.ts"));
+    std::fs::write(&bad1, UNREADABLE).unwrap();
+    std::fs::write(&bad2, UNREADABLE).unwrap();
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    let fresh = || {
+        let fresh = WatchSession::new(react_options(&root));
+        drop(fresh.initialize());
+        fresh.component("Box")
+    };
+    assert!(names(&session.component("Box")).contains(&"tw".to_owned()), "both unreadable: `late` is served");
+    assert!(session.component("Box") == fresh());
+    std::fs::write(&bad1, &fillers).unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+    assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "`bad1`'s files come first: no `late`");
+    assert!(session.component("Box") == fresh());
+    std::fs::write(&bad2, "export interface Bad2 {}\n").unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+    assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "complete: no `late`");
+    assert!(session.component("Box") == fresh());
 }
 
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type

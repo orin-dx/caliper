@@ -1814,6 +1814,8 @@ type Answers = (
 fn answers(layer: &DependencyLayer, root: &Utf8Path, demands: &[Demand]) -> Answers {
     let mut files: Vec<PathKey> =
         layer.chain().flat_map(|layer| layer.files.iter().chain(&layer.react_files).cloned()).collect();
+    // What answers read: the provisional augmentations are served, not loaded.
+    files.extend(layer.provisional_files().into_iter().map(|file| PathKey::from(file.as_path())));
     files.sort();
     let dir = |demand: &Demand| demand.from.parent().unwrap().to_owned();
     let augmenters = |module: &str| layer.augmenters_of(&PathKey::from(root.join(module).as_path())).cloned();
@@ -1909,7 +1911,7 @@ fn a_file_that_could_not_be_read_is_read_again_by_the_next_load_on_every_path() 
         assert!(lost.iter().all(|lost| expected.1.contains(lost)), "{path:?}: the oracle loads {lost:?}: {expected:?}");
         let (covered, files, reasons, ..) = answers(&failed, &root, &demands);
         let kept: Vec<PathKey> = expected.1.iter().filter(|file| !lost.contains(file)).cloned().collect();
-        assert_eq!(files, kept, "{path:?}: what was read is loaded, and only that");
+        assert_eq!(files, kept, "{path:?}: what was read is served, and only that");
         assert!(!covered, "{path:?}: the demand is not counted as followed");
         assert_eq!(reasons, vec![None; demands.len()], "{path:?}: no reason for a name not looked up");
         assert_eq!(answers(&session, &root, &demands), expected, "{path:?}: the session's next load");

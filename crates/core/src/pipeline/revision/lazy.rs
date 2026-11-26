@@ -118,7 +118,7 @@ impl Engine {
         react_types: &Option<Arc<NamedTypeIndex>>,
     ) -> Engine {
         let named_types = match &layer {
-            Some(layer) => Arc::new(named_types.with_fallback(layer.named_types.clone())),
+            Some(layer) => Arc::new(named_types.with_fallback(layer.served_types())),
             None => named_types.clone(),
         };
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
@@ -769,7 +769,7 @@ impl Revision {
         lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
         // rebuilding them for every growth was most of what a session reading across a project spent.
-        let named_types = Arc::new(self.named_types.with_fallback(extended.named_types.clone()));
+        let named_types = Arc::new(self.named_types.with_fallback(extended.served_types()));
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
         // What the load added that declares into React (an augmentation a retry read, React's own types) changes what
         // every resolution that reads React's augmentations sees, whichever files it recorded.
@@ -1192,6 +1192,96 @@ mod read_retry_tests {
     #[test]
     fn a_component_reading_augmentations_waits_on_the_shared_augmentation_walks() {
         shared_augmentation_scenario();
+    }
+
+    /// A retry that serves other provisional augmentations while the layer's counts stay as they were: `aug-kit`
+    /// re-exports `one`, `two` and `three`, each augmenting `AriaAttributes`. While `one` and `two` cannot be read,
+    /// `three` is served; once `one` reads, `one` and `three` are, still provisionally (`two` does not), so nothing is
+    /// indexed; once `two` reads, all three are indexed. Each component equals a cold run at each step.
+    #[test]
+    fn a_retry_that_serves_other_provisional_augmentations_is_a_change() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let augmentation = |attribute: &str| {
+            format!(
+                "import type {{}} from 'react';\n\
+                 declare module 'react' {{ interface AriaAttributes {{ '{attribute}'?: string }} }}\n"
+            )
+        };
+        let aria = |name: &str| {
+            format!(
+                "import * as React from 'react';\ninterface {name}Props extends React.AriaAttributes {{ own?: boolean }}\n\
+                 export const {name} = (props: {name}Props) => <div />;\n"
+            )
+        };
+        let first = aria("First");
+        // `Second` also reads a package `First` does not, so asking for it grows the layer.
+        let second = "import * as React from 'react';\nimport type { OtherProps } from 'other-kit';\n\
+                      interface SecondProps extends React.AriaAttributes, OtherProps { own?: boolean }\n\
+                      export const Second = (props: SecondProps) => <div />;\n"
+            .to_owned();
+        let bodies = ["one", "two", "three"].map(|name| augmentation(&format!("aria-{name}")));
+        let files = [
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            (
+                "node_modules/aug-kit/index.d.ts",
+                "export * from './one';\nexport * from './two';\nexport * from './three';\n",
+            ),
+            ("node_modules/aug-kit/one.d.ts", bodies[0].as_str()),
+            ("node_modules/aug-kit/two.d.ts", bodies[1].as_str()),
+            ("node_modules/aug-kit/three.d.ts", bodies[2].as_str()),
+            (
+                "node_modules/other-kit/package.json",
+                r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/other-kit/index.d.ts", "export interface OtherProps { other?: string }\n"),
+            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
+            ("src/first/First.tsx", first.as_str()),
+            ("src/second/Second.tsx", second.as_str()),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let options = |use_cache| PipelineOptions {
+            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
+            ..options(&root, use_cache)
+        };
+        let (one, two) = (root.join("node_modules/aug-kit/one.d.ts"), root.join("node_modules/aug-kit/two.d.ts"));
+        let cold = |name: &str| Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
+        let served = |answer: &ComponentAnswer| -> Vec<String> {
+            let names = ["aria-one", "aria-two", "aria-three"];
+            props(answer).into_iter().filter(|prop| names.contains(&prop.as_str())).collect()
+        };
+        std::fs::write(&one, [0xff; 8]).unwrap();
+        std::fs::write(&two, [0xff; 8]).unwrap();
+        let revision = Revision::cold_lazy(&options(true), 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        for name in ["First", "Second"] {
+            // `Second` grows the layer before any retry is due: what `First`'s load served is served still.
+            let answer = revision.lazy_component(&options(true), name).unwrap();
+            assert_eq!(served(&answer), ["aria-three"], "{name}");
+            assert!(answer == cold(name), "{name}");
+        }
+        let steps = [(&one, &bodies[0], ["aria-one", "aria-three"].as_slice()), (&two, &bodies[1], &[])];
+        for (step, (file, body, expected)) in steps.into_iter().enumerate() {
+            std::fs::write(file, body).unwrap();
+            set_clock(&revision, start + DEGRADED_RETRY * (step as u32 + 1));
+            for name in ["First", "Second"] {
+                let answer = revision.lazy_component(&options(true), name).unwrap();
+                let cold = cold(name);
+                if !expected.is_empty() {
+                    assert_eq!(served(&answer), expected, "step {step}, {name}");
+                }
+                assert_eq!(served(&cold), served(&answer), "step {step}, {name}");
+                assert!(answer == cold, "step {step}, {name}");
+            }
+        }
     }
 
     /// Full HTML mode: two props interfaces extend `React.AriaAttributes`, whose augmentation (imported only by

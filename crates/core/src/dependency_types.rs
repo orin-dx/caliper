@@ -37,6 +37,8 @@ type FxDashSet<K> = DashSet<K, FxBuildHasher>;
 /// demand of the scope, whose key it holds, has searched them; incomplete when the search could not read a file, for
 /// every demand of the scope.
 type ModuleCell = Arc<OnceLock<(DemandKey, Partial<Vec<(Utf8PathBuf, Arc<SourceData>)>>)>>;
+/// The augmenting files an incomplete search read, parsed.
+type ProvisionalFiles = Arc<[(Utf8PathBuf, Arc<SourceData>)]>;
 
 /// A file's data, read and parsed once per load whoever asks first, a failed read included (`Loader::parse_source`).
 type ParseCell = Arc<OnceLock<Result<Option<Arc<SourceData>>, ReadFailed>>>;
@@ -389,11 +391,13 @@ pub(crate) struct DependencyLayer {
     react_files: FxHashSet<PathKey>,
     /// Each module a demand reached, with the files its re-exports lead to that augment React.
     augmenters: FxHashMap<PathKey, Vec<Utf8PathBuf>>,
-    /// Each module whose search could not read a file, with the augmenting files it found among those it read: loaded
-    /// for now, until the module's complete search replaces them ([`withdrawn_augmentations`]).
-    provisional_augmenters: FxHashMap<PathKey, Vec<Utf8PathBuf>>,
-    /// Whether this layer left out files the chain loaded as augmentations, which a complete search no longer leads to.
-    withdrew_react_declarations: bool,
+    /// Each module whose latest augmentation search could not read a file, with the augmenting files it read: served
+    /// to answers ([`DependencyLayer::served_types`]) but never indexed, never loaded and never written, so nothing
+    /// they hold outlives the module's next search, complete or not.
+    provisional: FxHashMap<PathKey, ProvisionalFiles>,
+    /// `named_types`, with the provisional augmentations over it when there are any: what answers read. A load over
+    /// this layer builds on `named_types` alone.
+    served_types: Arc<NamedTypeIndex>,
     demands: FxHashSet<DemandKey>,
     unresolved: FxHashMap<DemandKey, Unresolved>,
     /// The `(file, name)` declarations whose references were followed.
@@ -445,14 +449,26 @@ impl DependencyLayer {
 
     /// Whether this layer, extended from `previous`, changed what declares into the `React` namespace (React's own
     /// types or an augmentation of them, which every answer that reads React's augmentations depends on): it holds a
-    /// file that does that `previous` did not, or it left out one `previous` held. A flatten copies the chain's files;
-    /// those are not additions.
+    /// file that does that `previous` did not, or it serves other provisional augmentations. A flatten copies the
+    /// chain's files; those are not additions.
     pub(crate) fn changes_react_declarations(&self, previous: &DependencyLayer) -> bool {
-        self.withdrew_react_declarations
+        self.provisional_files() != previous.provisional_files()
             || self.files.iter().any(|file| {
                 let file = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
                 self.named_types.declares_react_namespace(file) && !previous.is_dependency_file(file)
             })
+    }
+
+    /// The index answers read: the layer's, with the augmentations an incomplete search read over it.
+    pub(crate) fn served_types(&self) -> Arc<NamedTypeIndex> {
+        self.served_types.clone()
+    }
+
+    pub(crate) fn provisional_files(&self) -> Vec<&Utf8PathBuf> {
+        let mut files: Vec<&Utf8PathBuf> =
+            self.provisional.values().flat_map(|files| files.iter().map(|(file, _)| file)).collect();
+        files.sort();
+        files
     }
 
     pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
@@ -506,10 +522,6 @@ impl DependencyLayer {
         self.chain().find_map(|layer| layer.augmenters.get(module))
     }
 
-    fn provisional_augmenters_of(&self, module: &PathKey) -> Option<&Vec<Utf8PathBuf>> {
-        self.chain().find_map(|layer| layer.provisional_augmenters.get(module))
-    }
-
     fn has_react_file(&self, file: &str) -> bool {
         self.chain().any(|layer| layer.react_files.contains(file))
     }
@@ -541,10 +553,12 @@ impl DependencyLayer {
     }
 
     /// Whether `other`, a layer this one was extended from, resolves every name the way this one does: extending only
-    /// adds, so equal counts mean nothing was added. A partial mapping counts only where it differs from the chain's.
+    /// adds, so equal counts mean nothing was added. A partial mapping counts only where it differs from the chain's;
+    /// provisional augmentations are not counted, so they are compared.
     pub(crate) fn resolves_like(&self, other: &DependencyLayer) -> bool {
         let (a, b) = (self.totals, other.totals);
-        a.files == b.files
+        self.provisional_files() == other.provisional_files()
+            && a.files == b.files
             && a.react_files == b.react_files
             && a.exports == b.exports
             && a.partial_exports == b.partial_exports
@@ -591,7 +605,7 @@ struct Loader<'a> {
     declaring: FxDashSet<PathKey>,
     react_files: FxDashSet<PathKey>,
     augmenters: FxDashMap<PathKey, Vec<Utf8PathBuf>>,
-    provisional_augmenters: FxDashMap<PathKey, Vec<Utf8PathBuf>>,
+    provisional: FxDashMap<PathKey, ProvisionalFiles>,
     /// For each module in `augmenters`, the stamps of the other packages its search read files from.
     augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
@@ -639,7 +653,7 @@ impl<'a> Loader<'a> {
             declaring: DashSet::default(),
             react_files: DashSet::default(),
             augmenters: DashMap::default(),
-            provisional_augmenters: DashMap::default(),
+            provisional: DashMap::default(),
             augmenter_crossed: DashMap::default(),
             demands: DashSet::default(),
             ledger: LedgerBuilder::new(parent),
@@ -1049,7 +1063,7 @@ impl Loader<'_> {
     /// Directories with the same resolution scope resolve a specifier to the same module, so the first of them to ask
     /// resolves it, finds and reads the files that augment React, and loads their declarations; the rest wait for the
     /// files and ask nothing, and reach what the first reached. A file the search could not read leaves every demand of
-    /// the scope incomplete alike, and the augmentations of the files it did read are loaded all the same.
+    /// the scope incomplete alike, and the augmentations of the files it did read are provisional: served, not loaded.
     fn module_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand, node: &Node) -> Partial<()> {
         let dir = demand.from.parent().map_or("", Utf8Path::as_str);
         let key = (self.resolution_scope(dir), demand.specifier.clone());
@@ -1060,7 +1074,8 @@ impl Loader<'_> {
             (demand.key(), self.search_module(demand))
         });
         let loaded = match first {
-            true => self.load_augmentations(scope, &augmenting.value, node),
+            true if augmenting.unread.is_empty() => self.load_augmentations(scope, &augmenting.value, node),
+            true => Partial::DONE,
             false => {
                 self.ledger.reached(node, Node::Demand(searched_by.clone()));
                 Partial::DONE
@@ -1086,6 +1101,9 @@ impl Loader<'_> {
                 Err(ReadFailed(file)) => unread.push(file),
             }
         }
+        if !unread.is_empty() {
+            self.provisional.insert(PathKey::from(module.as_path()), Arc::from(parsed.as_slice()));
+        }
         Partial { value: parsed, unread }
     }
 
@@ -1108,8 +1126,8 @@ impl Loader<'_> {
     /// (`declare module "react" { ... }`): TypeScript reads them whenever the program reaches the file, whether or not
     /// a name from them is used. The search is bounded ([`AUGMENTATION_SCAN_FILES`]), breadth first in source order,
     /// so the answer for a module is the same on any thread; it is kept, in the layer and in the index on disk, unless
-    /// the search could not read a file: then the files found among those read are provisional, loaded until the
-    /// module's complete search, which may not reach them (the unread file's re-exports come first), replaces them.
+    /// the search could not read a file: then the files found among those read are provisional, since the complete
+    /// search may not reach them (the unread file's re-exports come first in the bounded order).
     fn augmenting_files(&self, module: &Utf8Path) -> Partial<Vec<Utf8PathBuf>> {
         let key = PathKey::from(module);
         let known = self.augmenters.get(&key).map(|files| files.clone());
@@ -1122,8 +1140,6 @@ impl Loader<'_> {
             self.augmenter_crossed.insert(key, crossed);
             // An empty answer is persisted too, or the next run would scan the module's re-exports again.
             module.parent().inspect(|dir| self.learn(dir));
-        } else {
-            self.provisional_augmenters.insert(key, files.clone());
         }
         Partial { value: files, unread }
     }
@@ -1467,41 +1483,20 @@ pub(crate) fn load_timed(
 }
 
 /// The loader behind every `load` function: `timing` is when walks are followed again and how failed reads are
-/// stamped and timed. When a complete search replaces a provisional one that loaded augmentations it no longer leads
-/// to, the load runs again as a flatten that leaves them out: the chain below still holds them.
+/// stamped and timed.
 fn load_with(
     demands: Vec<Demand>,
     options: &PipelineOptions,
     previous: Option<&Arc<DependencyLayer>>,
-    timing: (Retry, Stamp, Clock),
-) -> DependencyLayer {
-    let provisional = previous.is_some_and(|layer| layer.chain().any(|layer| !layer.provisional_augmenters.is_empty()));
-    let again = provisional.then(|| demands.clone());
-    let (layer, withdrawn) = load_layer(demands, options, previous, timing.clone(), None);
-    match again {
-        Some(demands) if !withdrawn.is_empty() => load_layer(demands, options, previous, timing, Some(&withdrawn)).0,
-        _ => layer,
-    }
-}
-
-/// One load over `previous`, and the augmentations it found withdrawn. With `withdraw`, a flatten that leaves those
-/// files out.
-fn load_layer(
-    demands: Vec<Demand>,
-    options: &PipelineOptions,
-    previous: Option<&Arc<DependencyLayer>>,
     (retry, stamp, clock): (Retry, Stamp, Clock),
-    withdraw: Option<&FxHashSet<PathKey>>,
-) -> (DependencyLayer, FxHashSet<PathKey>) {
-    let withdrawn = |file: &PathKey| withdraw.is_some_and(|files| files.contains(file));
+) -> DependencyLayer {
     // Its own resolvers, never another consumer's: `oxc_resolver` keeps a config reached through another's
     // `references` without that config's own references, so a shared cache would make what this load resolves depend
     // on what was resolved first.
     let resolvers = &ModuleResolvers::new(options);
     let project_dirs: Vec<Utf8PathBuf> =
         options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
-    let parent: Option<Arc<DependencyLayer>> =
-        previous.filter(|layer| withdraw.is_none() && layer.depth < MAX_CHAIN_DEPTH).cloned();
+    let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
     let flatten = previous.filter(|_| parent.is_none());
     let mut loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
     loader.ledger.retry = retry;
@@ -1535,13 +1530,13 @@ fn load_layer(
                 for key in &layer.demands {
                     loader.demands.insert(key.clone());
                 }
-                for key in layer.claimed.iter().filter(|(file, _)| !withdrawn(file)) {
+                for key in &layer.claimed {
                     loader.claimed.insert(key.clone());
                 }
                 for (key, reason) in &layer.unresolved {
                     loader.unresolved.insert(key.clone(), *reason);
                 }
-                for file in layer.files.iter().filter(|file| !withdrawn(file)) {
+                for file in &layer.files {
                     loader.declaring.insert(file.clone());
                 }
                 for file in &layer.react_files {
@@ -1549,9 +1544,6 @@ fn load_layer(
                 }
                 for (module, files) in &layer.augmenters {
                     loader.augmenters.insert(module.clone(), files.clone());
-                }
-                for (module, files) in &layer.provisional_augmenters {
-                    loader.provisional_augmenters.insert(module.clone(), files.clone());
                 }
                 loader.ledger.inherit(&layer.ledger);
                 // The demands a panic covered stay unanswered in the flattened layer, so its report stays too.
@@ -1577,10 +1569,6 @@ fn load_layer(
     {
         write_index(path, &loader);
     }
-    let found_withdrawn = match (withdraw, previous) {
-        (None, Some(previous)) => withdrawn_augmentations(&loader, previous),
-        _ => FxHashSet::default(),
-    };
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();
     files.sort();
@@ -1608,6 +1596,39 @@ fn load_layer(
         component_positions.entry(CompactString::from(mapping.binding_name())).or_default().push(position);
     }
     let named_types = Arc::new(named);
+    // The provisional augmentations: this load's incomplete searches, and `previous`'s for the modules this load did
+    // not search again. A module's newest search replaces what an older one read.
+    let mut provisional: FxHashMap<PathKey, ProvisionalFiles> = previous
+        .map(|layer| {
+            let searched =
+                |module: &PathKey| loader.augmenters.contains_key(module) || loader.provisional.contains_key(module);
+            layer
+                .provisional
+                .iter()
+                .filter(|(module, _)| !searched(module))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    provisional.extend(std::mem::take(&mut loader.provisional));
+    let served_types = match provisional.is_empty() {
+        true => named_types.clone(),
+        false => {
+            let mut over = NamedTypeIndex::default();
+            over.fallback = Some(named_types.clone());
+            let mut modules: Vec<&ProvisionalFiles> = provisional.values().collect();
+            modules.sort_by(|a, b| a.iter().map(|(file, _)| file).cmp(b.iter().map(|(file, _)| file)));
+            let mut merged: FxHashSet<&Utf8PathBuf> = FxHashSet::default();
+            for (file, data) in modules.into_iter().flat_map(|files| files.iter()) {
+                let indexed = loader.declaring.contains(file.as_str())
+                    || parent.as_ref().is_some_and(|layer| layer.is_dependency_file(file));
+                if !indexed && merged.insert(file) {
+                    over.merge_file(data);
+                }
+            }
+            Arc::new(over)
+        }
+    };
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
     // declarations stay out of `named_types`.
     let react_files: FxHashSet<PathKey> = loader.react_files.iter().map(|file| file.clone()).collect();
@@ -1645,7 +1666,7 @@ fn load_layer(
         resolutions: below.resolutions + resolutions.len(),
         unresolved: below.unresolved + unresolved.len(),
     };
-    let layer = DependencyLayer {
+    DependencyLayer {
         depth: parent.as_ref().map_or(0, |layer| layer.depth + 1),
         parent: parent.clone(),
         totals,
@@ -1658,8 +1679,8 @@ fn load_layer(
         files,
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
-        provisional_augmenters: loader.provisional_augmenters.into_iter().collect(),
-        withdrew_react_declarations: withdraw.is_some_and(|files| !files.is_empty()),
+        provisional,
+        served_types,
         partial_exports,
         // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer
         // follows it again.
@@ -1674,53 +1695,7 @@ fn load_layer(
         unread_walk_builds: std::sync::atomic::AtomicUsize::new(0),
         #[cfg(test)]
         reads: loader.reads.iter().map(|entry| *entry.value()).sum(),
-    };
-    (layer, found_withdrawn)
-}
-
-/// The files `previous` loaded as provisional augmentations of a module whose complete search, this load's, no longer
-/// leads to them, and that nothing else keeps: no complete search, no search still provisional, and no export a walk
-/// mapped to the file. A partial search may pass a file a complete one never reaches: the unread file's re-exports
-/// come first in the bounded order, so the complete search's set replaces the partial one's, never adds to it.
-fn withdrawn_augmentations(loader: &Loader, previous: &DependencyLayer) -> FxHashSet<PathKey> {
-    let mut candidates: FxHashSet<PathKey> = FxHashSet::default();
-    for entry in loader.augmenters.iter() {
-        if previous.augmenters_of(entry.key()).is_some() {
-            continue;
-        }
-        if let Some(provisional) = previous.provisional_augmenters_of(entry.key()) {
-            let dropped = provisional.iter().filter(|file| !entry.value().contains(file));
-            candidates.extend(dropped.map(|file| PathKey::from(file.as_path())));
-        }
     }
-    if candidates.is_empty() {
-        return candidates;
-    }
-    let complete =
-        |module: &PathKey| loader.augmenters.contains_key(module) || previous.augmenters_of(module).is_some();
-    let mut kept: FxHashSet<PathKey> = FxHashSet::default();
-    let mut keep = |files: &[Utf8PathBuf]| kept.extend(files.iter().map(|file| PathKey::from(file.as_path())));
-    for entry in loader.augmenters.iter() {
-        keep(entry.value());
-    }
-    for entry in loader.provisional_augmenters.iter().filter(|entry| !complete(entry.key())) {
-        keep(entry.value());
-    }
-    for layer in previous.chain() {
-        layer.augmenters.values().for_each(|files| keep(files));
-        let open = layer.provisional_augmenters.iter().filter(|(module, _)| !complete(module));
-        open.for_each(|(_, files)| keep(files));
-    }
-    let mapped =
-        |found: &Option<(Utf8PathBuf, CompactString)>| found.as_ref().map(|(file, _)| PathKey::from(file.as_path()));
-    kept.extend(loader.exports.iter().filter_map(|entry| mapped(entry.value())));
-    kept.extend(loader.partial_exports.iter().filter_map(|entry| mapped(entry.value())));
-    for layer in previous.chain() {
-        kept.extend(layer.exports.iter().filter_map(|(_, found)| mapped(found)));
-        kept.extend(layer.partial_exports.values().filter_map(mapped));
-    }
-    candidates.retain(|file| !kept.contains(file));
-    candidates
 }
 
 // ─── The persisted index ───────────────────────────────────────────

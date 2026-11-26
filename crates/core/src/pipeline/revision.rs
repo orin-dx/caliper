@@ -522,7 +522,7 @@ impl Revision {
                 // What the load added that declares into React (a retry that read an augmentation) can change every
                 // answer that reads React's augmentations, whichever file it was.
                 react_namespace |= extended.changes_react_declarations(layer);
-                named_types.fallback = Some(extended.named_types.clone());
+                named_types.fallback = Some(extended.served_types());
                 dependencies = Some(Arc::new(extended));
             }
         }
@@ -603,7 +603,7 @@ impl Revision {
         let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
         let global = Arc::new(global);
         let mut named_types = NamedTypeIndex::build(&global);
-        named_types.fallback = dependencies.as_ref().map(|layer| layer.named_types.clone());
+        named_types.fallback = dependencies.as_ref().map(|layer| layer.served_types());
         let named_types = Arc::new(named_types);
         let ambient_global_files = crate::resolver::compute_ambient_global_files(options);
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
