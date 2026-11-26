@@ -1494,6 +1494,40 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         ),
         // OXC 0.158 moved these type arguments onto the call, so main read the callee as written plainly.
         ("an instantiation in parentheses", "export const Button = (React.createElement<Props>)(Base);"),
+        // Round 18: a call given a tag and a config object, to a factory whose declared result is the component.
+        (
+            "tagged factory, no props type names the tag | rendered | plain",
+            "function make<T>(tag: T, config: object): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = make('button', {});",
+        ),
+        (
+            "tagged factory, no props type names the tag | rendered | typeof itself",
+            "function make<T>(tag: T, config: object): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = (make as typeof make)('button', {});",
+        ),
+        (
+            "tagged factory, no props type names the tag | rendered | any",
+            "function make<T>(tag: T, config: object): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = (make as any)('button', {});",
+        ),
+        (
+            "tagged factory, a props type names the tag | rendered | plain",
+            "interface ButtonProps extends React.ComponentProps<'button'> {}\n\
+             function make<T>(tag: T, config: object): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = make('button', {});",
+        ),
+        // The same slip in the generic wrapper rule: its type arguments name no props type, its callee declares one.
+        (
+            "generic wrapper, no type argument names props | rendered | plain",
+            "function makeX<E, T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = makeX<HTMLDivElement, Other>('div');",
+        ),
+        (
+            "tagged factory, a props type names the tag | rendered | typeof itself",
+            "interface ButtonProps extends React.ComponentProps<'button'> {}\n\
+             function make<T>(tag: T, config: object): React.FC<Props> { return (props) => <div />; }\n\
+             export const Button = (make as typeof make)('button', {});",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -1556,11 +1590,32 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
         let now = factory_parity_output(source);
         let main = base.get(id.as_str()).copied().unwrap_or("not in the base table");
         let cast = id.rsplit_once(" | ").filter(|(_, cast)| *cast != "plain");
+        // A component main listed that this head does not: never allowed, whatever main's plain call gives.
+        let mappings = |output: &str| -> Vec<String> {
+            output
+                .split(" | ")
+                .filter(|line| !line.starts_with("Info "))
+                .filter_map(|line| line.split_once(':').map(|(name, _)| name.to_owned()))
+                .collect()
+        };
+        let loses = mappings(main).iter().any(|mapping| !mappings(&now).contains(mapping));
         let holds = match cast {
+            // Round 18: main dropped a component its tagged factory call declares (`FC<Props>`) because no props type
+            // names the tag; the claim now falls through to the factory call, as a cast of it did on main.
+            None if id == "tagged factory, no props type names the tag | rendered | plain"
+                || id == "generic wrapper, no type argument names props | rendered | plain" =>
+            {
+                !loses && now.contains("factoryResult")
+            }
             None => now == main,
             Some((row, _)) => {
                 let main_plain = base.get(format!("{row} | plain").as_str()).copied().unwrap_or(main);
-                now == main || (main != main_plain && now == main_plain)
+                // The same components as main, or main's plain call where main read no callee through the cast. A
+                // tagged claim that falls through keeps its skip beside the factory's component (round 18).
+                let components = |output: &str| -> Vec<String> {
+                    output.split(" | ").filter(|line| !line.starts_with("Info ")).map(str::to_owned).collect()
+                };
+                components(&now) == components(main) || (main != main_plain && now == main_plain && !loses)
             }
         };
         if !holds {
@@ -1570,7 +1625,7 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    assert_eq!(read_as_the_plain_call, 56);
+    assert_eq!(read_as_the_plain_call, 61);
 }
 
 /// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing

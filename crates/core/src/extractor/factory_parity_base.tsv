@@ -150,6 +150,12 @@ finding: a builder aliased under a withX name	Button:Props"functionDeclaration"
 finding: a parameter shadowing an alias of the builder	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 finding: a var in a block, used after it	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression"
 an instantiation in parentheses	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument"
+tagged factory, no props type names the tag | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is built from a tag and a config object, but no props type declared in this file gives the tag "button"
+tagged factory, no props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult"
+tagged factory, no props type names the tag | rendered | any	Base:Props"functionDeclaration" | Button:make"factoryResult"
+tagged factory, a props type names the tag | rendered | plain	Base:Props"functionDeclaration" | Button:ButtonProps"taggedFactory"
+generic wrapper, no type argument names props | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props
+tagged factory, a props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult"
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression"
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument"
 an element built from forwardRef, plain	Button:Props"forwardRef"
