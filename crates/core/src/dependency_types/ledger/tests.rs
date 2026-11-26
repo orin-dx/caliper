@@ -639,6 +639,75 @@ fn a_healthy_layer_reports_failed_reads_without_iterating_the_live_demands() {
     assert_eq!(visited.get(), 1000);
 }
 
+/// An augmentation search past its file bound: the package's barrel re-exports `bad` (64 files once it reads) and
+/// `mid`, which re-exports `late`, an augmentation of React. While `bad` cannot be read, the search reaches `late`;
+/// once it reads, `bad`'s files fill the bound first and a fresh run never reaches `late`. The eager session never
+/// keeps `late`: after `bad` reads and an unrelated edit follows, `Box` equals a fresh run, without `tw`.
+#[test]
+fn an_augmentation_a_partial_search_reached_past_its_bound_is_not_kept() {
+    let fillers: String = (0..64).map(|n| format!("export * from './f{n}';\n")).collect();
+    let mut files: Vec<(String, String)> = vec![
+        (
+            "node_modules/scan-kit/package.json".into(),
+            r#"{ "name": "scan-kit", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
+        ),
+        ("node_modules/scan-kit/index.d.ts".into(), "export * from './bad';\nexport * from './mid';\n".into()),
+        ("node_modules/scan-kit/mid.d.ts".into(), "export * from './late';\n".into()),
+        ("node_modules/scan-kit/late.d.ts".into(), AUGMENTATION.into()),
+        ("src/setup.ts".into(), "import * as Scan from 'scan-kit';\nexport const scan = Scan;\n".into()),
+        ("src/box/Box.tsx".into(), BOX.into()),
+        ("src/plain/Plain.tsx".into(), "export function Plain(props: { title: string }) { return null; }\n".into()),
+    ];
+    files
+        .extend((0..64).map(|n| (format!("node_modules/scan-kit/f{n}.d.ts"), format!("export interface F{n} {{}}\n"))));
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = react_project(&files);
+    let bad = root.join("node_modules/scan-kit/bad.d.ts");
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    std::fs::write(&bad, &fillers).unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+
+    let fresh = WatchSession::new(react_options(&root));
+    drop(fresh.initialize());
+    assert!(!names(&fresh.component("Box")).contains(&"tw".to_owned()), "a fresh run's search stops before `late`");
+    assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "the partial search's `late` is not kept");
+    assert!(session.component("Box") == fresh.component("Box"));
+}
+
+/// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
+/// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
+/// augmentation did add one.
+#[test]
+fn a_flatten_adds_no_react_declaration_it_only_copied() {
+    let (_tmp, root) = react_project(&[("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n")]);
+    std::fs::write(root.join("node_modules/aug-kit/index.d.ts"), AUGMENTATION).unwrap();
+    write(
+        &root,
+        "node_modules/other-kit/package.json",
+        r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+    );
+    let other: String = (0..=MAX_CHAIN_DEPTH).map(|n| format!("export interface O{n} {{ o{n}: string }}\n")).collect();
+    write(&root, "node_modules/other-kit/index.d.ts", &other);
+    let options = react_options(&root);
+    let setup = Demand { from: root.join("src/setup.ts"), specifier: "aug-kit".into(), name: "".into() };
+    let other = |n: usize| Demand {
+        from: root.join("src/setup.ts"),
+        specifier: "other-kit".into(),
+        name: format!("O{n}").into(),
+    };
+    let empty = Arc::new(load(vec![other(0)], &options, None));
+    let mut layer = Arc::new(load(vec![setup], &options, Some(&empty)));
+    assert!(layer.adds_react_declarations(&empty), "the load that read the augmentation added it");
+    for n in 1..MAX_CHAIN_DEPTH {
+        layer = Arc::new(load(vec![other(n)], &options, Some(&layer)));
+    }
+    let flattened = load(vec![other(MAX_CHAIN_DEPTH)], &options, Some(&layer));
+    assert!(flattened.parent.is_none(), "the depth limit flattened the chain");
+    assert!(!flattened.adds_react_declarations(&layer), "copied, not added");
+}
+
 /// The eager revision: `Card` sits behind a file that could not be read, which then reads on disk, and `Plain`,
 /// unrelated, is deleted: a deletion makes the walk due as an edit does, and `Card` answers as a fresh session does.
 #[test]

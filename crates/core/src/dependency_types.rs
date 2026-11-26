@@ -438,11 +438,13 @@ impl DependencyLayer {
         self.totals.files
     }
 
-    /// Whether a file this layer loaded itself, not one below it, declares into the `React` namespace: React's own
-    /// types or an augmentation of them, which every answer that reads React's augmentations depends on.
-    pub(crate) fn declares_into_react(&self) -> bool {
+    /// Whether this layer, extended from `previous`, holds a file that declares into the `React` namespace (React's
+    /// own types or an augmentation of them, which every answer that reads React's augmentations depends on) that
+    /// `previous` did not: the augmentations it added. A flatten copies the chain's files; those are not additions.
+    pub(crate) fn adds_react_declarations(&self, previous: &DependencyLayer) -> bool {
         self.files.iter().any(|file| {
-            self.named_types.declares_react_namespace(Utf8Path::new(std::borrow::Borrow::<str>::borrow(file)))
+            let file = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
+            self.named_types.declares_react_namespace(file) && !previous.is_dependency_file(file)
         })
     }
 
@@ -1169,6 +1171,11 @@ impl Loader<'_> {
         let mut unread = Vec::new();
         let mut seen: FxHashSet<Utf8PathBuf> = FxHashSet::default();
         let mut queue = std::collections::VecDeque::from([module.to_owned()]);
+        // The files a complete search visits at the same place in its order, whatever the unreadable file re-exports:
+        // those seen or queued when the first read failed (its re-exports would queue after them). A file this search
+        // reaches later may fall past the bound once that file reads, so an augmentation found there is not kept: the
+        // search is incomplete anyway, and the retry that completes it decides.
+        let mut certain: Option<FxHashSet<Utf8PathBuf>> = None;
         while let Some(file) = queue.pop_front() {
             if seen.len() >= AUGMENTATION_SCAN_FILES {
                 break;
@@ -1179,12 +1186,13 @@ impl Loader<'_> {
             let (augments, re_exports) = match self.augmentation_scan(&file, file == module) {
                 Ok(Some(scan)) => scan,
                 Ok(None) => continue,
-                Err(ReadFailed(file)) => {
-                    unread.push(file);
+                Err(ReadFailed(failed)) => {
+                    certain.get_or_insert_with(|| seen.iter().chain(queue.iter()).cloned().collect());
+                    unread.push(failed);
                     continue;
                 }
             };
-            if augments {
+            if augments && certain.as_ref().is_none_or(|certain| certain.contains(&file)) {
                 found.push(file.clone());
             }
             for specifier in re_exports.iter() {

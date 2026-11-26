@@ -500,7 +500,9 @@ impl Revision {
         // it was: each is followed again, as a lazy session follows it on its next request. Only names no earlier
         // revision loaded cost a load; the new layer keeps everything the old one had. A deleted file demands nothing.
         let mut live = self.demands.clone();
-        if extend_dependencies {
+        // Most edits leave a file's imports as they were: then the revisions share one map, nothing copied.
+        let unchanged = self.demands.get(changed).map_or(demands.is_empty(), |old| **old == *demands);
+        if extend_dependencies && !unchanged {
             let map = Arc::make_mut(&mut live);
             match demands.is_empty() {
                 true => drop(map.remove(changed)),
@@ -519,7 +521,7 @@ impl Revision {
                 let extended = dependency_types::load(missing, options, Some(layer));
                 // What the load added that declares into React (a retry that read an augmentation) can change every
                 // answer that reads React's augmentations, whichever file it was.
-                react_namespace |= extended.declares_into_react();
+                react_namespace |= extended.adds_react_declarations(layer);
                 named_types.fallback = Some(extended.named_types.clone());
                 dependencies = Some(Arc::new(extended));
             }
@@ -1054,5 +1056,47 @@ pub(crate) fn empty_output() -> ExtractionOutput {
         enums: BTreeMap::new(),
         diagnostics: Vec::new(),
         stats: ExtractionStats::default(),
+    }
+}
+
+#[cfg(test)]
+mod live_demand_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    /// An eager edit that leaves the file's imports as they were shares the live-demand map with the revision
+    /// before it, over 1000 importing files: nothing is copied. An edit that changes them gets a map of its own.
+    #[test]
+    fn an_edit_with_unchanged_imports_copies_no_live_demand() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let kit = root.join("node_modules/kit");
+        std::fs::create_dir_all(&kit).unwrap();
+        std::fs::write(kit.join("package.json"), r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#)
+            .unwrap();
+        std::fs::write(kit.join("index.d.ts"), "export interface KitProps { kit: string }\n").unwrap();
+        let source = |n: usize, extra: &str| {
+            format!(
+                "import type {{ KitProps }} from 'kit';\ninterface C{n}Props extends KitProps {{ own: string{extra} }}\n\
+                 export function C{n}(props: C{n}Props) {{ return null; }}\n"
+            )
+        };
+        for n in 0..1000 {
+            let file = root.join(format!("src/c{n}/C{n}.tsx"));
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, source(n, "")).unwrap();
+        }
+        let options =
+            PipelineOptions { src_dirs: vec![root.join("src")], load_dependencies: true, ..Default::default() };
+        let first = Revision::cold(&options, 0);
+        assert_eq!(first.demands.len(), 1000);
+        let edited = root.join("src/c0/C0.tsx");
+        std::fs::write(&edited, source(0, "; more: string")).unwrap();
+        let (second, _) = first.next(&options, &edited).unwrap();
+        assert!(Arc::ptr_eq(&first.demands, &second.demands), "unchanged imports: the map is shared");
+        std::fs::write(&edited, "export function C0(props: { own: string }) { return null; }\n").unwrap();
+        let (third, _) = second.next(&options, &edited).unwrap();
+        assert!(!Arc::ptr_eq(&second.demands, &third.demands), "changed imports: a map of its own");
+        assert_eq!(third.demands.len(), 999);
     }
 }

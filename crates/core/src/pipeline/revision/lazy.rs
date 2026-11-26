@@ -773,7 +773,7 @@ impl Revision {
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
         // What the load added that declares into React (an augmentation a retry read, React's own types) changes what
         // every resolution that reads React's augmentations sees, whichever files it recorded.
-        let augmentations_changed = extended.declares_into_react();
+        let augmentations_changed = extended.adds_react_declarations(layer);
         let next = Engine { layer: Some(extended), ctx };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them. So does one that
