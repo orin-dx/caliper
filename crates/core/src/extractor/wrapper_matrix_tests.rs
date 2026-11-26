@@ -1203,6 +1203,83 @@ fn the_typeof_alias_walk_grows_with_the_declarations_not_with_the_aliases() {
     assert_eq!(work(40) - 6, 2 * (work(20) - 6));
 }
 
+/// Review round 24: the blocks of one namespace merge. A member a block exports shadows the module's `typeof` alias in
+/// every block of the namespace; one it does not export only in its own block. Namespaces are told apart by qualified
+/// name; `declare module 'x'` and `declare global` merge the same way, every member exported.
+#[test]
+fn a_namespace_member_shadows_the_alias_in_every_block_of_its_namespace() {
+    let means_at_probe = |body: &str| {
+        let source = format!("declare function wrap(): unknown;\ntype Wrap = typeof wrap;\n{body}");
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
+        let aliases = super::component::typeof_aliases(&parsed.program);
+        let at = u32::try_from(source.find("/*probe*/").expect("a probe")).expect("a short source");
+        aliases["Wrap"].means_at(oxc_span::Span::new(at, at + 9))
+    };
+    let rows = [
+        ("no namespace", "/*probe*/", true),
+        (
+            "exported in block 1, probe in block 2",
+            "namespace N { export type Wrap = () => void; }\nnamespace N { /*probe*/ }",
+            false,
+        ),
+        (
+            "exported in block 2, probe in block 1",
+            "namespace N { /*probe*/ }\nnamespace N { export type Wrap = () => void; }",
+            false,
+        ),
+        ("exported interface", "namespace N { export interface Wrap { (): void } }\nnamespace N { /*probe*/ }", false),
+        ("not exported, probe in block 2", "namespace N { type Wrap = () => void; }\nnamespace N { /*probe*/ }", true),
+        ("not exported, probe in its own block", "namespace N { type Wrap = () => void; /*probe*/ }", false),
+        ("another namespace", "namespace M { export type Wrap = () => void; }\nnamespace N { /*probe*/ }", true),
+        (
+            "dotted and nested",
+            "namespace A.B { export type Wrap = () => void; }\nnamespace A { namespace B { /*probe*/ } }",
+            false,
+        ),
+        (
+            "nested and dotted",
+            "namespace A { export namespace B { export type Wrap = () => void; } }\nnamespace A.B { /*probe*/ }",
+            false,
+        ),
+        ("the outer namespace", "namespace A.B { export type Wrap = () => void; }\nnamespace A { /*probe*/ }", true),
+        (
+            "same inner name, other outer",
+            "namespace A.B { export type Wrap = () => void; }\nnamespace C.B { /*probe*/ }",
+            true,
+        ),
+        (
+            "declare namespace",
+            "declare namespace N { type Wrap = () => void; }\ndeclare namespace N { /*probe*/ }",
+            false,
+        ),
+        ("declare module", "declare module 'x' { type Wrap = () => void; }\ndeclare module 'x' { /*probe*/ }", false),
+        ("another module", "declare module 'x' { type Wrap = () => void; }\ndeclare module 'y' { /*probe*/ }", true),
+        ("declare global", "declare global { type Wrap = () => void; }\ndeclare global { /*probe*/ }", false),
+        (
+            "a namespace named like the global",
+            "namespace global { type Wrap = () => void; }\ndeclare global { /*probe*/ }",
+            true,
+        ),
+    ];
+    for (id, body, means) in rows {
+        assert_eq!(means_at_probe(body), means, "{id}");
+    }
+    // The finding, end to end: block 2's cast names `N.Wrap`, so the wrapper's own declaration adds no props there.
+    let in_block_2 = |cast: &str| {
+        tsx(&format!(
+            "function wrap<T>(render: React.FC<T>): React.FC<T & {{ internal?: string }}> {{ return render as any; }}\n\
+             type Wrap = typeof wrap;\n\
+             namespace N {{ export type Wrap = <T>(render: React.FC<T>) => React.FC<T>; }}\n\
+             namespace N {{ export const Button = ({cast})<Props>((props: Props) => <div />); }}"
+        ))
+    };
+    let shadowed = in_block_2("wrap as Wrap");
+    assert_eq!(shadowed.len(), 1, "{shadowed:#?}");
+    assert_eq!(shadowed, in_block_2("wrap as <T>(render: React.FC<T>) => React.FC<T>"));
+    assert_ne!(shadowed, in_block_2("wrap as typeof wrap"));
+}
+
 /// Review round 23: a name the module gives N `typeof` aliases is ambiguous and dropped before the walk: it costs one
 /// lookup per declaration, not N per declaration, and no queried name is built for it.
 #[test]

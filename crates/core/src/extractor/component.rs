@@ -588,41 +588,99 @@ impl TypeofAlias {
 /// included), a `switch`, a static block, a namespace and a `declare module`/`declare global` body. A type holds no
 /// expression, so nothing declared in one (an alias's or interface's type parameters, `infer`, a mapped key) encloses
 /// a cast.
+///
+/// The blocks of one namespace merge, as in TypeScript: every `namespace N { … }` of the same qualified name (`N.M`
+/// for `namespace N.M` or a `namespace M` inside `N`), every `declare module 'x'` of the same name and every `declare
+/// global` is one namespace. A member it exports is in scope in each of its blocks; one it does not export only in its
+/// own block. In an ambient namespace (`declare namespace`, `declare module`, `declare global`) every member counts as
+/// exported, which errs towards a shadow.
 struct TypeDeclarations<'n> {
     /// The candidate of each name the module declares one `typeof` alias of, so a declaration visits only the alias
     /// it can shadow.
     slots: FxHashMap<&'n str, usize>,
-    scopes: Vec<oxc_span::Span>,
+    /// The open scopes, innermost last, each with the namespace it is a block of.
+    scopes: Vec<(oxc_span::Span, Option<Namespace>)>,
     /// Per candidate name, how many declarations the module itself makes.
     module_level: Vec<usize>,
     /// Per candidate name, the scopes that declare it again.
     shadowed_in: Vec<Vec<oxc_span::Span>>,
+    /// Per candidate name, the namespaces that export a member of that name.
+    exported_by: Vec<Vec<usize>>,
+    /// Each namespace's id, by qualified name.
+    namespaces: FxHashMap<String, usize>,
+    /// Each namespace's qualified name and blocks, by id.
+    namespace_blocks: Vec<(String, Vec<oxc_span::Span>)>,
+    /// Whether the declaration about to be visited is written with `export`.
+    exporting: bool,
+}
+
+/// The namespace a scope is a block of.
+#[derive(Clone, Copy)]
+struct Namespace {
+    id: usize,
+    ambient: bool,
 }
 
 impl TypeDeclarations<'_> {
-    /// Records a declaration of `name` in `scope`, or in the innermost open scope when `None`.
-    fn declare(&mut self, name: &str, scope: Option<oxc_span::Span>) {
-        let Some(&index) = self.slots.get(name) else {
-            #[cfg(test)]
-            steps::count_examined(1);
-            return;
-        };
+    fn slot(&self, name: &str) -> Option<usize> {
+        let slot = self.slots.get(name).copied();
         #[cfg(test)]
-        steps::count_examined(2);
-        match scope.or_else(|| self.scopes.last().copied()) {
+        steps::count_examined(if slot.is_some() { 2 } else { 1 });
+        slot
+    }
+
+    /// Records a declaration of `name` that is in scope throughout `scope`.
+    fn declare_in(&mut self, name: &str, scope: oxc_span::Span) {
+        if let Some(index) = self.slot(name) {
+            self.shadowed_in[index].push(scope);
+        }
+    }
+
+    /// Records a declaration of `name` where it is written: the module's own, a member of the namespace whose block
+    /// is open (in every block when exported), or a declaration in the innermost scope.
+    fn declare_here(&mut self, name: &str, exported: bool) {
+        let Some(index) = self.slot(name) else { return };
+        match self.scopes.last().copied() {
             None => self.module_level[index] += 1,
-            Some(scope) => self.shadowed_in[index].push(scope),
+            Some((_, Some(namespace))) if exported || namespace.ambient => self.exported_by[index].push(namespace.id),
+            Some((scope, _)) => self.shadowed_in[index].push(scope),
         }
     }
 
     fn type_parameters(&mut self, declared: Option<&TSTypeParameterDeclaration<'_>>, scope: oxc_span::Span) {
         for parameter in declared.into_iter().flat_map(|declared| &declared.params) {
-            self.declare(&parameter.name.name, Some(scope));
+            self.declare_in(&parameter.name.name, scope);
         }
     }
 
     fn within(&mut self, scope: oxc_span::Span, walk: impl FnOnce(&mut Self)) {
-        self.scopes.push(scope);
+        self.scopes.push((scope, None));
+        walk(self);
+        self.scopes.pop();
+    }
+
+    /// Walks a block of the namespace `name` (qualified by the namespace whose block is open, when `nested`).
+    fn within_namespace(
+        &mut self,
+        scope: oxc_span::Span,
+        name: &str,
+        nested: bool,
+        ambient: bool,
+        walk: impl FnOnce(&mut Self),
+    ) {
+        let parent = self.scopes.last().and_then(|(_, namespace)| *namespace).filter(|_| nested);
+        let qualified = match parent {
+            Some(parent) => format!("{}.{name}", self.namespace_blocks[parent.id].0),
+            None => name.to_owned(),
+        };
+        let next = self.namespace_blocks.len();
+        let id = *self.namespaces.entry(qualified.clone()).or_insert(next);
+        if id == next {
+            self.namespace_blocks.push((qualified, Vec::new()));
+        }
+        self.namespace_blocks[id].1.push(scope);
+        let ambient = ambient || parent.is_some_and(|parent| parent.ambient);
+        self.scopes.push((scope, Some(Namespace { id, ambient })));
         walk(self);
         self.scopes.pop();
     }
@@ -632,11 +690,18 @@ impl<'a> oxc_ast_visit::Visit<'a> for TypeDeclarations<'_> {
     fn visit_import_declaration(&mut self, it: &ImportDeclaration<'a>) {
         // Every import binds its name in type space too (a value import may be a class or a namespace).
         for specifier in it.specifiers.iter().flatten() {
-            self.declare(&specifier.local().name, None);
+            self.declare_here(&specifier.local().name, false);
         }
     }
 
+    fn visit_export_declaration(&mut self, it: &ExportDeclaration<'a>) {
+        self.exporting = true;
+        oxc_ast_visit::walk::walk_export_declaration(self, it);
+        self.exporting = false;
+    }
+
     fn visit_declaration(&mut self, it: &Declaration<'a>) {
+        let exported = std::mem::take(&mut self.exporting);
         let declared = match it {
             Declaration::ClassDeclaration(class) => class.id.as_ref().map(|id| &id.name),
             Declaration::TSTypeAliasDeclaration(alias) => Some(&alias.id.name),
@@ -652,7 +717,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for TypeDeclarations<'_> {
             | Declaration::TSGlobalDeclaration(_) => None,
         };
         if let Some(declared) = declared {
-            self.declare(declared, None);
+            self.declare_here(declared, exported);
         }
         oxc_ast_visit::walk::walk_declaration(self, it);
     }
@@ -666,7 +731,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for TypeDeclarations<'_> {
             match_expression!(ExportDefaultDeclarationKind) => None,
         };
         if let Some(declared) = declared {
-            self.declare(declared, None);
+            self.declare_here(declared, false);
         }
         oxc_ast_visit::walk::walk_export_default_declaration(self, it);
     }
@@ -689,7 +754,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for TypeDeclarations<'_> {
         // A class declaration's name is declared where the declaration is (`visit_declaration`); a class expression's
         // only inside the class.
         if let (Some(id), false) = (&it.id, it.is_declaration()) {
-            self.declare(&id.name, Some(it.span));
+            self.declare_in(&id.name, it.span);
         }
         self.type_parameters(it.type_parameters.as_deref(), it.span);
         self.within(it.span, |this| oxc_ast_visit::walk::walk_class(this, it));
@@ -708,15 +773,23 @@ impl<'a> oxc_ast_visit::Visit<'a> for TypeDeclarations<'_> {
     }
 
     fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
-        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_namespace_declaration(this, it));
+        self.within_namespace(it.span, &it.id.name, true, it.declare, |this| {
+            oxc_ast_visit::walk::walk_ts_namespace_declaration(this, it);
+        });
     }
 
+    // A module or the global scope is named apart from any namespace: a quote and angle brackets begin no identifier.
     fn visit_ts_external_module_declaration(&mut self, it: &TSExternalModuleDeclaration<'a>) {
-        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_external_module_declaration(this, it));
+        let name = format!("'{}'", it.id.value.as_str().unwrap_or_default());
+        self.within_namespace(it.span, &name, false, true, |this| {
+            oxc_ast_visit::walk::walk_ts_external_module_declaration(this, it);
+        });
     }
 
     fn visit_ts_global_declaration(&mut self, it: &TSGlobalDeclaration<'a>) {
-        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_global_declaration(this, it));
+        self.within_namespace(it.span, "<global>", false, true, |this| {
+            oxc_ast_visit::walk::walk_ts_global_declaration(this, it);
+        });
     }
 
     fn visit_ts_type(&mut self, _it: &TSType<'a>) {}
@@ -806,9 +879,21 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
         scopes: Vec::new(),
         module_level: vec![0; candidates.len()],
         shadowed_in: vec![Vec::new(); candidates.len()],
+        exported_by: vec![Vec::new(); candidates.len()],
+        namespaces: FxHashMap::default(),
+        namespace_blocks: Vec::new(),
+        exporting: false,
     };
     oxc_ast_visit::Visit::visit_program(&mut declarations, program);
-    let TypeDeclarations { module_level, shadowed_in, .. } = declarations;
+    let TypeDeclarations { module_level, mut shadowed_in, exported_by, namespace_blocks, .. } = declarations;
+    // A namespace's exported member shadows the name in every block of the namespace, whichever block declares it.
+    for (scopes, mut namespaces) in shadowed_in.iter_mut().zip(exported_by) {
+        namespaces.sort_unstable();
+        namespaces.dedup();
+        for id in namespaces {
+            scopes.extend_from_slice(&namespace_blocks[id].1);
+        }
+    }
     candidates
         .iter()
         .zip(module_level)
