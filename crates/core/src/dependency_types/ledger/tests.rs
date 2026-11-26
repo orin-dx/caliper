@@ -512,10 +512,14 @@ fn a_component_that_meets_a_declaration_an_earlier_load_left_unread_is_not_kept_
 }
 
 /// The model's package: a barrel of `export *` targets with a re-export stub, a named re-export of a declaration that
-/// extends a type from a nested file, and a chain of two more below it. Each of its files can be made unreadable.
+/// extends a type from a nested file, a chain of two more below it, and Radix's mapped `Primitive` behind the last
+/// `export *`. Each of its declaration files can be made unreadable.
 const MODEL_PACKAGE: &[(&str, &str)] = &[
     ("node_modules/mk/package.json", r#"{ "name": "mk", "version": "1.0.0", "types": "index.d.ts" }"#),
-    ("node_modules/mk/index.d.ts", "export * from './a';\nexport * from './stub';\nexport { Nest } from './nest';\n"),
+    (
+        "node_modules/mk/index.d.ts",
+        "export * from './a';\nexport * from './stub';\nexport { Nest } from './nest';\nexport * from './prim';\n",
+    ),
     ("node_modules/mk/a.d.ts", "export interface AProps { a: string }\n"),
     ("node_modules/mk/stub.d.ts", "export * from './b';\n"),
     ("node_modules/mk/b.d.ts", "export interface BProps { b: string }\n"),
@@ -528,48 +532,94 @@ const MODEL_PACKAGE: &[(&str, &str)] = &[
         "import type { Leaf } from './leaf';\nexport interface Deep extends Leaf { d: string }\n",
     ),
     ("node_modules/mk/leaf.d.ts", "export interface Leaf { l: string }\n"),
+    (
+        "node_modules/mk/prim.d.ts",
+        "import * as React from 'react';\n\
+         declare const NODES: readonly [\"a\", \"div\"];\n\
+         type Primitives = { [E in (typeof NODES)[number]]: PrimitiveForwardRefComponent<E> };\n\
+         type PrimitivePropsWithRef<E extends React.ElementType> = Own<E> & { asChild?: boolean };\n\
+         interface Own<E> { tag?: E }\n\
+         interface PrimitiveForwardRefComponent<E extends React.ElementType> \
+         extends React.ForwardRefExoticComponent<PrimitivePropsWithRef<E>> {}\n\
+         declare const Primitive: Primitives;\n\
+         export { Primitive };\n",
+    ),
 ];
 
-/// Each component, what it imports, and the package files its walk reads when every file is readable: its demands'
-/// export walks, the declarations they extend, and the augmentation search of the module its file imports.
+/// The model's resolution config. A config edit rewrites it with the same meaning, so the oracles need no copy of it,
+/// and the session takes its rebuild path.
+const MODEL_TSCONFIG: &str = "{ \"compilerOptions\": {} }\n";
+
+/// Each component, its source, and the package files its walk reads when every file is readable: its demands' export
+/// walks, the declarations they extend, and the augmentation search of the module its file imports. `Direct` loads
+/// `BProps` through the stub (`mk/stub`), and its walk of `Missing` (exported by nothing) resolves every target of
+/// the barrel, so a later barrel walk of `BProps` past an unreadable `a.d.ts` adds only a partial mapping. `Q` reads
+/// `typeof Primitive.div` past the same.
 const MODEL_COMPONENTS: &[(&str, &str, &[&str])] = &[
-    ("A", "AProps", &["index", "a", "stub", "b", "nest"]),
-    ("B", "BProps", &["index", "a", "stub", "b", "nest"]),
-    ("N", "Nest", &["index", "a", "stub", "b", "nest", "deep", "leaf"]),
-    ("All", "AProps, BProps, Nest", &["index", "a", "stub", "b", "nest", "deep", "leaf"]),
-    ("Direct", "BProps", &["b"]),
+    (
+        "A",
+        "import type { AProps } from 'mk';\ninterface AOwn extends AProps { own_a: string }\n\
+         export function A(props: AOwn) { return null; }\n",
+        &["index", "a", "stub", "b", "nest", "prim"],
+    ),
+    (
+        "B",
+        "import type { BProps } from 'mk';\ninterface BOwn extends BProps { own_b: string }\n\
+         export function B(props: BOwn) { return null; }\n",
+        &["index", "a", "stub", "b", "nest", "prim"],
+    ),
+    (
+        "N",
+        "import type { Nest } from 'mk';\ninterface NOwn extends Nest { own_n: string }\n\
+         export function N(props: NOwn) { return null; }\n",
+        &["index", "a", "stub", "b", "nest", "deep", "leaf", "prim"],
+    ),
+    (
+        "All",
+        "import type { AProps, BProps, Nest } from 'mk';\n\
+         interface AllOwn extends AProps, BProps, Nest { own_all: string }\n\
+         export function All(props: AllOwn) { return null; }\n",
+        &["index", "a", "stub", "b", "nest", "deep", "leaf", "prim"],
+    ),
+    (
+        "Direct",
+        "import type { BProps } from 'mk/stub';\nimport type { Missing, Nest } from 'mk';\n\
+         interface DirectOwn extends BProps, Nest { own_direct: string }\n\
+         export function Direct(props: DirectOwn) { return null; }\n",
+        &["index", "a", "stub", "b", "nest", "deep", "leaf", "prim"],
+    ),
+    (
+        "Q",
+        "import { Primitive } from 'mk';\nimport * as React from 'react';\n\
+         export function Q(props: React.ComponentProps<typeof Primitive.div> & { own_q?: string }) { return null; }\n",
+        &["index", "a", "stub", "b", "nest", "prim"],
+    ),
 ];
 
-/// The components that import from a module of the package other than its index: `Direct` loads `b.d.ts`'s
-/// declaration without the barrel, so a later barrel walk past an unreadable `a.d.ts` adds only its partial mapping.
-const MODEL_SPECIFIERS: &[(&str, &str)] = &[("Direct", "mk/b")];
-
-fn model_source(name: &str, imports: &str, edit: usize) -> String {
-    let own = name.to_lowercase();
-    let from = MODEL_SPECIFIERS.iter().find(|(component, _)| *component == name).map_or("mk", |(_, from)| from);
-    format!(
-        "import type {{ {imports} }} from '{from}';\ninterface {name}Own extends {imports} {{ own_{own}: string }}\n\
-         export function {name}(props: {name}Own) {{ return null; }}\n// edit {edit}\n"
-    )
+fn model_source(body: &str, edit: usize) -> String {
+    format!("{body}// edit {edit}\n")
 }
 
 fn model_project() -> (tempfile::TempDir, Utf8PathBuf) {
     let (tmp, root) = project(MODEL_PACKAGE);
-    for (name, imports, _) in MODEL_COMPONENTS {
-        write(&root, &format!("src/{name}.tsx"), &model_source(name, imports, 0));
+    write(&root, "tsconfig.json", MODEL_TSCONFIG);
+    for (name, body, _) in MODEL_COMPONENTS {
+        write(&root, &format!("src/{name}.tsx"), &model_source(body, 0));
     }
     (tmp, root)
 }
 
-/// Exactly `unreadable` of the package's declaration files unreadable, the rest as written.
-fn set_unreadable(root: &Utf8Path, unreadable: &std::collections::BTreeSet<&str>) {
+/// Exactly `unreadable` of the package's declaration files unreadable (or, with `empty`, declaring nothing), the rest
+/// as written.
+fn set_unreadable(root: &Utf8Path, unreadable: &std::collections::BTreeSet<&str>, empty: bool) {
     for (path, body) in MODEL_PACKAGE {
         let Some(name) = path.strip_prefix("node_modules/mk/").and_then(|name| name.strip_suffix(".d.ts")) else {
             continue;
         };
-        match unreadable.contains(name) {
-            true => std::fs::write(root.join(path), UNREADABLE).unwrap(),
-            false => std::fs::write(root.join(path), body).unwrap(),
+        match (unreadable.contains(name), empty) {
+            (true, false) => std::fs::write(root.join(path), UNREADABLE).unwrap(),
+            (true, true) => std::fs::write(root.join(path), "export {};\n").unwrap(),
+            (false, _) => std::fs::write(root.join(path), body).unwrap(),
         }
     }
 }
@@ -597,41 +647,137 @@ fn comparable(root: &Utf8Path, answer: &ComponentAnswer) -> String {
     format!("{answer:?}").replace(root.as_str(), "<root>")
 }
 
-/// A model-based test of what a lazy session holds while package files go unreadable and readable again: a seeded
-/// sequence of files made unreadable (bytes that are not UTF-8) or readable, requests and project edits. After every
-/// request:
+fn prop_names(answer: &ComponentAnswer) -> Vec<String> {
+    let mut names: Vec<String> = answer.entry.props.keys().cloned().collect();
+    names.sort();
+    names
+}
+
+/// The model's two oracles, each a fresh session with the cache off over a project of its own, memoized by component
+/// and file set: the answer with exactly those files unreadable, and the props with those files declaring nothing
+/// (what the readable files give, decided without any code that handles a failed read).
+struct ModelOracle {
+    _tmp: tempfile::TempDir,
+    root: Utf8PathBuf,
+    answers: FxHashMap<(String, Vec<String>, bool), String>,
+}
+
+impl ModelOracle {
+    fn new() -> Self {
+        let (tmp, root) = model_project();
+        ModelOracle { _tmp: tmp, root, answers: FxHashMap::default() }
+    }
+
+    fn ask(&mut self, component: &str, files: &[String], empty: bool) -> String {
+        let root = self.root.clone();
+        self.answers
+            .entry((component.to_owned(), files.to_vec(), empty))
+            .or_insert_with(|| {
+                set_unreadable(&root, &files.iter().map(String::as_str).collect(), empty);
+                let fresh = WatchSession::lazy(PipelineOptions { use_cache: false, ..options(&root) });
+                drop(fresh.initialize());
+                let answer = fresh.component(component).unwrap();
+                match empty {
+                    true => format!("{:?}", prop_names(&answer)),
+                    false => comparable(&root, &answer),
+                }
+            })
+            .clone()
+    }
+}
+
+/// One model session: its project, what is unreadable in it, and every invariant that failed, by rule.
+struct ModelRun<'o> {
+    oracle: &'o mut ModelOracle,
+    _tmp: tempfile::TempDir,
+    root: Utf8PathBuf,
+    session: WatchSession,
+    label: String,
+    log: Vec<String>,
+    failures: &'o mut Vec<String>,
+}
+
+impl ModelRun<'_> {
+    fn fail(&mut self, rule: &str, detail: String) {
+        self.failures.push(format!("[{rule}] {}: {detail}\n  {}", self.label, self.log.join("\n  ")));
+    }
+
+    /// A request, checked against both oracles: the answer is a fresh session's over exactly the files it reports
+    /// unreadable, and its props are what the readable files give.
+    fn request(&mut self, name: &str) -> Vec<String> {
+        let answer = self.session.component(name).unwrap();
+        self.session.wait_for_dependency_load();
+        self.log.push(format!("request {name}"));
+        let warned = warned_names(&self.root, &answer);
+        let mut once = warned.clone();
+        once.dedup();
+        if warned != once {
+            self.fail("reported once", format!("{warned:?}"));
+        }
+        let expected = self.oracle.ask(name, &warned, false);
+        if comparable(&self.root, &answer) != expected {
+            self.fail("fresh session", format!("{name} warned {warned:?}"));
+        }
+        let readable = self.oracle.ask(name, &warned, true);
+        if format!("{:?}", prop_names(&answer)) != readable {
+            self.fail("readable files", format!("{name} {:?}, expected {readable}", prop_names(&answer)));
+        }
+        let again = self.session.component(name).unwrap();
+        let again_warned = warned_names(&self.root, &again);
+        if comparable(&self.root, &again) != self.oracle.ask(name, &again_warned, false) {
+            self.fail("asked again", name.to_owned());
+        }
+        warned
+    }
+
+    /// A project edit, or a config edit when `file` is the tsconfig: every component whose answer changes is in the
+    /// delta, a provisional one included.
+    fn edit(&mut self, file: &Utf8Path, body: &str) {
+        let answers = |run: &Self| -> Vec<String> {
+            MODEL_COMPONENTS
+                .iter()
+                .map(|(name, _, _)| comparable(&run.root, &run.session.component(name).unwrap()))
+                .collect()
+        };
+        let before = answers(self);
+        std::fs::write(file, body).unwrap();
+        let update = self.session.update_file(file);
+        self.log.push(format!("edit {}", file.file_name().unwrap_or_default()));
+        let after = answers(self);
+        for ((component, _, _), (before, after)) in MODEL_COMPONENTS.iter().zip(before.iter().zip(&after)) {
+            if before != after && !update.updated_keys.iter().any(|key| key == component) {
+                self.fail("delta", format!("{component} changed, not in the delta"));
+            }
+        }
+    }
+}
+
+/// A model-based test of what a lazy session holds while package files go unreadable and readable again: seeded
+/// sequences of files made unreadable (bytes that are not UTF-8) or readable, requests, project edits and config edits
+/// (the rebuild path), and every ordered pair of requests under each single unreadable file followed by a config edit
+/// once it reads. After every request:
 ///
 /// 1. the answer equals a fresh session's (cache off) with exactly the files the session reports unreadable made
-///    unreadable: the cold answer when it reports none, the cold answer minus exactly what those files held otherwise;
+///    unreadable, and its props equal a fresh session's with those files declaring nothing: what the readable files
+///    give, through every resolver path (a direct import, a barrel, a qualified `typeof X.y`);
 /// 2. each file is reported once, and a request made while every file reads, after an edit since a file last changed,
 ///    reports none of the files its own walk reads: the edit made every walk past an unreadable file due, and no
 ///    provisional answer outlives it;
-/// 3. once every file reads, every component equals the cold answer, with no warning, in this session and in the next
+/// 3. after every edit, project or config, every component whose answer changed is in the delta;
+/// 4. once every file reads, every component equals the cold answer, with no warning, in this session and in the next
 ///    one over the same cache: nothing from a degraded answer was memoized or persisted.
 ///
-/// A failure prints the seed and the steps so far.
+/// Every failure is collected with its rule, seed or pair, and the steps so far.
 #[test]
 fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_could_read() {
     let names: Vec<&str> = MODEL_PACKAGE
         .iter()
         .filter_map(|(path, _)| path.strip_prefix("node_modules/mk/")?.strip_suffix(".d.ts"))
         .collect();
-    let (_oracle_tmp, oracle_root) = model_project();
-    let mut oracle_answers: FxHashMap<(String, Vec<String>), String> = FxHashMap::default();
-    let mut oracle = |component: &str, unreadable: &[String]| -> String {
-        let key = (component.to_owned(), unreadable.to_vec());
-        oracle_answers
-            .entry(key)
-            .or_insert_with(|| {
-                set_unreadable(&oracle_root, &unreadable.iter().map(String::as_str).collect());
-                let fresh = WatchSession::lazy(PipelineOptions { use_cache: false, ..options(&oracle_root) });
-                drop(fresh.initialize());
-                comparable(&oracle_root, &fresh.component(component).unwrap())
-            })
-            .clone()
-    };
+    let mut oracle = ModelOracle::new();
+    let mut failures: Vec<String> = Vec::new();
     for seed in [1_u64, 2, 3, 5, 8, 13, 21, 34] {
-        let (_tmp, root) = model_project();
+        let (tmp, root) = model_project();
         let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
         let mut next = |bound: usize| -> usize {
             state ^= state << 13;
@@ -640,90 +786,101 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
             (state % bound as u64) as usize
         };
         let mut unreadable: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-        let mut log: Vec<String> = Vec::new();
         let session = WatchSession::lazy(options(&root));
+        let mut log = Vec::new();
         if next(2) == 0 {
             unreadable.insert(names[next(names.len())]);
-            set_unreadable(&root, &unreadable);
+            set_unreadable(&root, &unreadable, false);
             log.push(format!("unreadable before start: {unreadable:?}"));
         }
         drop(session.initialize());
+        let label = format!("seed {seed}");
+        let mut run = ModelRun { oracle: &mut oracle, _tmp: tmp, root, session, label, log, failures: &mut failures };
         let mut edited_since_change = true;
         for step in 0..40 {
-            let context = |log: &[String]| format!("seed {seed}, step {step}:\n{}", log.join("\n"));
-            match next(4) {
+            match next(5) {
                 0 => {
                     let name = names[next(names.len())];
                     if !unreadable.remove(name) {
                         unreadable.insert(name);
                     }
-                    set_unreadable(&root, &unreadable);
+                    set_unreadable(&run.root, &unreadable, false);
                     edited_since_change = false;
-                    log.push(format!("unreadable: {unreadable:?}"));
+                    run.log.push(format!("unreadable: {unreadable:?}"));
                 }
                 1 => {
-                    let (name, imports, _) = MODEL_COMPONENTS[next(MODEL_COMPONENTS.len())];
-                    let file = root.join(format!("src/{name}.tsx"));
-                    let answers = |session: &WatchSession| -> Vec<String> {
-                        let answer = |name: &&str| comparable(&root, &session.component(name).unwrap());
-                        MODEL_COMPONENTS.iter().map(|(name, _, _)| answer(name)).collect()
-                    };
-                    let before = answers(&session);
-                    std::fs::write(&file, model_source(name, imports, step + 1)).unwrap();
-                    let update = session.update_file(&file);
+                    let (name, body, _) = MODEL_COMPONENTS[next(MODEL_COMPONENTS.len())];
+                    let file = run.root.join(format!("src/{name}.tsx"));
+                    run.edit(&file, &model_source(body, step + 1));
                     edited_since_change = true;
-                    log.push(format!("edit {name}"));
-                    // Every component whose answer the edit changes is in the delta, a provisional one included.
-                    let after = answers(&session);
-                    for ((component, _, _), (before, after)) in MODEL_COMPONENTS.iter().zip(before.iter().zip(&after)) {
-                        let named = update.updated_keys.iter().any(|key| key == component);
-                        assert!(before == after || named, "{component} changed, not in the delta: {}", context(&log));
-                    }
+                }
+                2 => {
+                    let file = run.root.join("tsconfig.json");
+                    run.edit(&file, &format!("{MODEL_TSCONFIG}{}", "\n".repeat(step + 1)));
+                    edited_since_change = true;
                 }
                 _ => {
                     let (name, _, reads) = MODEL_COMPONENTS[next(MODEL_COMPONENTS.len())];
                     let all_read = unreadable.is_empty() && edited_since_change;
-                    let answer = session.component(name).unwrap();
-                    session.wait_for_dependency_load();
-                    log.push(format!("request {name}"));
-                    let warned = warned_names(&root, &answer);
-                    let mut once = warned.clone();
-                    once.dedup();
-                    assert_eq!(warned, once, "each file is reported once: {}", context(&log));
-                    assert_eq!(comparable(&root, &answer), oracle(name, &warned), "{}", context(&log));
-                    // Asked again at once, a provisional answer included: still a fresh session's over its warned files.
-                    let again = session.component(name).unwrap();
-                    let again_warned = warned_names(&root, &again);
-                    assert_eq!(comparable(&root, &again), oracle(name, &again_warned), "again: {}", context(&log));
-                    if all_read {
-                        let reread: Vec<&String> =
-                            warned.iter().filter(|file| reads.contains(&file.as_str())).collect();
-                        assert_eq!(reread, Vec::<&String>::new(), "read again: {}", context(&log));
+                    let warned = run.request(name);
+                    let reread: Vec<&String> = warned.iter().filter(|file| reads.contains(&file.as_str())).collect();
+                    if all_read && !reread.is_empty() {
+                        run.fail("read again", format!("{name} {reread:?}"));
                     }
                 }
             }
         }
         unreadable.clear();
-        set_unreadable(&root, &unreadable);
-        let (name, imports, _) = MODEL_COMPONENTS[0];
-        let file = root.join(format!("src/{name}.tsx"));
-        std::fs::write(&file, model_source(name, imports, 99)).unwrap();
-        drop(session.update_file(&file));
+        set_unreadable(&run.root, &unreadable, false);
+        let (name, body, _) = MODEL_COMPONENTS[0];
+        let file = run.root.join(format!("src/{name}.tsx"));
+        run.edit(&file, &model_source(body, 99));
         for (name, _, _) in MODEL_COMPONENTS {
-            drop(session.component(name));
-            session.wait_for_dependency_load();
+            drop(run.session.component(name));
+            run.session.wait_for_dependency_load();
         }
-        let next_session = WatchSession::lazy(options(&root));
+        let next_session = WatchSession::lazy(options(&run.root));
         drop(next_session.initialize());
         for (name, _, _) in MODEL_COMPONENTS {
-            let cold = oracle(name, &[]);
-            let context = format!("seed {seed}, all readable, {name}:\n{}", log.join("\n"));
-            let answer = session.component(name).unwrap();
-            assert_eq!(warned_names(&root, &answer), Vec::<String>::new(), "{context}");
-            assert_eq!(comparable(&root, &answer), cold, "this session: {context}");
-            let answer = next_session.component(name).unwrap();
-            assert_eq!(warned_names(&root, &answer), Vec::<String>::new(), "{context}");
-            assert_eq!(comparable(&root, &answer), cold, "the next session: {context}");
+            let cold = run.oracle.ask(name, &[], false);
+            let answers =
+                [("this session", run.session.component(name)), ("the next session", next_session.component(name))];
+            for (which, answer) in answers {
+                let answer = answer.unwrap();
+                if !warned_names(&run.root, &answer).is_empty() || comparable(&run.root, &answer) != cold {
+                    run.fail("all readable", format!("{which}: {name}"));
+                }
+            }
         }
     }
+    // Every ordered pair of requests under each single unreadable file, then the file reads again and a config edit
+    // rebuilds the session: an event order the seeds need not hit.
+    for file in &names {
+        for (first, _, _) in MODEL_COMPONENTS {
+            for (second, _, _) in MODEL_COMPONENTS.iter().filter(|(second, _, _)| second != first) {
+                let (tmp, root) = model_project();
+                let unreadable: std::collections::BTreeSet<&str> = [*file].into();
+                set_unreadable(&root, &unreadable, false);
+                let session = WatchSession::lazy(options(&root));
+                drop(session.initialize());
+                let label = format!("pair {file}: {first}, {second}");
+                let mut run = ModelRun {
+                    oracle: &mut oracle,
+                    _tmp: tmp,
+                    root,
+                    session,
+                    label,
+                    log: Vec::new(),
+                    failures: &mut failures,
+                };
+                run.request(first);
+                run.request(second);
+                set_unreadable(&run.root, &std::collections::BTreeSet::new(), false);
+                run.log.push(format!("{file} reads"));
+                let tsconfig = run.root.join("tsconfig.json");
+                run.edit(&tsconfig, &format!("{MODEL_TSCONFIG}\n"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
 }
