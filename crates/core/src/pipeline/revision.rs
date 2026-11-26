@@ -521,7 +521,7 @@ impl Revision {
                 let extended = dependency_types::load(missing, options, Some(layer));
                 // What the load added that declares into React (a retry that read an augmentation) can change every
                 // answer that reads React's augmentations, whichever file it was.
-                react_namespace |= extended.adds_react_declarations(layer);
+                react_namespace |= extended.changes_react_declarations(layer);
                 named_types.fallback = Some(extended.named_types.clone());
                 dependencies = Some(Arc::new(extended));
             }

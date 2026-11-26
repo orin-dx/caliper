@@ -259,6 +259,12 @@ impl ReadLedger {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many failed-read entries the warning reports looked up, for tests.
+    pub(crate) static WARNING_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The nodes among `marks` (each node's latest mark) that reach an unread walk, their own or one their marks reach: one
 /// reverse traversal, each node once.
 fn nodes_reaching_unread<'m>(marks: impl Iterator<Item = (&'m Node, &'m Mark)>) -> FxHashSet<&'m Node> {
@@ -322,11 +328,13 @@ impl DependencyLayer {
     /// [`Self::read_warnings`], only for the files the unread walks `roots` lead to could not read: what a revision
     /// whose live demands are `roots` reports.
     pub(crate) fn read_warnings_reached<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Diagnostic> {
-        // A healthy layer, the common case, neither walks nor allocates: `roots` is not iterated.
-        if !self.has_failed_reads() {
+        // A healthy layer, the common case, recovered ones included, neither walks nor allocates: the files whose
+        // latest read failed are kept once per layer, and `roots` is not iterated.
+        let walks = self.unread_walks();
+        if walks.failed.is_empty() {
             return Vec::new();
         }
-        let warnings = self.read_warnings();
+        let warnings = self.warnings_of(&walks.failed);
         let mut reached: FxHashSet<&str> = FxHashSet::default();
         for walk in self.unread_from(roots) {
             if let Some(mark) = self.mark(&Node::Demand(walk.key())) {
@@ -341,17 +349,21 @@ impl DependencyLayer {
 
     /// One warning for each file whose latest read in the chain failed, sorted by message.
     pub(crate) fn read_warnings(&self) -> Vec<Diagnostic> {
-        let mut seen: FxHashSet<&PathKey> = FxHashSet::default();
-        let mut warnings: Vec<Diagnostic> = Vec::new();
-        for layer in self.chain() {
-            for (path, read) in &layer.ledger.reads {
-                if seen.insert(path)
-                    && let Read::Failed(failed) = read
-                {
-                    warnings.push(failed.warning.clone());
+        self.warnings_of(&self.unread_walks().failed)
+    }
+
+    fn warnings_of(&self, failed: &FxHashSet<PathKey>) -> Vec<Diagnostic> {
+        let mut warnings: Vec<Diagnostic> = failed
+            .iter()
+            .filter_map(|path| {
+                #[cfg(test)]
+                WARNING_READS.with(|reads| reads.set(reads.get() + 1));
+                match self.latest_read(std::borrow::Borrow::borrow(path)) {
+                    Some(Read::Failed(failed)) => Some(failed.warning.clone()),
+                    _ => None,
                 }
-            }
-        }
+            })
+            .collect();
         warnings.sort_by(|a, b| (&a.message, &a.file).cmp(&(&b.message, &b.file)));
         warnings
     }
@@ -438,6 +450,16 @@ impl DependencyLayer {
     /// over the latest marks, each node once, so a chain of N declarations ending at one unread file costs N.
     pub(crate) fn unread_walks_counted(&self) -> (UnreadWalks, usize) {
         let mut walks = UnreadWalks::default();
+        // The parent's current failures, with this layer's own reads over them: a read since shadows a failure.
+        if let Some(parent) = &self.parent {
+            walks.failed.clone_from(&parent.unread_walks().failed);
+        }
+        for (path, read) in &self.ledger.reads {
+            match read {
+                Read::Failed(_) => drop(walks.failed.insert(path.clone())),
+                Read::Done => drop(walks.failed.remove(path)),
+            }
+        }
         if !self.has_marks() {
             return (walks, 0);
         }
@@ -445,13 +467,6 @@ impl DependencyLayer {
         for layer in self.chain() {
             for (node, mark) in &layer.ledger.marks {
                 latest.entry(node).or_insert(mark);
-            }
-            for (path, read) in &layer.ledger.reads {
-                if self.latest_read(std::borrow::Borrow::borrow(path)).is_some_and(|latest| std::ptr::eq(latest, read))
-                    && matches!(read, Read::Failed(_))
-                {
-                    walks.failed.insert(path.clone());
-                }
             }
         }
         let mut reached_by: FxHashMap<&Node, Vec<&Node>> = FxHashMap::default();
@@ -527,11 +542,6 @@ impl DependencyLayer {
             return Vec::new();
         }
         unread_below(roots.into_iter().map(|demand| Node::Demand(demand.key())), |node| self.mark(node))
-    }
-
-    /// Whether the latest read of some file in the chain failed.
-    fn has_failed_reads(&self) -> bool {
-        self.chain().any(|layer| layer.ledger.reads.values().any(|read| matches!(read, Read::Failed(_))))
     }
 }
 

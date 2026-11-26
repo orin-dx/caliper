@@ -639,10 +639,40 @@ fn a_healthy_layer_reports_failed_reads_without_iterating_the_live_demands() {
     assert_eq!(visited.get(), 1000);
 }
 
+/// After 1000 failed reads recover, reporting them costs an eager edit nothing: the layer's current failures are kept
+/// once per layer, empty, so no read of the history is looked up and no live demand is iterated.
+#[test]
+fn a_recovered_layer_reports_failed_reads_without_reading_the_history() {
+    let reexports: String = (0..1000).map(|n| format!("export * from './m{n}';\n")).collect();
+    let (_tmp, root) = project(&[
+        ("node_modules/many-kit/package.json", r#"{ "name": "many-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/many-kit/index.d.ts", &reexports),
+    ]);
+    let module = |n: usize| root.join(format!("node_modules/many-kit/m{n}.d.ts"));
+    (0..1000).for_each(|n| std::fs::write(module(n), UNREADABLE).unwrap());
+    let options = PipelineOptions { use_cache: false, ..options(&root) };
+    let demand = Demand { from: root.join("src/Card.tsx"), specifier: "many-kit".into(), name: "Absent".into() };
+    let failed = Arc::new(load(vec![demand.clone()], &options, None));
+    assert_eq!(failed.read_warnings().len(), 1000);
+    (0..1000).for_each(|n| std::fs::write(module(n), format!("export interface M{n} {{}}\n")).unwrap());
+    let recovered = load(failed.missing(std::slice::from_ref(&demand)), &options, Some(&failed));
+    let roots: Vec<Demand> = vec![demand; 1000];
+    let visited = std::cell::Cell::new(0);
+    drop(recovered.unread_walks());
+    WARNING_READS.with(|reads| reads.set(0));
+    for _edit in 0..3 {
+        let counted = roots.iter().inspect(|_| visited.set(visited.get() + 1));
+        assert_eq!(recovered.read_warnings_reached(counted), Vec::<Diagnostic>::new());
+    }
+    assert_eq!(WARNING_READS.with(std::cell::Cell::get), 0, "no read looked up");
+    assert_eq!(visited.get(), 0, "no live demand iterated");
+}
+
 /// An augmentation search past its file bound: the package's barrel re-exports `bad` (64 files once it reads) and
-/// `mid`, which re-exports `late`, an augmentation of React. While `bad` cannot be read, the search reaches `late`;
-/// once it reads, `bad`'s files fill the bound first and a fresh run never reaches `late`. The eager session never
-/// keeps `late`: after `bad` reads and an unrelated edit follows, `Box` equals a fresh run, without `tw`.
+/// `mid`, which re-exports `late`, an augmentation of React. While `bad` cannot be read, the search reaches `late`
+/// and `Box` has `tw`, provisionally; once `bad` reads, its files fill the bound first and a fresh run never reaches
+/// `late`. The complete search replaces the partial one: after an unrelated edit `Box` equals a fresh run, without
+/// `tw`.
 #[test]
 fn an_augmentation_a_partial_search_reached_past_its_bound_is_not_kept() {
     let fillers: String = (0..64).map(|n| format!("export * from './f{n}';\n")).collect();
@@ -666,6 +696,7 @@ fn an_augmentation_a_partial_search_reached_past_its_bound_is_not_kept() {
     std::fs::write(&bad, UNREADABLE).unwrap();
     let session = WatchSession::new(react_options(&root));
     drop(session.initialize());
+    assert!(names(&session.component("Box")).contains(&"tw".to_owned()), "what the partial search read, for now");
     std::fs::write(&bad, &fillers).unwrap();
     edit(&session, &root.join("src/plain/Plain.tsx"));
 
@@ -673,6 +704,37 @@ fn an_augmentation_a_partial_search_reached_past_its_bound_is_not_kept() {
     drop(fresh.initialize());
     assert!(!names(&fresh.component("Box")).contains(&"tw".to_owned()), "a fresh run's search stops before `late`");
     assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "the partial search's `late` is not kept");
+    assert!(session.component("Box") == fresh.component("Box"));
+}
+
+/// A search that cannot read one file keeps every augmentation it can read: the barrel re-exports `bad`, unreadable,
+/// and `mid`, which re-exports `late`, an augmentation of React. `Box` has `tw` while `bad` cannot be read, and once
+/// it reads (re-exporting nothing) and an edit follows, `Box` equals a fresh run, `tw` and nothing else added.
+#[test]
+fn an_augmentation_past_an_unreadable_file_is_kept() {
+    let (_tmp, root) = react_project(&[
+        ("node_modules/scan-kit/package.json", r#"{ "name": "scan-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/scan-kit/index.d.ts", "export * from './bad';\nexport * from './mid';\n"),
+        ("node_modules/scan-kit/mid.d.ts", "export * from './late';\n"),
+        ("node_modules/scan-kit/late.d.ts", AUGMENTATION),
+        ("src/setup.ts", "import * as Scan from 'scan-kit';\nexport const scan = Scan;\n"),
+        ("src/box/Box.tsx", BOX),
+        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+    ]);
+    let bad = root.join("node_modules/scan-kit/bad.d.ts");
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    let while_unread = names(&session.component("Box"));
+    assert!(while_unread.contains(&"tw".to_owned()), "`late` reads though `bad` does not");
+    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+
+    let fresh = WatchSession::new(react_options(&root));
+    drop(fresh.initialize());
+    assert!(names(&fresh.component("Box")).contains(&"tw".to_owned()));
+    assert_eq!(names(&session.component("Box")), names(&fresh.component("Box")));
+    assert_eq!(names(&session.component("Box")), while_unread, "the complete search adds nothing stale");
     assert!(session.component("Box") == fresh.component("Box"));
 }
 
@@ -699,13 +761,13 @@ fn a_flatten_adds_no_react_declaration_it_only_copied() {
     };
     let empty = Arc::new(load(vec![other(0)], &options, None));
     let mut layer = Arc::new(load(vec![setup], &options, Some(&empty)));
-    assert!(layer.adds_react_declarations(&empty), "the load that read the augmentation added it");
+    assert!(layer.changes_react_declarations(&empty), "the load that read the augmentation added it");
     for n in 1..MAX_CHAIN_DEPTH {
         layer = Arc::new(load(vec![other(n)], &options, Some(&layer)));
     }
     let flattened = load(vec![other(MAX_CHAIN_DEPTH)], &options, Some(&layer));
     assert!(flattened.parent.is_none(), "the depth limit flattened the chain");
-    assert!(!flattened.adds_react_declarations(&layer), "copied, not added");
+    assert!(!flattened.changes_react_declarations(&layer), "copied, not added");
 }
 
 /// The eager revision: `Card` sits behind a file that could not be read, which then reads on disk, and `Plain`,
