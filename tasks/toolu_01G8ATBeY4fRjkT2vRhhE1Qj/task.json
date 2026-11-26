@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01G8ATBeY4fRjkT2vRhhE1Qj",
+  "agent_id": "a57a8ab917f1457a1",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix #527 four findings: partial results on read failure",
+  "token_usage": {
+    "input_tokens": 186,
+    "cache_creation_tokens": 241343,
+    "cache_read_tokens": 17388029,
+    "output_tokens": 86806,
+    "api_call_count": 92
+  },
+  "started_at": "2026-11-25T15:15:05.164225-08:00",
+  "completed_at": "2026-11-25T15:50:53.192242-08:00"
+}
