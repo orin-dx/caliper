@@ -46,15 +46,53 @@ pub(crate) struct PendingWrapper {
 /// through a cast main read no callee through (`tentative`: a generic wrapper whose cast replaces the callee's type and
 /// whose type arguments still name the props). A tentative candidate counts toward no structure a plain one reads (the
 /// tags several candidates share, the props types already taken, the identifier aliases) and is promoted after them.
+/// Recording one claims nothing: the rules main ran after the wrapper rule still give the declaration main's answer, and
+/// the tentative candidate replaces that answer only with a mapping of its own.
 #[derive(Default)]
 pub(crate) struct Candidates {
     plain: Vec<PendingWrapper>,
-    tentative: Vec<PendingWrapper>,
+    tentative: Vec<Tentative>,
+}
+
+/// A tentative candidate and main's answer for its declaration, which stands unless the candidate gives a mapping.
+struct Tentative {
+    pending: PendingWrapper,
+    /// The skip the later rules gave the declaration, recorded only if the candidate gives no mapping.
+    fallback_skip: Option<String>,
+    /// An anonymous default export, which is no binding of its name.
+    anonymous_default: bool,
 }
 
 impl Candidates {
     fn push(&mut self, tentative: bool, pending: PendingWrapper) {
-        if tentative { self.tentative.push(pending) } else { self.plain.push(pending) }
+        if tentative {
+            self.tentative.push(Tentative { pending, fallback_skip: None, anonymous_default: false });
+        } else {
+            self.plain.push(pending);
+        }
+    }
+
+    fn tentative_at(&mut self, span: Span) -> Option<&mut Tentative> {
+        self.tentative.iter_mut().rev().find(|tentative| tentative.pending.span == span)
+    }
+
+    /// Hold the skip the later rules gave a declaration with a tentative candidate until the candidate is promoted.
+    /// Gives the message back when the declaration has none.
+    pub(super) fn defer_skip(&mut self, span: Span, message: String) -> Option<String> {
+        match self.tentative_at(span) {
+            Some(tentative) => {
+                tentative.fallback_skip = Some(message);
+                None
+            }
+            None => Some(message),
+        }
+    }
+
+    /// Mark the tentative candidate recorded for the anonymous default export at `span`, if there is one.
+    pub(super) fn mark_anonymous_default(&mut self, span: Span) {
+        if let Some(tentative) = self.tentative_at(span) {
+            tentative.anonymous_default = true;
+        }
     }
 }
 
@@ -212,7 +250,8 @@ impl<'src> SourceDataCollector<'src> {
             span: decl.span,
         };
         self.pending_wrappers.push(tentative, candidate);
-        true
+        // A tentative candidate claims nothing: the rules after this one still answer for the declaration.
+        !tentative
     }
 
     /// Record `const Center = chakra("div", { ... })` as a candidate: a call given an intrinsic tag name and a config
@@ -299,8 +338,27 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Turn the tentative candidates into mappings once every rule main ran before its factory rule has run on the
     /// candidates main saw, so none of them reads a tentative one (an identifier alias, a props type already taken).
+    /// A candidate whose type arguments select no props type gives no mapping and says nothing: main's answer for the
+    /// declaration stands, the skip the later rules gave it or the component an anonymous default export wraps.
     pub(super) fn promote_tentative_wrapper_calls(&mut self) {
-        for pending in std::mem::take(&mut self.pending_wrappers.tentative) {
+        for Tentative { pending, fallback_skip, anonymous_default } in
+            std::mem::take(&mut self.pending_wrappers.tentative)
+        {
+            let selected = match self.select_wrapper_props(&pending.type_args) {
+                PropsSelection::Found { from_payload, .. } => from_payload || !pending.needs_payload,
+                PropsSelection::UnusablePayload { .. } | PropsSelection::None => false,
+            };
+            let default_taken = anonymous_default
+                && self.exported_locals.values().any(|names| names.iter().any(|name| name == "default"));
+            if !selected || default_taken {
+                if let Some(message) = fallback_skip {
+                    self.record_skip(DiagnosticCode::SkippedCandidate, message, pending.span);
+                }
+                continue;
+            }
+            if anonymous_default {
+                self.anonymous_default = Some(pending.span.start);
+            }
             self.promote_wrapper_call(pending, false);
         }
     }

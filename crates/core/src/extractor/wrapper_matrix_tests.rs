@@ -1604,6 +1604,58 @@ fn factory_parity_cases() -> Vec<(String, String)> {
              const Styled = chakra('div', {});\n\
              export const Group = (withContext as <T, P>(c: unknown) => React.FC<P>)<HTMLDivElement, Props>(Styled);",
         ),
+        // Round 21: a tentative candidate claims nothing, so the rules after the wrapper rule still answer for the
+        // declaration: an anonymous default export keeps the component its call wraps.
+        (
+            "round 21: default export, no props type | plain",
+            "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             export default withTheme<unknown>(Base);",
+        ),
+        (
+            "round 21: default export, no props type | asserted signature",
+            "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             export default (withTheme as <T>(c: typeof Base) => typeof Base)<unknown>(Base);",
+        ),
+        (
+            "round 21: default export, a props type | plain",
+            "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             export default withTheme<Props>(Base);",
+        ),
+        (
+            "round 21: default export, a props type | asserted signature",
+            "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             export default (withTheme as <T>(c: typeof Base) => typeof Base)<Props>(Base);",
+        ),
+        (
+            "round 21: named export, no props type | plain",
+            "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             export const Themed = withTheme<unknown>(Base);",
+        ),
+        (
+            "round 21: named export, no props type | asserted signature",
+            "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             export const Themed = (withTheme as <T>(c: typeof Base) => typeof Base)<unknown>(Base);",
+        ),
+        (
+            "round 21: named export, a props type | plain",
+            "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             export const Themed = withTheme<Props>(Base);",
+        ),
+        (
+            "round 21: named export, a props type | asserted signature",
+            "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             export const Themed = (withTheme as <T>(c: typeof Base) => typeof Base)<Props>(Base);",
+        ),
+        (
+            "round 21: named export, a builder, no props type | plain",
+            "function makeX<T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
+             export const Themed = makeX<unknown>('div');",
+        ),
+        (
+            "round 21: named export, a builder, no props type | asserted signature",
+            "function makeX<T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
+             export const Themed = (makeX as <T>(tag: string) => React.FC<Props>)<unknown>('div');",
+        ),
         (
             "round 20: alias of a cast-built wrapper",
             "function withContext<T, P>(c: unknown): React.FC<P> { return (props) => <div />; }\n\
@@ -1644,7 +1696,12 @@ fn factory_parity_output(source: &str) -> String {
         .component_mappings
         .iter()
         .map(|m| {
-            format!("{}:{}{}", m.component_name, m.props_type_name, serde_json::to_string(&m.rule).unwrap_or_default())
+            // The export names too, so a default export that falls back to the component its call wraps is compared.
+            let exports: Vec<&str> = m.exports.iter().map(|export| export.name.as_str()).collect();
+            let rule = serde_json::to_string(&m.rule).unwrap_or_default();
+            let exported =
+                if exports.is_empty() { String::new() } else { format!(" exported as {}", exports.join(",")) };
+            format!("{}:{}{rule}{exported}", m.component_name, m.props_type_name)
         })
         .chain(data.diagnostics.iter().map(|d| format!("{:?} {:?}: {}", d.severity, d.code, d.message)))
         .collect();
@@ -1668,7 +1725,8 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     assert_eq!(base.len(), cases.len(), "the base table and the cases are out of step");
     let mut failures = Vec::new();
     let mut read_as_the_plain_call = 0;
-    for (id, source) in cases.iter().filter(|(id, _)| !id.starts_with("round 20: ")) {
+    // Rounds 20 and 21 are checked line by line in `a_candidate_main_saw_keeps_main_s_answer_beside_a_cast_built_one`.
+    for (id, source) in cases.iter().filter(|(id, _)| !id.starts_with("round 20: ") && !id.starts_with("round 21: ")) {
         let now = factory_parity_output(source);
         let main = base.get(id.as_str()).copied().unwrap_or("not in the base table");
         let cast = id.rsplit_once(" | ").filter(|(_, cast)| *cast != "plain");
@@ -1732,10 +1790,20 @@ fn a_candidate_main_saw_keeps_main_s_answer_beside_a_cast_built_one() {
             "round 20: wrapper, same props type",
             ["Base", "StyledGroup"],
             "Group",
-            "Group:GroupProps\"wrapperTypeArgument\"",
+            "Group:GroupProps\"wrapperTypeArgument\" exported as Group",
         ),
-        ("round 20: wrapper, own props type", ["Base", "Styled"], "Group", "Group:Props\"wrapperTypeArgument\""),
-        ("round 20: alias of a cast-built wrapper", ["Base", "Alias"], "Group", "Group:Props\"wrapperTypeArgument\""),
+        (
+            "round 20: wrapper, own props type",
+            ["Base", "Styled"],
+            "Group",
+            "Group:Props\"wrapperTypeArgument\" exported as Group",
+        ),
+        (
+            "round 20: alias of a cast-built wrapper",
+            ["Base", "Alias"],
+            "Group",
+            "Group:Props\"wrapperTypeArgument\" exported as default",
+        ),
     ];
     for (id, plain, cast_built, answer) in rows {
         let now = factory_parity_output(&cases[id]);
@@ -1745,7 +1813,32 @@ fn a_candidate_main_saw_keeps_main_s_answer_beside_a_cast_built_one() {
         }
         assert_eq!(line(&now, cast_built), answer, "{id}: {cast_built}");
     }
-    assert_eq!(line(base["round 20: tagged"], "Primary"), "Primary:RecipeProps\"taggedFactory\"");
+    assert_eq!(line(base["round 20: tagged"], "Primary"), "Primary:RecipeProps\"taggedFactory\" exported as Primary");
+    // Round 21: recording a tentative candidate claims nothing, so the rules after the wrapper rule still answer for the
+    // declaration. Every round 21 row equals main's, but one: through the cast, `withTheme<Props>(Base)` gives the
+    // props its type argument names, as main's plain call does, where main read `withTheme`'s declaration.
+    for (id, source) in cases.iter().filter(|(id, _)| id.starts_with("round 21: ")) {
+        let now = factory_parity_output(source);
+        let expected = match id.as_str() {
+            "round 21: named export, a props type | asserted signature" => {
+                base["round 21: named export, a props type | plain"]
+            }
+            // Main's factory rule reads `makeX` through the cast (`Themed:makeX`); here the factory rule withholds a
+            // callee cast to another type (round 8), and the candidate, selecting no props type, adds nothing.
+            "round 21: named export, a builder, no props type | asserted signature" => {
+                "Base:Props\"functionDeclaration\" | Info SkippedCandidate: 'Themed' is built by a call to 'makeX' \
+                 through a type assertion that replaces its \
+                 type, so the declaration that would give its props is not read and it is not listed"
+            }
+            _ => base[id.as_str()],
+        };
+        assert_eq!(now, expected, "{id}");
+    }
+    // The finding's form: the default export is the component the call wraps, as on main.
+    assert_eq!(
+        base["round 21: default export, no props type | asserted signature"],
+        "Base:Props\"functionDeclaration\" exported as default"
+    );
 }
 
 /// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing

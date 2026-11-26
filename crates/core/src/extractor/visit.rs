@@ -407,7 +407,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                                      (FC annotation, forwardRef, HOC wrapper, or identifier alias)"
                             )
                         });
-                        self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
+                        if let Some(message) = self.pending_wrappers.defer_skip(declarator.span, message) {
+                            self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
+                        }
                     }
                 }
             }
@@ -706,6 +708,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         } else if self.try_record_wrapper_call(&binding, &name) {
                             self.anonymous_default = Some(node.span.start);
                             is_a_component = true;
+                        } else {
+                            self.pending_wrappers.mark_anonymous_default(node.span);
                         }
                     }
                 }
