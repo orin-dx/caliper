@@ -593,14 +593,78 @@ pub(crate) enum Origin {
     Alias(CompactString),
 }
 
-/// What a module itself declares as a value under a name: its module-level declarations by origin, the scopes inside
-/// it that declare the name as their own value (a parameter, a local `const`, a nested function), and the scopes that
-/// declare it from a factory's origin. An import is the module's binding of another module's value, not its own
-/// declaration.
+/// One declaration of a name: where it comes from, and its own site, where the names its origin reads (`React` in
+/// `const ce = React.createElement`) are resolved.
+#[derive(Clone, Debug)]
+pub(crate) struct Declared {
+    pub(super) origin: Origin,
+    pub(super) site: oxc_span::Span,
+}
+
+/// A declaration inside a scope, in the scope tree of its name: scopes nest or are apart.
+struct ScopedDeclaration {
+    scope: oxc_span::Span,
+    declared: Declared,
+    /// The nearest scope around this one that declares the name too.
+    parent: Option<usize>,
+}
+
+/// What a module itself declares as a value under a name: its module-level declarations, and its declarations inside
+/// scopes (a parameter, a local `const` from wherever it comes, a nested function), as one scope tree. An import is
+/// the module's binding of another module's value, not its own declaration.
 pub(crate) struct LocalValue {
-    pub(super) module_level: Vec<Origin>,
-    pub(super) shadowed_in: ShadowScopes,
-    pub(super) scoped_origins: Vec<(oxc_span::Span, Origin)>,
+    pub(super) module_level: Vec<Declared>,
+    /// Sorted by scope start, outer first, each with its parent.
+    scoped: Vec<ScopedDeclaration>,
+}
+
+impl LocalValue {
+    fn new(module_level: Vec<Declared>, mut scoped: Vec<(oxc_span::Span, Declared)>) -> Self {
+        scoped.sort_by_key(|(scope, _)| (scope.start, std::cmp::Reverse(scope.end)));
+        let mut tree: Vec<ScopedDeclaration> = Vec::with_capacity(scoped.len());
+        let mut open: Vec<usize> = Vec::new();
+        for (scope, declared) in scoped {
+            // Two declarations of the name in one scope: which one a use means is not read.
+            if let Some(last) = tree.last_mut()
+                && last.scope == scope
+            {
+                last.declared.origin = Origin::Own;
+                continue;
+            }
+            while open.last().is_some_and(|&index| tree[index].scope.end <= scope.start) {
+                open.pop();
+            }
+            tree.push(ScopedDeclaration { scope, declared, parent: open.last().copied() });
+            open.push(tree.len() - 1);
+        }
+        Self { module_level, scoped: tree }
+    }
+
+    /// The nearest declaration around `at`, whatever its origin: a binary search for the last scope that starts at or
+    /// before `at`, then up its parents to the first that encloses it.
+    pub(super) fn innermost(&self, at: oxc_span::Span) -> Option<&Declared> {
+        let (mut low, mut high) = (0, self.scoped.len());
+        while low < high {
+            #[cfg(test)]
+            steps::count_probed();
+            let middle = low + (high - low) / 2;
+            if self.scoped[middle].scope.start <= at.start {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        let mut index = low.checked_sub(1)?;
+        loop {
+            #[cfg(test)]
+            steps::count_probed();
+            let candidate = &self.scoped[index];
+            if candidate.scope.start <= at.start && at.end <= candidate.scope.end {
+                return Some(&candidate.declared);
+            }
+            index = candidate.parent?;
+        }
+    }
 }
 
 /// Every value declaration of one of `names`, or of any name declared from a factory's origin, in the module, from
@@ -617,24 +681,14 @@ pub(super) fn local_values(
     declarations
         .found
         .into_iter()
-        .map(|(name, found)| {
-            (
-                CompactString::from(name),
-                LocalValue {
-                    module_level: found.module_level,
-                    shadowed_in: ShadowScopes::new(found.own_scopes),
-                    scoped_origins: found.scoped_origins,
-                },
-            )
-        })
+        .map(|(name, found)| (CompactString::from(name), LocalValue::new(found.module_level, found.scoped)))
         .collect()
 }
 
 #[derive(Default)]
 struct Found {
-    module_level: Vec<Origin>,
-    own_scopes: Vec<oxc_span::Span>,
-    scoped_origins: Vec<(oxc_span::Span, Origin)>,
+    module_level: Vec<Declared>,
+    scoped: Vec<(oxc_span::Span, Declared)>,
 }
 
 struct ValueDeclarations<'n> {
@@ -672,13 +726,13 @@ fn origin_of(init: &Expression<'_>, key: Option<&str>) -> Origin {
 }
 
 impl ValueDeclarations<'_> {
-    fn declare(&mut self, name: &str) {
-        self.declare_from(name, Origin::Own);
+    fn declare(&mut self, name: &str, site: oxc_span::Span) {
+        self.declare_from(name, Origin::Own, site);
     }
 
-    /// Records a declaration of `name`: always for one of `names`, and for another name only when it comes from a
-    /// factory's origin, which a call through it may need.
-    fn declare_from(&mut self, name: &str, origin: Origin) {
+    /// Records a declaration of `name` at `site`: always for one of `names`, and for another name only when it comes
+    /// from a factory's origin, which a call through it may need.
+    fn declare_from(&mut self, name: &str, origin: Origin, site: oxc_span::Span) {
         let wanted = self.names.contains(name)
             || match &origin {
                 Origin::Own => false,
@@ -691,10 +745,10 @@ impl ValueDeclarations<'_> {
             return;
         }
         let entry = self.found.entry(name.to_owned()).or_default();
-        match (self.scopes.last(), origin) {
-            (None, origin) => entry.module_level.push(origin),
-            (Some(scope), Origin::Own) => entry.own_scopes.push(*scope),
-            (Some(scope), origin) => entry.scoped_origins.push((*scope, origin)),
+        let declared = Declared { origin, site };
+        match self.scopes.last() {
+            None => entry.module_level.push(declared),
+            Some(scope) => entry.scoped.push((*scope, declared)),
         }
     }
 
@@ -716,7 +770,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for ValueDeclarations<'_> {
     fn visit_ts_type(&mut self, _it: &TSType<'a>) {}
 
     fn visit_binding_identifier(&mut self, it: &BindingIdentifier<'a>) {
-        self.declare(&it.name);
+        self.declare(&it.name, it.span);
     }
 
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
@@ -724,13 +778,17 @@ impl<'a> oxc_ast_visit::Visit<'a> for ValueDeclarations<'_> {
         // pattern declares its names as the module's own.
         let Some(init) = &it.init else { return oxc_ast_visit::walk::walk_variable_declarator(self, it) };
         match &it.id {
-            BindingPattern::BindingIdentifier(id) => self.declare_from(&id.name, origin_of(init, None)),
+            BindingPattern::BindingIdentifier(id) => self.declare_from(&id.name, origin_of(init, None), it.span),
             BindingPattern::ObjectPattern(pattern) => {
                 for property in &pattern.properties {
                     let key = property.key.static_name();
                     match (&property.value, key) {
                         (BindingPattern::BindingIdentifier(id), Some(key)) => {
-                            self.declare_from(&id.name, origin_of(init, Some(&super::js_text::property_name(&key))));
+                            self.declare_from(
+                                &id.name,
+                                origin_of(init, Some(&super::js_text::property_name(&key))),
+                                it.span,
+                            );
                         }
                         (value, _) => self.visit_binding_pattern(value),
                     }
@@ -754,7 +812,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for ValueDeclarations<'_> {
         // A declaration's name is declared where the declaration is; the rest (its name again, for an expression its
         // only one) inside the function.
         if let (true, Some(id)) = (it.is_declaration(), &it.id) {
-            self.declare(&id.name);
+            self.declare(&id.name, it.span);
         }
         self.within(it.span, |this| oxc_ast_visit::walk::walk_function(this, it, flags));
     }
@@ -765,7 +823,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for ValueDeclarations<'_> {
 
     fn visit_class(&mut self, it: &Class<'a>) {
         if let (true, Some(id)) = (it.is_declaration(), &it.id) {
-            self.declare(&id.name);
+            self.declare(&id.name, it.span);
         }
         self.within(it.span, |this| oxc_ast_visit::walk::walk_class(this, it));
     }
@@ -799,7 +857,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for ValueDeclarations<'_> {
     }
 
     fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
-        self.declare(&it.id.name);
+        self.declare(&it.id.name, it.span);
         self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_namespace_declaration(this, it));
     }
 
@@ -1246,6 +1304,16 @@ impl<'src> SourceDataCollector<'src> {
 
     /// The ordered rules for a binding whose initializer may be a component; the first that matches wins.
     pub(super) fn detect_component<'a>(&mut self, binding: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
+        // An element or a ref is no component whatever it is built from: the known factory is judged first, before
+        // any rule reads the call's arguments (`createElement(forwardRef(render))`).
+        if let Some(Expression::CallExpression(call)) = binding.init.map(peel_expr)
+            && matches!(self.react_api(call), Some(ReactApi::Element | ReactApi::Ref))
+        {
+            let callee = self.extract_callee_name(call).unwrap_or_default();
+            self.decline_reason =
+                Some(format!("'{name}' is a call to '{callee}', which builds an element or a ref, not a component"));
+            return None;
+        }
         self.try_fc_annotation(binding, name)
             .or_else(|| self.try_forward_ref(binding, name))
             .or_else(|| self.try_hoc_wrapped(binding, name))

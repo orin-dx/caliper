@@ -1442,7 +1442,81 @@ fn factory_parity_cases() -> Vec<(String, String)> {
          export function build(el = React.createElement(Foo)) { const React = {}; return el; }"
             .to_owned(),
     ));
+    // Round 16: the nearest declaration of a name wins whatever its kind, and an alias's origin is read where the
+    // alias is declared. `Foo` takes a ref, so it is a component only when something renders it.
+    let foo = "import React from 'react';\ninterface Props { label?: string }\n\
+               function Foo(props: Props, ref: unknown) { return <div />; }\n";
+    for (id, body) in [
+        (
+            "nearest: an inner factory binding inside a parameter",
+            "export function run(createElement: unknown) { { const { createElement } = React; return createElement(Foo); } }",
+        ),
+        (
+            "nearest: an inner parameter inside a factory binding",
+            "export function run() { const { createElement } = React; return ((createElement: (c: unknown) => unknown) => createElement(Foo))(String); }",
+        ),
+        (
+            "nearest: an inner factory binding inside a module function of the name",
+            "function createElement(tag: unknown) { return tag; }\nexport function run() { const { createElement } = React; return createElement(Foo); }",
+        ),
+        (
+            "nearest: an inner function of the name inside a factory binding",
+            "const { createElement } = React;\nexport function run() { function createElement(tag: unknown) { return tag; } return createElement(Foo); }",
+        ),
+        (
+            "nearest: a parameter, after an inner factory binding",
+            "export function run(createElement: (c: unknown) => unknown) { { const { createElement } = React; } return createElement(Foo); }",
+        ),
+        (
+            "nearest: an inner factory binding inside a module factory binding",
+            "const ce = React.createElement;\nexport function run() { const { createElement: ce } = React; return ce(Foo); }",
+        ),
+    ] {
+        cases.push((id.to_owned(), format!("{foo}{body}")));
+    }
+    cases.push((
+        "an alias's namespace is read where the alias is declared".to_owned(),
+        "import React from 'react';\ninterface Props { label?: string }\nconst createElement = React.createElement;\n\
+         export const Button = (props: Props) => { const React = {}; return createElement('button', null, props.label); };"
+            .to_owned(),
+    ));
+    for (id, inner) in [
+        ("an element built from forwardRef, plain", "React.forwardRef<HTMLElement, Props>((props, ref) => <div />)"),
+        ("an element built from forwardRef, aliased", "fr<HTMLElement, Props>((props, ref) => <div />)"),
+        ("an element built from memo, aliased", "m((props: Props) => <div />)"),
+    ] {
+        cases.push((
+            id.to_owned(),
+            format!(
+                "import React from 'react';\ninterface Props {{ label?: string }}\nconst fr = React.forwardRef;\n\
+                 const m = React.memo;\nexport const Button = React.createElement({inner}, null);"
+            ),
+        ));
+    }
     cases
+}
+
+/// The round 16 rows whose answer is a component's presence: the row, the component, whether it is listed.
+fn factory_parity_special(id: &str) -> Option<(&'static str, bool, &'static str)> {
+    match id {
+        "nearest: an inner factory binding inside a parameter"
+        | "nearest: an inner factory binding inside a module function of the name"
+        | "nearest: an inner factory binding inside a module factory binding" => {
+            Some(("Foo:", true, "the nearest binding is React's builder, which renders Foo"))
+        }
+        "nearest: an inner parameter inside a factory binding"
+        | "nearest: an inner function of the name inside a factory binding"
+        | "nearest: a parameter, after an inner factory binding" => {
+            Some(("Foo:", false, "the nearest binding is the file's own, which renders nothing"))
+        }
+        "an alias's namespace is read where the alias is declared" => {
+            Some(("Button:", true, "the alias is React's builder, whatever the call site shadows"))
+        }
+        "an element built from forwardRef, plain"
+        | "an element built from forwardRef, aliased"
+        | "an element built from memo, aliased" => Some(("Button:", false, "an element is no component")),
+        _ => None,
+    }
 }
 
 /// Every mapping of a row and every diagnostic, sorted, as `parity_output` prints them.
@@ -1500,18 +1574,20 @@ fn a_known_factory_is_known_through_its_provenance() {
         let main = base.get(id.as_str()).copied().unwrap_or("not in the base table");
         let plain_id = id.rsplit_once(" | ").map_or(id.clone(), |(row, _)| format!("{row} | plain"));
         let main_plain = base.get(plain_id.as_str()).copied().unwrap_or(main);
-        let (expected, why) = factory_parity_expectation(id);
-        let holds = match expected {
-            Some(listed) => button(&now) == listed,
-            None => now == main_plain,
+        let listed = |output: &str, subject: &str| output.split(" | ").any(|line| line.starts_with(subject));
+        let (holds, main_right, why) = match factory_parity_special(id) {
+            Some((subject, present, why)) => (listed(&now, subject) == present, listed(main, subject) == present, why),
+            None => {
+                let (expected, why) = factory_parity_expectation(id);
+                match expected {
+                    Some(present) => (button(&now) == present, button(main) == present, why),
+                    None => (now == main_plain, main == main_plain, why),
+                }
+            }
         };
         if !holds {
             failures.push(format!("{id} ({why}):\n  main {main}\n  now  {now}"));
         }
-        let main_right = match expected {
-            Some(listed) => button(main) == listed,
-            None => main == main_plain,
-        };
         if !main_right {
             *main_differs.entry(why).or_default() += 1;
         }
@@ -1523,9 +1599,11 @@ fn a_known_factory_is_known_through_its_provenance() {
         main_differs,
         [
             ("a known builder's result renders", 47),
-            ("an element is no component", 23),
+            ("an element is no component", 24),
             ("an unknown function builds no element", 3),
-            ("as main's plain call", 12)
+            ("as main's plain call", 12),
+            ("the nearest binding is React's builder, which renders Foo", 1),
+            ("the nearest binding is the file's own, which renders nothing", 3)
         ]
     );
 }
@@ -2162,4 +2240,28 @@ fn a_known_factory_is_known_by_its_binding_not_its_name() {
         failures.push(format!("an import used where a parameter shadows it elsewhere: {:?}", outcome(&shadowed)));
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// Round 16, finding 1: a call finds the declaration of its callee's name by a binary search of the name's scope
+/// tree, so N functions that each alias React's builder and call it cost N log N probes, not N squared.
+#[test]
+fn a_call_finds_its_nearest_declaration_by_binary_search() {
+    let probes = |n: usize| {
+        let mut source = String::from("import React from 'react';\ninterface Props { label?: string }\n");
+        for i in 0..n {
+            source.push_str(&format!(
+                "export const B{i} = (props: Props) => {{ const ce = React.createElement; return ce('div'); }};\n"
+            ));
+        }
+        super::component::steps::take_probed();
+        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
+        assert_eq!(data.component_mappings.len(), n, "every function renders through its alias");
+        super::component::steps::take_probed()
+    };
+    for n in [64_usize, 128, 256] {
+        // A few lookups per call (render evidence, call uses), each probing at most log2 of the n scopes and up the tree.
+        let bound = 8 * n as u64 * (u64::from(usize::BITS - n.leading_zeros()) + 2);
+        let found = probes(n);
+        assert!(found <= bound, "{n}: {found} probes, bound {bound}");
+    }
 }

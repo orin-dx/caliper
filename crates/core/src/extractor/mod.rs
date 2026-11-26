@@ -850,44 +850,37 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// The origin of the file's own value under `name` at `at`: `None` when the file declares none there, so the
-    /// name is an import's or a global. A scope around `at` that declares it as its own value wins; then a scope
-    /// that declares it from a factory's origin; then the module-level declarations, which give an origin only when
-    /// there is exactly one.
-    fn local_origin(&self, name: &str, at: Span) -> Option<&component::Origin> {
+    /// The file's own declaration of `name` that a use at `at` means: the nearest one in a scope around `at`,
+    /// whatever its origin (one walk up the name's scope tree), else the module-level one when there is exactly one.
+    /// `None` when the file declares none there, so the name is an import's or a global. The declaration's site is
+    /// where the names its origin reads are resolved, never the use's.
+    fn local_declaration(&self, name: &str, at: Span) -> Option<(&component::Origin, Span)> {
         const OWN: &component::Origin = &component::Origin::Own;
         let local = self.local_values.get(name)?;
-        if local.shadowed_in.contains(at) {
-            return Some(OWN);
-        }
-        let scoped = local
-            .scoped_origins
-            .iter()
-            .filter(|(scope, _)| scope.start <= at.start && at.end <= scope.end)
-            .min_by_key(|(scope, _)| scope.end - scope.start);
-        if let Some((_, origin)) = scoped {
-            return Some(origin);
+        if let Some(declared) = local.innermost(at) {
+            return Some((&declared.origin, declared.site));
         }
         match local.module_level.as_slice() {
             [] => None,
-            [origin] => Some(origin),
-            [_, _, ..] => Some(OWN),
+            [declared] => Some((&declared.origin, declared.site)),
+            [_, _, ..] => Some((OWN, at)),
         }
     }
 
     /// The factory a name called at `at` resolves to, following the file's own aliases and destructurings of a
-    /// namespace or a `require` (`ReactApi::of_export`): `depth` bounds a cycle.
+    /// namespace or a `require` (`ReactApi::of_export`), each resolved at its own declaration's site: `depth` bounds a
+    /// cycle.
     fn factory_named(&self, name: &str, at: Span, depth: u8) -> Option<ReactApi> {
         if depth > 8 {
             return None;
         }
-        match self.local_origin(name, at) {
-            Some(component::Origin::Own | component::Origin::ModuleNamespace(_)) => None,
-            Some(component::Origin::Alias(target)) => self.factory_named(target, at, depth + 1),
-            Some(component::Origin::Member { object, property }) => {
-                ReactApi::of_export(self.namespace_source(object, at, depth + 1)?, property)
+        match self.local_declaration(name, at) {
+            Some((component::Origin::Own | component::Origin::ModuleNamespace(_), _)) => None,
+            Some((component::Origin::Alias(target), site)) => self.factory_named(target, site, depth + 1),
+            Some((component::Origin::Member { object, property }, site)) => {
+                ReactApi::of_export(self.namespace_source(object, site, depth + 1)?, property)
             }
-            Some(component::Origin::Module { specifier, name }) => {
+            Some((component::Origin::Module { specifier, name }, _)) => {
                 ReactApi::of_export(FactorySource::of(specifier), name)
             }
             None => match self.data.imports.iter().find(|import| import.local_name.as_str() == name) {
@@ -900,16 +893,19 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Where the namespace `name`, read at `at` for a member, comes from: a namespace or default import, a
-    /// `require`, the file's alias of one, or a global (`React`, or any other object, whose members keep the element
-    /// builders' names). The file's own value of another origin is no namespace a factory is read from.
+    /// `require`, the file's alias of one (resolved at the alias's site), or a global (`React`, or any other object,
+    /// whose members keep the element builders' names). The file's own value of another origin is no namespace a
+    /// factory is read from.
     fn namespace_source(&self, name: &str, at: Span, depth: u8) -> Option<FactorySource> {
         if depth > 8 {
             return None;
         }
-        match self.local_origin(name, at) {
-            Some(component::Origin::ModuleNamespace(specifier)) => Some(FactorySource::of(specifier)),
-            Some(component::Origin::Alias(target)) => self.namespace_source(target, at, depth + 1),
-            Some(component::Origin::Own | component::Origin::Member { .. } | component::Origin::Module { .. }) => None,
+        match self.local_declaration(name, at) {
+            Some((component::Origin::ModuleNamespace(specifier), _)) => Some(FactorySource::of(specifier)),
+            Some((component::Origin::Alias(target), site)) => self.namespace_source(target, site, depth + 1),
+            Some((component::Origin::Own | component::Origin::Member { .. } | component::Origin::Module { .. }, _)) => {
+                None
+            }
             None => match self.data.imports.iter().find(|import| import.local_name.as_str() == name) {
                 Some(import) if matches!(import.exported_name.as_str(), "*" | "default") => {
                     Some(FactorySource::of(&import.specifier))
