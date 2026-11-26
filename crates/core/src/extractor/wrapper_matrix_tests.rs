@@ -1578,6 +1578,38 @@ fn factory_parity_cases() -> Vec<(String, String)> {
              function make<T>(tag: T, config: object): React.FC<Props> { return (props) => <div />; }\n\
              export const Button = (make as typeof make)('button', {});",
         ),
+        // Round 20: a candidate derived from a cast main read no callee through shares no tag and takes no props type
+        // a candidate main saw would take (`a_candidate_main_saw_keeps_main_s_answer_beside_a_cast_built_one`).
+        (
+            "round 20: tagged",
+            "interface RecipeProps extends React.ComponentProps<'button'> {}\n\
+             declare function stringify(tag: string, config: object): string;\n\
+             function chakra(tag: string, config: object): React.FC<Props> { return (props) => <div />; }\n\
+             const Label = (stringify as (tag: string, config: object) => string)('button', {});\n\
+             export const Primary = chakra('button', {});",
+        ),
+        (
+            "round 20: wrapper, same props type",
+            "interface GroupProps extends React.ComponentProps<'div'> {}\n\
+             function chakra(tag: string, config: object): React.FC<Props> { return (props) => <div />; }\n\
+             function withContext<T, P>(c: unknown): React.FC<P> { return (props) => <div />; }\n\
+             const StyledGroup = chakra('div', {});\n\
+             export const Group = (withContext as <T, P>(c: unknown) => React.FC<P>)<HTMLDivElement, GroupProps>(StyledGroup);",
+        ),
+        (
+            "round 20: wrapper, own props type",
+            "interface StyledProps extends React.ComponentProps<'div'> {}\n\
+             function chakra(tag: string, config: object): React.FC<Props> { return (props) => <div />; }\n\
+             function withContext<T, P>(c: unknown): React.FC<P> { return (props) => <div />; }\n\
+             const Styled = chakra('div', {});\n\
+             export const Group = (withContext as <T, P>(c: unknown) => React.FC<P>)<HTMLDivElement, Props>(Styled);",
+        ),
+        (
+            "round 20: alias of a cast-built wrapper",
+            "function withContext<T, P>(c: unknown): React.FC<P> { return (props) => <div />; }\n\
+             const Group = (withContext as <T, P>(c: unknown) => React.FC<P>)<HTMLDivElement, Props>(Base);\n\
+             export const Alias = Group;\nexport default Group;",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -1636,7 +1668,7 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     assert_eq!(base.len(), cases.len(), "the base table and the cases are out of step");
     let mut failures = Vec::new();
     let mut read_as_the_plain_call = 0;
-    for (id, source) in &cases {
+    for (id, source) in cases.iter().filter(|(id, _)| !id.starts_with("round 20: ")) {
         let now = factory_parity_output(source);
         let main = base.get(id.as_str()).copied().unwrap_or("not in the base table");
         let cast = id.rsplit_once(" | ").filter(|(_, cast)| *cast != "plain");
@@ -1669,6 +1701,51 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
     assert_eq!(read_as_the_plain_call, 44);
+}
+
+/// Round 20: a candidate derived from a cast main read no callee through (`Candidates::tentative`) counts toward no tag
+/// several candidates share and takes no props type before a candidate main saw, so every candidate main saw extracts
+/// exactly main's row. The cast-built candidate is the one-linear-peel answer, pinned beside main's.
+#[test]
+fn a_candidate_main_saw_keeps_main_s_answer_beside_a_cast_built_one() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let line = |output: &str, name: &str| -> String {
+        output
+            .split(" | ")
+            .filter(|line| line.contains(&format!("'{name}'")) || line.starts_with(&format!("{name}:")))
+            .collect()
+    };
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    // (row, the candidates main saw, the cast-built candidate, its answer here). Main's answer for the cast-built one
+    // is the factory rule's, through the callee it did not read as cast: `Label:stringify"factoryResult"` (a call
+    // returning `string` listed as a component) and `Group:withContext"factoryResult"`.
+    let rows = [
+        (
+            "round 20: tagged",
+            ["Base", "Primary"],
+            "Label",
+            "Info SkippedCandidate: 'Label' is built by a call to 'stringify' through a type assertion that replaces its \
+             type, so the declaration that would give its props is not read and it is not listed",
+        ),
+        (
+            "round 20: wrapper, same props type",
+            ["Base", "StyledGroup"],
+            "Group",
+            "Group:GroupProps\"wrapperTypeArgument\"",
+        ),
+        ("round 20: wrapper, own props type", ["Base", "Styled"], "Group", "Group:Props\"wrapperTypeArgument\""),
+        ("round 20: alias of a cast-built wrapper", ["Base", "Alias"], "Group", "Group:Props\"wrapperTypeArgument\""),
+    ];
+    for (id, plain, cast_built, answer) in rows {
+        let now = factory_parity_output(&cases[id]);
+        let main = base[id];
+        for name in plain {
+            assert_eq!(line(&now, name), line(main, name), "{id}: {name}");
+        }
+        assert_eq!(line(&now, cast_built), answer, "{id}: {cast_built}");
+    }
+    assert_eq!(line(base["round 20: tagged"], "Primary"), "Primary:RecipeProps\"taggedFactory\"");
 }
 
 /// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing

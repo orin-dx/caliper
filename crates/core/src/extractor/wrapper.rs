@@ -42,6 +42,22 @@ pub(crate) struct PendingWrapper {
     span: Span,
 }
 
+/// The pending wrapper candidates in two buckets: those main saw (`plain`), and those derived from a callee written
+/// through a cast main read no callee through (`tentative`: a generic wrapper whose cast replaces the callee's type and
+/// whose type arguments still name the props). A tentative candidate counts toward no structure a plain one reads (the
+/// tags several candidates share, the props types already taken, the identifier aliases) and is promoted after them.
+#[derive(Default)]
+pub(crate) struct Candidates {
+    plain: Vec<PendingWrapper>,
+    tentative: Vec<PendingWrapper>,
+}
+
+impl Candidates {
+    fn push(&mut self, tentative: bool, pending: PendingWrapper) {
+        if tentative { self.tentative.push(pending) } else { self.plain.push(pending) }
+    }
+}
+
 /// Member that carries the props type inside a factory payload: `Factory<{ props: ButtonProps; ... }>`.
 const PAYLOAD_PROPS_MEMBER: &str = "props";
 
@@ -183,7 +199,8 @@ impl<'src> SourceDataCollector<'src> {
         // name the props: the candidate stays, without the callee.
         let callee = self.wrapper_callee(call);
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
-        self.pending_wrappers.push(PendingWrapper {
+        let tentative = super::component::wrapped_beyond_main(&call.callee);
+        let candidate = PendingWrapper {
             name: name.to_owned(),
             needs_payload,
             tag: None,
@@ -193,7 +210,8 @@ impl<'src> SourceDataCollector<'src> {
             description,
             tags,
             span: decl.span,
-        });
+        };
+        self.pending_wrappers.push(tentative, candidate);
         true
     }
 
@@ -208,9 +226,10 @@ impl<'src> SourceDataCollector<'src> {
     ) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        // Main's claim, as in `try_record_wrapper_call`: a callee written through an assertion, `satisfies` or `!` is
-        // left to the later rules.
-        if super::component::call_type_arguments(call).is_some() || self.left_to_the_factory_rule(call) {
+        // Main's claim: a callee written through an assertion, `satisfies` or `!` is left to the later rules, as main
+        // read no callee name through one. A tag has no type argument to keep props from, so no cast is kept here.
+        if super::component::call_type_arguments(call).is_some() || super::component::wrapped_beyond_main(&call.callee)
+        {
             return false;
         }
         let [tag, config] = call.arguments.as_slice() else { return false };
@@ -233,7 +252,7 @@ impl<'src> SourceDataCollector<'src> {
             return false;
         }
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
-        self.pending_wrappers.push(PendingWrapper {
+        let candidate = PendingWrapper {
             name: name.to_owned(),
             needs_payload: false,
             tag: tag_name,
@@ -243,7 +262,8 @@ impl<'src> SourceDataCollector<'src> {
             description,
             tags,
             span: decl.span,
-        });
+        };
+        self.pending_wrappers.push(false, candidate);
         true
     }
 
@@ -260,103 +280,113 @@ impl<'src> SourceDataCollector<'src> {
         matches!(self.select_wrapper_props(&type_args), PropsSelection::Found { from_payload: false, .. })
     }
 
-    /// Turn the recorded candidates into mappings, now that every declaration in the file is known.
+    /// Turn the candidates main saw into mappings, now that every declaration in the file is known.
     pub(super) fn promote_wrapper_calls(&mut self) {
-        let pending_wrappers = std::mem::take(&mut self.pending_wrappers);
-        let tag_uses =
-            |tag: &str| pending_wrappers.iter().filter(|pending| pending.tag.as_deref() == Some(tag)).count();
-        let shared_tags: Vec<bool> = pending_wrappers
-            .iter()
-            .map(|pending| pending.tag.as_deref().is_some_and(|tag| tag_uses(tag) > 1))
-            .collect();
+        let plain = std::mem::take(&mut self.pending_wrappers.plain);
+        // Which tags several candidates share is counted over the candidates main saw.
+        let tag_uses = |tag: &str| plain.iter().filter(|pending| pending.tag.as_deref() == Some(tag)).count();
+        let shared_tags: Vec<bool> =
+            plain.iter().map(|pending| pending.tag.as_deref().is_some_and(|tag| tag_uses(tag) > 1)).collect();
         // A tagged factory takes the props type no other component in the file takes, so every other candidate is
         // promoted first, in source order: `StyledGroup = chakra("div", …)` comes before `Group = withContext<…,
         // GroupProps>(StyledGroup)` and would otherwise take `GroupProps` before `Group` claims it.
         let (tagged, others): (Vec<_>, Vec<_>) =
-            pending_wrappers.into_iter().zip(shared_tags).partition(|(pending, _)| pending.tag.is_some());
+            plain.into_iter().zip(shared_tags).partition(|(pending, _)| pending.tag.is_some());
         for (pending, shared_tag) in others.into_iter().chain(tagged) {
-            // The anonymous default export is no binding of its name, so a binding of that name is no reason to skip it.
-            let bound = self.anonymous_default != Some(pending.span.start);
-            if bound && self.data.component_mappings.iter().any(|m| m.is_binding_named(&pending.name)) {
-                continue;
-            }
-            if let Some(tag) = &pending.tag {
-                let Some((props_name, props_args)) = self.tagged_factory_props(&pending.name, tag, shared_tag) else {
-                    self.record_skip(
-                        DiagnosticCode::SkippedCandidate,
-                        format!(
-                            "'{}' is built from a tag and a config object, but no props type declared in this file gives the tag \"{tag}\"",
-                            pending.name
-                        ),
-                        pending.span,
-                    );
-                    continue;
-                };
-                self.data.component_mappings.push(
-                    ComponentMapping::new(
-                        pending.name,
-                        props_name,
-                        self.file_path.clone(),
-                        pending.span.start,
-                        pending.span.end,
-                        pending.rule,
-                    )
-                    .with_props_type_args(props_args)
-                    .with_doc(pending.description, pending.tags),
-                );
-                continue;
-            }
-            let selected = match self.select_wrapper_props(&pending.type_args) {
-                PropsSelection::Found { name, args, from_payload } if from_payload || !pending.needs_payload => {
-                    Some((name, args))
-                }
-                PropsSelection::UnusablePayload { alias } => {
-                    self.record_skip(
-                        DiagnosticCode::SkippedCandidate,
-                        format!(
-                            "'{}' is built from the factory payload '{alias}', whose `props` member is not a named type",
-                            pending.name
-                        ),
-                        pending.span,
-                    );
-                    continue;
-                }
-                PropsSelection::Found { .. } | PropsSelection::None => None,
-            };
-            let Some((props_name, props_args)) = selected else {
+            self.promote_wrapper_call(pending, shared_tag);
+        }
+    }
+
+    /// Turn the tentative candidates into mappings once every rule main ran before its factory rule has run on the
+    /// candidates main saw, so none of them reads a tentative one (an identifier alias, a props type already taken).
+    pub(super) fn promote_tentative_wrapper_calls(&mut self) {
+        for pending in std::mem::take(&mut self.pending_wrappers.tentative) {
+            self.promote_wrapper_call(pending, false);
+        }
+    }
+
+    fn promote_wrapper_call(&mut self, pending: PendingWrapper, shared_tag: bool) {
+        // The anonymous default export is no binding of its name, so a binding of that name is no reason to skip it.
+        let bound = self.anonymous_default != Some(pending.span.start);
+        if bound && self.data.component_mappings.iter().any(|m| m.is_binding_named(&pending.name)) {
+            return;
+        }
+        if let Some(tag) = &pending.tag {
+            let Some((props_name, props_args)) = self.tagged_factory_props(&pending.name, tag, shared_tag) else {
                 self.record_skip(
                     DiagnosticCode::SkippedCandidate,
                     format!(
-                        "'{}' looks like a component built by a wrapper call, but none of its type arguments names {}",
-                        pending.name,
-                        if pending.needs_payload {
-                            "a factory payload, which a tag-name argument needs"
-                        } else {
-                            "a props type declared in this file or ending in Props"
-                        }
+                        "'{}' is built from a tag and a config object, but no props type declared in this file gives the tag \"{tag}\"",
+                        pending.name
                     ),
                     pending.span,
                 );
-                continue;
+                return;
             };
-            let mut mapping = ComponentMapping::new(
-                pending.name,
-                props_name,
-                self.file_path.clone(),
-                pending.span.start,
-                pending.span.end,
-                pending.rule,
-            )
-            .with_props_type_args(props_args)
-            .with_doc(pending.description, pending.tags);
-            if let Some(callee) = pending.callee {
-                mapping = mapping.with_wrapper_callee(callee);
-            }
-            if !bound {
-                mapping = mapping.without_binding();
-            }
-            self.data.component_mappings.push(mapping);
+            self.data.component_mappings.push(
+                ComponentMapping::new(
+                    pending.name,
+                    props_name,
+                    self.file_path.clone(),
+                    pending.span.start,
+                    pending.span.end,
+                    pending.rule,
+                )
+                .with_props_type_args(props_args)
+                .with_doc(pending.description, pending.tags),
+            );
+            return;
         }
+        let selected = match self.select_wrapper_props(&pending.type_args) {
+            PropsSelection::Found { name, args, from_payload } if from_payload || !pending.needs_payload => {
+                Some((name, args))
+            }
+            PropsSelection::UnusablePayload { alias } => {
+                self.record_skip(
+                    DiagnosticCode::SkippedCandidate,
+                    format!(
+                        "'{}' is built from the factory payload '{alias}', whose `props` member is not a named type",
+                        pending.name
+                    ),
+                    pending.span,
+                );
+                return;
+            }
+            PropsSelection::Found { .. } | PropsSelection::None => None,
+        };
+        let Some((props_name, props_args)) = selected else {
+            self.record_skip(
+                DiagnosticCode::SkippedCandidate,
+                format!(
+                    "'{}' looks like a component built by a wrapper call, but none of its type arguments names {}",
+                    pending.name,
+                    if pending.needs_payload {
+                        "a factory payload, which a tag-name argument needs"
+                    } else {
+                        "a props type declared in this file or ending in Props"
+                    }
+                ),
+                pending.span,
+            );
+            return;
+        };
+        let mut mapping = ComponentMapping::new(
+            pending.name,
+            props_name,
+            self.file_path.clone(),
+            pending.span.start,
+            pending.span.end,
+            pending.rule,
+        )
+        .with_props_type_args(props_args)
+        .with_doc(pending.description, pending.tags);
+        if let Some(callee) = pending.callee {
+            mapping = mapping.with_wrapper_callee(callee);
+        }
+        if !bound {
+            mapping = mapping.without_binding();
+        }
+        self.data.component_mappings.push(mapping);
     }
 
     /// The props type a tagged factory builds from: the interface or alias declared in this file whose heritage or body

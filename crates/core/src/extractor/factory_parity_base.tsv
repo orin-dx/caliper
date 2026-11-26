@@ -163,6 +163,10 @@ wrapper call before its component | rendered | typeof itself	Base:Props"function
 anonymous default wrapper call | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a factory payload, which a tag-name argument needs
 anonymous default wrapper call | rendered | typeof itself	Base:Props"functionDeclaration"
 tagged factory, a props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult"
+round 20: tagged	Base:Props"functionDeclaration" | Label:stringify"factoryResult" | Primary:RecipeProps"taggedFactory"
+round 20: wrapper, same props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" | StyledGroup:GroupProps"taggedFactory"
+round 20: wrapper, own props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" | Styled:StyledProps"taggedFactory"
+round 20: alias of a cast-built wrapper	Base:Props"functionDeclaration" | Group:withContext"factoryResult" | Info SkippedCandidate: 'Alias' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression"
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument"
 an element built from forwardRef, plain	Button:Props"forwardRef"
