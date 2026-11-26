@@ -4995,6 +4995,10 @@ fn a_component_asked_while_a_dependency_file_could_not_be_read_is_answered_in_fu
         fs::write(&props_file, [0xff_u8, 0xfe, 0xfd]).unwrap();
         assert_eq!(names(&session.component("Card")), ["title"], "answered from what was read");
         fs::write(&props_file, PROPS).unwrap();
+        // Nothing is read again before the retry is due or an edit arrives (`dependency_types::Retry`): an edit.
+        let card_file = root.join("src/Card.tsx");
+        fs::write(&card_file, fs::read_to_string(&card_file).unwrap() + "// edited\n").unwrap();
+        drop(session.update_file(&card_file));
         let tag = other_first.then(|| session.component("Tag"));
         let card = session.component("Card");
 

@@ -132,7 +132,8 @@ pub(crate) async fn answer(
         .enumerate()
         .map(|(index, (target, instantiation))| probe_line(index, &target.file_path, instantiation))
         .collect();
-    // A rejected request says nothing about the components, so their fallbacks are transient: asked again, kept nowhere.
+    // A rejected request says nothing about the components, so their fallbacks are transient: asked again, kept
+    // nowhere.
     let all_rejected = |outcome: &mut SemanticOutcome, reason: &str| {
         outcome.fallbacks.extend(pending.iter().map(|(target, _)| rejected_fallback_of(target, reason)));
     };

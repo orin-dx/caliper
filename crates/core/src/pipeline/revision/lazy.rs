@@ -155,6 +155,9 @@ pub(super) struct Lazy {
     whole_demand_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// How many times the layer grew (and the context was rebuilt or kept), for tests and stats.
     growths: std::sync::atomic::AtomicUsize,
+    /// Components resolved through a walk that passed a file it could not read, with the unread walks they reached:
+    /// answered until one of those is due, then resolved again. Never carried to the next revision, never persisted.
+    provisional: DashMap<ComponentId, (Arc<Resolved>, Vec<Demand>), FxBuildHasher>,
     /// The session's clock for following again a walk that passed a file it could not read, shared by its revisions.
     clock: Arc<RetryClock>,
     /// How many edits the session has seen: one arriving makes every such walk due again.
@@ -252,6 +255,7 @@ impl Revision {
             whole_demand_started: std::sync::atomic::AtomicBool::new(false),
             whole_demand_thread: Mutex::new(None),
             growths: std::sync::atomic::AtomicUsize::new(0),
+            provisional: DashMap::default(),
             clock: Arc::default(),
             edits: 0,
             #[cfg(test)]
@@ -393,6 +397,8 @@ impl Revision {
                 whole_demand_started: std::sync::atomic::AtomicBool::new(false),
                 whole_demand_thread: Mutex::new(None),
                 growths: std::sync::atomic::AtomicUsize::new(0),
+                // An edit makes every walk past an unreadable file due: no provisional answer carries over.
+                provisional: DashMap::default(),
                 clock: previous.clock.clone(),
                 edits: previous.edits + 1,
                 #[cfg(test)]
@@ -456,6 +462,9 @@ impl Revision {
         if let Some(hit) = lazy.memo.get(id) {
             return Some(hit.clone());
         }
+        if let Some(hit) = self.provisional_hit(lazy, id) {
+            return Some(hit);
+        }
         let mapping = self.global.component_mappings.get(index)?;
         // The component's own file almost always reaches its own names; loading them first saves a resolution.
         if let Some(seed) = lazy.demands.get(mapping.file_path.as_str()) {
@@ -484,18 +493,19 @@ impl Revision {
                     missing.extend(layer.missing_at(&unread, retry));
                     missing.sort();
                     missing.dedup();
-                    (missing, !unread.is_empty())
+                    (missing, unread)
                 }
-                None => (Vec::new(), false),
+                None => (Vec::new(), Vec::new()),
             };
             // A resolution against a layer that lacked a name it reached is discarded, and so is its context's memo.
             // A load that left the same names missing answered none of them (a demand whose load panicked stays
             // unanswered, a file that stays unreadable), so asking again would never end.
             if missing.is_empty() || missing == asked_for {
                 let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes });
-                // A walk past a file that could not be read may answer more on the next request, whichever component
-                // asks: the answer without it is this request's alone.
-                if unread {
+                // A walk past a file that could not be read answers more once it is followed again: until then the
+                // answer holds only provisionally, and never in the memo an edit carries over.
+                if !unread.is_empty() {
+                    lazy.provisional.insert(id.clone(), (resolved.clone(), unread));
                     return Some(resolved);
                 }
                 return Some(lazy.memo.entry(id.clone()).or_insert(resolved).clone());
@@ -503,6 +513,19 @@ impl Revision {
             self.grow(options, lazy, &missing);
             asked_for = missing;
         }
+    }
+
+    /// The provisional answer for `id` while none of the unread walks it reached is due ([`Lazy::provisional`]): no
+    /// retry has passed, no edit arrived, and no later load followed one of them again or read one of their files.
+    fn provisional_hit(&self, lazy: &Lazy, id: &ComponentId) -> Option<Arc<Resolved>> {
+        let (resolved, unread) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
+        let engine = lazy.engine.load();
+        let until = engine.layer.as_ref().and_then(|layer| layer.unread_until(&unread, lazy.edits));
+        if until.is_some_and(|until| lazy.clock.now() < until) {
+            return Some(resolved);
+        }
+        lazy.provisional.remove(id);
+        None
     }
 
     /// Once the layer has grown [`WHOLE_DEMAND_AFTER_GROWTHS`] times, load every name the project's files take from a
@@ -765,6 +788,7 @@ mod read_retry_tests {
     use crate::pipeline::{CollapseInheritedProps, ComponentAnswer, PipelineOptions};
 
     const BAD_PROPS: &str = "export interface BadProps { bad: string }\n";
+    const BAD2_PROPS: &str = "export interface Bad2Props { bad2: string }\n";
 
     fn project() -> (tempfile::TempDir, Utf8PathBuf) {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -788,6 +812,13 @@ mod read_retry_tests {
             ("src/a/A.tsx", component("A", "bad-kit", "BadProps")),
             ("src/u1/U1.tsx", component("U1", "good-kit", "GoodProps")),
             ("src/u2/U2.tsx", component("U2", "other-kit", "OtherProps")),
+            ("node_modules/bad2-kit/package.json", kit("bad2-kit")),
+            ("node_modules/bad2-kit/index.d.ts", "export * from './props';\n".to_owned()),
+            ("node_modules/bad2-kit/props.d.ts", BAD2_PROPS.to_owned()),
+            ("node_modules/c-kit/package.json", kit("c-kit")),
+            ("node_modules/c-kit/index.d.ts", "export * from '../bad2-kit/props';\n".to_owned()),
+            ("src/b/B.tsx", component("B", "bad2-kit", "Bad2Props")),
+            ("src/c/C.tsx", component("C", "c-kit", "Bad2Props")),
         ];
         for (path, body) in files {
             let path = root.join(path);
@@ -849,11 +880,11 @@ mod read_retry_tests {
     }
 
     /// One file stays unreadable (its stamp unchanged, as for a permission error). The component behind it costs one
-    /// load and one resolution on its first request, then one resolution and no load per request until the retry is
-    /// due, then one load once. A component that never reaches the file costs what it would anyway, and the memos of
-    /// the components before it outlive the growths after the failure. Once the file reads and the retry is due, the
-    /// answer equals a cold run's, and it is kept. On the base each request behind the file cost two loads and two
-    /// resolutions, and every growth after the failure dropped every memo.
+    /// load and one resolution on its first request, then nothing until the retry is due (its provisional answer), then
+    /// one load and one resolution once. A component that never reaches the file costs what it would anyway, and the
+    /// memos of the components before it outlive the growths after the failure. Once the file reads and the retry is
+    /// due, the answer equals a cold run's, and it is kept. On the base each request behind the file cost two loads and
+    /// two resolutions, and every growth after the failure dropped every memo.
     #[test]
     fn a_file_that_stays_unreadable_is_followed_again_once_its_retry_is_due_and_costs_no_other_component_anything() {
         let (_tmp, root) = project();
@@ -868,7 +899,7 @@ mod read_retry_tests {
         assert_eq!(cost(&revision, || assert_eq!(props(&ask("U1")), ["good", "own"])), (1, 1));
         assert_eq!(cost(&revision, || assert_eq!(props(&ask("A")), ["own"])), (1, 1), "the first request behind it");
         for request in 0..5 {
-            assert_eq!(cost(&revision, || assert_eq!(props(&ask("A")), ["own"])), (0, 1), "request {request}");
+            assert_eq!(cost(&revision, || assert_eq!(props(&ask("A")), ["own"])), (0, 0), "request {request}");
         }
         let before = memo_files(&revision);
         assert!(before.contains("U1.tsx") && before.contains("A.tsx"), "{before:?}");
@@ -879,13 +910,13 @@ mod read_retry_tests {
         assert_eq!(cost(&revision, || drop(ask("U1"))), (0, 0), "an unrelated component is memoized");
 
         set_clock(&revision, start + READ_RETRY - Duration::from_millis(1));
-        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 1), "not due yet");
+        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 0), "not due yet");
         set_clock(&revision, start + READ_RETRY);
         assert_eq!(cost(&revision, || drop(ask("A"))), (1, 1), "due: followed again, still unreadable");
-        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 1), "the failure just now starts the retry again");
+        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 0), "the failure just now starts the retry again");
 
-        rewrite_keeping_stamp(&props_file, BAD_PROPS.as_bytes());
-        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 1), "readable, but nothing says so before the retry");
+        std::fs::write(&props_file, BAD_PROPS).unwrap();
+        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 0), "readable, but nothing is read before the retry");
         set_clock(&revision, start + READ_RETRY * 2);
         let mut recovered = None;
         assert_eq!(cost(&revision, || recovered = Some(ask("A"))), (1, 1));
@@ -893,35 +924,50 @@ mod read_retry_tests {
         assert_eq!(cost(&revision, || drop(ask("A"))), (0, 0), "and it is kept");
     }
 
-    /// While a file stays unreadable, a change to it (its modification time or size) or an edit to the project makes the
-    /// walk that could not read it due at once, without waiting for the retry; the next request answers as a cold run.
+    /// An edit to the project, any file, makes every walk past an unreadable file due at once, without waiting for the
+    /// retry, and drops the provisional answers: the next request answers as a cold run.
     #[test]
-    fn a_change_to_the_file_or_an_edit_makes_the_walk_past_it_due_at_once() {
-        for edit in [false, true] {
-            let (_tmp, root) = project();
-            let options = options(&root, true);
-            let props_file = root.join("node_modules/bad-kit/props.d.ts");
-            rewrite_keeping_stamp(&props_file, &[0xff; BAD_PROPS.len()]);
-            let first = Revision::cold_lazy(&options, 0);
-            set_clock(&first, Instant::now());
-            assert_eq!(props(&first.lazy_component(&options, "A").unwrap()), ["own"]);
-            assert_eq!(cost(&first, || drop(first.lazy_component(&options, "A"))), (0, 1), "edit {edit}");
+    fn an_edit_makes_the_walk_past_an_unreadable_file_due_at_once() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        let props_file = root.join("node_modules/bad-kit/props.d.ts");
+        rewrite_keeping_stamp(&props_file, &[0xff; BAD_PROPS.len()]);
+        let first = Revision::cold_lazy(&options, 0);
+        set_clock(&first, Instant::now());
+        assert_eq!(props(&first.lazy_component(&options, "A").unwrap()), ["own"]);
+        assert_eq!(cost(&first, || drop(first.lazy_component(&options, "A"))), (0, 0));
 
-            let revision = match edit {
-                false => {
-                    std::fs::write(&props_file, BAD_PROPS).unwrap();
-                    first
-                }
-                true => {
-                    rewrite_keeping_stamp(&props_file, BAD_PROPS.as_bytes());
-                    let u1 = root.join("src/u1/U1.tsx");
-                    std::fs::write(&u1, std::fs::read_to_string(&u1).unwrap() + "// edited\n").unwrap();
-                    first.next_lazy(&options, &u1).unwrap().0
-                }
-            };
-            let mut answer = None;
-            assert_eq!(cost(&revision, || answer = revision.lazy_component(&options, "A")), (1, 1), "edit {edit}");
-            assert_eq!(answer.unwrap(), cold(&root, "A"), "edit {edit}");
-        }
+        std::fs::write(&props_file, BAD_PROPS).unwrap();
+        let u1 = root.join("src/u1/U1.tsx");
+        std::fs::write(&u1, std::fs::read_to_string(&u1).unwrap() + "// edited\n").unwrap();
+        let revision = first.next_lazy(&options, &u1).unwrap().0;
+        let mut answer = None;
+        assert_eq!(cost(&revision, || answer = revision.lazy_component(&options, "A")), (1, 1));
+        assert_eq!(answer.unwrap(), cold(&root, "A"));
+    }
+
+    /// Two components, followed in one load, each behind a file of its own that could not be read. One of the files is
+    /// read since, by a third component's walk: only the component behind it is followed again, and the other keeps
+    /// its provisional answer. On the base every failed read of the load was a suspect of both walks, so the second
+    /// was walked again too.
+    #[test]
+    fn only_the_walk_whose_own_file_was_read_since_is_followed_again() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        let (bad, bad2) = (root.join("node_modules/bad-kit/props.d.ts"), root.join("node_modules/bad2-kit/props.d.ts"));
+        rewrite_keeping_stamp(&bad, &[0xff; BAD_PROPS.len()]);
+        rewrite_keeping_stamp(&bad2, &[0xff; BAD2_PROPS.len()]);
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        let ask = |key: &str| revision.lazy_component(&options, key).unwrap();
+        let both = ["A".to_owned(), "B".to_owned()];
+        assert_eq!(cost(&revision, || drop(revision.lazy_components(&options, &both))), (1, 2), "one load for both");
+
+        std::fs::write(&bad2, BAD2_PROPS).unwrap();
+        assert_eq!(props(&ask("C")), ["bad2", "own"], "C's walk reads bad2 again");
+        assert_eq!(cost(&revision, || assert_eq!(props(&ask("A")), ["own"])), (0, 0), "its own file still failed");
+        let mut answer = None;
+        assert_eq!(cost(&revision, || answer = Some(ask("B"))), (1, 1), "its own file was read since");
+        assert_eq!(answer.unwrap(), cold(&root, "B"));
     }
 }

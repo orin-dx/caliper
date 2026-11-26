@@ -626,9 +626,9 @@ mod tests {
         assert!(format!("{:?}", last.props[0].prop_type).contains("\"c\""), "{last:?}");
     }
 
-    /// A fallback the checker gave because it failed (a rejected request: a panic, a stopped checker) is about that run,
-    /// not the component: it is not kept, so the next run asks again. The same fallback as a verdict is kept. On the base
-    /// both were kept, since neither carries a diagnostic.
+    /// A fallback the checker gave because it failed (a rejected request: a panic, a stopped checker) is about that
+    /// run, not the component: it is not kept, so the next run asks again. The same fallback as a verdict is kept. On
+    /// the base both were kept, since neither carries a diagnostic.
     #[test]
     fn a_transient_fallback_is_not_kept_and_a_verdict_is() {
         use caliper_docgen_core::types::semantic::SemanticFallback;

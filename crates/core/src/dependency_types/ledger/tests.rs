@@ -198,9 +198,9 @@ fn a_stub_that_reads_again_through_a_scan_is_no_longer_reported() {
     assert!(recovered.is_dependency_file(&inner), "the augmentation past the stub is loaded");
 }
 
-/// Two files of one resolution scope import a module for its own sake, and an augmentation it leads to takes a type from
-/// a file that could not be read. Only the first demand to ask searches the module and loads the augmentation, so the
-/// other reaches the unread walk through it: each demand leads to the same unread one, whichever searched.
+/// Two files of one resolution scope import a module for its own sake, and an augmentation it leads to takes a type
+/// from a file that could not be read. Only the first demand to ask searches the module and loads the augmentation, so
+/// the other reaches the unread walk through it: each demand leads to the same unread one, whichever searched.
 #[test]
 fn every_demand_of_a_scope_leads_to_what_the_search_its_first_demand_made_left_unread() {
     let (_tmp, root) = project(&[
@@ -225,6 +225,13 @@ fn every_demand_of_a_scope_leads_to_what_the_search_its_first_demand_made_left_u
     for demand in &demands {
         assert_eq!(layer.unread(std::slice::from_ref(demand)), std::slice::from_ref(&tone), "{}", demand.from);
     }
+}
+
+/// An edit to `file`, which makes every walk past an unreadable file due: nothing is read again before the retry or an
+/// edit ([`Retry`]).
+fn edit(session: &WatchSession, file: &Utf8Path) {
+    std::fs::write(file, std::fs::read_to_string(file).unwrap() + "// edited\n").unwrap();
+    drop(session.update_file(file));
 }
 
 fn names(answer: &Option<ComponentAnswer>) -> Vec<String> {
@@ -280,6 +287,7 @@ fn a_prop_a_package_file_inherits_from_an_unreadable_file_appears_once_the_file_
     assert_eq!(names(&card), ["own", "title"], "asked again while it stays unreadable");
     assert_eq!(warned(&card), [Some(base.to_string())]);
     std::fs::write(&base, text).unwrap();
+    edit(&session, &root.join("src/Card.tsx"));
     let card = session.component("Card");
 
     let fresh = WatchSession::lazy(options(&root));
@@ -340,6 +348,7 @@ fn a_component_that_meets_a_declaration_an_earlier_load_left_unread_is_not_kept_
     assert_eq!(names(&tag), ["label", "own"], "answered from what was read");
     assert_eq!(warned(&tag), [Some(base.to_string())]);
     std::fs::write(&base, text).unwrap();
+    edit(&session, &root.join("src/tag/Tag.tsx"));
     let tag = session.component("Tag");
 
     let fresh = WatchSession::lazy(options(&root));
@@ -435,8 +444,9 @@ fn comparable(root: &Utf8Path, answer: &ComponentAnswer) -> String {
 ///
 /// 1. the answer equals a fresh session's (cache off) with exactly the files the session reports unreadable made
 ///    unreadable: the cold answer when it reports none, the cold answer minus exactly what those files held otherwise;
-/// 2. each file is reported once, and a request made while every file reads reports none of the files its own walk
-///    reads (it read them again);
+/// 2. each file is reported once, and a request made while every file reads, after an edit since a file last changed,
+///    reports none of the files its own walk reads: the edit made every walk past an unreadable file due, and no
+///    provisional answer outlives it;
 /// 3. once every file reads, every component equals the cold answer, with no warning, in this session and in the next
 ///    one over the same cache: nothing from a degraded answer was memoized or persisted.
 ///
@@ -479,6 +489,7 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
             log.push(format!("unreadable before start: {unreadable:?}"));
         }
         drop(session.initialize());
+        let mut edited_since_change = true;
         for step in 0..40 {
             let context = |log: &[String]| format!("seed {seed}, step {step}:\n{}", log.join("\n"));
             match next(4) {
@@ -488,6 +499,7 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
                         unreadable.insert(name);
                     }
                     set_unreadable(&root, &unreadable);
+                    edited_since_change = false;
                     log.push(format!("unreadable: {unreadable:?}"));
                 }
                 1 => {
@@ -495,11 +507,12 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
                     let file = root.join(format!("src/{name}.tsx"));
                     std::fs::write(&file, model_source(name, imports, step + 1)).unwrap();
                     drop(session.update_file(&file));
+                    edited_since_change = true;
                     log.push(format!("edit {name}"));
                 }
                 _ => {
                     let (name, _, reads) = MODEL_COMPONENTS[next(MODEL_COMPONENTS.len())];
-                    let all_read = unreadable.is_empty();
+                    let all_read = unreadable.is_empty() && edited_since_change;
                     let answer = session.component(name).unwrap();
                     session.wait_for_dependency_load();
                     log.push(format!("request {name}"));
@@ -518,6 +531,10 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
         }
         unreadable.clear();
         set_unreadable(&root, &unreadable);
+        let (name, imports, _) = MODEL_COMPONENTS[0];
+        let file = root.join(format!("src/{name}.tsx"));
+        std::fs::write(&file, model_source(name, imports, 99)).unwrap();
+        drop(session.update_file(&file));
         for (name, _, _) in MODEL_COMPONENTS {
             drop(session.component(name));
             session.wait_for_dependency_load();

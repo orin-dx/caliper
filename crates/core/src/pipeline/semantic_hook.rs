@@ -49,8 +49,8 @@ enum Settled {
     /// The checker answered for the component: kept for the next request.
     Answered(Answered),
     /// The checker answered nothing for the component: it was unavailable, timed out or crashed
-    /// ([`SemanticOutcome::unavailable`]), or failed on this component ([`SemanticFallback::transient`]). The structural
-    /// props stand, with what the checker said. Never kept as the answer: it is held as a refusal
+    /// ([`SemanticOutcome::unavailable`]), or failed on this component ([`SemanticFallback::transient`]). The
+    /// structural props stand, with what the checker said. Never kept as the answer: it is held as a refusal
     /// ([`AnswerCache::degraded`]) until [`DEGRADED_RETRY`] passes or a file changes, and the request after that asks
     /// the checker again.
     Degraded(Vec<Diagnostic>),
@@ -106,6 +106,25 @@ struct AnswerCache {
     degraded: FxHashMap<(String, u64), (Instant, Vec<Diagnostic>)>,
     /// The one copy of each prop the kept answers hold, for this generation.
     props: PropInterner,
+}
+
+/// The most refusals [`AnswerCache::degraded`] holds. A key asked once and never again would otherwise stay for the
+/// session; past the bound the expired ones go first, then the oldest.
+const DEGRADED_HELD: usize = 256;
+
+impl AnswerCache {
+    /// Hold `key`'s refusal from `at`. At the bound, the refusals past [`DEGRADED_RETRY`] are dropped first (a scan
+    /// only when the map is full), then the oldest, so the map never holds more than [`DEGRADED_HELD`].
+    fn hold_degraded(&mut self, key: (String, u64), at: Instant, said: Vec<Diagnostic>) {
+        if self.degraded.len() >= DEGRADED_HELD && !self.degraded.contains_key(&key) {
+            self.degraded.retain(|_, (held, _)| at.saturating_duration_since(*held) < DEGRADED_RETRY);
+            if self.degraded.len() >= DEGRADED_HELD {
+                let oldest = self.degraded.iter().min_by_key(|(_, (held, _))| *held).map(|(key, _)| key.clone());
+                oldest.map(|oldest| self.degraded.remove(&oldest));
+            }
+        }
+        self.degraded.insert(key, (at, said));
+    }
 }
 
 impl AnswerCache {
@@ -344,9 +363,7 @@ impl SemanticHook {
                             answered.component = answered.component.take().map(|component| cache.shared(component));
                             cache.answers.insert(key, answered.clone());
                         }
-                        Settled::Degraded(said) => {
-                            cache.degraded.insert(key, (now(), said.clone()));
-                        }
+                        Settled::Degraded(said) => cache.hold_degraded(key, now(), said.clone()),
                         // Not the checker's answer, nor one it failed to give: the next request asks.
                         Settled::Stopped | Settled::Cancelled => {}
                     }
@@ -660,6 +677,29 @@ mod tests {
         assert_eq!(messages, [CHECKER_PENDING]);
     }
 
+    /// Refusals for keys never asked again do not pile up: the map holds at most [`DEGRADED_HELD`], the expired ones go
+    /// first and then the oldest, and a fresh refusal is never dropped for an expired one. On the base an expired
+    /// refusal went only when its own key was asked again.
+    #[test]
+    fn refusals_for_keys_never_asked_again_are_bounded() {
+        let mut cache = AnswerCache::default();
+        let start = Instant::now();
+        let key = |n: usize| (format!("C{n}"), 0_u64);
+        for n in 0..DEGRADED_HELD {
+            cache.hold_degraded(key(n), start, Vec::new());
+        }
+        assert_eq!(cache.degraded.len(), DEGRADED_HELD);
+        let later = start + DEGRADED_RETRY;
+        cache.hold_degraded(key(DEGRADED_HELD), later, Vec::new());
+        assert_eq!(cache.degraded.len(), 1, "every expired refusal went");
+        for n in 1..=DEGRADED_HELD {
+            cache.hold_degraded(key(DEGRADED_HELD + n), later + Duration::from_millis(n as u64), Vec::new());
+        }
+        assert_eq!(cache.degraded.len(), DEGRADED_HELD, "never more than the bound");
+        assert!(!cache.degraded.contains_key(&key(DEGRADED_HELD)), "the oldest fresh one went");
+        assert!(cache.degraded.contains_key(&key(2 * DEGRADED_HELD)), "the newest stays");
+    }
+
     /// What [`Replies`] answers while the checker has not recovered.
     #[derive(Clone, Copy, Debug)]
     enum Reply {
@@ -672,7 +712,8 @@ mod tests {
         /// An outcome with no entry for the component and a warning, which marks it (and another) as not asked: a run
         /// past its heap budget.
         OverBudget,
-        /// An outcome with a warning and no entry or mark for the component: the checker's answer is the structural one.
+        /// An outcome with a warning and no entry or mark for the component: the checker's answer is the structural
+        /// one.
         Absent,
     }
 

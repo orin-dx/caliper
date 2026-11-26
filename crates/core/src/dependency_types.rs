@@ -52,10 +52,10 @@ type ScanCell = Arc<OnceLock<Result<Option<Scan>, ReadFailed>>>;
 /// A dependency file that exists but could not be read (a permission, too many open files, an install racing the run):
 /// what it declares is unknown, not absent. `Loader::read` and `Loader::parse` return it for the one file; every walk
 /// or search over many files turns it into an incomplete [`Partial`] and goes on with the files it can read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ReadFailed;
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadFailed(PathKey);
 
-/// What a walk or search found in the files it could read, and whether it passed one it could not ([`ReadFailed`]).
+/// What a walk or search found in the files it could read, and the files on it that it could not ([`ReadFailed`]).
 /// An incomplete answer is used by the load that made it, as the best it has, and kept nowhere: not in the loader's
 /// maps, the layer or the index. The demand it served is marked unread in the layer's [`ReadLedger`], which is what
 /// makes the next load follow it again and a lazy session not memoize a component that reached it.
@@ -63,38 +63,47 @@ struct ReadFailed;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Partial<T> {
     value: T,
-    incomplete: bool,
+    /// The files this walk passed and could not read; empty when it is complete.
+    unread: Vec<PathKey>,
 }
 
 impl<T> Partial<T> {
     fn complete(value: T) -> Self {
-        Partial { value, incomplete: false }
+        Partial { value, unread: Vec::new() }
+    }
+
+    fn incomplete(&self) -> bool {
+        !self.unread.is_empty()
     }
 }
 
 impl Partial<()> {
-    /// Nothing, because the one file needed could not be read.
-    const UNREAD: Partial<()> = Partial { value: (), incomplete: true };
-    const DONE: Partial<()> = Partial { value: (), incomplete: false };
+    const DONE: Partial<()> = Partial { value: (), unread: Vec::new() };
 
-    fn and(self, other: Partial<()>) -> Partial<()> {
-        Partial { value: (), incomplete: self.incomplete || other.incomplete }
+    /// Nothing, because the one file needed could not be read.
+    fn unread_at(ReadFailed(file): ReadFailed) -> Partial<()> {
+        Partial { value: (), unread: vec![file] }
+    }
+
+    fn and(mut self, mut other: Partial<()>) -> Partial<()> {
+        self.unread.append(&mut other.unread);
+        self
     }
 }
 
 /// Why an export lookup's answer may not be kept, gathered over one walk.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 struct Unkept {
     /// The walk met a module already on it (a re-export cycle), so the answer depends on where it entered.
     cycle: bool,
-    /// The walk passed a module it could not read, which may have declared the name.
-    unread: bool,
+    /// The modules the walk passed and could not read, any of which may have declared the name.
+    unread: Vec<PathKey>,
 }
 
 impl Unkept {
     fn absorb(&mut self, other: Unkept) {
         self.cycle |= other.cycle;
-        self.unread |= other.unread;
+        self.unread.extend(other.unread);
     }
 }
 
@@ -604,7 +613,7 @@ impl Loader<'_> {
                 // The package's types are not the project's, and the run still produces its output.
                 diagnostic.severity = crate::types::DiagnosticSeverity::Warning;
                 self.ledger.read_failed(file, diagnostic);
-                Err(ReadFailed)
+                Err(ReadFailed(PathKey::from(file)))
             }
         }
     }
@@ -682,14 +691,14 @@ impl Loader<'_> {
     fn find_export(&self, module: &Utf8Path, name: &str) -> Partial<Option<(Utf8PathBuf, CompactString)>> {
         let mut unkept = Unkept::default();
         let value = self.find_export_in(module, name, &mut FxHashSet::default(), &mut unkept);
-        Partial { value, incomplete: unkept.unread }
+        Partial { value, unread: unkept.unread }
     }
 
     /// `find_export` within one walk. A lookup that met a module already on the walk (a re-export cycle) or passed one
     /// it could not read is returned but not kept, and `unkept` says why to every lookup that relied on it: a cycle's
     /// answer depends on where the walk entered it, and an unread module may have declared the name. Kept answers are
-    /// therefore the same in any order, on any thread, and the same as a run that read every file. The walk goes on past
-    /// a module it cannot read, as it does past one that does not export the name.
+    /// therefore the same in any order, on any thread, and the same as a run that read every file. The walk goes on
+    /// past a module it cannot read, as it does past one that does not export the name.
     fn find_export_in(
         &self,
         module: &Utf8Path,
@@ -711,7 +720,7 @@ impl Loader<'_> {
         let mut own = Unkept::default();
         let found = self.find_export_uncached(module, name, visited, &mut own);
         visited.remove(&key);
-        if !own.cycle && !own.unread {
+        if !own.cycle && own.unread.is_empty() {
             if let Some(dir) = module.parent() {
                 self.learn(dir);
             }
@@ -730,8 +739,8 @@ impl Loader<'_> {
     ) -> Option<(Utf8PathBuf, CompactString)> {
         let data = match self.parse(module) {
             Ok(data) => data?,
-            Err(ReadFailed) => {
-                unkept.unread = true;
+            Err(ReadFailed(file)) => {
+                unkept.unread.push(file);
                 return None;
             }
         };
@@ -827,8 +836,9 @@ impl Loader<'_> {
         if known && !self.ledger.retries(&key) {
             return;
         }
-        if self.follow(scope, &demand, &key).incomplete {
-            self.ledger.unread_demand(&demand);
+        let followed = self.follow(scope, &demand, &key);
+        if followed.incomplete() {
+            self.ledger.unread_demand(&demand, followed.unread);
         }
     }
 
@@ -858,23 +868,23 @@ impl Loader<'_> {
                     self.load_declaration(scope, module, qualified, &node)
                 }
                 Ok(_) => Partial::DONE,
-                Err(ReadFailed) => Partial::UNREAD,
+                Err(failed) => Partial::unread_at(failed),
             };
         }
         let found = self.find_export(&module, &demand.name);
         let loaded = match found.value {
             Some((file, name)) => self.load_declaration(scope, file, name, &node),
-            None if found.incomplete => Partial::DONE,
+            None if !found.unread.is_empty() => Partial::DONE,
             None => {
                 let cause = self.unresolved_cause(&module, &demand.name);
-                if cause.incomplete {
-                    return Partial::UNREAD;
+                if cause.incomplete() {
+                    return Partial { value: (), unread: cause.unread };
                 }
                 self.unresolved.insert(key.clone(), cause.value.unwrap_or(Unresolved::NotExported));
                 Partial::DONE
             }
         };
-        loaded.and(Partial { value: (), incomplete: found.incomplete })
+        loaded.and(Partial { value: (), unread: found.unread })
     }
 
     /// Why a name `module` seems not to export was not found: a re-export hop on the way to it that cannot be
@@ -883,9 +893,9 @@ impl Loader<'_> {
     /// incomplete when a module on the way could not be read, which may have held the cause.
     fn unresolved_cause(&self, module: &Utf8Path, name: &str) -> Partial<Option<Unresolved>> {
         let mut visited = FxHashSet::default();
-        let (mut star, mut unread) = (None, false);
+        let (mut star, mut unread) = (None, Vec::new());
         let cause = self.unresolved_cause_in(module, name, &mut visited, &mut star, &mut unread);
-        Partial { value: cause.or(star), incomplete: unread }
+        Partial { value: cause.or(star), unread }
     }
 
     fn unresolved_cause_in(
@@ -894,15 +904,15 @@ impl Loader<'_> {
         name: &str,
         visited: &mut FxHashSet<(PathKey, CompactString)>,
         star: &mut Option<Unresolved>,
-        unread: &mut bool,
+        unread: &mut Vec<PathKey>,
     ) -> Option<Unresolved> {
         if !visited.insert((PathKey::from(module), CompactString::from(name))) {
             return None;
         }
         let data = match self.parse(module) {
             Ok(data) => data?,
-            Err(ReadFailed) => {
-                *unread = true;
+            Err(ReadFailed(file)) => {
+                unread.push(file);
                 return None;
             }
         };
@@ -971,7 +981,7 @@ impl Loader<'_> {
                 Partial::DONE
             }
         };
-        loaded.and(Partial { value: (), incomplete: augmenting.incomplete })
+        loaded.and(Partial { value: (), unread: augmenting.unread.clone() })
     }
 
     /// The files that augment React which the module `demand` resolves to leads to, parsed.
@@ -982,16 +992,16 @@ impl Loader<'_> {
         if self.in_project(&module) || Self::is_react(&module) {
             return Partial::complete(Vec::new());
         }
-        let Partial { value: files, mut incomplete } = self.augmenting_files(&module);
+        let Partial { value: files, mut unread } = self.augmenting_files(&module);
         let mut parsed = Vec::new();
         for file in files {
             match self.parse(&file) {
                 Ok(Some(data)) => parsed.push((file, data)),
                 Ok(None) => {}
-                Err(ReadFailed) => incomplete = true,
+                Err(ReadFailed(file)) => unread.push(file),
             }
         }
-        Partial { value: parsed, incomplete }
+        Partial { value: parsed, unread }
     }
 
     /// The nearest directory at or above `dir` where module resolution can start to differ: one with a `package.json`
@@ -1020,14 +1030,14 @@ impl Loader<'_> {
         if let Some(files) = known.or_else(|| self.parent.and_then(|parent| parent.augmenters_of(&key)).cloned()) {
             return Partial::complete(files);
         }
-        let Partial { value: (files, crossed), incomplete } = self.find_augmenting_files(module);
-        if !incomplete {
+        let Partial { value: (files, crossed), unread } = self.find_augmenting_files(module);
+        if unread.is_empty() {
             self.augmenters.insert(key.clone(), files.clone());
             self.augmenter_crossed.insert(key, crossed);
             // An empty answer is persisted too, or the next run would scan the module's re-exports again.
             module.parent().inspect(|dir| self.learn(dir));
         }
-        Partial { value: files, incomplete }
+        Partial { value: files, unread }
     }
 
     /// Loads the `React.`-qualified declarations of `augmenting`, the parsed files that augment React.
@@ -1086,7 +1096,7 @@ impl Loader<'_> {
     /// with the rest.
     fn find_augmenting_files(&self, module: &Utf8Path) -> Partial<(Vec<Utf8PathBuf>, Vec<PackageStampRow>)> {
         let mut found = Vec::new();
-        let mut incomplete = false;
+        let mut unread = Vec::new();
         let mut seen: FxHashSet<Utf8PathBuf> = FxHashSet::default();
         let mut queue = std::collections::VecDeque::from([module.to_owned()]);
         while let Some(file) = queue.pop_front() {
@@ -1099,8 +1109,8 @@ impl Loader<'_> {
             let (augments, re_exports) = match self.augmentation_scan(&file, file == module) {
                 Ok(Some(scan)) => scan,
                 Ok(None) => continue,
-                Err(ReadFailed) => {
-                    incomplete = true;
+                Err(ReadFailed(file)) => {
+                    unread.push(file);
                     continue;
                 }
             };
@@ -1127,7 +1137,7 @@ impl Loader<'_> {
             })
             .collect();
         crossed.sort();
-        Partial { value: (found, crossed), incomplete }
+        Partial { value: (found, crossed), unread }
     }
 
     /// Mark `(file, name)` loaded and follow the names its declaration references: same-file ones in place, imported
@@ -1150,10 +1160,10 @@ impl Loader<'_> {
         let data = match self.parse(&file) {
             Ok(Some(data)) => data,
             Ok(None) => return Partial::DONE,
-            Err(ReadFailed) => return Partial::UNREAD,
+            Err(failed) => return Partial::unread_at(failed),
         };
-        // `Primitive.div` is a member of the value `Primitive`, whose declared type has it. Each name goes with the node
-        // that reached it.
+        // `Primitive.div` is a member of the value `Primitive`, whose declared type has it. Each name goes with the
+        // node that reached it.
         let mut stack: Vec<(CompactString, Node)> =
             name.split_once('.').map(|(head, _)| (CompactString::from(head), from.clone())).into_iter().collect();
         stack.push((name, from.clone()));
@@ -1476,8 +1486,8 @@ pub(crate) fn load_at(
         files,
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
-        // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer follows
-        // it again.
+        // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer
+        // follows it again.
         demands,
         unresolved,
         claimed: loader.claimed.into_iter().collect(),

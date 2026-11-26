@@ -1973,7 +1973,10 @@ fn readers_that_meet_read_a_file_once_and_share_its_result() {
             });
             std::fs::write(&file, TEXT).unwrap();
 
-            let expected = if readable { Ok(Some(vec!["./more".to_string()])) } else { Err(ReadFailed) };
+            let expected = match readable {
+                true => Ok(Some(vec!["./more".to_string()])),
+                false => Err(ReadFailed(PathKey::from(file.as_path()))),
+            };
             assert_eq!(results, vec![expected; READERS], "{reader:?}, readable: {readable}");
             let reads = *loader.reads.get(&PathKey::from(file.as_path())).unwrap();
             assert_eq!(reads, 1, "{reader:?}, readable: {readable}");

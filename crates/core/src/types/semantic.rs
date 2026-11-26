@@ -413,8 +413,8 @@ impl SemanticOutcome {
         self.unavailable = Some(Unavailable(Some(keys.into_boxed_slice())));
     }
 
-    /// Add `other`'s answers, fallbacks, diagnostics and its mark of the targets not asked to this outcome's: the one way
-    /// two parts of a run are put together, so no part's mark is lost.
+    /// Add `other`'s answers, fallbacks, diagnostics and its mark of the targets not asked to this outcome's: the one
+    /// way two parts of a run are put together, so no part's mark is lost.
     pub fn merge(&mut self, mut other: SemanticOutcome) {
         self.components.append(&mut other.components);
         self.fallbacks.append(&mut other.fallbacks);
@@ -427,8 +427,8 @@ impl SemanticOutcome {
     }
 
     /// Whether this outcome answers only for this request: the checker was unavailable or not asked about a target
-    /// ([`Unavailable`]), or failed while it answered a component ([`SemanticFallback::transient`]). Nothing keeps such an outcome (a session's answers, the kept answer
-    /// on disk); the next request asks the checker again.
+    /// ([`Unavailable`]), or failed while it answered a component ([`SemanticFallback::transient`]). Nothing keeps such
+    /// an outcome (a session's answers, the kept answer on disk); the next request asks the checker again.
     pub fn is_degraded(&self) -> bool {
         self.unavailable.is_some() || self.fallbacks.iter().any(|fallback| fallback.transient)
     }
