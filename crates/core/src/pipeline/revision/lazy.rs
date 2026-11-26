@@ -114,11 +114,12 @@ impl Engine {
         options: &PipelineOptions,
         ambient_global_files: &[Utf8PathBuf],
         named_types: &Arc<NamedTypeIndex>,
-        layer: Option<Arc<DependencyLayer>>,
+        // The layer, and the demands whose walks decide what it serves.
+        (layer, shared): (Option<Arc<DependencyLayer>>, &[Demand]),
         react_types: &Option<Arc<NamedTypeIndex>>,
     ) -> Engine {
         let named_types = match &layer {
-            Some(layer) => Arc::new(named_types.with_fallback(layer.served_types())),
+            Some(layer) => Arc::new(named_types.with_fallback(layer.served_types(shared))),
             None => named_types.clone(),
         };
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
@@ -331,7 +332,8 @@ impl Revision {
             let clock = RetryClock::reader(&clock);
             Arc::new(dependency_types::load_timed(react, options, None, dependency_types::Retry::Always, stamp, clock))
         });
-        let engine = Engine::new(&global, options, &ambient_global_files, &named_types, layer, &react_types);
+        let shared = shared_demands(file_demands.iter().map(|(_, demands)| demands.as_slice()));
+        let engine = Engine::new(&global, options, &ambient_global_files, &named_types, (layer, &shared), &react_types);
         lib_diagnostics.extend(engine.ctx.tsconfig_diagnostic.clone());
         let (dts_files_parsed, dts_cache_hits) = cache.counts();
         let tail_diagnostics: Vec<Diagnostic> = match Arc::try_unwrap(cache) {
@@ -341,7 +343,7 @@ impl Revision {
         .into_iter()
         .collect();
         let lazy = Lazy {
-            shared: shared_demands(file_demands.iter().map(|(_, demands)| demands.as_slice())),
+            shared,
             shared_unread: Mutex::new(None),
             demands: demands_by_file(file_demands),
             by_name: group_by_name(&global, options),
@@ -468,7 +470,15 @@ impl Revision {
         affected_files.dedup();
 
         let layer = previous.engine.load().layer.clone();
-        let engine = Engine::new(&global, options, &self.ambient_global_files, &named_types, layer, &self.react_types);
+        let shared = shared_demands(file_demands.values().map(|demands| demands.as_ref()));
+        let engine = Engine::new(
+            &global,
+            options,
+            &self.ambient_global_files,
+            &named_types,
+            (layer, &shared),
+            &self.react_types,
+        );
         // A kept answer is decided again against the new call sites, so an edit to a consumer can change its `used`
         // lists without touching its resolution. The new sites are the ones the next answer reads.
         if memo.iter().any(|entry| entry.value().evidence.is_some()) {
@@ -499,7 +509,7 @@ impl Revision {
             output: Arc::new(empty_output()),
             keys: FxHashMap::default(),
             lazy: Some(Lazy {
-                shared: shared_demands(file_demands.values().map(|demands| demands.as_ref())),
+                shared,
                 shared_unread: Mutex::new(None),
                 demands: file_demands,
                 by_name,
@@ -769,7 +779,7 @@ impl Revision {
         lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
         // rebuilding them for every growth was most of what a session reading across a project spent.
-        let named_types = Arc::new(self.named_types.with_fallback(extended.served_types()));
+        let named_types = Arc::new(self.named_types.with_fallback(extended.served_types(lazy.shared.iter())));
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
         // What the load added that declares into React (an augmentation a retry read, React's own types) changes what
         // every resolution that reads React's augmentations sees, whichever files it recorded.

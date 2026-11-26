@@ -392,12 +392,12 @@ pub(crate) struct DependencyLayer {
     /// Each module a demand reached, with the files its re-exports lead to that augment React.
     augmenters: FxHashMap<PathKey, Vec<Utf8PathBuf>>,
     /// Each module whose latest augmentation search could not read a file, with the augmenting files it read: served
-    /// to answers ([`DependencyLayer::served_types`]) but never indexed, never loaded and never written, so nothing
-    /// they hold outlives the module's next search, complete or not.
+    /// to the answers whose live demands reach the module ([`DependencyLayer::served_types`]), never indexed, never
+    /// written, so nothing they hold outlives the module's next search, complete or not.
     provisional: FxHashMap<PathKey, ProvisionalFiles>,
-    /// `named_types`, with the provisional augmentations over it when there are any: what answers read. A load over
-    /// this layer builds on `named_types` alone.
-    served_types: Arc<NamedTypeIndex>,
+    /// The declarations of each module's provisional files, [`serve`]d as an indexed file is, in module order; their
+    /// imports are in `import_map`.
+    provisional_types: Vec<(PathKey, Arc<NamedTypeIndex>)>,
     demands: FxHashSet<DemandKey>,
     unresolved: FxHashMap<DemandKey, Unresolved>,
     /// The `(file, name)` declarations whose references were followed.
@@ -459,9 +459,42 @@ impl DependencyLayer {
             })
     }
 
-    /// The index answers read: the layer's, with the augmentations an incomplete search read over it.
-    pub(crate) fn served_types(&self) -> Arc<NamedTypeIndex> {
-        self.served_types.clone()
+    /// The index the answers of a revision whose live demands are `roots` read: the layer's, with the provisional
+    /// augmentations of each module those demands reach over it. A module no live demand reaches is not served, as a
+    /// fresh run would not search it.
+    pub(crate) fn served_types<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Arc<NamedTypeIndex> {
+        let live = self.served_modules(roots);
+        let mut served = self.named_types.clone();
+        for (_, types) in self.provisional_types.iter().filter(|(module, _)| live.contains(module)) {
+            served = Arc::new(types.with_fallback(served));
+        }
+        served
+    }
+
+    /// The provisional files [`Self::served_types`] serves to `roots`, sorted.
+    pub(crate) fn served_files<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<&Utf8PathBuf> {
+        let live = self.served_modules(roots);
+        let served = self.provisional.iter().filter(|(module, _)| live.contains(*module));
+        let mut files: Vec<&Utf8PathBuf> = served.flat_map(|(_, files)| files.iter().map(|(file, _)| file)).collect();
+        files.sort();
+        files
+    }
+
+    /// The modules with provisional augmentations that the unread module walks `roots` lead to reach.
+    fn served_modules<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> FxHashSet<PathKey> {
+        if self.provisional.is_empty() {
+            return FxHashSet::default();
+        }
+        let module = |demand: &Demand| {
+            let dir = demand.from.parent()?;
+            match self.resolution(&(Box::from(dir.as_str()), Box::from(&*demand.specifier)))? {
+                Ok(module) => Some(PathKey::from(module.as_path())),
+                Err(_) => None,
+            }
+        };
+        let walks = self.unread_from(roots);
+        let modules = walks.iter().filter(|walk| walk.name.is_empty()).filter_map(module);
+        modules.filter(|module| self.provisional.contains_key(module)).collect()
     }
 
     pub(crate) fn provisional_files(&self) -> Vec<&Utf8PathBuf> {
@@ -950,7 +983,7 @@ impl Loader<'_> {
             let qualified = CompactString::from(format!("React.{}", demand.name));
             return match self.parse(&module) {
                 Ok(Some(data)) if declares(&data, &module, &qualified) => {
-                    self.load_declaration(scope, module, qualified, &node)
+                    self.load_declaration(scope, module, qualified, &node, true)
                 }
                 Ok(_) => Partial::DONE,
                 Err(failed) => Partial::unread_at(failed),
@@ -972,7 +1005,7 @@ impl Loader<'_> {
             (true, None) | (false, _) => {}
         }
         let loaded = match found.value {
-            Some((file, name)) => self.load_declaration(scope, file, name, &node),
+            Some((file, name)) => self.load_declaration(scope, file, name, &node, true),
             None if !found.unread.is_empty() => Partial::DONE,
             None => {
                 let cause = self.unresolved_cause(&module, &demand.name);
@@ -1063,7 +1096,7 @@ impl Loader<'_> {
     /// Directories with the same resolution scope resolve a specifier to the same module, so the first of them to ask
     /// resolves it, finds and reads the files that augment React, and loads their declarations; the rest wait for the
     /// files and ask nothing, and reach what the first reached. A file the search could not read leaves every demand of
-    /// the scope incomplete alike, and the augmentations of the files it did read are provisional: served, not loaded.
+    /// the scope incomplete alike, and the augmentations of the files it did read are provisional: served, not indexed.
     fn module_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand, node: &Node) -> Partial<()> {
         let dir = demand.from.parent().map_or("", Utf8Path::as_str);
         let key = (self.resolution_scope(dir), demand.specifier.clone());
@@ -1074,8 +1107,7 @@ impl Loader<'_> {
             (demand.key(), self.search_module(demand))
         });
         let loaded = match first {
-            true if augmenting.unread.is_empty() => self.load_augmentations(scope, &augmenting.value, node),
-            true => Partial::DONE,
+            true => self.load_augmentations(scope, &augmenting.value, node, augmenting.unread.is_empty()),
             false => {
                 self.ledger.reached(node, Node::Demand(searched_by.clone()));
                 Partial::DONE
@@ -1144,12 +1176,14 @@ impl Loader<'_> {
         Partial { value: files, unread }
     }
 
-    /// Loads the `React.`-qualified declarations of `augmenting`, the parsed files that augment React.
+    /// Loads the `React.`-qualified declarations of `augmenting`, the parsed files that augment React, and what they
+    /// import: indexed when the search was `complete`, else served provisionally while what they import is loaded.
     fn load_augmentations<'s>(
         &'s self,
         scope: &rayon::Scope<'s>,
         augmenting: &[(Utf8PathBuf, Arc<SourceData>)],
         from: &Node,
+        complete: bool,
     ) -> Partial<()> {
         let mut loaded = Partial::DONE;
         for (file, data) in augmenting {
@@ -1159,7 +1193,8 @@ impl Loader<'_> {
                 if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':'))
                     && name.starts_with("React.")
                 {
-                    loaded = loaded.and(self.load_declaration(scope, file.clone(), CompactString::from(name), from));
+                    let name = CompactString::from(name);
+                    loaded = loaded.and(self.load_declaration(scope, file.clone(), name, from, complete));
                 }
             }
         }
@@ -1256,6 +1291,7 @@ impl Loader<'_> {
         file: Utf8PathBuf,
         name: CompactString,
         from: &Node,
+        indexed: bool,
     ) -> Partial<()> {
         if self.in_project(&file) {
             return Partial::DONE;
@@ -1271,18 +1307,24 @@ impl Loader<'_> {
         let mut stack: Vec<(CompactString, Node)> =
             name.split_once('.').map(|(head, _)| (CompactString::from(head), from.clone())).into_iter().collect();
         stack.push((name, from.clone()));
+        // A provisional declaration claims nothing and is served, not indexed; what it imports is loaded alike.
+        let mut served: FxHashSet<CompactString> = FxHashSet::default();
         while let Some((name, reached_from)) = stack.pop() {
             let claim = (PathKey::from(file.as_path()), name.clone());
             let node = Node::Claim(claim.clone());
             self.ledger.reached(&reached_from, node.clone());
-            if self.parent.is_some_and(|parent| parent.has_claimed(&claim)) || !self.claimed.insert(claim) {
+            let first = match indexed {
+                true => !self.parent.is_some_and(|parent| parent.has_claimed(&claim)) && self.claimed.insert(claim),
+                false => served.insert(name.clone()),
+            };
+            if !first {
                 continue;
             }
-            if react {
+            if indexed && react {
                 if !self.parent.is_some_and(|parent| parent.has_react_file(file.as_str())) {
                     self.react_files.insert(PathKey::from(file.as_path()));
                 }
-            } else if !self.parent.is_some_and(|parent| parent.is_dependency_file(&file)) {
+            } else if indexed && !self.parent.is_some_and(|parent| parent.is_dependency_file(&file)) {
                 self.declaring.insert(PathKey::from(file.as_path()));
             }
             // The type a value is declared with (`declare const Primitive: Primitives`) goes with the value.
@@ -1584,10 +1626,8 @@ fn load_with(
     for file in &files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
         if let Ok(Some(data)) = loader.parse(path) {
-            named.merge_file(&data);
+            serve(&mut named, &mut imports, path, &data);
             component_mappings.extend(data.component_mappings.iter().cloned());
-            imports.import_map.insert(path.to_owned(), data.imports.clone());
-            imports.re_export_map.insert(path.to_owned(), data.exports.clone());
         }
     }
     component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
@@ -1611,24 +1651,19 @@ fn load_with(
         })
         .unwrap_or_default();
     provisional.extend(std::mem::take(&mut loader.provisional));
-    let served_types = match provisional.is_empty() {
-        true => named_types.clone(),
-        false => {
-            let mut over = NamedTypeIndex::default();
-            over.fallback = Some(named_types.clone());
-            let mut modules: Vec<&ProvisionalFiles> = provisional.values().collect();
-            modules.sort_by(|a, b| a.iter().map(|(file, _)| file).cmp(b.iter().map(|(file, _)| file)));
-            let mut merged: FxHashSet<&Utf8PathBuf> = FxHashSet::default();
-            for (file, data) in modules.into_iter().flat_map(|files| files.iter()) {
-                let indexed = loader.declaring.contains(file.as_str())
-                    || parent.as_ref().is_some_and(|layer| layer.is_dependency_file(file));
-                if !indexed && merged.insert(file) {
-                    over.merge_file(data);
-                }
+    // Each module's provisional files, served as an indexed file is, each module apart: which are served depends on
+    // the live demands of the revision that reads the layer.
+    let mut provisional_types: Vec<(PathKey, Arc<NamedTypeIndex>)> = provisional
+        .iter()
+        .map(|(module, files)| {
+            let mut types = NamedTypeIndex::default();
+            for (file, data) in files.iter() {
+                serve(&mut types, &mut imports, file, data);
             }
-            Arc::new(over)
-        }
-    };
+            (module.clone(), Arc::new(types))
+        })
+        .collect();
+    provisional_types.sort_by(|a, b| a.0.cmp(&b.0));
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
     // declarations stay out of `named_types`.
     let react_files: FxHashSet<PathKey> = loader.react_files.iter().map(|file| file.clone()).collect();
@@ -1680,7 +1715,7 @@ fn load_with(
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
         provisional,
-        served_types,
+        provisional_types,
         partial_exports,
         // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer
         // follows it again.
@@ -1696,6 +1731,14 @@ fn load_with(
         #[cfg(test)]
         reads: loader.reads.iter().map(|entry| *entry.value()).sum(),
     }
+}
+
+/// What a dependency file gives the answers that read it, whether the layer indexes it or serves it provisionally:
+/// its declarations, into `named`, and its imports and re-exports, so the names it references resolve.
+fn serve(named: &mut NamedTypeIndex, imports: &mut GlobalSourceData, path: &Utf8Path, data: &SourceData) {
+    named.merge_file(data);
+    imports.import_map.insert(path.to_owned(), data.imports.clone());
+    imports.re_export_map.insert(path.to_owned(), data.exports.clone());
 }
 
 // ─── The persisted index ───────────────────────────────────────────

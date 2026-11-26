@@ -787,6 +787,97 @@ fn each_search_of_a_module_serves_only_what_it_read() {
     assert!(session.component("Box") == fresh());
 }
 
+/// The served augmentations follow the live demands: `setup.ts`, the sole importer of `scan-kit` (an unreadable `bad`
+/// and the augmentation `late`), drops the import, then `Plain` loads an unrelated package, then `setup.ts` imports
+/// it again. At each step `Box` and the reported failed reads equal a fresh run: no `tw` and no warning once nothing
+/// imports the package, `tw` and the warning again once something does.
+#[test]
+fn what_is_served_follows_the_live_demands() {
+    let setup = "import * as Scan from 'scan-kit';\nexport const scan = Scan;\n";
+    let (_tmp, root) = react_project(&[
+        ("node_modules/scan-kit/package.json", r#"{ "name": "scan-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/scan-kit/index.d.ts", "export * from './bad';\nexport * from './late';\n"),
+        ("node_modules/scan-kit/late.d.ts", AUGMENTATION),
+        (
+            "node_modules/other-kit/package.json",
+            r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/other-kit/index.d.ts", "export interface OtherProps { other?: string }\n"),
+        ("src/setup.ts", setup),
+        ("src/box/Box.tsx", BOX),
+        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+    ]);
+    std::fs::write(root.join("node_modules/scan-kit/bad.d.ts"), UNREADABLE).unwrap();
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    let io = |output: &crate::types::ExtractionOutput| -> Vec<Option<String>> {
+        let io = |d: &&crate::types::Diagnostic| d.code == DiagnosticCode::IoError;
+        output.diagnostics.iter().filter(io).map(|d| d.file.clone()).collect()
+    };
+    let check = |step: &str, tw: bool| {
+        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
+        let fresh_output = fresh.initialize();
+        assert_eq!(names(&session.component("Box")).contains(&"tw".to_owned()), tw, "{step}");
+        assert_eq!(io(&session.current_output().unwrap()), io(&fresh_output), "{step}: the reported failed reads");
+        assert_eq!(io(&fresh_output).is_empty(), !tw, "{step}: the fixture warns while something imports `scan-kit`");
+        assert!(session.component("Box") == fresh.component("Box"), "{step}");
+    };
+    check("imported", true);
+    let setup_file = root.join("src/setup.ts");
+    std::fs::write(&setup_file, "export const scan = 1;\n").unwrap();
+    drop(session.update_file(&setup_file));
+    check("the sole importer drops it", false);
+    let plain = root.join("src/plain/Plain.tsx");
+    std::fs::write(
+        &plain,
+        "import type { OtherProps } from 'other-kit';\nexport function Plain(props: OtherProps) { return null; }\n",
+    )
+    .unwrap();
+    drop(session.update_file(&plain));
+    check("an unrelated package loads", false);
+    std::fs::write(&setup_file, setup).unwrap();
+    drop(session.update_file(&setup_file));
+    check("imported again", true);
+}
+
+/// A served augmentation brings what it imports, as an indexed one does: `aug` declares `tone?: Tone` with `Tone`
+/// imported from `./tone`, beside an unreadable `bad`. `Box`'s `tone` is the union while `bad` cannot be read, and
+/// equals a fresh run before and after `bad` reads.
+#[test]
+fn a_served_augmentation_brings_what_it_imports() {
+    let (_tmp, root) = react_project(&[
+        ("node_modules/tone-kit/package.json", r#"{ "name": "tone-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/tone-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+        (
+            "node_modules/tone-kit/aug.d.ts",
+            "import type { Tone } from './tone';\n\
+             declare module 'react' { interface HTMLAttributes<T> { tone?: Tone } }\nexport {};\n",
+        ),
+        ("node_modules/tone-kit/tone.d.ts", "export type Tone = 'warm' | 'cool';\n"),
+        ("src/setup.ts", "import * as Tones from 'tone-kit';\nexport const tones = Tones;\n"),
+        ("src/box/Box.tsx", BOX),
+        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+    ]);
+    let bad = root.join("node_modules/tone-kit/bad.d.ts");
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    let fresh = || {
+        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
+        drop(fresh.initialize());
+        fresh.component("Box")
+    };
+    let tone = |answer: &Option<ComponentAnswer>| format!("{:?}", answer.as_ref().unwrap().entry.props.get("tone"));
+    let served = session.component("Box");
+    assert!(tone(&served).contains("warm") && tone(&served).contains("cool"), "the union: {}", tone(&served));
+    assert!(served == fresh());
+    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+    let recovered = session.component("Box");
+    assert_eq!(tone(&recovered), tone(&served));
+    assert!(recovered == fresh());
+}
+
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
 /// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
 /// augmentation did add one.

@@ -522,9 +522,15 @@ impl Revision {
                 // What the load added that declares into React (a retry that read an augmentation) can change every
                 // answer that reads React's augmentations, whichever file it was.
                 react_namespace |= extended.changes_react_declarations(layer);
-                named_types.fallback = Some(extended.served_types());
                 dependencies = Some(Arc::new(extended));
             }
+        }
+        // What a layer serves provisionally follows the live demands, so an edit that drops or restores the last import
+        // of a module changes it with no load at all.
+        if let (true, Some(old), Some(new)) = (extend_dependencies, &self.dependencies, &dependencies) {
+            let (before, after) = (self.demands.values().flat_map(|d| d.iter()), live.values().flat_map(|d| d.iter()));
+            react_namespace |= old.served_files(before) != new.served_files(after);
+            named_types.fallback = Some(new.served_types(live.values().flat_map(|demands| demands.iter())));
         }
         Applied {
             global,
@@ -603,7 +609,8 @@ impl Revision {
         let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
         let global = Arc::new(global);
         let mut named_types = NamedTypeIndex::build(&global);
-        named_types.fallback = dependencies.as_ref().map(|layer| layer.served_types());
+        named_types.fallback =
+            dependencies.as_ref().map(|layer| layer.served_types(live.values().flat_map(|demands| demands.iter())));
         let named_types = Arc::new(named_types);
         let ambient_global_files = crate::resolver::compute_ambient_global_files(options);
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
