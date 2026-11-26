@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01KfYHP7Cgdef1PeJ7C1gfj7",
+  "agent_id": "ab63402bc97357a83",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix the semantic crate Cargo.lock test layout finding",
+  "token_usage": {
+    "input_tokens": 56,
+    "cache_creation_tokens": 81541,
+    "cache_read_tokens": 1929822,
+    "output_tokens": 15156,
+    "api_call_count": 28
+  },
+  "started_at": "2026-11-25T18:18:25.061851-08:00",
+  "completed_at": "2026-11-25T18:25:43.441819-08:00"
+}
