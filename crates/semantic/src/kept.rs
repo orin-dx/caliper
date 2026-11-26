@@ -627,8 +627,7 @@ mod tests {
     }
 
     /// A fallback the checker gave because it failed (a rejected request: a panic, a stopped checker) is about that
-    /// run, not the component: it is not kept, so the next run asks again. The same fallback as a verdict is kept. On
-    /// the base both were kept, since neither carries a diagnostic.
+    /// run, not the component: it is not kept, so the next run asks again. The same fallback as a verdict is kept.
     #[test]
     fn a_transient_fallback_is_not_kept_and_a_verdict_is() {
         use caliper_docgen_core::types::semantic::SemanticFallback;

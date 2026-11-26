@@ -54,7 +54,8 @@ enum Settled {
     /// ([`AnswerCache::degraded`]) until [`DEGRADED_RETRY`] passes or a file changes, and the request after that asks
     /// the checker again.
     Degraded(Vec<Diagnostic>),
-    /// The checker stopped without answering.
+    /// The checker stopped without answering. Held as a refusal like [`Settled::Degraded`], with the warning that says
+    /// so ([`stopped_warning`]): a checker that keeps stopping would otherwise be asked by every request.
     Stopped,
     /// The request was cancelled before the checker converted it ([`SharedPriority::cancel`]): not an answer, and not
     /// a checker that stopped, so a caller reads it as one still on its way.
@@ -157,10 +158,10 @@ enum Found {
 /// 0.4 to 0.8 s.
 pub(crate) const DEFAULT_WAIT_EMPTY: Duration = Duration::from_secs(2);
 
-/// How long a request the checker answered with nothing ([`Settled::Degraded`]) stands before the component is asked
-/// again, unless a file changes first. A checker that is missing or keeps crashing would otherwise be asked by every
-/// request and prefetch, each spending a restart or a timeout; one that recovered answers within this.
-pub(crate) const DEGRADED_RETRY: Duration = Duration::from_secs(30);
+/// How long a request the checker answered with nothing ([`Settled::Degraded`], [`Settled::Stopped`]) stands before the
+/// component is asked again, unless a file changes first: the interval a walk past an unreadable dependency file waits
+/// too, one constant for both.
+pub(crate) use crate::dependency_types::DEGRADED_RETRY;
 
 /// The time now, as the session reads it; a test sets its own.
 type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
@@ -287,15 +288,7 @@ impl SemanticHook {
         match pending.wait(self.wait_for(&answer, priority)) {
             Some(Settled::Answered(answered)) => self.apply(&mut answer, answered, mode, cx),
             Some(Settled::Degraded(diagnostics)) => answer.diagnostics.extend(diagnostics),
-            Some(Settled::Stopped) => {
-                let mut stopped = Diagnostic::new(
-                    DiagnosticSeverity::Warning,
-                    DiagnosticCode::SemanticBackend,
-                    "the TypeScript checker stopped without answering; the structural props are used",
-                );
-                stopped.affects = vec![answer.key.clone()];
-                answer.diagnostics.push(stopped);
-            }
+            Some(Settled::Stopped) => answer.diagnostics.push(stopped_warning(&answer.key)),
             Some(Settled::Cancelled) | None => {
                 let mut pending =
                     Diagnostic::new(DiagnosticSeverity::Info, DiagnosticCode::SemanticBackend, CHECKER_PENDING);
@@ -364,8 +357,9 @@ impl SemanticHook {
                             cache.answers.insert(key, answered.clone());
                         }
                         Settled::Degraded(said) => cache.hold_degraded(key, now(), said.clone()),
-                        // Not the checker's answer, nor one it failed to give: the next request asks.
-                        Settled::Stopped | Settled::Cancelled => {}
+                        Settled::Stopped => cache.hold_degraded(key, now(), vec![stopped_warning(&asked)]),
+                        // Not an answer, nor one the checker failed to give: the next request asks.
+                        Settled::Cancelled => {}
                     }
                 }
             }
@@ -428,6 +422,17 @@ impl SemanticHook {
             answer.diagnostics.push(unread_diagnostic(unread, vec![answer.key.clone()]));
         }
     }
+}
+
+/// What an answer for `key` says when the checker stopped without answering for it.
+fn stopped_warning(key: &str) -> Diagnostic {
+    let mut stopped = Diagnostic::new(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::SemanticBackend,
+        "the TypeScript checker stopped without answering; the structural props are used",
+    );
+    stopped.affects = vec![key.to_owned()];
+    stopped
 }
 
 /// What the checker is asked about `answer`'s component: its props under `mode`, converted only where the merge with
@@ -594,7 +599,7 @@ mod tests {
 
     /// A prefetch of a story the client navigated away from is cancelled, so the checker drops it before converting it;
     /// the next request of that component asks again rather than joining it. A prefetch a story joined is waited for
-    /// and is not cancelled. On the base nothing could cancel a request.
+    /// and is not cancelled.
     #[test]
     fn a_request_for_a_component_nobody_shows_is_dropped_before_conversion() {
         let (_dir, session, checker) = session(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
@@ -621,8 +626,7 @@ mod tests {
     }
 
     /// A neighbour request the checker already took is converted whatever the client shows now: a cancel leaves it
-    /// registered, so a request for the component joins it, and its one delivery settles both callers. On the base the
-    /// cancel removed the entry and the second request started a second conversion.
+    /// registered, so a request for the component joins it, and its one delivery settles both callers.
     #[test]
     fn a_request_being_converted_survives_a_cancel_and_is_joined() {
         let (_dir, session, checker) = session(&[("Button.tsx", BUTTON)]);
@@ -678,8 +682,7 @@ mod tests {
     }
 
     /// Refusals for keys never asked again do not pile up: the map holds at most [`DEGRADED_HELD`], the expired ones go
-    /// first and then the oldest, and a fresh refusal is never dropped for an expired one. On the base an expired
-    /// refusal went only when its own key was asked again.
+    /// first and then the oldest, and a fresh refusal is never dropped for an expired one.
     #[test]
     fn refusals_for_keys_never_asked_again_are_bounded() {
         let mut cache = AnswerCache::default();
@@ -715,6 +718,8 @@ mod tests {
         /// An outcome with a warning and no entry or mark for the component: the checker's answer is the structural
         /// one.
         Absent,
+        /// No outcome at all: the checker stopped mid-request (the delivery is dropped, not cancelled).
+        Stops,
     }
 
     /// A checker that answers every request at once with `reply`, or with `label` and `size` once it has `recovered`,
@@ -754,6 +759,10 @@ mod tests {
                     outcome.leave_unasked(["Other".to_owned()]);
                     outcome
                 }
+                (false, Reply::Stops) => {
+                    drop(delivery);
+                    return;
+                }
             };
             delivery.deliver(Some(outcome));
         }
@@ -763,8 +772,7 @@ mod tests {
     /// it until `DEGRADED_RETRY` passes or a file changes, each answer still carrying what it said; then it is asked
     /// again, and a recovered checker's answer replaces the structural one; a run that left the component unasked once
     /// its heap passed the budget is refused the same way. A verdict, or an outcome with no entry and no mark for the
-    /// component, is the checker's answer and is kept, even past the retry. On the base the down checker was asked
-    /// by every request, a rejected fallback was kept as the answer, and an absent entry was asked by every request.
+    /// component, is the checker's answer and is kept, even past the retry.
     #[test]
     fn a_checker_that_answered_nothing_is_asked_again_only_after_the_retry_or_an_edit() {
         use std::sync::atomic::Ordering::SeqCst;
@@ -777,9 +785,9 @@ mod tests {
         let answer = structural.component("Button").unwrap();
         let cx = CollapseContext::of(&options);
 
-        for reply in [Reply::Down, Reply::Rejected, Reply::OverBudget, Reply::Verdict, Reply::Absent] {
+        for reply in [Reply::Down, Reply::Rejected, Reply::OverBudget, Reply::Stops, Reply::Verdict, Reply::Absent] {
             let degraded = match reply {
-                Reply::Down | Reply::Rejected | Reply::OverBudget => true,
+                Reply::Down | Reply::Rejected | Reply::OverBudget | Reply::Stops => true,
                 Reply::Verdict | Reply::Absent => false,
             };
             let checker = Arc::new(Replies { reply, recovered: false.into(), asked: 0.into() });

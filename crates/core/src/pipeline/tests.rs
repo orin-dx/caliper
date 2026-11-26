@@ -4944,11 +4944,10 @@ fn a_css_property_that_takes_a_number_or_a_string_is_both_without_dependencies()
     assert_eq!(output.components["Box"].props["z"].prop_type.raw_string(), "string | number");
 }
 
-/// A component asked while one of its dependency files could not be read is answered from what was read, and the
-/// answer is not kept: once the file reads again, the next request has the full props, the same as a fresh session's,
-/// whether or not another component's request loaded the file first. The file fails to read for any user, root
-/// included: its bytes are not UTF-8. On the base the lazy memo kept the answer without the file, since the failed
-/// demand stayed missing after its retry.
+/// A component asked while one of its dependency files could not be read is answered from what was read, and the answer
+/// is not kept: once the file reads again, the next request has the full props, the same as a fresh session's, whether
+/// or not another component's request loaded the file first. The file fails to read for any user, root included: its
+/// bytes are not UTF-8.
 #[test]
 fn a_component_asked_while_a_dependency_file_could_not_be_read_is_answered_in_full_once_it_reads() {
     const PROPS: &str = "export interface SoloProps { tone: string }\n";

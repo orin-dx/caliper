@@ -160,11 +160,11 @@ pub(super) struct Lazy {
     provisional: DashMap<ComponentId, (Arc<Resolved>, dependency_types::Footprint), FxBuildHasher>,
     /// The id of the session's next dependency load, shared by its revisions: a footprint tells one load's failed read
     /// from a later one's.
-    load_ids: Arc<std::sync::atomic::AtomicU64>,
+    load_ids: Arc<dependency_types::LoadIds>,
     /// The session's clock for following again a walk that passed a file it could not read, shared by its revisions.
     clock: Arc<RetryClock>,
     /// How many edits the session has seen: one arriving makes every such walk due again.
-    edits: u64,
+    edits: dependency_types::Edits,
     /// How many times a component was resolved, for tests.
     #[cfg(test)]
     resolutions: std::sync::atomic::AtomicUsize,
@@ -183,7 +183,11 @@ type Between = Box<dyn FnOnce(&Revision) + Send>;
 impl Lazy {
     /// When this revision follows again a walk that passed a file it could not read: once it is due.
     fn retry(&self) -> dependency_types::Retry {
-        dependency_types::Retry::Due { now: self.clock.now(), edits: self.edits, load: 0 }
+        dependency_types::Retry::Due(self.moment())
+    }
+
+    fn moment(&self) -> dependency_types::Moment {
+        dependency_types::Moment { at: self.clock.now(), edits: self.edits }
     }
 }
 
@@ -249,7 +253,17 @@ impl Revision {
                 demands.iter().filter(|demand| &*demand.specifier == "react" || demand.name.is_empty()).cloned()
             })
             .collect();
-        let layer = options.load_dependencies.then(|| Arc::new(dependency_types::load(react, options, None)));
+        // The first load follows every walk, and stamps its failed reads with the session's own moment and load id.
+        let (clock, load_ids, edits) = (
+            Arc::<RetryClock>::default(),
+            Arc::<dependency_types::LoadIds>::default(),
+            dependency_types::Edits::default(),
+        );
+        let layer = options.load_dependencies.then(|| {
+            let moment = dependency_types::Moment { at: clock.now(), edits };
+            let stamp = dependency_types::Stamp { moment, load: load_ids.next() };
+            Arc::new(dependency_types::load_at(react, options, None, dependency_types::Retry::Always, stamp))
+        });
         let engine = Engine::new(&global, options, &ambient_global_files, &named_types, layer, &react_types);
         lib_diagnostics.extend(engine.ctx.tsconfig_diagnostic.clone());
         let (dts_files_parsed, dts_cache_hits) = cache.counts();
@@ -269,9 +283,9 @@ impl Revision {
             whole_demand_thread: Mutex::new(None),
             growths: std::sync::atomic::AtomicUsize::new(0),
             provisional: DashMap::default(),
-            clock: Arc::default(),
-            edits: 0,
-            load_ids: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            clock,
+            edits,
+            load_ids,
             #[cfg(test)]
             resolutions: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -424,7 +438,7 @@ impl Revision {
                 // An edit makes every walk past an unreadable file due: no provisional answer carries over.
                 provisional: DashMap::default(),
                 clock: previous.clock.clone(),
-                edits: previous.edits + 1,
+                edits: previous.edits.next(),
                 load_ids: previous.load_ids.clone(),
                 #[cfg(test)]
                 resolutions: std::sync::atomic::AtomicUsize::new(0),
@@ -567,7 +581,7 @@ impl Revision {
     ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
         let (resolved, footprint) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
         let layer = lazy.engine.load().layer.clone();
-        let holds = layer.as_ref().is_some_and(|layer| layer.footprint_holds(&footprint, lazy.clock.now(), lazy.edits));
+        let holds = layer.as_ref().is_some_and(|layer| layer.footprint_holds(&footprint, lazy.moment()));
         if holds {
             return Some((resolved, layer));
         }
@@ -635,17 +649,14 @@ impl Revision {
         let _growing = lazy.growing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let engine = lazy.engine.load_full();
         let Some(layer) = &engine.layer else { return };
-        let retry = lazy.retry();
+        let moment = lazy.moment();
+        let retry = dependency_types::Retry::Due(moment);
         let missing = layer.missing_at(demands, retry);
         if missing.is_empty() {
             return;
         }
-        let load = lazy.load_ids.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let retry = match retry {
-            dependency_types::Retry::Due { now, edits, .. } => dependency_types::Retry::Due { now, edits, load },
-            always => always,
-        };
-        let extended = Arc::new(off_pool(|| dependency_types::load_at(missing, options, Some(layer), retry)));
+        let stamp = dependency_types::Stamp { moment, load: lazy.load_ids.next() };
+        let extended = Arc::new(off_pool(|| dependency_types::load_at(missing, options, Some(layer), retry, stamp)));
         #[cfg(test)]
         lazy.loads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
@@ -846,7 +857,7 @@ mod read_retry_tests {
     use camino::Utf8PathBuf;
 
     use super::*;
-    use crate::dependency_types::READ_RETRY;
+    use crate::dependency_types::DEGRADED_RETRY;
     use crate::pipeline::{CollapseInheritedProps, ComponentAnswer, PipelineOptions};
 
     const BAD_PROPS: &str = "export interface BadProps { bad: string }\n";
@@ -861,8 +872,8 @@ mod read_retry_tests {
 
     /// A walk that passes an unreadable `export *` target and finds the name in a later one gives the resolver that
     /// barrel's mapping for this layer: the props are in the answer, with the warning. The mapping is kept nowhere a
-    /// complete answer is (`export_of`, which the index writes). Once the file reads and an edit arrives, the answer is a
-    /// cold run's. On the base the props were lost: the resolver had no mapping for the barrel.
+    /// complete answer is (`export_of`, which the index writes). Once the file reads and an edit arrives, the answer is
+    /// a cold run's.
     #[test]
     fn an_export_found_past_an_unreadable_star_target_reaches_the_resolver_for_its_layer() {
         let (_tmp, root) = project();
@@ -887,8 +898,7 @@ mod read_retry_tests {
     }
 
     /// A component answered provisionally that also reads a project file: an edit to that file names it in the delta,
-    /// and its next answer is a cold run's. On the base the delta scanned only the memo, which a provisional answer is
-    /// not in, so the key was missing.
+    /// and its next answer is a cold run's.
     #[test]
     fn an_edit_names_every_provisional_component_in_the_delta() {
         let (_tmp, root) = project();
@@ -907,8 +917,7 @@ mod read_retry_tests {
     }
 
     /// A load that only retries a file that stays unreadable adds nothing the resolver reads, so it is no growth:
-    /// repeated retries of one component never bring the background load of every name nearer. On the base each
-    /// retry counted, and the third started it.
+    /// repeated retries of one component never bring the background load of every name nearer.
     #[test]
     fn retries_of_a_file_that_stays_unreadable_are_no_growth() {
         let (_tmp, root) = project();
@@ -921,7 +930,7 @@ mod read_retry_tests {
         let lazy = revision.lazy.as_ref().unwrap();
         let growths = lazy.growths.load(Relaxed);
         for retry in 1..=5_u32 {
-            set_clock(&revision, start + READ_RETRY * retry);
+            set_clock(&revision, start + DEGRADED_RETRY * retry);
             assert_eq!(cost(&revision, || drop(revision.lazy_component(&options, "A"))), (1, 1), "retry {retry}");
         }
         assert_eq!(lazy.growths.load(Relaxed), growths, "no retry is a growth");
@@ -929,7 +938,6 @@ mod read_retry_tests {
 
     /// Another request reads the unreadable file again between this request's resolution and its diagnostics: the
     /// answer still carries the warning of the layer it was read against, so incomplete props never come without it.
-    /// On the base the diagnostics came from the newest layer, where the warning had ended.
     #[test]
     fn an_answer_carries_the_warnings_of_the_layer_it_was_read_against() {
         let (_tmp, root) = project();
@@ -980,6 +988,51 @@ mod read_retry_tests {
         assert_eq!(layer.unread(&demands).len(), 200);
     }
 
+    /// The session's first load follows every walk and could not read React's types. After three edits, the first
+    /// request behind them follows that walk again (an edit makes it due), and the requests after it are answered from
+    /// that retry until the next one is due: one load and one resolution, then none.
+    #[test]
+    fn a_failure_the_first_load_recorded_is_followed_again_once_per_retry_after_edits() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        let react = root.join("node_modules/react/index.d.ts");
+        std::fs::write(&react, [0xff; 8]).unwrap();
+        let mut revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        let u1 = root.join("src/u1/U1.tsx");
+        for edit in 0..3 {
+            std::fs::write(&u1, std::fs::read_to_string(&u1).unwrap() + &format!("// edit {edit}\n")).unwrap();
+            revision = revision.next_lazy(&options, &u1).unwrap().0;
+        }
+        let ask = || revision.lazy_component(&options, "M").unwrap();
+        let mut first = None;
+        assert_eq!(cost(&revision, || first = Some(ask())), (1, 1), "the edits made it due");
+        assert_eq!(props(first.as_ref().unwrap()), ["own"]);
+        assert_eq!(warned(first.as_ref().unwrap()), [react.to_string()]);
+        for request in 0..5 {
+            assert_eq!(cost(&revision, || drop(ask())), (0, 0), "request {request} inside the retry");
+        }
+        set_clock(&revision, start + DEGRADED_RETRY);
+        assert_eq!(cost(&revision, || drop(ask())), (1, 1), "due again after the retry");
+    }
+
+    /// A component whose own demand is complete but whose package declaration extends a type from a file that could not
+    /// be read: the memos read in its file do not outlive the next growth, since what lay past that file is missing.
+    #[test]
+    fn memos_read_in_a_file_whose_demand_reaches_an_unread_walk_do_not_outlive_a_growth() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        std::fs::write(root.join("node_modules/nest-kit/base.d.ts"), [0xff; 8]).unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        assert_eq!(props(&revision.lazy_component(&options, "N").unwrap()), ["own", "tone"]);
+        assert!(memo_files(&revision).contains("N.tsx"));
+        drop(revision.lazy_component(&options, "U2"));
+        let after = memo_files(&revision);
+        assert!(!after.contains("N.tsx") && after.contains("U2.tsx"), "{after:?}");
+    }
+
     fn project() -> (tempfile::TempDir, Utf8PathBuf) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
@@ -1022,6 +1075,22 @@ mod read_retry_tests {
             ("node_modules/barrel-kit/first.d.ts", FIRST.to_owned()),
             ("node_modules/barrel-kit/second.d.ts", "export interface SecondProps { second: string }\n".to_owned()),
             ("src/s/S.tsx", component("S", "barrel-kit", "SecondProps")),
+            ("node_modules/nest-kit/package.json", kit("nest-kit")),
+            (
+                "node_modules/nest-kit/index.d.ts",
+                "import type { Base } from './base';\nexport interface NestProps extends Base { tone: string }\n"
+                    .to_owned(),
+            ),
+            ("node_modules/nest-kit/base.d.ts", "export interface Base { base: string }\n".to_owned()),
+            ("src/n/N.tsx", component("N", "nest-kit", "NestProps")),
+            ("node_modules/react/package.json", kit("react")),
+            ("node_modules/react/index.d.ts", "export interface Attributes { key?: string }\n".to_owned()),
+            (
+                "src/m/M.tsx",
+                "import type { Attributes } from 'react';\ninterface MProps extends Attributes { own: string }\n\
+                 export function M(props: MProps) { return null; }\n"
+                    .to_owned(),
+            ),
         ];
         for (path, body) in files {
             let path = root.join(path);
@@ -1086,8 +1155,7 @@ mod read_retry_tests {
     /// load and one resolution on its first request, then nothing until the retry is due (its provisional answer), then
     /// one load and one resolution once. A component that never reaches the file costs what it would anyway, and the
     /// memos of the components before it outlive the growths after the failure. Once the file reads and the retry is
-    /// due, the answer equals a cold run's, and it is kept. On the base each request behind the file cost two loads and
-    /// two resolutions, and every growth after the failure dropped every memo.
+    /// due, the answer equals a cold run's, and it is kept.
     #[test]
     fn a_file_that_stays_unreadable_is_followed_again_once_its_retry_is_due_and_costs_no_other_component_anything() {
         let (_tmp, root) = project();
@@ -1112,15 +1180,15 @@ mod read_retry_tests {
         assert!(!after.contains("A.tsx"), "the memos read behind the unread walk are not: {after:?}");
         assert_eq!(cost(&revision, || drop(ask("U1"))), (0, 0), "an unrelated component is memoized");
 
-        set_clock(&revision, start + READ_RETRY - Duration::from_millis(1));
+        set_clock(&revision, start + DEGRADED_RETRY - Duration::from_millis(1));
         assert_eq!(cost(&revision, || drop(ask("A"))), (0, 0), "not due yet");
-        set_clock(&revision, start + READ_RETRY);
+        set_clock(&revision, start + DEGRADED_RETRY);
         assert_eq!(cost(&revision, || drop(ask("A"))), (1, 1), "due: followed again, still unreadable");
         assert_eq!(cost(&revision, || drop(ask("A"))), (0, 0), "the failure just now starts the retry again");
 
         std::fs::write(&props_file, BAD_PROPS).unwrap();
         assert_eq!(cost(&revision, || drop(ask("A"))), (0, 0), "readable, but nothing is read before the retry");
-        set_clock(&revision, start + READ_RETRY * 2);
+        set_clock(&revision, start + DEGRADED_RETRY * 2);
         let mut recovered = None;
         assert_eq!(cost(&revision, || recovered = Some(ask("A"))), (1, 1));
         assert_eq!(recovered.unwrap(), cold(&root, "A"), "once it reads, the answer is a cold run's");
@@ -1150,9 +1218,8 @@ mod read_retry_tests {
     }
 
     /// Two components, followed in one load, each behind a file of its own that could not be read. One of the files is
-    /// read since, by a third component's walk: only the component behind it is followed again, and the other keeps
-    /// its provisional answer. On the base every failed read of the load was a suspect of both walks, so the second
-    /// was walked again too.
+    /// read since, by a third component's walk: only the component behind it is followed again, and the other keeps its
+    /// provisional answer.
     #[test]
     fn only_the_walk_whose_own_file_was_read_since_is_followed_again() {
         let (_tmp, root) = project();

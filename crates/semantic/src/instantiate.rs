@@ -317,7 +317,7 @@ mod tests {
 
     /// A request the checker rejects while it instantiates says nothing about the component, so the fallback it gives
     /// is transient: no session or kept answer stores it, and the next request asks again. The checker rejects the
-    /// derived snapshot here because the one it derives from was released. On the base the rejection was a verdict.
+    /// derived snapshot here because the one it derives from was released.
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used)]
     fn a_rejected_instantiation_is_a_transient_fallback() {

@@ -239,9 +239,8 @@ fn only_an_export_of_a_list_or_a_star_makes_a_file_worth_scanning_for_re_exports
     }
 }
 
-/// A file an augmentation search could not read is not held as one that augments nothing: the run that met it writes
-/// no index, so the next run, with the file readable, finds its augmentation, as a run with the cache off does. On the
-/// base the search's answer without it was persisted and trusted while `inner`'s `package.json` was unchanged.
+/// A file an augmentation search could not read is not held as one that augments nothing: the run that met it writes no
+/// index, so the next run, with the file readable, finds its augmentation, as a run with the cache off does.
 #[test]
 fn a_file_an_augmentation_search_could_not_read_is_searched_again_on_the_next_run() {
     let (_tmp, root) = project(REEXPORTING);

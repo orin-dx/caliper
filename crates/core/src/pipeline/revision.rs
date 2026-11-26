@@ -634,7 +634,7 @@ impl Revision {
         // may differ though the edit did not touch it, so it is resolved again (the old layer's ledger names them).
         let unread = match (&self.dependencies, &dependencies) {
             (Some(old), Some(new)) if !Arc::ptr_eq(old, new) => old.unread_walks(),
-            _ => dependency_types::UnreadWalks::default(),
+            _ => Arc::default(),
         };
         let (stale, kept): (Vec<_>, Vec<_>) = ids.into_iter().partition(|(id, _)| match self.resolved.get(id) {
             None => true,

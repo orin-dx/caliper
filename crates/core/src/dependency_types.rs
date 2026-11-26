@@ -28,9 +28,7 @@ use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 mod ledger;
-#[cfg(test)]
-pub(crate) use ledger::READ_RETRY;
-pub(crate) use ledger::{Footprint, Retry, UnreadWalks};
+pub(crate) use ledger::{DEGRADED_RETRY, Edits, Footprint, LoadIds, Moment, Retry, Stamp, UnreadWalks};
 use ledger::{LedgerBuilder, Node, ReadLedger};
 
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
@@ -397,6 +395,10 @@ pub(crate) struct DependencyLayer {
     panics: Vec<Diagnostic>,
     /// The dependency files this layer's load could not read or read again, and what those reads left unfollowed.
     ledger: ReadLedger,
+    /// What the chain's ledger leaves unread, once asked ([`DependencyLayer::unread_walks`]).
+    unread_walks: OnceLock<Arc<UnreadWalks>>,
+    #[cfg(test)]
+    unread_walk_builds: std::sync::atomic::AtomicUsize,
     /// How many times this layer's load read a dependency file, for tests.
     #[cfg(test)]
     reads: usize,
@@ -1359,15 +1361,16 @@ pub(crate) fn load(
     options: &PipelineOptions,
     previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
-    load_at(demands, options, previous, Retry::Always)
+    load_at(demands, options, previous, Retry::Always, Stamp::unsessioned())
 }
 
-/// [`load`], following again only the walks `retry` makes due, and recording its failed reads at its time.
+/// [`load`], following again only the walks `retry` makes due, and recording its failed reads with `stamp`.
 pub(crate) fn load_at(
     demands: Vec<Demand>,
     options: &PipelineOptions,
     previous: Option<&Arc<DependencyLayer>>,
     retry: Retry,
+    stamp: Stamp,
 ) -> DependencyLayer {
     // Its own resolvers, never another consumer's: `oxc_resolver` keeps a config reached through another's
     // `references` without that config's own references, so a shared cache would make what this load resolves depend
@@ -1379,6 +1382,7 @@ pub(crate) fn load_at(
     let flatten = previous.filter(|_| parent.is_none());
     let mut loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
     loader.ledger.retry = retry;
+    loader.ledger.stamp = stamp;
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
     match (previous, flatten) {
@@ -1522,6 +1526,9 @@ pub(crate) fn load_at(
         parsed: loader.parsed.into_iter().filter_map(|(key, cell)| Some((key, cell.get()?.clone().ok()?))).collect(),
         panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
         ledger: loader.ledger.finish(),
+        unread_walks: OnceLock::new(),
+        #[cfg(test)]
+        unread_walk_builds: std::sync::atomic::AtomicUsize::new(0),
         #[cfg(test)]
         reads: loader.reads.iter().map(|entry| *entry.value()).sum(),
     }

@@ -1435,9 +1435,9 @@ mod tests {
         }
     }
 
-    /// The checker rejects the lookup of a component's module (its snapshot was released first): every component of
-    /// the file keeps its structural result for this request only, and the reason says what the checker rejected, as
-    /// every other rejection does. On the base the reason was the verdict "not part of the checker's program".
+    /// The checker rejects the lookup of a component's module (its snapshot was released first): every component of the
+    /// file keeps its structural result for this request only, and the reason says what the checker rejected, as every
+    /// other rejection does.
     #[test]
     fn a_rejected_module_lookup_says_what_the_checker_rejected_and_is_transient() {
         let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generic");

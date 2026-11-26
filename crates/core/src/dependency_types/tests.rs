@@ -1647,8 +1647,7 @@ fn make_unreadable(file: &Utf8Path) -> String {
 }
 
 /// A dependency file that could not be read is unknown, not empty: the run reports it, and the next run, with the file
-/// readable again, finds what it exports, as a run with the cache off does. On the base the failed read was kept as
-/// "not exported" and persisted in the index, which every later run trusted while the package was unchanged.
+/// readable again, finds what it exports, as a run with the cache off does.
 #[test]
 fn an_export_in_a_file_that_could_not_be_read_is_found_on_the_next_run() {
     let (_tmp, root) = project(&[
@@ -1784,12 +1783,10 @@ fn answers(layer: &DependencyLayer, root: &Utf8Path, demands: &[Demand]) -> Answ
 }
 
 /// Every path that reads a dependency file, made to fail one at a time with the cache on. The run reports the file and
-/// keeps what it read: its layer loads exactly the oracle's files minus those only the unreadable file led to, holds
-/// no reason for a name it could not look up, and does not count the demand as followed. A session's next load over
-/// the layer (the demands `missing` gives, as a session asks) and the next cold run answer as a run that never failed
-/// (the oracle: cache off, every file readable). On the base a failed read ended the walk or the search, so what it
-/// had read was lost (`PartialAugmentation`'s own augmentation, `NamedHop`), and before that it was kept as an
-/// absence.
+/// keeps what it read: its layer loads exactly the oracle's files minus those only the unreadable file led to, holds no
+/// reason for a name it could not look up, and does not count the demand as followed. A session's next load over the
+/// layer (the demands `missing` gives, as a session asks) and the next cold run answer as a run that never failed (the
+/// oracle: cache off, every file readable).
 #[test]
 fn a_file_that_could_not_be_read_is_read_again_by_the_next_load_on_every_path() {
     let paths = [
@@ -1883,12 +1880,11 @@ const WALK: &[(&str, &str)] = &[
 ];
 
 /// A differential test of the export walk over a barrel of `export *` targets, each unreadable in turn. The layer
-/// equals the all-readable one minus exactly what the unreadable target declared: every other target's name is
-/// loaded, a name found before the walk reached the unreadable target is answered and kept, and a name the walk
-/// looked for past it (found later or not at all) is used for this load only: neither kept as an export nor counted as
-/// followed, since the unreadable target may have declared it first. With the target readable again, the session's
-/// next load and the next cold run equal the cold answer. On the base the walk ended at the unreadable target, so the
-/// targets after it were never loaded.
+/// equals the all-readable one minus exactly what the unreadable target declared: every other target's name is loaded,
+/// a name found before the walk reached the unreadable target is answered and kept, and a name the walk looked for past
+/// it (found later or not at all) is used for this load only: neither kept as an export nor counted as followed, since
+/// the unreadable target may have declared it first. With the target readable again, the session's next load and the
+/// next cold run equal the cold answer.
 #[test]
 fn an_export_walk_continues_past_a_target_it_cannot_read_and_keeps_only_what_it_answered_in_full() {
     const TARGETS: [(&str, &str); 3] = [("a", "AProps"), ("b", "BProps"), ("c", "CProps")];
@@ -1943,7 +1939,7 @@ enum Reader {
 }
 
 /// Readers that ask for one file at once read it once and all get its one result, a failed read included, through
-/// either reader. On the base a parse read the file outside its cell, so each caller that met another read it too.
+/// either reader.
 #[test]
 fn readers_that_meet_read_a_file_once_and_share_its_result() {
     const READERS: usize = 8;

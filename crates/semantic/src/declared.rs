@@ -403,7 +403,7 @@ mod tests {
     }
 
     /// Two conversions on one lane ask about the same prop at once: the declaration's symbol, the description and the
-    /// tags are each asked of the checker once, and both get the answer. On the base each asked.
+    /// tags are each asked of the checker once, and both get the answer.
     #[test]
     fn two_conversions_asking_about_one_prop_at_once_send_one_request() {
         with_mapped_props(async |rpc, file, properties| {
@@ -432,8 +432,7 @@ mod tests {
         });
     }
 
-    /// A question the checker rejects is not kept, for the asker or for one that waited for it: each asks again, as
-    /// each did on the base.
+    /// A question the checker rejects is not kept, for the asker or for one that waited for it: each asks again.
     #[test]
     fn a_rejected_question_is_asked_again_by_the_next_asker_and_by_one_that_waited() {
         with_mapped_props(async |rpc, _, properties| {
