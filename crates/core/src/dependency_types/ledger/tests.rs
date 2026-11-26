@@ -520,6 +520,56 @@ fn an_eager_walk_whose_last_importer_drops_it_is_not_followed_again() {
     }
 }
 
+/// The eager revision, roots: `setup.ts`, the only importer of `aug-kit`, is deleted while the augmentation cannot be
+/// read; the augmentation reads and an unrelated file is edited: no live demand leads to the walk, so it is not
+/// followed and `Box` has no augmented attribute, as a fresh run. Restoring `setup.ts` makes the walk live again.
+#[test]
+fn an_eager_walk_whose_importer_was_deleted_is_not_followed_until_it_returns() {
+    let setup = "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n";
+    let plain = "export function Plain(props: { title: string }) { return null; }\n";
+    let (_tmp, root) =
+        react_project(&[("src/setup.ts", setup), ("src/box/Box.tsx", BOX), ("src/plain/Plain.tsx", plain)]);
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    std::fs::remove_file(root.join("src/setup.ts")).unwrap();
+    drop(session.update_file(&root.join("src/setup.ts")));
+    std::fs::write(root.join("node_modules/aug-kit/index.d.ts"), AUGMENTATION).unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+    let fresh = WatchSession::new(react_options(&root));
+    drop(fresh.initialize());
+    assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "no live demand reaches the augmentation");
+    assert!(session.component("Box") == fresh.component("Box"));
+
+    std::fs::write(root.join("src/setup.ts"), setup).unwrap();
+    drop(session.update_file(&root.join("src/setup.ts")));
+    let fresh = WatchSession::new(react_options(&root));
+    drop(fresh.initialize());
+    assert!(names(&session.component("Box")).contains(&"tw".to_owned()), "restored, the walk is live again");
+    assert!(session.component("Box") == fresh.component("Box"));
+}
+
+/// Reporting failed reads costs a healthy layer nothing: with no failed read in the chain, 1000 live demands are not
+/// iterated. With one, they are.
+#[test]
+fn a_healthy_layer_reports_failed_reads_without_iterating_the_live_demands() {
+    let (_tmp, root) = project(SOLO);
+    let demand = |n: usize| Demand {
+        from: root.join(format!("src/c{n}/Card.tsx")),
+        specifier: "solo-kit".into(),
+        name: "SoloProps".into(),
+    };
+    let roots: Vec<Demand> = (0..1000).map(demand).collect();
+    let healthy = load(vec![demand(0)], &options(&root), None);
+    let visited = std::cell::Cell::new(0);
+    let counted = || roots.iter().inspect(|_| visited.set(visited.get() + 1));
+    assert_eq!(healthy.read_warnings_reached(counted()), Vec::<Diagnostic>::new());
+    assert_eq!(visited.get(), 0, "no live demand iterated");
+    std::fs::write(root.join("node_modules/solo-kit/props.d.ts"), UNREADABLE).unwrap();
+    let failed = load(vec![demand(0)], &PipelineOptions { use_cache: false, ..options(&root) }, None);
+    assert_eq!(failed.read_warnings_reached(counted()).len(), 1);
+    assert_eq!(visited.get(), 1000);
+}
+
 /// The eager revision: `Card` sits behind a file that could not be read, which then reads on disk, and `Plain`,
 /// unrelated, is deleted: a deletion makes the walk due as an edit does, and `Card` answers as a fresh session does.
 #[test]
@@ -1368,6 +1418,40 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
                     failures.push(format!("[eager retry] {file}, {change}: {name} is not a fresh run's"));
                 }
             }
+        }
+    }
+    // Roots: a project with React's types, where `setup.ts` alone imports `aug-kit`, whose augmentation cannot be
+    // read. Each change removes the importer (deleted, or its import dropped) while the file cannot be read; the file
+    // then reads and an unrelated edit follows. No live demand reaches the walk: `Box` answers as a fresh run, without
+    // the augmented attribute. Restoring the importer makes the walk live again.
+    for (change, gone) in [("setup.ts deleted", true), ("setup.ts drops its import", false)] {
+        let setup = "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n";
+        let files = [("src/setup.ts", setup), ("src/box/Box.tsx", BOX), ("src/plain/Plain.tsx", MODEL_PLAIN)];
+        let (_tmp, root) = react_project(&files);
+        let session = WatchSession::new(react_options(&root));
+        drop(session.initialize());
+        match gone {
+            true => std::fs::remove_file(root.join("src/setup.ts")).unwrap(),
+            false => std::fs::write(root.join("src/setup.ts"), "export const aug = 1;\n").unwrap(),
+        }
+        drop(session.update_file(&root.join("src/setup.ts")));
+        std::fs::write(root.join("node_modules/aug-kit/index.d.ts"), AUGMENTATION).unwrap();
+        edit(&session, &root.join("src/plain/Plain.tsx"));
+        let fresh = WatchSession::new(react_options(&root));
+        drop(fresh.initialize());
+        if session.component("Box") != fresh.component("Box") {
+            failures.push(format!("[eager roots] {change}: Box is not a fresh run's"));
+        }
+        // The importer returns: the walk is live again, followed, and `Box` has the attribute, as a fresh run.
+        std::fs::write(root.join("src/setup.ts"), setup).unwrap();
+        drop(session.update_file(&root.join("src/setup.ts")));
+        let fresh = WatchSession::new(react_options(&root));
+        drop(fresh.initialize());
+        let restored = session.component("Box");
+        if restored != fresh.component("Box")
+            || !restored.as_ref().is_some_and(|box_| box_.entry.props.contains_key("tw"))
+        {
+            failures.push(format!("[eager roots] {change}, then restored: Box lacks the augmentation a fresh run has"));
         }
     }
     assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));

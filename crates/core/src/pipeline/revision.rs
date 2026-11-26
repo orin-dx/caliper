@@ -198,30 +198,11 @@ struct Change<'c> {
 /// demand nothing are absent, and a lazy revision keeps its own ([`Lazy`]).
 type LiveDemands = FxHashMap<Utf8PathBuf, Arc<[Demand]>>;
 
-/// The due walks of `layer` to follow again: each a package file began (reached through a project demand), and each a
-/// project file began whose demand (directory, specifier, name) some project file still makes, re-homed to that
-/// file's demand. A walk of a demand no project file makes is not followed; it stays in the ledger, so restoring the
-/// import makes it due again. `project` says which files are the project's. One pass over the live demands of the
-/// walks' directories, indexed, then one lookup per walk.
-fn live_due_walks(layer: &DependencyLayer, live: &LiveDemands, project: impl Fn(&Utf8Path) -> bool) -> Vec<Demand> {
-    let due = layer.due_walks(dependency_types::Retry::Always);
-    let dirs: FxHashSet<&Utf8Path> =
-        due.iter().filter(|walk| project(&walk.from)).filter_map(|walk| walk.from.parent()).collect();
-    let mut owners: FxHashMap<(&Utf8Path, &str, &str), &Demand> = FxHashMap::default();
-    for (file, demands) in live.iter().filter(|(file, _)| file.parent().is_some_and(|dir| dirs.contains(dir))) {
-        for demand in demands.iter() {
-            owners.entry((file.parent().unwrap_or(file), &demand.specifier, &demand.name)).or_insert(demand);
-        }
-    }
-    due.iter()
-        .filter_map(|walk| match project(&walk.from) {
-            false => Some(walk.clone()),
-            true => {
-                let key = (walk.from.parent().unwrap_or(&walk.from), &*walk.specifier, walk.name.as_str());
-                owners.get(&key).map(|owner| (*owner).clone())
-            }
-        })
-        .collect()
+/// The walks to follow again: every unread walk a live demand of the current revision leads to, a project file's own
+/// and every package walk below it (React's included). A walk no live demand reaches is not followed and not reported;
+/// its mark stays, so a demand that returns finds it again. Derived from the current files' demands, nothing retired.
+fn live_due_walks(layer: &DependencyLayer, live: &LiveDemands) -> Vec<Demand> {
+    layer.unread_from(live.values().flat_map(|demands| demands.iter()))
 }
 
 /// The bare names `file` declares in an enum or const-array map keyed `file:name`.
@@ -531,14 +512,7 @@ impl Revision {
             // Only a walk some project file still demands is followed again, under that file's demand (the loader
             // keeps one per directory, recorded under whichever file made it first, which may have dropped it); the
             // walk of a demand no file makes any more ends, as a fresh run would never follow it.
-            let project = |file: &Utf8Path| file == changed || self.files.contains(file);
-            let due = live_due_walks(layer, &live, project);
-            debug_assert!(
-                due.iter().all(|walk| !project(&walk.from)
-                    || live.get(&walk.from).is_some_and(|demands| demands.iter().any(|now| now.same_walk(walk)))),
-                "a retry of a demand no project file makes"
-            );
-            missing.extend(due);
+            missing.extend(live_due_walks(layer, &live));
             missing.sort();
             missing.dedup();
             if !missing.is_empty() {
@@ -836,8 +810,10 @@ impl Revision {
         diagnostics.extend(self.lib_diagnostics.iter().cloned(), None);
         if let Some(layer) = &self.dependencies {
             // A failed read is reported while a walk some project file makes now reaches it.
-            let live: Vec<Demand> = self.demands.values().flat_map(|demands| demands.iter().cloned()).collect();
-            diagnostics.extend(layer.panic_diagnostics_reached(&live), None);
+            diagnostics.extend(
+                layer.panic_diagnostics_reached(self.demands.values().flat_map(|demands| demands.iter())),
+                None,
+            );
         }
 
         let mut components = BTreeMap::new();

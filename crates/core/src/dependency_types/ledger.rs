@@ -297,13 +297,14 @@ impl DependencyLayer {
 
     /// [`Self::read_warnings`], only for the files the unread walks `roots` lead to could not read: what a revision
     /// whose live demands are `roots` reports.
-    pub(crate) fn read_warnings_reached(&self, roots: &[Demand]) -> Vec<Diagnostic> {
-        let warnings = self.read_warnings();
-        if warnings.is_empty() {
-            return warnings;
+    pub(crate) fn read_warnings_reached<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Diagnostic> {
+        // A healthy layer, the common case, neither walks nor allocates: `roots` is not iterated.
+        if !self.has_failed_reads() {
+            return Vec::new();
         }
+        let warnings = self.read_warnings();
         let mut reached: FxHashSet<&str> = FxHashSet::default();
-        for walk in self.unread(roots) {
+        for walk in self.unread_from(roots) {
             if let Some(mark) = self.mark(&Node::Demand(walk.key())) {
                 reached.extend(mark.suspects.iter().map(std::borrow::Borrow::<str>::borrow));
             }
@@ -462,9 +463,9 @@ impl DependencyLayer {
         (walks, visits)
     }
 
-    /// Every demand of the chain whose own walk is unread and that a load under `retry` follows again, sorted. An edit
-    /// makes each such walk due ([`Mark::is_due`]), whatever file it was: the eager revision follows these on every
-    /// edit.
+    /// Every demand of the chain whose own walk is unread and that a load under `retry` follows again, sorted, for
+    /// tests: the eager revision follows only the ones its live demands reach ([`Self::unread_from`]).
+    #[cfg(test)]
     pub(crate) fn due_walks(&self, retry: Retry) -> Vec<Demand> {
         if !self.has_marks() {
             return Vec::new();
@@ -491,10 +492,20 @@ impl DependencyLayer {
     /// not been followed since, sorted. Following them again is what may answer more; while there are any, what was
     /// resolved from `roots` holds for one request only.
     pub(crate) fn unread(&self, roots: &[Demand]) -> Vec<Demand> {
+        self.unread_from(roots)
+    }
+
+    /// [`Self::unread`] over borrowed roots, which it does not iterate while no walk is unread.
+    pub(crate) fn unread_from<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Demand> {
         if !self.has_marks() {
             return Vec::new();
         }
-        unread_below(roots.iter().map(|demand| Node::Demand(demand.key())), |node| self.mark(node))
+        unread_below(roots.into_iter().map(|demand| Node::Demand(demand.key())), |node| self.mark(node))
+    }
+
+    /// Whether the latest read of some file in the chain failed.
+    fn has_failed_reads(&self) -> bool {
+        self.chain().any(|layer| layer.ledger.reads.values().any(|read| matches!(read, Read::Failed(_))))
     }
 }
 

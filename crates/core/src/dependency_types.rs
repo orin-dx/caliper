@@ -121,13 +121,6 @@ pub(crate) struct Demand {
 }
 
 impl Demand {
-    /// Whether `other` is the same demand as this one: one directory, specifier and name, whichever file made it.
-    pub(crate) fn same_walk(&self, other: &Demand) -> bool {
-        self.specifier == other.specifier
-            && self.name == other.name
-            && self.from.parent().map_or("", Utf8Path::as_str) == other.from.parent().map_or("", Utf8Path::as_str)
-    }
-
     fn key(&self) -> DemandKey {
         let dir = self.from.parent().map_or("", Utf8Path::as_str);
         (Box::from(dir), self.specifier.clone(), self.name.clone())
@@ -418,7 +411,7 @@ pub(crate) struct DependencyLayer {
 impl DependencyLayer {
     /// [`Self::panic_diagnostics`], with only the failed reads a walk from `roots` reaches: a file no live demand
     /// leads to any more is not reported, though the ledger keeps its failure for a demand that returns.
-    pub(crate) fn panic_diagnostics_reached(&self, roots: &[Demand]) -> Vec<Diagnostic> {
+    pub(crate) fn panic_diagnostics_reached<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Diagnostic> {
         let mut all: Vec<Diagnostic> = self.chain().flat_map(|layer| layer.panics.iter().cloned()).collect();
         all.extend(self.read_warnings_reached(roots));
         all.sort_by(|a, b| a.message.cmp(&b.message));
