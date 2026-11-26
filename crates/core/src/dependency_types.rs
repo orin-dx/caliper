@@ -1362,6 +1362,21 @@ fn declaration_refs(data: &SourceData, file: &Utf8Path, name: &str, out: &mut Fx
     }
 }
 
+/// The parses a load's layer keeps: each file that read, except one whose read also failed in the same load (an
+/// augmentation scan and a parse each read it while it changed on disk). The layer keeps that failure, and a load over
+/// it reads the file again; a parse kept beside it would answer that load without the read that ends the failure, and
+/// the file would be reported unreadable for good. So no layer holds a file both failed and parsed.
+fn retained_parses(
+    parsed: FxDashMap<PathKey, ParseCell>,
+    ledger: &ReadLedger,
+) -> FxHashMap<PathKey, Option<Arc<SourceData>>> {
+    parsed
+        .into_iter()
+        .filter(|(key, _)| !ledger.failed(std::borrow::Borrow::borrow(key)))
+        .filter_map(|(key, cell)| Some((key, cell.get()?.clone().ok()?)))
+        .collect()
+}
+
 /// Load what `demands` reference: from scratch for a cold run, or on top of `previous` when a watch revision or a lazy
 /// session found names it hasn't loaded.
 ///
@@ -1520,6 +1535,7 @@ pub(crate) fn load_timed(
     let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
     let demands: FxHashSet<DemandKey> = loader.demands.into_iter().collect();
     let files: FxHashSet<PathKey> = files.into_iter().collect();
+    let ledger = loader.ledger.finish();
     // A walk that found the mapping the chain already holds adds nothing the resolver reads.
     let partial_exports: FxHashMap<_, _> = loader
         .partial_exports
@@ -1557,10 +1573,9 @@ pub(crate) fn load_timed(
         demands,
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
-        // Only files that were read: the next load reads a failed one again.
-        parsed: loader.parsed.into_iter().filter_map(|(key, cell)| Some((key, cell.get()?.clone().ok()?))).collect(),
+        parsed: retained_parses(loader.parsed, &ledger),
         panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
-        ledger: loader.ledger.finish(),
+        ledger,
         unread_walks: OnceLock::new(),
         #[cfg(test)]
         unread_walk_builds: std::sync::atomic::AtomicUsize::new(0),

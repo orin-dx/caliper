@@ -242,7 +242,7 @@ fn an_unavailable_checker_warns_on_every_answer_it_affects_and_never_fails_a_req
         assert_eq!(warnings, [vec![key.to_string()]], "{key}: {:?}", answer.diagnostics);
         assert!(!caliper_docgen_core::pipeline::awaits_checker(answer));
     }
-    assert_eq!(checker.requests(), 2, "a request asked a moment ago is refused without asking the checker again");
+    assert_eq!(checker.requests(), 1, "the outage refuses every component without asking the checker again");
 }
 
 /// A checker that times out on its first request, then answers as [`finds_size`]: one that restarted.

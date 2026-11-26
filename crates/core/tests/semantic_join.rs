@@ -245,8 +245,8 @@ fn a_request_after_an_edit_does_not_join_the_request_asked_before_it() {
     }
 }
 
-/// The story that joined the request and every later story the checker could not answer each carry the warning: an
-/// unavailable checker is reported on every answer it affects, not once per session.
+/// The story that joined the request and every later story carry the warning: an unavailable checker is reported on
+/// every answer it affects, not once per session, and a later component is refused without asking it again.
 #[test]
 fn an_unavailable_checker_is_reported_to_the_story_that_joined_the_request_and_to_every_later_one() {
     let project = project(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
@@ -258,10 +258,8 @@ fn an_unavailable_checker_is_reported_to_the_story_that_joined_the_request_and_t
 
     checker.answer(0, Some(down));
     let joined = story.join().unwrap();
-    let card = open_story(&session, "Card");
-    checker.wait_until(|asked| asked.len() == 2);
-    checker.answer(1, Some(down));
-    let card = card.join().unwrap();
+    let card = open_story(&session, "Card").join().unwrap();
+    assert_eq!(checker.asked().len(), 1, "the outage holds for every component");
 
     let warnings = |answer: &ComponentAnswer| {
         answer.diagnostics.iter().filter(|d| d.severity == DiagnosticSeverity::Warning).count()

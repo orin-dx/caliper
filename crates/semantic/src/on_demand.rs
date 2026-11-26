@@ -551,7 +551,8 @@ impl Checker {
             Ok(outcome) => outcome,
             Err(error) => {
                 self.forget().await;
-                SemanticOutcome::unavailable(format!("the checker stopped answering: {error}"))
+                // This request failed; the backend may answer the next one, so it is not refused for every component.
+                SemanticOutcome::request_failed(format!("the checker stopped answering: {error}"))
             }
         }
     }

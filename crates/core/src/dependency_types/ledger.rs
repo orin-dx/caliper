@@ -130,7 +130,7 @@ struct Mark {
     /// The demand's own walk passed a file it could not read: following it again may answer more.
     unread: Option<Demand>,
     /// The files the demand's own walk could not read, the last time it was followed.
-    suspects: Box<[PathKey]>,
+    suspects: Arc<[PathKey]>,
     /// The marked nodes it reached: below it in the same load, or marked by an earlier one.
     reaches: Box<[Node]>,
 }
@@ -153,7 +153,7 @@ impl Mark {
     /// whatever the time: an edit arrived since a failure, or one of its files was read since.
     fn retry_at<'a>(&self, edits: Edits, latest: impl Fn(&str) -> Option<&'a Read>) -> Option<Instant> {
         let mut earliest: Option<Instant> = None;
-        for path in &self.suspects {
+        for path in self.suspects.iter() {
             let at = match latest(std::borrow::Borrow::borrow(path)) {
                 Some(Read::Failed(failed)) => failed.retry_at(edits)?,
                 Some(Read::Done) | None => return None,
@@ -226,6 +226,11 @@ pub(super) struct ReadLedger {
 }
 
 impl ReadLedger {
+    /// Whether this ledger's latest read of `file` failed.
+    pub(super) fn failed(&self, file: &str) -> bool {
+        matches!(self.reads.get(file), Some(Read::Failed(_)))
+    }
+
     /// `newer`'s entries over this ledger's, as a flatten merges a chain: the latest entry wins.
     fn absorb(&mut self, newer: &ReadLedger) {
         self.reads.extend(newer.reads.iter().map(|(path, read)| (path.clone(), read.clone())));
@@ -301,7 +306,7 @@ impl DependencyLayer {
         let mut files: Vec<Unreadable> = Vec::new();
         for demand in unread {
             let mark = self.mark(&Node::Demand(demand.key())).filter(|mark| mark.unread.is_some())?;
-            for path in &mark.suspects {
+            for path in mark.suspects.iter() {
                 let Some(Read::Failed(failed)) = self.latest_read(std::borrow::Borrow::borrow(path)) else {
                     return None;
                 };
@@ -321,6 +326,19 @@ impl DependencyLayer {
                 Some(Read::Failed(failed)) if failed.stamp == *read && failed.at == *at);
             same && read.moment.edits >= now.edits && now.at < at.0 + DEGRADED_RETRY
         })
+    }
+
+    /// How many distinct lists of files this layer's own unread walks hold, for tests.
+    #[cfg(test)]
+    pub(crate) fn distinct_suspect_lists(&self) -> usize {
+        let lists: FxHashSet<*const [PathKey]> = self
+            .ledger
+            .marks
+            .values()
+            .filter(|mark| mark.unread.is_some())
+            .map(|mark| Arc::as_ptr(&mark.suspects))
+            .collect();
+        lists.len()
     }
 
     /// How many files each of this layer's own unread walks holds, for tests.
@@ -449,7 +467,10 @@ pub(super) struct LedgerBuilder<'a> {
     /// claimed or met claimed.
     edges: FxDashMap<Node, Vec<Node>>,
     /// The demands whose own walk passed a file it could not read, with those files.
-    unread: FxDashMap<DemandKey, (Demand, Vec<PathKey>)>,
+    unread: FxDashMap<DemandKey, (Demand, Arc<[PathKey]>)>,
+    /// One copy of each list of files a walk could not read: the demands of one augmentation search (every directory
+    /// of a resolution scope importing the module) share the search's list instead of each holding its own.
+    suspect_lists: FxDashSet<Arc<[PathKey]>>,
     /// The demands followed again because their last walk was unread.
     retried: FxDashSet<DemandKey>,
     /// When this load follows again a demand an earlier one left unread.
@@ -471,6 +492,7 @@ impl<'a> LedgerBuilder<'a> {
             reads: DashMap::default(),
             edges: DashMap::default(),
             unread: DashMap::default(),
+            suspect_lists: DashSet::default(),
             retried: DashSet::default(),
         }
     }
@@ -514,7 +536,15 @@ impl<'a> LedgerBuilder<'a> {
     pub(super) fn unread_demand(&self, demand: &Demand, mut files: Vec<PathKey>) {
         files.sort();
         files.dedup();
-        self.unread.insert(demand.key(), (demand.clone(), files));
+        let shared = match self.suspect_lists.get(files.as_slice()) {
+            Some(shared) => shared.clone(),
+            None => {
+                let list: Arc<[PathKey]> = Arc::from(files);
+                self.suspect_lists.insert(list.clone());
+                list
+            }
+        };
+        self.unread.insert(demand.key(), (demand.clone(), shared));
     }
 
     /// Whether a demand followed before this load is to be followed again (its last walk was unread and the retry is
@@ -534,10 +564,21 @@ impl<'a> LedgerBuilder<'a> {
     /// in is merged into it and what is clean is dropped.
     pub(super) fn finish(self) -> ReadLedger {
         let has_earlier = self.has_earlier_marks();
-        let LedgerBuilder { parent, inherited, reads, edges, unread, retried, retry: _, stamp: _, clock: _ } = self;
+        let LedgerBuilder {
+            parent,
+            inherited,
+            reads,
+            edges,
+            unread,
+            retried,
+            retry: _,
+            stamp: _,
+            clock: _,
+            suspect_lists: _,
+        } = self;
         let reads: FxHashMap<PathKey, Read> = reads.into_iter().collect();
         let earlier = |node: &Node| inherited.marks.get(node).or_else(|| parent.and_then(|parent| parent.mark(node)));
-        let unread: FxHashMap<Node, (Demand, Vec<PathKey>)> =
+        let unread: FxHashMap<Node, (Demand, Arc<[PathKey]>)> =
             unread.into_iter().map(|(key, walk)| (Node::Demand(key), walk)).collect();
         let mut marks: FxHashMap<Node, Mark> = FxHashMap::default();
         if !unread.is_empty() || has_earlier {
@@ -574,8 +615,8 @@ impl<'a> LedgerBuilder<'a> {
             for &node in marked.iter().filter(|node| followed(node)) {
                 let reaches = edges.get(node).into_iter().flatten().filter(|to| marked.contains(to)).cloned().collect();
                 let (own, suspects) = match unread.get(node) {
-                    Some((demand, files)) => (Some(demand.clone()), files.clone().into_boxed_slice()),
-                    None => (None, Box::default()),
+                    Some((demand, files)) => (Some(demand.clone()), files.clone()),
+                    None => (None, Arc::default()),
                 };
                 marks.insert(node.clone(), Mark { unread: own, suspects, reaches });
             }

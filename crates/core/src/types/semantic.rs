@@ -172,14 +172,46 @@ pub struct SemanticOutcome {
 }
 
 /// The mark of the targets the checker was not asked about: every one, or the keys listed. Only
-/// [`SemanticOutcome::unavailable`] and [`SemanticOutcome::leave_unasked`] make one, so no other outcome can claim it.
+/// [`SemanticOutcome::unavailable`], [`SemanticOutcome::request_failed`] and [`SemanticOutcome::leave_unasked`] make
+/// one, so no other outcome can claim it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Unavailable(Option<Box<[String]>>);
+pub struct Unavailable(Unasked);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Unasked {
+    /// Every target: the backend cannot serve any request.
+    Backend,
+    /// Every target of this request: answering it failed.
+    Request,
+    /// These keys: the run stopped asking once the heap passed its budget.
+    Keys(Box<[String]>),
+}
+
+/// What a failure that left targets unasked says about the next request, decided where the failure is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnavailableScope {
+    /// The backend cannot serve any request: it is missing, unsupported, could not start, or stopped for the session.
+    Backend,
+    /// Only this request failed (it timed out, the checker crashed while answering it, the heap passed its budget):
+    /// another request may be answered.
+    Request,
+}
 
 impl Unavailable {
     /// Whether the checker was not asked about `key`.
     pub fn covers(&self, key: &str) -> bool {
-        self.0.as_ref().is_none_or(|keys| keys.iter().any(|unasked| unasked == key))
+        match &self.0 {
+            Unasked::Backend | Unasked::Request => true,
+            Unasked::Keys(keys) => keys.iter().any(|unasked| unasked == key),
+        }
+    }
+
+    /// Whether the next request can be answered at all.
+    pub fn scope(&self) -> UnavailableScope {
+        match &self.0 {
+            Unasked::Backend => UnavailableScope::Backend,
+            Unasked::Request | Unasked::Keys(_) => UnavailableScope::Request,
+        }
     }
 }
 
@@ -384,15 +416,25 @@ pub enum SourceChange {
 }
 
 impl SemanticOutcome {
-    /// An outcome for a backend that did nothing: the structural result stands, for this reason.
+    /// An outcome for a backend that cannot serve any request: the structural result stands, for this reason.
     pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self::unasked(Unasked::Backend, reason.into())
+    }
+
+    /// An outcome for one request that failed (it timed out, the checker crashed while answering it): the structural
+    /// result stands for its targets, for this reason, and the next request may be answered.
+    pub fn request_failed(reason: impl Into<String>) -> Self {
+        Self::unasked(Unasked::Request, reason.into())
+    }
+
+    fn unasked(unasked: Unasked, reason: String) -> Self {
         let diagnostic = Diagnostic::new(
             DiagnosticSeverity::Warning,
             DiagnosticCode::SemanticBackend,
-            format!("TypeScript checker backend unavailable: {}", reason.into()),
+            format!("TypeScript checker backend unavailable: {reason}"),
         )
         .with_help("The structural result is used instead.");
-        Self { diagnostics: vec![diagnostic], unavailable: Some(Unavailable(None)), ..Self::default() }
+        Self { diagnostics: vec![diagnostic], unavailable: Some(Unavailable(unasked)), ..Self::default() }
     }
 
     /// Mark `keys` as not asked: the run stopped asking once the heap passed its budget, which says nothing about them,
@@ -401,8 +443,8 @@ impl SemanticOutcome {
     pub fn leave_unasked(&mut self, keys: impl IntoIterator<Item = String>) {
         let mut keys: Vec<String> = keys.into_iter().collect();
         match &mut self.unavailable {
-            Some(Unavailable(None)) => return,
-            Some(Unavailable(Some(listed))) => keys.extend(listed.iter().cloned()),
+            Some(Unavailable(Unasked::Backend | Unasked::Request)) => return,
+            Some(Unavailable(Unasked::Keys(listed))) => keys.extend(listed.iter().cloned()),
             None => {}
         }
         if keys.is_empty() {
@@ -410,7 +452,7 @@ impl SemanticOutcome {
         }
         keys.sort();
         keys.dedup();
-        self.unavailable = Some(Unavailable(Some(keys.into_boxed_slice())));
+        self.unavailable = Some(Unavailable(Unasked::Keys(keys.into_boxed_slice())));
     }
 
     /// Add `other`'s answers, fallbacks, diagnostics and its mark of the targets not asked to this outcome's: the one
@@ -419,10 +461,15 @@ impl SemanticOutcome {
         self.components.append(&mut other.components);
         self.fallbacks.append(&mut other.fallbacks);
         self.diagnostics.append(&mut other.diagnostics);
-        match other.unavailable {
-            Some(Unavailable(None)) => self.unavailable = Some(Unavailable(None)),
-            Some(Unavailable(Some(keys))) => self.leave_unasked(keys.into_vec()),
-            None => {}
+        // Every target outweighs listed keys, and a backend that cannot serve outweighs one failed request.
+        match (other.unavailable, &self.unavailable) {
+            (Some(Unavailable(Unasked::Backend)), _) => self.unavailable = Some(Unavailable(Unasked::Backend)),
+            (Some(Unavailable(Unasked::Request)), Some(Unavailable(Unasked::Backend))) => {}
+            (Some(Unavailable(Unasked::Request)), Some(Unavailable(Unasked::Request | Unasked::Keys(_))) | None) => {
+                self.unavailable = Some(Unavailable(Unasked::Request))
+            }
+            (Some(Unavailable(Unasked::Keys(keys))), _) => self.leave_unasked(keys.into_vec()),
+            (None, _) => {}
         }
     }
 

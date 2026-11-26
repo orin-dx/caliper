@@ -91,6 +91,28 @@ fn a_failed_read_stands_for_its_load_when_another_reader_then_reads_the_file() {
     assert!(matches!(ledger.reads.get(props.as_str()), Some(Read::Failed(_))), "the failure stands for this load");
 }
 
+/// The interleaving built by hand: in one load an augmentation scan fails to read a file, it becomes readable, and a
+/// parse of it succeeds. The load's ledger keeps the failure, and the layer does not keep the parse, so the next load
+/// reads the file again and that read ends the failure.
+#[test]
+fn a_file_whose_scan_failed_and_parse_read_in_one_load_is_not_kept_parsed() {
+    let (_tmp, root) = project(SOLO);
+    let props = root.join("node_modules/solo-kit/props.d.ts");
+    let text = std::fs::read_to_string(&props).unwrap();
+    std::fs::write(&props, UNREADABLE).unwrap();
+    let options = options(&root);
+    let resolvers = crate::resolver::ModuleResolvers::new(&options);
+    let loader = Loader::new(&resolvers, &[], None);
+    assert!(loader.augmentation_scan(&props, false).is_err(), "the scan's read fails");
+    std::fs::write(&props, &text).unwrap();
+    assert!(matches!(loader.parse(&props), Ok(Some(_))), "the parse's read succeeds");
+    let Loader { parsed, ledger, .. } = loader;
+    let ledger = ledger.finish();
+    assert!(ledger.failed(props.as_str()), "the failure stands for this load");
+    let kept = retained_parses(parsed, &ledger);
+    assert!(!kept.contains_key(props.as_str()), "no layer holds the file both failed and parsed");
+}
+
 /// A cold load with one unreadable file writes the index for every walk that read all it needed, and leaves out only
 /// the one that could not: the next cold load answers the complete walks from it, reading neither re-export stub, and
 /// loads what a load without the index loads.
@@ -344,6 +366,29 @@ fn an_eager_edit_to_any_file_follows_every_unread_walk_again() {
     for name in ["Card", "Tag", "Plain"] {
         assert_eq!(session.component(name), fresh.component(name), "{name}");
     }
+}
+
+/// Two hundred directories of one resolution scope import a module whose augmentation search could not read two
+/// files: one search, and its list of two files is held once for all 200 unread walks.
+#[test]
+fn the_demands_of_one_augmentation_search_share_its_list_of_unread_files() {
+    let augments = "import 'react';\ndeclare module 'react' { interface CSSProperties { one?: string } }\nexport {};\n";
+    let (_tmp, root) = project(&[
+        ("node_modules/aug2-kit/package.json", r#"{"name":"aug2-kit","version":"1.0.0","types":"index.d.ts"}"#),
+        ("node_modules/aug2-kit/index.d.ts", "export * from './one';\nexport * from './two';\n"),
+        ("node_modules/aug2-kit/one.d.ts", augments),
+        ("node_modules/aug2-kit/two.d.ts", augments),
+    ]);
+    std::fs::write(root.join("node_modules/aug2-kit/one.d.ts"), UNREADABLE).unwrap();
+    std::fs::write(root.join("node_modules/aug2-kit/two.d.ts"), UNREADABLE).unwrap();
+    let demands: Vec<Demand> = (0..200)
+        .map(|n| Demand { from: root.join(format!("src/d{n}/App.tsx")), specifier: "aug2-kit".into(), name: "".into() })
+        .collect();
+    let layer = load(demands, &options(&root), None);
+    let counts = layer.suspect_counts();
+    assert_eq!(counts.len(), 200, "one unread walk per directory");
+    assert!(counts.iter().all(|count| *count == 2), "{counts:?}");
+    assert_eq!(layer.distinct_suspect_lists(), 1, "one list for the search");
 }
 
 /// A slow load: it starts at `start` and its read fails 29 s later. The walk is due again 30 s after the failure, not
