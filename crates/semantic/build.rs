@@ -29,9 +29,55 @@ fn source_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// The one rule for where the locked versions are read from, shared with the tests through `CALIPER_SEMANTIC_LOCKFILE`:
-/// the workspace's lockfile, else the one the published crate ships (`cargo package` includes it), else none.
+/// the lockfile Cargo resolves this package with. That is the workspace's when the workspace two levels up lists this
+/// package as a member, else the package's own (`cargo package` ships one), else none; a `Cargo.lock` of some other
+/// project in an ancestor directory is never taken. Paths come back joined onto `package`.
+pub(crate) fn lockfile_in(package: &Path) -> Option<PathBuf> {
+    let workspace = package.join("../..");
+    let shared = workspace.join("Cargo.lock");
+    if lists_member(&workspace.join("Cargo.toml"), package) && shared.is_file() {
+        return Some(shared);
+    }
+    let own = package.join("Cargo.lock");
+    own.is_file().then_some(own)
+}
+
+/// Whether the manifest has a `[workspace]` that lists `package` (a directory two levels below it) in `members`, by its
+/// path or a `parent/*` glob, and does not `exclude` it. Reads only that table's arrays; unsure means no.
+fn lists_member(manifest: &Path, package: &Path) -> bool {
+    let (Ok(text), Ok(package)) = (std::fs::read_to_string(manifest), package.canonicalize()) else { return false };
+    let (Some(name), Some(parent)) = (package.file_name(), package.parent().and_then(Path::file_name)) else {
+        return false;
+    };
+    let (name, parent) = (name.to_string_lossy(), parent.to_string_lossy());
+    let member = format!("{parent}/{name}");
+
+    let mut table = String::new();
+    let mut in_workspace = false;
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if line.starts_with('[') {
+            in_workspace = line == "[workspace]";
+        } else if in_workspace {
+            table.push_str(line);
+            table.push('\n');
+        }
+    }
+    let array = |key: &str| -> Vec<String> {
+        let rest = table.lines().skip_while(|line| !is_key(line, key)).collect::<Vec<_>>().join("\n");
+        let inside = rest.split_once('[').map_or("", |(_, inside)| inside.split(']').next().unwrap_or_default());
+        inside.split('"').skip(1).step_by(2).map(str::to_string).collect()
+    };
+    let glob = format!("{parent}/*");
+    array("members").iter().any(|m| *m == member || *m == glob) && !array("exclude").contains(&member)
+}
+
+fn is_key(line: &str, key: &str) -> bool {
+    line.strip_prefix(key).is_some_and(|rest| rest.trim_start().starts_with('='))
+}
+
 fn lockfile() -> Option<PathBuf> {
-    ["../../Cargo.lock", "Cargo.lock"].into_iter().map(PathBuf::from).find(|lock| lock.is_file())
+    lockfile_in(Path::new("."))
 }
 
 fn main() {

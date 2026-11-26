@@ -1092,6 +1092,12 @@ pub(crate) fn decode<T: DeserializeOwned>(answer: &RawValue) -> Result<T, CallEr
         .map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
 }
 
+/// `build.rs` itself, so the tests run the lockfile rule it uses rather than a copy of it.
+#[cfg(test)]
+#[allow(dead_code, clippy::print_stdout)]
+#[path = "../build.rs"]
+mod build_script;
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
@@ -1339,6 +1345,59 @@ mod tests {
             "tsrs_ast moved: re-read NO_ASSIGNMENT_DECLARATION and ASSIGNMENT_DECLARATION from its Kind"
         );
         PinCheck::Checked
+    }
+
+    /// The lockfile is the one Cargo resolves the package with: the workspace's only when it lists the package, else the
+    /// package's own, else none; an unrelated `Cargo.lock` above an unpacked crate is never read.
+    #[test]
+    fn the_lockfile_is_the_one_cargo_resolves_the_package_with() {
+        use std::fs::{create_dir_all, write};
+        use std::path::Path;
+
+        let layout = |root: &Path, package: &str, manifest: Option<&str>, root_lock: bool, own_lock: bool| {
+            create_dir_all(root.join(package)).unwrap();
+            if let Some(manifest) = manifest {
+                write(root.join("Cargo.toml"), manifest).unwrap();
+            }
+            if root_lock {
+                write(root.join("Cargo.lock"), "root").unwrap();
+            }
+            if own_lock {
+                write(root.join(package).join("Cargo.lock"), "own").unwrap();
+            }
+            build_script::lockfile_in(&root.join(package)).map(|lock| std::fs::read_to_string(lock).unwrap())
+        };
+        let members =
+            |list: &str| format!("[workspace]\nmembers = [\n    \"crates/core\",\n{list}]\nresolver = \"2\"\n");
+        let dir = tempfile::tempdir().unwrap();
+        let case = |name: &str| dir.path().join(name);
+
+        // (a) The workspace layout reads the workspace lockfile, by name, by glob and with a comment around.
+        let named = members("    \"crates/semantic\", # the checker\n");
+        assert_eq!(layout(&case("a1"), "crates/semantic", Some(&named), true, false).as_deref(), Some("root"));
+        let globbed = "[workspace]\nmembers = [\"crates/*\"]\n[workspace.package]\nversion = \"1\"\n";
+        assert_eq!(layout(&case("a2"), "crates/semantic", Some(globbed), true, false).as_deref(), Some("root"));
+        assert_eq!(layout(&case("a3"), "crates/semantic", Some(&named), true, true).as_deref(), Some("root"));
+
+        // (b) An unpacked crate beside an unrelated lockfile reads its own, never the unrelated one: whatever the
+        // ancestor's manifest, if any, does not list this package.
+        let other = members("    \"crates/binding\",\n");
+        let excluded = "[workspace]\nmembers = [\"crates/*\"]\nexclude = [\"crates/semantic\"]\n";
+        let single = "[package]\nname = \"x\"\n";
+        for (name, manifest) in
+            [("b1", None), ("b2", Some(other.as_str())), ("b3", Some(excluded)), ("b4", Some(single))]
+        {
+            assert_eq!(layout(&case(name), "downloads/pkg", manifest, true, true).as_deref(), Some("own"), "{name}");
+            assert_eq!(layout(&case(name), "crates/semantic", manifest, true, true).as_deref(), Some("own"), "{name}");
+        }
+        let nested = members("    \"crates/semantic\",\n");
+        assert_eq!(layout(&case("b5"), "downloads/pkg", Some(&nested), true, true).as_deref(), Some("own"));
+
+        // (c) Neither a listing workspace nor the package's own lockfile: none, so the pin check says it skipped.
+        for (name, manifest) in [("c1", None), ("c2", Some(other.as_str())), ("c3", Some(nested.as_str()))] {
+            assert_eq!(layout(&case(name), "downloads/pkg", manifest, true, false), None, "{name}");
+        }
+        assert_eq!(layout(&case("c4"), "crates/semantic", Some(&named), false, false), None);
     }
 
     /// Without a lockfile the pin check says it did not run; with one it runs and fails on a moved version.
