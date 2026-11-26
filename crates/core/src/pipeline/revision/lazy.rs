@@ -157,7 +157,10 @@ pub(super) struct Lazy {
     growths: std::sync::atomic::AtomicUsize,
     /// Components resolved through a walk that passed a file it could not read, with the unread walks they reached:
     /// answered until one of those is due, then resolved again. Never carried to the next revision, never persisted.
-    provisional: DashMap<ComponentId, (Arc<Resolved>, Vec<Demand>), FxBuildHasher>,
+    provisional: DashMap<ComponentId, (Arc<Resolved>, dependency_types::Footprint), FxBuildHasher>,
+    /// The id of the session's next dependency load, shared by its revisions: a footprint tells one load's failed read
+    /// from a later one's.
+    load_ids: Arc<std::sync::atomic::AtomicU64>,
     /// The session's clock for following again a walk that passed a file it could not read, shared by its revisions.
     clock: Arc<RetryClock>,
     /// How many edits the session has seen: one arriving makes every such walk due again.
@@ -180,7 +183,7 @@ type Between = Box<dyn FnOnce(&Revision) + Send>;
 impl Lazy {
     /// When this revision follows again a walk that passed a file it could not read: once it is due.
     fn retry(&self) -> dependency_types::Retry {
-        dependency_types::Retry::Due { now: self.clock.now(), edits: self.edits }
+        dependency_types::Retry::Due { now: self.clock.now(), edits: self.edits, load: 0 }
     }
 }
 
@@ -268,6 +271,7 @@ impl Revision {
             provisional: DashMap::default(),
             clock: Arc::default(),
             edits: 0,
+            load_ids: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             #[cfg(test)]
             resolutions: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -421,6 +425,7 @@ impl Revision {
                 provisional: DashMap::default(),
                 clock: previous.clock.clone(),
                 edits: previous.edits + 1,
+                load_ids: previous.load_ids.clone(),
                 #[cfg(test)]
                 resolutions: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
@@ -541,7 +546,9 @@ impl Revision {
                 // A walk past a file that could not be read answers more once it is followed again: until then the
                 // answer holds only provisionally, and never in the memo an edit carries over.
                 if !unread.is_empty() {
-                    lazy.provisional.insert(id.clone(), (resolved.clone(), unread));
+                    if let Some(footprint) = engine.layer.as_ref().and_then(|layer| layer.footprint(&unread)) {
+                        lazy.provisional.insert(id.clone(), (resolved.clone(), footprint));
+                    }
                     return Some((resolved, engine.layer.clone()));
                 }
                 return Some((lazy.memo.entry(id.clone()).or_insert(resolved).clone(), None));
@@ -558,10 +565,10 @@ impl Revision {
         lazy: &Lazy,
         id: &ComponentId,
     ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
-        let (resolved, unread) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
+        let (resolved, footprint) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
         let layer = lazy.engine.load().layer.clone();
-        let until = layer.as_ref().and_then(|layer| layer.unread_until(&unread, lazy.edits));
-        if until.is_some_and(|until| lazy.clock.now() < until) {
+        let holds = layer.as_ref().is_some_and(|layer| layer.footprint_holds(&footprint, lazy.clock.now(), lazy.edits));
+        if holds {
             return Some((resolved, layer));
         }
         lazy.provisional.remove(id);
@@ -633,6 +640,11 @@ impl Revision {
         if missing.is_empty() {
             return;
         }
+        let load = lazy.load_ids.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let retry = match retry {
+            dependency_types::Retry::Due { now, edits, .. } => dependency_types::Retry::Due { now, edits, load },
+            always => always,
+        };
         let extended = Arc::new(off_pool(|| dependency_types::load_at(missing, options, Some(layer), retry)));
         #[cfg(test)]
         lazy.loads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

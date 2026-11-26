@@ -29,7 +29,7 @@ pub(crate) enum Retry {
     Always,
     /// Once it is due: a file its walk could not read was read since, [`READ_RETRY`] passed since that read failed, or
     /// an edit arrived since (`edits`, the session's count of them, moved past the failure's).
-    Due { now: Instant, edits: u64 },
+    Due { now: Instant, edits: u64, load: u64 },
 }
 
 /// A read that failed, and when.
@@ -38,6 +38,8 @@ struct FailedRead {
     warning: Diagnostic,
     at: Instant,
     edits: u64,
+    /// The load that made this read, so a [`Footprint`] tells it from a later failure of the same file.
+    load: u64,
 }
 
 impl FailedRead {
@@ -87,7 +89,7 @@ impl Mark {
         if self.unread.is_none() {
             return false;
         }
-        let Retry::Due { now, edits } = retry else { return true };
+        let Retry::Due { now, edits, .. } = retry else { return true };
         self.retry_at(edits, latest).is_none_or(|at| at <= now)
     }
 
@@ -113,11 +115,13 @@ pub(crate) struct UnreadWalks {
     demands: FxHashSet<DemandKey>,
     /// The files of the declarations whose references reach an unread walk.
     files: FxHashSet<PathKey>,
+    /// The files whose latest read failed.
+    failed: FxHashSet<PathKey>,
 }
 
 impl UnreadWalks {
     pub(crate) fn is_empty(&self) -> bool {
-        self.demands.is_empty() && self.files.is_empty()
+        self.demands.is_empty() && self.files.is_empty() && self.failed.is_empty()
     }
 
     /// Whether one of `demands` (a project file's) reached an unread walk: what was read through it may lack what that
@@ -130,7 +134,20 @@ impl UnreadWalks {
     pub(crate) fn declared_in(&self, file: &str) -> bool {
         self.files.contains(file)
     }
+
+    /// Whether what was read in `file` may change once a walk that could not read a file is followed again: a
+    /// declaration in it reached an unread walk, or it is itself a file whose latest read failed.
+    pub(crate) fn touches(&self, file: &str) -> bool {
+        self.files.contains(file) || self.failed.contains(file)
+    }
 }
+
+/// What a provisional answer read through unread walks ([`DependencyLayer::footprint`]): each file those walks could
+/// not read, with the load, time and edit count of the failed read the answer saw. The one rule for every answer
+/// resolved past a file that could not be read: it holds while each of these is still that failed read and not due
+/// ([`DependencyLayer::footprint_holds`]), and not a moment after.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Footprint(Box<[(PathKey, u64, Instant, u64)]>);
 
 /// One layer's entries: what its load read again or could not read, and the marks its follows left.
 #[derive(Default)]
@@ -209,17 +226,32 @@ impl DependencyLayer {
                 .is_some_and(|mark| mark.is_due(retry, |path| self.latest_read(path)))
     }
 
-    /// Until when what was resolved through the unread walks `unread` ([`Self::unread`]) holds: the earliest time one
-    /// of them is due, given the session's `edits`. `None` when one is due already, or is no longer unread: a later
-    /// load followed it again, or read one of its files.
-    pub(crate) fn unread_until(&self, unread: &[Demand], edits: u64) -> Option<Instant> {
-        let mut earliest: Option<Instant> = None;
+    /// The footprint of an answer resolved through the unread walks `unread` ([`Self::unread`]): every file those
+    /// walks could not read, with the failed read the answer saw. `None` when one of them is no longer unread.
+    pub(crate) fn footprint(&self, unread: &[Demand]) -> Option<Footprint> {
+        let mut files: Vec<(PathKey, u64, Instant, u64)> = Vec::new();
         for demand in unread {
             let mark = self.mark(&Node::Demand(demand.key())).filter(|mark| mark.unread.is_some())?;
-            let at = mark.retry_at(edits, |path| self.latest_read(path))?;
-            earliest = Some(earliest.map_or(at, |earliest| earliest.min(at)));
+            for path in &mark.suspects {
+                let Some(Read::Failed(failed)) = self.latest_read(std::borrow::Borrow::borrow(path)) else {
+                    return None;
+                };
+                files.push((path.clone(), failed.load, failed.at, failed.edits));
+            }
         }
-        earliest
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        files.dedup_by(|a, b| a.0 == b.0);
+        (!files.is_empty()).then(|| Footprint(files.into_boxed_slice()))
+    }
+
+    /// Whether an answer with `footprint` still holds: every file in it is still the failed read the answer saw (no
+    /// load read it since, whichever walk), its retry has not passed, and no edit arrived since.
+    pub(crate) fn footprint_holds(&self, footprint: &Footprint, now: Instant, edits: u64) -> bool {
+        footprint.0.iter().all(|(path, load, at, failed_edits)| {
+            let same = matches!(self.latest_read(std::borrow::Borrow::borrow(path)),
+                Some(Read::Failed(failed)) if failed.load == *load && failed.at == *at);
+            same && *failed_edits >= edits && now < *at + READ_RETRY
+        })
     }
 
     /// How many files each of this layer's own unread walks holds, for tests.
@@ -230,21 +262,56 @@ impl DependencyLayer {
 
     /// Every node of the chain whose latest follow reached a walk that is unread, its own or one below it.
     pub(crate) fn unread_walks(&self) -> UnreadWalks {
+        self.unread_walks_counted().0
+    }
+
+    /// [`Self::unread_walks`], and how many nodes its traversal visited: one reverse traversal from the unread walks
+    /// over the latest marks, each node once, so a chain of N declarations ending at one unread file costs N.
+    pub(crate) fn unread_walks_counted(&self) -> (UnreadWalks, usize) {
         let mut walks = UnreadWalks::default();
         if !self.has_marks() {
-            return walks;
+            return (walks, 0);
         }
-        let mut seen: FxHashSet<&Node> = FxHashSet::default();
-        for node in self.chain().flat_map(|layer| layer.ledger.marks.keys()) {
-            if !seen.insert(node) || unread_below([node.clone()], |node| self.mark(node)).is_empty() {
-                continue;
+        let mut latest: FxHashMap<&Node, &Mark> = FxHashMap::default();
+        for layer in self.chain() {
+            for (node, mark) in &layer.ledger.marks {
+                latest.entry(node).or_insert(mark);
             }
+            for (path, read) in &layer.ledger.reads {
+                if self.latest_read(std::borrow::Borrow::borrow(path)).is_some_and(|latest| std::ptr::eq(latest, read))
+                    && matches!(read, Read::Failed(_))
+                {
+                    walks.failed.insert(path.clone());
+                }
+            }
+        }
+        let mut reached_by: FxHashMap<&Node, Vec<&Node>> = FxHashMap::default();
+        let mut marked: FxHashSet<&Node> = FxHashSet::default();
+        let mut queue: Vec<&Node> = Vec::new();
+        for (&node, mark) in &latest {
+            for to in mark.reaches.iter() {
+                reached_by.entry(to).or_default().push(node);
+            }
+            if mark.unread.is_some() && marked.insert(node) {
+                queue.push(node);
+            }
+        }
+        let mut visits = 0;
+        while let Some(node) = queue.pop() {
+            visits += 1;
+            for &from in reached_by.get(node).into_iter().flatten() {
+                if marked.insert(from) {
+                    queue.push(from);
+                }
+            }
+        }
+        for node in marked {
             match node {
                 Node::Demand(key) => walks.demands.insert(key.clone()),
                 Node::Claim((file, _)) => walks.files.insert(file.clone()),
             };
         }
-        walks
+        (walks, visits)
     }
 
     /// The demands that `roots` lead to, themselves included, whose walk passed a file that could not be read and has
@@ -315,11 +382,11 @@ impl<'a> LedgerBuilder<'a> {
     }
 
     pub(super) fn read_failed(&self, file: &Utf8Path, warning: Diagnostic) {
-        let (at, edits) = match self.retry {
-            Retry::Always => (Instant::now(), 0),
-            Retry::Due { now, edits } => (now, edits),
+        let (at, edits, load) = match self.retry {
+            Retry::Always => (Instant::now(), 0, 0),
+            Retry::Due { now, edits, load } => (now, edits, load),
         };
-        self.reads.insert(PathKey::from(file), Read::Failed(FailedRead { warning, at, edits }));
+        self.reads.insert(PathKey::from(file), Read::Failed(FailedRead { warning, at, edits, load }));
     }
 
     /// `from` reached `to`, whether it followed `to` itself or found it followed already.

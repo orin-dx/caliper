@@ -163,6 +163,105 @@ fn a_cold_load_with_an_unreadable_file_indexes_every_walk_it_completed() {
     assert_eq!(reported(&recovered), Vec::<Option<String>>::new());
 }
 
+/// A chain of 200 package declarations, each extending the next, ends at one file that could not be read: finding the
+/// nodes that reach the unread walk visits each node once. On the base each marked node walked its whole suffix.
+#[test]
+fn the_nodes_that_reach_an_unread_walk_are_found_in_one_traversal() {
+    let mut files: Vec<(String, String)> = vec![
+        (
+            "node_modules/chain-kit/package.json".into(),
+            r#"{ "name": "chain-kit", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
+        ),
+        ("node_modules/chain-kit/index.d.ts".into(), "export { D0 } from './d0';\n".into()),
+        ("node_modules/chain-kit/leaf.d.ts".into(), "export interface Leaf { leaf: string }\n".into()),
+    ];
+    for n in 0..200 {
+        let (next, from) = if n == 199 {
+            ("Leaf".to_owned(), "leaf".to_owned())
+        } else {
+            (format!("D{}", n + 1), format!("d{}", n + 1))
+        };
+        let body = format!(
+            "import type {{ {next} }} from './{from}';\nexport interface D{n} extends {next} {{ f{n}: string }}\n"
+        );
+        files.push((format!("node_modules/chain-kit/d{n}.d.ts"), body));
+    }
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = project(&files);
+    std::fs::write(root.join("node_modules/chain-kit/leaf.d.ts"), UNREADABLE).unwrap();
+    let demands = vec![Demand { from: root.join("src/Card.tsx"), specifier: "chain-kit".into(), name: "D0".into() }];
+    let layer = load(demands, &options(&root), None);
+    let (walks, visits) = layer.unread_walks_counted();
+    assert!(walks.touches(root.join("node_modules/chain-kit/d0.d.ts").as_str()), "the head reaches the unread walk");
+    let marks = layer.ledger.marks.len();
+    assert!(marks >= 400, "{marks} marks: every claim and demand of the chain");
+    assert!(visits <= marks, "{visits} visits for {marks} marks");
+}
+
+/// A module's augmentation search could not read two files. A retry reads one of them again and still fails on the
+/// other: an answer resolved before the retry no longer holds, though the walk's latest mark (one file, a new retry
+/// time) would say it did. So does an answer whose files were read again and failed again, by any load.
+#[test]
+fn an_answer_holds_only_while_every_file_it_could_not_read_is_unchanged() {
+    let augments = "import 'react';\ndeclare module 'react' { interface CSSProperties { one?: string } }\nexport {};\n";
+    let (_tmp, root) = project(&[
+        ("node_modules/aug2-kit/package.json", r#"{"name":"aug2-kit","version":"1.0.0","types":"index.d.ts"}"#),
+        ("node_modules/aug2-kit/index.d.ts", "export * from './one';\nexport * from './two';\n"),
+        ("node_modules/aug2-kit/one.d.ts", augments),
+        ("node_modules/aug2-kit/two.d.ts", augments),
+    ]);
+    let (one, two) = (root.join("node_modules/aug2-kit/one.d.ts"), root.join("node_modules/aug2-kit/two.d.ts"));
+    std::fs::write(&one, UNREADABLE).unwrap();
+    std::fs::write(&two, UNREADABLE).unwrap();
+    let demand = Demand { from: root.join("src/App.tsx"), specifier: "aug2-kit".into(), name: "".into() };
+    let options = options(&root);
+    let start = std::time::Instant::now();
+    let first = Arc::new(load_at(vec![demand.clone()], &options, None, Retry::Due { now: start, edits: 0, load: 1 }));
+    let footprint = first.footprint(&first.unread(std::slice::from_ref(&demand))).unwrap();
+    assert!(first.footprint_holds(&footprint, start, 0));
+    assert!(!first.footprint_holds(&footprint, start + READ_RETRY, 0), "not past its retry");
+    assert!(!first.footprint_holds(&footprint, start, 1), "not past an edit");
+
+    let again = load_at(vec![demand.clone()], &options, Some(&first), Retry::Always);
+    assert!(!again.footprint_holds(&footprint, start, 0), "both read again and failed again: a new failure");
+
+    std::fs::write(&one, augments).unwrap();
+    let retry = start + READ_RETRY;
+    let recovered = load_at(vec![demand.clone()], &options, Some(&first), Retry::Due { now: retry, edits: 0, load: 2 });
+    assert!(recovered.is_dependency_file(&one), "the retry loads the file it read again");
+    let latest = recovered.footprint(&recovered.unread(std::slice::from_ref(&demand))).unwrap();
+    assert!(recovered.footprint_holds(&latest, retry, 0), "the walk's latest mark alone still looks unexpired");
+    assert!(
+        !recovered.footprint_holds(&footprint, retry, 0),
+        "the earlier answer does not hold: one of its files reads"
+    );
+}
+
+/// The eager revision: two components of one directory share a demand whose package declaration extends a type from
+/// a file that could not be read. Once it reads, an edit to one of them follows the shared walk again, and both
+/// answer as a fresh session does. On the base only the edited one was resolved again.
+#[test]
+fn an_eager_edit_resolves_again_every_component_that_reached_a_walk_it_followed_again() {
+    let tag = "import type { NestProps } from 'nest-kit';\ninterface TagProps extends NestProps { label: string }\n\
+               export function Tag(props: TagProps) { return null; }\n";
+    let (_tmp, root) = project(&[NESTED, &[("src/Tag.tsx", tag)]].concat());
+    let base = root.join("node_modules/nest-kit/base.d.ts");
+    let text = std::fs::read_to_string(&base).unwrap();
+    std::fs::write(&base, UNREADABLE).unwrap();
+    let session = WatchSession::new(options(&root));
+    drop(session.initialize());
+    assert_eq!(names(&session.component("Tag")), ["label", "own"]);
+    std::fs::write(&base, text).unwrap();
+    edit(&session, &root.join("src/Card.tsx"));
+
+    let fresh = WatchSession::new(options(&root));
+    drop(fresh.initialize());
+    for name in ["Card", "Tag"] {
+        assert_eq!(session.component(name), fresh.component(name), "{name}");
+    }
+    assert_eq!(names(&session.component("Tag")), ["label", "own", "tone"]);
+}
+
 /// A re-export stub an augmentation search only scans (it names neither React nor `"react"`) and could not read is
 /// reported until a load reads it again, and not after: the scan's read clears it as a parse's does. On the base only a
 /// parse did, so the warning outlived the read.
@@ -317,7 +416,7 @@ fn a_load_meets_an_unread_demand_that_is_not_due_without_reading_its_file_again(
     let base =
         Demand { from: root.join("node_modules/nest-kit/index.d.ts"), specifier: "./base".into(), name: "Base".into() };
     let options = options(&root);
-    let due = Retry::Due { now: std::time::Instant::now(), edits: 0 };
+    let due = Retry::Due { now: std::time::Instant::now(), edits: 0, load: 1 };
     let first = Arc::new(load_at(vec![demand("NestProps")], &options, None, due));
     assert_eq!(first.unread(&[demand("NestProps")]), std::slice::from_ref(&base));
 
@@ -532,6 +631,10 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
                     once.dedup();
                     assert_eq!(warned, once, "each file is reported once: {}", context(&log));
                     assert_eq!(comparable(&root, &answer), oracle(name, &warned), "{}", context(&log));
+                    // Asked again at once, a provisional answer included: still a fresh session's over its warned files.
+                    let again = session.component(name).unwrap();
+                    let again_warned = warned_names(&root, &again);
+                    assert_eq!(comparable(&root, &again), oracle(name, &again_warned), "again: {}", context(&log));
                     if all_read {
                         let reread: Vec<&String> =
                             warned.iter().filter(|file| reads.contains(&file.as_str())).collect();

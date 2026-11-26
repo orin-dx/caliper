@@ -477,7 +477,11 @@ impl Revision {
                 }
                 // Only names no earlier revision loaded cost a load; the new layer keeps everything the old one had.
                 if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
-                    let missing = layer.missing(&demands);
+                    // The unread walks the file's demands lead to inside packages are followed again too.
+                    let mut missing = layer.missing(&demands);
+                    missing.extend(layer.unread(&demands));
+                    missing.sort();
+                    missing.dedup();
                     if !missing.is_empty() {
                         let extended = dependency_types::load(missing, options, Some(layer));
                         named_types.fallback = Some(extended.named_types.clone());
@@ -626,9 +630,24 @@ impl Revision {
         let global = Arc::new(global);
         let named_types = Arc::new(named_types);
         let ids = component_ids(&global, options);
+        // A layer this edit extended followed again the walks that could not read a file: an answer read through one
+        // may differ though the edit did not touch it, so it is resolved again (the old layer's ledger names them).
+        let unread = match (&self.dependencies, &dependencies) {
+            (Some(old), Some(new)) if !Arc::ptr_eq(old, new) => old.unread_walks(),
+            _ => dependency_types::UnreadWalks::default(),
+        };
         let (stale, kept): (Vec<_>, Vec<_>) = ids.into_iter().partition(|(id, _)| match self.resolved.get(id) {
             None => true,
-            Some(previous) => id.file == changed || previous.affected_by(&change),
+            Some(previous) => {
+                id.file == changed
+                    || previous.affected_by(&change)
+                    || (!unread.is_empty()
+                        && previous
+                            .depends_on
+                            .files
+                            .iter()
+                            .any(|file| unread.touches(std::borrow::Borrow::borrow(file))))
+            }
         });
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),

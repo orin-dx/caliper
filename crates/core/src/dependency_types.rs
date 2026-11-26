@@ -30,7 +30,7 @@ use crate::types::*;
 mod ledger;
 #[cfg(test)]
 pub(crate) use ledger::READ_RETRY;
-pub(crate) use ledger::Retry;
+pub(crate) use ledger::{Footprint, Retry, UnreadWalks};
 use ledger::{LedgerBuilder, Node, ReadLedger};
 
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
