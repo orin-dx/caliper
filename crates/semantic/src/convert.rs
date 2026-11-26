@@ -836,7 +836,8 @@ struct State {
     /// The types of the properties [`Converter::fields`] lists, by the object type's handle and [`Listing`].
     field_types: Answers<(u64, Listing), Arc<[Arc<TypeInfo>]>>,
     /// Whether each of those properties is `readonly`, asked only for fields the size budget does not cut (see
-    /// [`Converter::fields`]).
+    /// [`Converter::fields`]). Kept for every list, also one the answers settle without a request: a byte per property
+    /// is small beside the list's types, and a list read again is not classified again.
     readonly: Answers<(u64, Listing), Arc<[bool]>>,
     /// Where props are declared ([`crate::declared`]), kept for the snapshot like the rest.
     declared: crate::declared::Memo,
@@ -1975,8 +1976,10 @@ impl Converter {
             let prop_type = without_undefined(prop_type, !required);
             fields.push(ObjectField::new(property.member_name().to_string(), prop_type, required, String::new()));
         }
-        let sides: Vec<TypeInfo> =
-            indexes.iter().flat_map(|index| [index.key_type.clone(), index.value_type.clone()]).collect();
+        let mut sides: Vec<&TypeInfo> = Vec::with_capacity(indexes.len() * 2);
+        for index in indexes {
+            sides.extend([&index.key_type, &index.value_type]);
+        }
         let mut sides = self.convert_all(&sides, cx).await?.into_iter();
         for index in indexes {
             let (Some(key), Some(value)) = (sides.next(), sides.next()) else { break };
@@ -1989,18 +1992,90 @@ impl Converter {
         // that object ([`Self::convert`]) replaces it with its name, and whether a property is `readonly` reaches
         // nothing.
         if !references.is_empty() && !fields_past_size_budget(&fields, MAX_SIZE) {
-            let readonly = self
-                .state
-                .readonly
-                .get(listed, || async { Ok(Arc::from(self.rpc.readonly_symbols(&references).await?)) })
-                .await?;
-            // `listed` names the same symbol list every time, so the cached flags are one per reference asked.
-            debug_assert_eq!(readonly.len(), references.len(), "the cached readonly flags are of another list");
+            let readonly = self.readonly(listed, properties, &references).await?;
             for (field, readonly) in fields.iter_mut().zip(readonly.iter()) {
                 field.readonly = *readonly;
             }
         }
         Ok(fields)
+    }
+
+    /// Whether each property of `listed` is `readonly`: what the property answer settles
+    /// ([`SymbolInfo::settled_readonly`]), and the checker's answer for the rest. `references` are the properties' own,
+    /// one each, which [`Self::fields`] has already gathered. Kept by (handle, listing) like every answer about a list,
+    /// so a list read again is not worked out again; a list the answer settles entirely sends nothing, and one it
+    /// settles not at all is the checker's answer as it comes. The only caller is past the size budget, so a cut
+    /// object's properties are not classified.
+    async fn readonly(
+        &self,
+        listed: (u64, Listing),
+        properties: &[SymbolInfo],
+        references: &[&SymbolRef],
+    ) -> Result<Arc<[bool]>, CallError> {
+        debug_assert_eq!(references.len(), properties.len(), "the references are of another list");
+        let readonly = self
+            .state
+            .readonly
+            .get(listed, || async {
+                #[cfg(test)]
+                self.rpc.note("readonly classified", properties.len() as u64);
+                // Nothing to merge until a property is settled: a list the answer settles not at all gets no vector.
+                let mut settled: Option<Vec<Option<bool>>> = None;
+                // Counted as the properties are classified, so the references to ask are sized without another pass.
+                let mut unresolved = 0;
+                for (index, property) in properties.iter().enumerate() {
+                    match property.settled_readonly() {
+                        Some(value) => settled
+                            .get_or_insert_with(|| {
+                                #[cfg(test)]
+                                self.rpc.note("readonly merge data", 1);
+                                // Room for every property now, so the push after an unresolved prefix does not grow it.
+                                let mut merge = Vec::with_capacity(properties.len());
+                                merge.resize(index, None);
+                                merge
+                            })
+                            .push(Some(value)),
+                        None => {
+                            unresolved += 1;
+                            settled.iter_mut().for_each(|settled| settled.push(None));
+                        }
+                    }
+                }
+                let wrong_length = || CallError::Rejected("an isReadonlySymbol batch of another length".to_string());
+                let Some(settled) = settled else {
+                    // `batch` fails a batch that does not get one answer per request.
+                    let answers = self.rpc.readonly_symbols(references).await?;
+                    return (answers.len() == properties.len()).then(|| Arc::from(answers)).ok_or_else(wrong_length);
+                };
+                let mut asked: Vec<&SymbolRef> = Vec::with_capacity(unresolved);
+                if unresolved > 0 {
+                    #[cfg(test)]
+                    self.rpc.note("readonly references built", 1);
+                    asked.extend(
+                        references.iter().zip(&settled).filter(|(_, settled)| settled.is_none()).map(|(r, _)| *r),
+                    );
+                }
+                let answers = if asked.is_empty() { Vec::new() } else { self.rpc.readonly_symbols(&asked).await? };
+                Self::merge_flags(&settled, unresolved, answers).ok_or_else(wrong_length)
+            })
+            .await?;
+        // `listed` names the same symbol list every time, so the cached flags are one per property.
+        debug_assert_eq!(readonly.len(), properties.len(), "the cached readonly flags are of another list");
+        Ok(readonly)
+    }
+
+    /// The flags of a list in property order: each settled one, and the next of the checker's `answers` for each that
+    /// is not. `unresolved` is how many are not; fewer answers than that is `None`, since a missing answer is never
+    /// read as `false` (silence as evidence). The flags are collected straight into the shared slice from an
+    /// exact-size iterator, so a fully settled list costs that one allocation and no copy out of a vector.
+    fn merge_flags(settled: &[Option<bool>], unresolved: usize, answers: Vec<bool>) -> Option<Arc<[bool]>> {
+        if answers.len() < unresolved {
+            return None;
+        }
+        debug_assert_eq!(settled.iter().filter(|settled| settled.is_none()).count(), unresolved);
+        let mut answers = answers.into_iter();
+        // The `false` is never reached: there is an answer for each unsettled property, as checked above.
+        Some(settled.iter().map(|settled| settled.or_else(|| answers.next()).unwrap_or(false)).collect())
     }
 
     /// The parameter markers of the signatures of an object type, as the checker prints the type (see
@@ -2514,8 +2589,8 @@ mod tests {
     }
 
     /// An object whose fields hold more types than the size budget is cut by the conversion it belongs to, so whether
-    /// its properties are `readonly` is never asked: 169 properties of a union of 110 literals are 18,760 types. On the
-    /// base each of the 169 was asked about.
+    /// its properties are `readonly` is neither asked nor worked out from their answers: 169 properties of a union of
+    /// 110 literals are 18,760 types. On the base each of the 169 was classified as its answer was read.
     #[test]
     fn the_fields_of_an_object_the_size_budget_cuts_are_not_asked_whether_they_are_readonly() {
         let literals: Vec<String> = (0..110).map(|index| format!("'v{index}'")).collect();
@@ -2530,6 +2605,7 @@ mod tests {
         let style = &component.props.iter().find(|prop| prop.name == "style").unwrap().prop_type;
         assert!(matches!(style, PropType::Truncated { limit: TruncationLimit::Depth, .. }), "{style:?}");
         assert_eq!(calls.get("isReadonlySymbol"), None, "{calls:?}");
+        assert_eq!(calls.get("readonly classified"), None, "{calls:?}");
     }
 
     /// One property fewer, 168 of them (18,649 types), and the object is kept and its fields are asked whether they are
@@ -2548,6 +2624,131 @@ mod tests {
         let style = &component.props.iter().find(|prop| prop.name == "style").unwrap().prop_type;
         assert!(field(style, "p167").readonly, "{style:?}");
         assert_eq!(calls.get("isReadonlySymbol"), Some(&168), "{calls:?}");
+        // Each of the 168 is classified once, and asked because its `readonly` modifier is not in its answer.
+        assert_eq!(calls.get("readonly classified"), Some(&168), "{calls:?}");
+        // Nothing is settled, so the 168 are the checker's answer as it comes: no settlement vector, and the references
+        // `fields` gathered are the ones asked, not a second list.
+        assert_eq!(calls.get("readonly merge data"), None, "{calls:?}");
+        assert_eq!(calls.get("readonly references built"), None, "{calls:?}");
+    }
+
+    /// A list the answer settles in part merges the settled flags and the checker's answers in property order: `a` and
+    /// `b` are declared properties (asked), `g` is a getter (settled `readonly`) and `m` a method (settled not).
+    /// Interleaved, so a merge that appended the asked flags after the settled ones, or dropped the earlier `None`s of a
+    /// list that starts with an asked property, gets a flag wrong.
+    #[test]
+    fn a_list_settled_in_part_merges_the_settled_and_the_asked_flags_in_order() {
+        let (outcome, calls) = answered_with_calls(
+            "interface Mixed { a: string; get g(): number; readonly b: number; m(): void; c: string }\n\
+             export function C(props: { mixed: Mixed }) { return null; }\n",
+        );
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let mixed = &component.props.iter().find(|prop| prop.name == "mixed").unwrap().prop_type;
+        let PropType::Object(fields) = mixed else { panic!("{mixed:?}") };
+        let flags: Vec<_> = fields.iter().map(|field| (field.name.as_str(), field.readonly)).collect();
+        assert_eq!(flags, [("a", false), ("g", true), ("b", true), ("m", false), ("c", false)]);
+        assert_eq!(calls.get("readonly merge data"), Some(&1), "{calls:?}");
+        assert_eq!(calls.get("readonly references built"), Some(&1), "{calls:?}");
+    }
+
+    /// Counts the allocations of the thread that armed it, so a test can say how many a step makes.
+    struct Counting;
+
+    thread_local! {
+        static ALLOCATIONS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    }
+
+    fn count_allocation() {
+        // Fails only while the thread's storage is torn down, when nothing is being counted.
+        ALLOCATIONS.try_with(|count| count.set(count.get().map(|count| count + 1))).unwrap_or_default();
+    }
+
+    // SAFETY: every call is the system allocator's; only a thread-local counter is added.
+    #[allow(unsafe_code)]
+    unsafe impl std::alloc::GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            count_allocation();
+            unsafe { std::alloc::System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+            unsafe { std::alloc::System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, size: usize) -> *mut u8 {
+            count_allocation();
+            unsafe { std::alloc::System.realloc(ptr, layout, size) }
+        }
+    }
+
+    #[global_allocator]
+    static COUNTING: Counting = Counting;
+
+    /// What `f` returns and how many allocations it made on this thread.
+    fn allocations<T>(f: impl FnOnce() -> T) -> (T, u64) {
+        ALLOCATIONS.with(|count| count.set(Some(0)));
+        let out = f();
+        (out, ALLOCATIONS.with(|count| count.take()).unwrap_or_default())
+    }
+
+    /// A list the answer settles entirely holds its flags in one allocation, the shared slice, not a vector copied into
+    /// one; a list settled in part also takes the checker's answers in order, in one; and a short answer is an error,
+    /// never `false`.
+    #[test]
+    fn the_flags_of_a_list_are_collected_into_the_shared_slice_in_one_allocation() {
+        let settled = [Some(true), Some(false), Some(true), Some(false)];
+        let (flags, made) = allocations(|| Converter::merge_flags(&settled, 0, Vec::new()));
+        assert_eq!((flags.as_deref(), made), (Some([true, false, true, false].as_slice()), 1));
+
+        let mixed = [None, Some(true), None, Some(false), None];
+        let answers = vec![true, false, true];
+        let (flags, made) = allocations(|| Converter::merge_flags(&mixed, 3, answers));
+        assert_eq!((flags.as_deref(), made), (Some([true, true, false, false, true].as_slice()), 1));
+
+        assert_eq!(Converter::merge_flags(&mixed, 3, vec![true, false]), None);
+    }
+
+    /// A mapped type's properties have no declaration of their own: their check flags say whether they are `readonly`,
+    /// and a method or a getter is settled by its flags. None of them is asked about; on the base each of the eight
+    /// was.
+    #[test]
+    fn mapped_properties_methods_and_getters_are_not_asked_whether_they_are_readonly() {
+        let (outcome, calls) = answered_with_calls(
+            "interface Base { a: string; readonly b: number; m(): void; get g(): number }\n\
+             type Frozen<T> = { readonly [K in keyof T]: T[K] };\n\
+             type Loose<T> = { [K in keyof T]?: T[K] };\n\
+             export function C(props: { f: Frozen<Base>; l: Loose<Base> }) { return null; }\n",
+        );
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let prop = |name: &str| &component.props.iter().find(|prop| prop.name == name).unwrap().prop_type;
+        let readonly = |ty: &PropType| ["a", "b", "m", "g"].map(|name| field(ty, name).readonly);
+        assert_eq!(readonly(prop("f")), [true, true, true, true]);
+        assert_eq!(readonly(prop("l")), [false, true, false, true]);
+        assert_eq!(calls.get("isReadonlySymbol"), None, "{calls:?}");
+        // Nor is an empty batch sent for a list the answers settle whole: the six are the members' and the props'.
+        assert_eq!(calls.get("batchRequests"), Some(&6), "{calls:?}");
+    }
+
+    /// The own list of an object (below the top, past the fields allowed from outside the project) settles what the
+    /// whole list settles: `got`, a getter, is `readonly` in both and asked about in neither; `own` is asked about once
+    /// per list, and of the lib's `String` only its declared properties (`length`), not its methods. On the base each
+    /// of the whole list's properties was asked about.
+    #[test]
+    fn the_own_list_settles_readonly_as_the_whole_list_does() {
+        let (outcome, calls) = answered_with_calls(
+            "interface Wide extends String { readonly own: boolean; get got(): number }\n\
+             export function C(props: { b: { inner: Wide }; a: Wide }) { return null; }\n",
+        );
+        let [component] = outcome.components.as_slice() else { panic!("{outcome:?}") };
+        let prop = |name: &str| &component.props.iter().find(|prop| prop.name == name).unwrap().prop_type;
+        let whole = |name: &str| field(prop("a"), name).readonly;
+        assert_eq!((whole("own"), whole("got"), whole("length"), whole("charAt")), (true, true, true, false));
+        let PropType::Intersection(parts) = &field(prop("b"), "inner").prop_type else { panic!("{:?}", prop("b")) };
+        let PropType::Object(own) = &parts[0] else { panic!("{parts:?}") };
+        let own: Vec<_> = own.iter().map(|field| (field.name.as_str(), field.readonly)).collect();
+        // `key` is `String`'s index signature, `readonly [index: number]: string`.
+        assert_eq!(own, [("own", true), ("got", true), ("key", true)]);
+        assert_eq!(calls.get("isReadonlySymbol"), Some(&4), "{calls:?}");
     }
 
     /// One object type is listed whole at the top and only its own properties below it, where fewer properties from

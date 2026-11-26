@@ -288,12 +288,29 @@ pub(crate) struct SymbolInfo {
     /// The symbol it is a member of: the interface or type literal that declares a property. Absent for a property a
     /// mapped type or an intersection made (`Omit<Base, "x">`, `A & B`), whose declarations still name the original.
     pub parent: Option<CompactSymbol>,
+    /// What the answer carries besides the flags and declarations that [`Self::settled_readonly`] reads; None for an
+    /// answer without check flags, which settles nothing. Kept raw so that a symbol nobody asks about is not classified.
+    pub readonly: Option<ReadonlyEvidence>,
+}
+
+/// The parts of a symbol's answer that only [`SymbolInfo::settled_readonly`] reads.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReadonlyEvidence {
+    check_flags: u64,
+    value_declaration: bool,
 }
 
 impl SymbolInfo {
     /// The name of this member as the source writes it.
     pub(crate) fn member_name(&self) -> &str {
         self.member.as_deref().unwrap_or(&self.name)
+    }
+
+    /// What `isReadonlySymbol` answers for this symbol when its answer settles it ([`settled_readonly`]); None when
+    /// only the checker can say.
+    pub(crate) fn settled_readonly(&self) -> Option<bool> {
+        let evidence = self.readonly?;
+        settled_readonly(self.flags, evidence.check_flags, evidence.value_declaration, &self.declarations)
     }
 }
 
@@ -308,12 +325,20 @@ struct SymbolWire {
     declarations: Vec<String>,
     #[serde(default)]
     parent: Option<CompactSymbol>,
+    /// Absent from an answer that does not carry it, which settles nothing ([`settled_readonly`]).
+    check_flags: Option<u64>,
+    /// Only its presence is read, so the handle is skipped, not kept.
+    #[serde(default)]
+    value_declaration: Option<serde::de::IgnoredAny>,
 }
 
 impl From<SymbolWire> for SymbolInfo {
     fn from(wire: SymbolWire) -> Self {
         let member = internal_member_name(&wire.name);
         let name = unescape_leading_underscores(&wire.name).to_string();
+        let readonly = wire
+            .check_flags
+            .map(|check_flags| ReadonlyEvidence { check_flags, value_declaration: wire.value_declaration.is_some() });
         Self {
             reference: wire.reference,
             name,
@@ -321,9 +346,56 @@ impl From<SymbolWire> for SymbolInfo {
             flags: wire.flags,
             declarations: wire.declarations,
             parent: wire.parent,
+            readonly,
         }
     }
 }
+
+/// What the checker's `isReadonlySymbol` answers for a symbol, read off its flags, check flags, whether it has a value
+/// declaration and its declarations' kinds; None when that depends on what the answer leaves out. The checker (tsrs
+/// `is_readonly_symbol`, TypeScript's `isReadonlySymbol`) answers true for exactly:
+/// - a transient symbol whose check flags say `Readonly` (a mapped, reverse-mapped or union property);
+/// - a getter without a setter, and an enum member;
+/// - a property whose value declaration has the `readonly` modifier: the answer has no modifiers, so asked;
+/// - a variable declared `const`: the answer has no node flags, so asked;
+/// - a symbol with an `Object.defineProperty` call among its declarations: settled false only when every declaration
+///   is of a kind in [`NO_ASSIGNMENT_DECLARATION`].
+///
+/// A property's modifiers are read only off its value declaration (tsrs and TypeScript
+/// `getDeclarationModifierFlagsFromSymbol`), so one without a value declaration has no `readonly` modifier.
+fn settled_readonly(flags: u64, check_flags: u64, value_declaration: bool, declarations: &[String]) -> Option<bool> {
+    if check_flags & flag::CHECK_READONLY != 0
+        || flags & flag::SYMBOL_GET_ACCESSOR != 0 && flags & flag::SYMBOL_SET_ACCESSOR == 0
+        || flags & flag::SYMBOL_ENUM_MEMBER != 0
+    {
+        return Some(true);
+    }
+    // The answer omits `valueDeclaration` both when there is none and when it was not sent, so "none" is believed only
+    // of a property the checker makes without one: a mapped, reverse-mapped, union or intersection property. Any other
+    // check flag (`Instantiated` alone, `Late`) proves nothing about the declaration.
+    let modifiers_unread = flags & flag::SYMBOL_PROPERTY != 0
+        && (value_declaration || check_flags & flag::CHECK_MADE_WITHOUT_DECLARATION == 0);
+    let constant_unread = flags & flag::SYMBOL_VARIABLE != 0;
+    // Only the checker can say: do not read the declarations to find that out.
+    if modifiers_unread || constant_unread {
+        return None;
+    }
+    let declarations_known = declarations.iter().all(|declaration| {
+        let kind = declaration.split('.').nth(1).and_then(|kind| kind.parse::<u32>().ok());
+        kind.is_some_and(|kind| NO_ASSIGNMENT_DECLARATION.contains(&kind))
+    });
+    declarations_known.then_some(false)
+}
+
+/// The syntax kinds (tsrs_ast 0.24.0 numbering, as node handles carry them) of the declarations that are not an
+/// `Object.defineProperty` call: parameter, property signature and declaration, method signature and declaration, get
+/// and set accessor, property assignment, shorthand property assignment. A kind not listed is asked.
+///
+/// The numbers are tsrs's, not ours: after a renumbering a listed number may name `CallExpression`, and a
+/// `defineProperty` declaration would then be settled not readonly. So the test
+/// `the_declaration_kinds_are_read_from_the_pinned_tsrs` fails on any tsrs version but the one they were read from,
+/// and `a_settled_readonly_answer_is_the_checkers` pins each to a real declaration.
+const NO_ASSIGNMENT_DECLARATION: [u32; 9] = [171, 173, 174, 175, 176, 179, 180, 304, 305];
 
 /// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
 /// `[brand]`. An ES-private member is `__#<symbol id>@#<name>`; the source writes `#<name>`. The id is the checker's
@@ -535,6 +607,17 @@ pub(crate) mod flag {
     pub(crate) const CONDITIONAL: u64 = 67108864;
     pub(crate) const UNION: u64 = 134217728;
     pub(crate) const INTERSECTION: u64 = 268435456;
+    /// `SymbolFlags`.
+    pub(crate) const SYMBOL_VARIABLE: u64 = 1 | 2;
+    pub(crate) const SYMBOL_PROPERTY: u64 = 4;
+    pub(crate) const SYMBOL_ENUM_MEMBER: u64 = 8;
+    pub(crate) const SYMBOL_GET_ACCESSOR: u64 = 32768;
+    pub(crate) const SYMBOL_SET_ACCESSOR: u64 = 65536;
+    /// `CheckFlags.Readonly`: a transient symbol made readonly.
+    pub(crate) const CHECK_READONLY: u64 = 8;
+    /// `CheckFlags.SyntheticProperty | SyntheticMethod | ReverseMapped | Mapped`: a property the checker makes for a
+    /// union or intersection, a reverse-inferred mapped type or a mapped type.
+    pub(crate) const CHECK_MADE_WITHOUT_DECLARATION: u64 = 2 | 4 | (1 << 16) | (1 << 21);
     pub(crate) const SYMBOL_INTERFACE: u64 = 64;
     pub(crate) const SYMBOL_ALIAS: u64 = 2097152;
     pub(crate) const SYMBOL_OPTIONAL: u64 = 16777216;
@@ -919,6 +1002,15 @@ impl Rpc {
         self.calls.lock().map(|calls| calls.clone()).unwrap_or_default()
     }
 
+    /// Counts something a test asks about under `what`, beside the requests, so a count belongs to the session under
+    /// test and not to the process: tests that run in parallel threads do not see each other's.
+    #[cfg(test)]
+    pub(crate) fn note(&self, what: &'static str, count: u64) {
+        if let Ok(mut calls) = self.calls.lock() {
+            *calls.entry(what).or_default() += count;
+        }
+    }
+
     /// One request, its answer as the JSON text it arrived as: [`decode`] parses it once, into the shape the caller
     /// expects. The parameters are written straight to the text the checker reads.
     async fn call(&self, params: &impl Request) -> Result<Box<RawValue>, CallError> {
@@ -1139,6 +1231,12 @@ pub(crate) fn decode<T: DeserializeOwned>(answer: &RawValue) -> Result<T, CallEr
         .map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
 }
 
+/// `build.rs` itself, so the tests run the lockfile rule it uses rather than a copy of it.
+#[cfg(test)]
+#[allow(dead_code, clippy::print_stdout)]
+#[path = "../build.rs"]
+mod build_script;
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
@@ -1181,6 +1279,358 @@ mod tests {
             rpc.release().await;
         });
         runtime.block_on(checker.shutdown());
+    }
+
+    /// Every form of property, of every kind of type that lists them: for each property whose answer settles
+    /// `isReadonlySymbol` ([`SymbolInfo::settled_readonly`]), the checker answers the same, and which properties are
+    /// settled true, settled false or asked is pinned by name. Also pins the syntax kinds [`NO_ASSIGNMENT_DECLARATION`]
+    /// reads off the node handles to real declarations, and checks that an expando assignment's kind is not listed.
+    #[test]
+    fn a_settled_readonly_answer_is_the_checkers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let file = root.join("forms.ts").to_string();
+        let source = "\
+            export interface I { a: string; readonly b: number; m(): void; get g(): number; get gs(): number; \
+              set gs(v: number); set so(v: number); c?: boolean; 'quoted-key': 1; readonly [Symbol.iterator]: 1; }\n\
+            export class K { x = 1; readonly y = 2; declare z: string; private p = 1; #q = 1; static s = 1; \
+              static readonly t = 1; get gk() { return 1; } set gk(v) {} get only() { return 1; } \
+              constructor(public pp: number, readonly rp: number) {} method() {} }\n\
+            export type R = Readonly<I>;\n\
+            export type P = Partial<I>;\n\
+            export type Req = Required<Partial<R>>;\n\
+            export type Mut = { -readonly [Key in keyof R]: R[Key] };\n\
+            export type Pk = Pick<I, 'a' | 'b' | 'm' | 'g'>;\n\
+            export type O = Omit<I, 'a'>;\n\
+            export type Rec = Record<'u' | 'v', number>;\n\
+            export type Ro = { readonly [Key in 'k1' | 'k2']: Key };\n\
+            export type Renamed = { [Key in keyof I as `on${Capitalize<string & Key>}`]: I[Key] };\n\
+            export type X = I & { readonly a: string; b: number; extra: 1 };\n\
+            export type Y = R & { a: string };\n\
+            export type U = I | { readonly a: string; b: number; m(): void; g: number; gs: number; c?: boolean };\n\
+            export type Inst = InstanceType<typeof K>;\n\
+            export type Tup = readonly [number, string];\n\
+            export type MutTup = [number, ...string[]];\n\
+            export type Str = String;\n\
+            export type Arr = ReadonlyArray<number>;\n\
+            export enum E { A, B = 'b' }\n\
+            const short = 1;\n\
+            export const ns = { lit: 1, readonly ro: 2, get gg() { return 1; }, set ss(v: number) {}, method() {}, \
+              short, ['computed']: 1, ...{ spread: 1 } };\n\
+            export const frozen = { a: 1, b: [1] } as const;\n\
+            export const fn = Object.assign(() => 1, { attached: 1 });\n\
+            export namespace N { export const c = 1; export let l = 2; export var v = 3; export function f() {} \
+              export class Kn {} export enum En { A } }\n\
+            export interface G<T> { readonly gr: T; gw: T }\n\
+            export type Gi = G<number>;\n\
+            declare function unbox<T>(boxed: { [Key in keyof T]: { v: T[Key] } }): T;\n\
+            export const rev = unbox({ ra: { v: 1 }, rb: { v: 'b' } });\n\
+            export function fx() { return 1; }\n\
+            fx.dotted = 1;\n\
+            fx['bracketed'] = 2;\n";
+        let checker = Backend::start(&root, 1).unwrap();
+        let runtime = multi_thread();
+        let (compared, kinds) = runtime.block_on(async {
+            let deadline = Duration::from_secs(60);
+            let client = checker.client();
+            let options = Rpc::prepare(&client, deadline, None).await.unwrap();
+            let rpc =
+                Rpc::open_in_memory(client, deadline, &options, &[(file.clone(), source.to_string())]).await.unwrap();
+            let module = rpc.source_file_symbol(&file).await.unwrap().unwrap();
+            let mut compared = Vec::new();
+            let mut kinds = BTreeMap::new();
+            for export in rpc.exports_of_module(&module.reference).await.unwrap() {
+                // Type alias, interface, class: the declared type; variable, function, class, enum, namespace: the
+                // value's.
+                let mut types = Vec::new();
+                if export.flags & (524_288 | 64 | 32) != 0 {
+                    types.push(rpc.declared_type_of_symbol(&export.reference).await.unwrap());
+                }
+                if export.flags & (3 | 16 | 32 | 256 | 512) != 0 {
+                    types.push(rpc.type_of_symbol(&export.reference).await.unwrap());
+                }
+                for ty in types {
+                    let properties = rpc.properties(ty.id).await.unwrap();
+                    let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
+                    let asked = rpc.readonly_symbols(&references).await.unwrap();
+                    for (property, asked) in properties.iter().zip(asked) {
+                        let at = format!("{}.{}", export.name, property.member_name());
+                        let declared =
+                            property.declarations.iter().map(|d| d.split('.').nth(1).unwrap().parse().unwrap());
+                        kinds.insert(at.clone(), declared.collect::<Vec<u32>>());
+                        compared.push((at, property.settled_readonly(), asked));
+                    }
+                }
+            }
+            rpc.release().await;
+            (compared, kinds)
+        });
+        runtime.block_on(checker.shutdown());
+
+        let disagreements: Vec<_> =
+            compared.iter().filter(|(_, settled, asked)| settled.is_some_and(|settled| settled != *asked)).collect();
+        assert_eq!(disagreements, Vec::<&(String, Option<bool>, bool)>::new(), "{compared:#?}");
+        assert_eq!(kinds.len(), compared.len(), "a property named twice: {compared:#?}");
+        // Which properties the answer settles, and how: one settled that was asked, or settled the other way, fails
+        // here by name.
+        let partition = |want: Option<bool>| {
+            let named = compared.iter().filter(|(_, settled, _)| *settled == want).map(|(at, ..)| at.as_str());
+            named.collect::<Vec<_>>().join(" ")
+        };
+        let readonly = "I.g K.only R.a R.b R.m R.g R.gs R.so R.c R.quoted-key R.[Symbol.iterator] P.b P.g \
+            P.[Symbol.iterator] Req.a Req.b Req.m Req.g Req.gs Req.so Req.c Req.quoted-key Req.[Symbol.iterator] \
+            Pk.b Pk.g O.b O.g O.[Symbol.iterator] Ro.k1 Ro.k2 Renamed.onB Renamed.onG X.g Y.b Y.m Y.g Y.gs Y.so Y.c \
+            Y.quoted-key Y.[Symbol.iterator] U.a U.b U.g Inst.only Tup.0 Tup.1 Tup.length E.A E.B frozen.a frozen.b";
+        assert_eq!(partition(Some(true)), readonly, "settled readonly");
+        let not_readonly = "I.m I.gs I.so K.gk K.method P.a P.m P.gs P.so P.c P.quoted-key Mut.a Mut.b Mut.m \
+            Mut.g Mut.gs Mut.so Mut.c Mut.quoted-key Mut.[Symbol.iterator] Pk.a Pk.m O.m O.gs O.so O.c O.quoted-key \
+            Rec.u Rec.v Renamed.onA Renamed.onC Renamed.onGs Renamed.onM Renamed.onQuoted-key Renamed.onSo X.a X.b \
+            X.m X.gs X.so U.m U.gs U.c Inst.gk Inst.method Tup.toString Tup.toLocaleString Tup.concat Tup.join \
+            Tup.slice Tup.indexOf Tup.lastIndexOf Tup.every Tup.some Tup.forEach Tup.map Tup.filter Tup.reduce \
+            Tup.reduceRight Tup.find Tup.findIndex Tup.[Symbol.iterator] Tup.entries Tup.keys Tup.values \
+            Tup.includes Tup.flatMap Tup.flat Tup.at MutTup.toString MutTup.toLocaleString MutTup.pop MutTup.push \
+            MutTup.concat MutTup.join MutTup.reverse MutTup.shift MutTup.slice MutTup.sort MutTup.splice \
+            MutTup.unshift MutTup.indexOf MutTup.lastIndexOf MutTup.every MutTup.some MutTup.forEach MutTup.map \
+            MutTup.filter MutTup.reduce MutTup.reduceRight MutTup.find MutTup.findIndex MutTup.fill \
+            MutTup.copyWithin MutTup.[Symbol.iterator] MutTup.entries MutTup.keys MutTup.values MutTup.includes \
+            MutTup.flatMap MutTup.flat MutTup.at Str.toString Str.charAt Str.charCodeAt Str.concat Str.indexOf \
+            Str.lastIndexOf Str.localeCompare Str.match Str.replace Str.search Str.slice Str.split Str.substring \
+            Str.toLowerCase Str.toLocaleLowerCase Str.toUpperCase Str.toLocaleUpperCase Str.trim Str.substr \
+            Str.valueOf Str.codePointAt Str.includes Str.endsWith Str.normalize Str.repeat Str.startsWith Str.anchor \
+            Str.big Str.blink Str.bold Str.fixed Str.fontcolor Str.fontsize Str.italics Str.link Str.small \
+            Str.strike Str.sub Str.sup Str.[Symbol.iterator] Str.padStart Str.padEnd Str.trimEnd Str.trimStart \
+            Str.trimLeft Str.trimRight Str.matchAll Str.replaceAll Str.at Arr.toString Arr.toLocaleString Arr.concat \
+            Arr.join Arr.slice Arr.indexOf Arr.lastIndexOf Arr.every Arr.some Arr.forEach Arr.map Arr.filter \
+            Arr.reduce Arr.reduceRight Arr.find Arr.findIndex Arr.[Symbol.iterator] Arr.entries Arr.keys Arr.values \
+            Arr.includes Arr.flatMap Arr.flat Arr.at rev.ra rev.rb";
+        assert_eq!(partition(Some(false)), not_readonly, "settled not readonly");
+        let unsettled = "I.a I.b I.c I.quoted-key I.[Symbol.iterator] K.x K.y K.z K.p K.#q K.pp K.rp K.s K.t \
+            K.prototype X.c X.quoted-key X.[Symbol.iterator] X.extra Y.a Inst.x Inst.y Inst.z Inst.p Inst.#q Inst.pp \
+            Inst.rp Tup.[Symbol.unscopables] MutTup.[Symbol.unscopables] MutTup.0 MutTup.length Str.length \
+            Arr.length Arr.[Symbol.unscopables] ns.lit ns.ro ns.gg ns.ss ns.method ns.short ns.computed ns.spread \
+            fn.attached N.c N.l N.v N.f N.Kn N.En G.gr G.gw Gi.gr Gi.gw fx.dotted fx.bracketed";
+        assert_eq!(partition(None), unsettled, "asked");
+        let pinned = [
+            ("K.pp", 171),
+            ("I.a", 173),
+            ("K.x", 174),
+            ("I.m", 175),
+            ("K.method", 176),
+            ("I.g", 179),
+            ("I.so", 180),
+            ("ns.lit", 304),
+            ("ns.short", 305),
+        ];
+        for (at, kind) in pinned {
+            assert_eq!(kinds.get(at), Some(&vec![kind]), "{at}: {kinds:#?}");
+        }
+        assert_eq!(pinned.map(|(_, kind)| kind), NO_ASSIGNMENT_DECLARATION);
+        // The expando assignments' declarations are of a kind the list leaves out, so they are asked.
+        for at in ["fx.dotted", "fx.bracketed"] {
+            let declared = kinds.get(at).unwrap();
+            assert!(declared.iter().all(|kind| !NO_ASSIGNMENT_DECLARATION.contains(kind)), "{at}: {declared:?}");
+            assert!(ASSIGNMENT_DECLARATION.iter().any(|(_, kind)| declared.contains(kind)), "{at}: {declared:?}");
+        }
+    }
+
+    /// The kinds (tsrs_ast 0.24.0's `Kind`, the version [`the_declaration_kinds_are_read_from_the_pinned_tsrs`] holds)
+    /// of the nodes that make a declaration an assignment or `Object.defineProperty` one, after TypeScript's
+    /// `getAssignmentDeclarationKind`, and of the JSDoc tags that declare a property.
+    const ASSIGNMENT_DECLARATION: [(&str, u32); 7] = [
+        ("PropertyAccessExpression", 213),
+        ("ElementAccessExpression", 214),
+        ("CallExpression", 215),
+        ("BinaryExpression", 228),
+        ("JSDocCallbackTag", 332),
+        ("JSDocTypedefTag", 339),
+        ("JSDocPropertyTag", 341),
+    ];
+
+    /// The syntax kind numbers above are tsrs's and change when it renumbers, which no check here can see; this fails
+    /// on any tsrs but the one they were read from, until they are read again from its `tsrs_ast::Kind` and the
+    /// version below updated. A real `defineProperty` declaration cannot stand in: tsrs 0.24 does not bind one.
+    #[test]
+    #[allow(clippy::print_stderr)]
+    fn the_declaration_kinds_are_read_from_the_pinned_tsrs() {
+        // `build.rs` names the lockfile it found, relative to this crate: the workspace's, else a published crate's.
+        let lock = option_env!("CALIPER_SEMANTIC_LOCKFILE")
+            .map(|lock| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(lock)).unwrap());
+        match tsrs_ast_pin(lock.as_deref()) {
+            PinCheck::Checked => {}
+            PinCheck::Skipped(why) => eprintln!("SKIPPED the tsrs_ast version pin: {why}"),
+        }
+        for (name, kind) in ASSIGNMENT_DECLARATION {
+            assert!(!NO_ASSIGNMENT_DECLARATION.contains(&kind), "{name} ({kind}) is listed");
+        }
+    }
+
+    enum PinCheck {
+        Checked,
+        /// No lockfile to read: reported in the test output, never passed as if the pin had held.
+        Skipped(&'static str),
+    }
+
+    /// Fails unless the locked `tsrs_ast` is the version the kind numbers were read from.
+    fn tsrs_ast_pin(lock: Option<&str>) -> PinCheck {
+        let Some(lock) = lock else { return PinCheck::Skipped("no Cargo.lock in the workspace or this crate") };
+        let versions: Vec<_> = lock
+            .split("[[package]]")
+            .filter(|package| package.contains("\nname = \"tsrs_ast\"\n"))
+            .filter_map(|package| package.lines().find_map(|line| line.strip_prefix("version = ")))
+            .collect();
+        assert_eq!(
+            versions,
+            ["\"0.24.0\""],
+            "tsrs_ast moved: re-read NO_ASSIGNMENT_DECLARATION and ASSIGNMENT_DECLARATION from its Kind"
+        );
+        PinCheck::Checked
+    }
+
+    /// The lockfile is the one Cargo resolves the package with, by Cargo's own workspace resolution: the workspace's
+    /// for a member (listed, globbed or taken in as a path dependency of one), else the package's own, else none; an
+    /// unrelated `Cargo.lock` above an unpacked crate is never read.
+    #[test]
+    fn the_lockfile_is_the_one_cargo_resolves_the_package_with() {
+        use std::fs::{create_dir_all, write};
+        use std::path::Path;
+
+        // A package at `root/at` with `deps` as path dependencies, so Cargo reads a real manifest.
+        let package = |root: &Path, at: &str, deps: &[&str]| {
+            let dir = root.join(at);
+            create_dir_all(dir.join("src")).unwrap();
+            write(dir.join("src/lib.rs"), "").unwrap();
+            let deps: String = deps.iter().map(|dep| format!("{dep} = {{ path = \"../{dep}\" }}\n")).collect();
+            let name = at.replace('/', "-");
+            write(
+                dir.join("Cargo.toml"),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\n[dependencies]\n{deps}"),
+            )
+            .unwrap();
+        };
+        // The lockfile `lockfile_in` picks for the package at `root/at`, by what is written in it.
+        let picked = |root: &Path, at: &str| {
+            build_script::lockfile_in(&root.join(at)).map(|lock| std::fs::read_to_string(lock).unwrap())
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let case = |name: &str| {
+            let root = dir.path().join(name);
+            create_dir_all(&root).unwrap();
+            write(root.join("Cargo.lock"), "root").unwrap();
+            root
+        };
+        let workspace =
+            |root: &Path, table: &str| write(root.join("Cargo.toml"), format!("[workspace]\n{table}\n")).unwrap();
+
+        // (a) The workspace's lockfile, for a package listed by path, by glob, taken in as a path dependency of a
+        // member while `members` does not list it, and with a lockfile of its own beside.
+        let root = case("a1");
+        package(&root, "crates/core", &[]);
+        package(&root, "crates/semantic", &[]);
+        workspace(&root, "members = [\"crates/core\", \"crates/semantic\"] # listed");
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("root"));
+        let root = case("a2");
+        package(&root, "crates/core", &[]);
+        package(&root, "crates/semantic", &[]);
+        workspace(&root, "members = [\"crates/*\"]");
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("root"));
+        let root = case("a3");
+        package(&root, "crates/semantic", &[]);
+        package(&root, "crates/cli", &["semantic"]);
+        workspace(&root, "members = [\"crates/cli\"]");
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("root"));
+        write(root.join("crates/semantic/Cargo.lock"), "own").unwrap();
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("root"));
+
+        // (b) An unpacked crate with a lockfile of its own beside an unrelated lockfile reads its own: the ancestor
+        // may be no project, a single package, or a workspace that does not include the crate (an error to Cargo), or
+        // one that excludes it.
+        let root = case("b1");
+        package(&root, "downloads/pkg", &[]);
+        write(root.join("downloads/pkg/Cargo.lock"), "own").unwrap();
+        assert_eq!(picked(&root, "downloads/pkg").as_deref(), Some("own"));
+        write(root.join("Cargo.toml"), "[package]\nname = \"top\"\nversion = \"0.0.0\"\n").unwrap();
+        create_dir_all(root.join("src")).unwrap();
+        write(root.join("src/lib.rs"), "").unwrap();
+        assert_eq!(picked(&root, "downloads/pkg").as_deref(), Some("own"));
+        workspace(&root, "members = [\"crates/binding\"]");
+        package(&root, "crates/binding", &[]);
+        assert_eq!(picked(&root, "downloads/pkg").as_deref(), Some("own"));
+        let root = case("b2");
+        package(&root, "crates/binding", &[]);
+        package(&root, "crates/semantic", &[]);
+        workspace(&root, "members = [\"crates/*\"]\nexclude = [\"crates/semantic\"]");
+        write(root.join("crates/semantic/Cargo.lock"), "own").unwrap();
+        assert_eq!(picked(&root, "crates/semantic").as_deref(), Some("own"));
+
+        // (c) No workspace that claims the crate and no lockfile of its own: none, so the pin check says it skipped.
+        let root = case("c1");
+        package(&root, "downloads/pkg", &[]);
+        assert_eq!(picked(&root, "downloads/pkg"), None);
+        workspace(&root, "members = [\"crates/binding\"]");
+        package(&root, "crates/binding", &[]);
+        assert_eq!(picked(&root, "downloads/pkg"), None);
+        let root = case("c2");
+        package(&root, "crates/core", &[]);
+        package(&root, "crates/semantic", &[]);
+        workspace(&root, "members = [\"crates/*\"]");
+        std::fs::remove_file(root.join("Cargo.lock")).unwrap();
+        assert_eq!(picked(&root, "crates/semantic"), None);
+    }
+
+    /// Without a lockfile the pin check says it did not run; with one it runs and fails on a moved version.
+    #[test]
+    fn the_pin_check_is_skipped_only_without_a_lockfile() {
+        assert!(matches!(tsrs_ast_pin(None), PinCheck::Skipped(why) if why.contains("no Cargo.lock")));
+        let lock = "[[package]]\nname = \"tsrs_ast\"\nversion = \"0.24.0\"\n";
+        assert!(matches!(tsrs_ast_pin(Some(lock)), PinCheck::Checked));
+        let moved = std::panic::catch_unwind(|| tsrs_ast_pin(Some(&lock.replace("0.24.0", "0.25.0"))));
+        assert!(moved.is_err());
+    }
+
+    /// The answer settles only what its fields decide; an answer without check flags settles nothing.
+    #[test]
+    fn readonly_is_settled_only_from_what_the_answer_carries() {
+        let settled = |extra: serde_json::Value| {
+            let mut symbol = serde_json::json!({ "reference": { "kind": 1, "id": 4, "snapshot": 2 }, "name": "x" });
+            if let (Some(symbol), serde_json::Value::Object(extra)) = (symbol.as_object_mut(), extra) {
+                symbol.extend(extra);
+            }
+            serde_json::from_value::<SymbolInfo>(symbol).unwrap().settled_readonly()
+        };
+        let mapped = |check_flags: u64| serde_json::json!({ "flags": 4, "checkFlags": check_flags, "declarations": ["1.173./a.ts"] });
+        assert_eq!(settled(mapped(8 | (1 << 21))), Some(true));
+        // Mapped, union or intersection (property or method), reverse-mapped: made with no value declaration.
+        for made in [1 << 21, 2, 4, 1 << 16, (1 << 21) | 1] {
+            assert_eq!(settled(mapped(made)), Some(false), "{made}");
+        }
+        assert_eq!(settled(serde_json::json!({ "flags": 4, "declarations": ["1.173./a.ts"] })), None);
+        // No value declaration, and no check flag that says the checker made it without one: the field may have gone
+        // missing from a declared, instantiated, late-bound or index-signature property's answer, so its `readonly`
+        // modifier is unread.
+        for unproven in [0, 1, 1 << 15, 1 << 26] {
+            assert_eq!(settled(mapped(unproven)), None, "{unproven}");
+        }
+        let synthetic_declared = serde_json::json!({
+            "flags": 4, "checkFlags": 2, "declarations": ["1.173./a.ts"], "valueDeclaration": "1.173./a.ts"
+        });
+        assert_eq!(settled(synthetic_declared), None);
+        let declared = serde_json::json!({
+            "flags": 4, "checkFlags": 0, "declarations": ["1.173./a.ts"], "valueDeclaration": "1.173./a.ts"
+        });
+        assert_eq!(settled(declared), None);
+        assert_eq!(settled(serde_json::json!({ "flags": 2, "checkFlags": 0 })), None);
+        assert_eq!(settled(serde_json::json!({ "flags": 32768, "checkFlags": 0 })), Some(true));
+        assert_eq!(settled(serde_json::json!({ "flags": 32768 | 65536, "checkFlags": 0 })), Some(false));
+        assert_eq!(
+            settled(serde_json::json!({ "flags": 8 | 4, "checkFlags": 0, "valueDeclaration": "1.307./a.ts" })),
+            Some(true)
+        );
+        for (name, kind) in ASSIGNMENT_DECLARATION {
+            let assigned =
+                serde_json::json!({ "flags": 4, "checkFlags": 1 << 21, "declarations": [format!("1.{kind}./a.js")] });
+            assert_eq!(settled(assigned), None, "{name}");
+        }
+        assert_eq!(settled(serde_json::json!({ "flags": 4, "checkFlags": 0, "declarations": ["bad"] })), None);
     }
 
     fn multi_thread() -> tokio::runtime::Runtime {
