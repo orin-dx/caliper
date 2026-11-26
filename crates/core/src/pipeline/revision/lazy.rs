@@ -165,7 +165,17 @@ pub(super) struct Lazy {
     /// How many times a component was resolved, for tests.
     #[cfg(test)]
     resolutions: std::sync::atomic::AtomicUsize,
+    /// How many times the layer was loaded, whether or not it grew, for tests.
+    #[cfg(test)]
+    loads: std::sync::atomic::AtomicUsize,
+    /// Run once by the next [`Revision::lazy_component`] between its resolution and its diagnostics, for tests.
+    #[cfg(test)]
+    between: Mutex<Option<Between>>,
 }
+
+/// What a test runs inside a request ([`Lazy::between`]).
+#[cfg(test)]
+type Between = Box<dyn FnOnce(&Revision) + Send>;
 
 impl Lazy {
     /// When this revision follows again a walk that passed a file it could not read: once it is due.
@@ -260,6 +270,10 @@ impl Revision {
             edits: 0,
             #[cfg(test)]
             resolutions: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            loads: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            between: Mutex::new(None),
         };
         Revision {
             id,
@@ -347,6 +361,12 @@ impl Revision {
                 affected_files.push(id.file.clone());
             }
         }
+        // A provisional answer is never carried over: the edit makes every walk past an unreadable file due, so each
+        // may answer differently, whatever file it read.
+        for entry in previous.provisional.iter() {
+            touched.insert(entry.key().name.clone());
+            affected_files.push(entry.key().file.clone());
+        }
         // A name the changed file declared before or after keeps no memo, but its keys can still move.
         for groups in [&previous.by_name, &by_name] {
             for (name, group) in groups {
@@ -403,6 +423,10 @@ impl Revision {
                 edits: previous.edits + 1,
                 #[cfg(test)]
                 resolutions: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                loads: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                between: Mutex::new(None),
             }),
         };
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -458,9 +482,21 @@ impl Revision {
 
     /// `component` resolved, memoized. `None` when the position is not one of this revision's mappings.
     fn lazy_resolved(&self, options: &PipelineOptions, id: &ComponentId, index: usize) -> Option<Arc<Resolved>> {
+        self.lazy_resolved_at(options, id, index).map(|(resolved, _)| resolved)
+    }
+
+    /// [`Self::lazy_resolved`], with the layer a provisional answer was read against: its read warnings are the ones
+    /// that answer carries, whatever a later load recovered since. `None` for a memoized answer, which no unread walk
+    /// reached.
+    fn lazy_resolved_at(
+        &self,
+        options: &PipelineOptions,
+        id: &ComponentId,
+        index: usize,
+    ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
         let lazy = self.lazy.as_ref()?;
         if let Some(hit) = lazy.memo.get(id) {
-            return Some(hit.clone());
+            return Some((hit.clone(), None));
         }
         if let Some(hit) = self.provisional_hit(lazy, id) {
             return Some(hit);
@@ -506,9 +542,9 @@ impl Revision {
                 // answer holds only provisionally, and never in the memo an edit carries over.
                 if !unread.is_empty() {
                     lazy.provisional.insert(id.clone(), (resolved.clone(), unread));
-                    return Some(resolved);
+                    return Some((resolved, engine.layer.clone()));
                 }
-                return Some(lazy.memo.entry(id.clone()).or_insert(resolved).clone());
+                return Some((lazy.memo.entry(id.clone()).or_insert(resolved).clone(), None));
             }
             self.grow(options, lazy, &missing);
             asked_for = missing;
@@ -517,12 +553,16 @@ impl Revision {
 
     /// The provisional answer for `id` while none of the unread walks it reached is due ([`Lazy::provisional`]): no
     /// retry has passed, no edit arrived, and no later load followed one of them again or read one of their files.
-    fn provisional_hit(&self, lazy: &Lazy, id: &ComponentId) -> Option<Arc<Resolved>> {
+    fn provisional_hit(
+        &self,
+        lazy: &Lazy,
+        id: &ComponentId,
+    ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
         let (resolved, unread) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
-        let engine = lazy.engine.load();
-        let until = engine.layer.as_ref().and_then(|layer| layer.unread_until(&unread, lazy.edits));
+        let layer = lazy.engine.load().layer.clone();
+        let until = layer.as_ref().and_then(|layer| layer.unread_until(&unread, lazy.edits));
         if until.is_some_and(|until| lazy.clock.now() < until) {
-            return Some(resolved);
+            return Some((resolved, layer));
         }
         lazy.provisional.remove(id);
         None
@@ -594,13 +634,16 @@ impl Revision {
             return;
         }
         let extended = Arc::new(off_pool(|| dependency_types::load_at(missing, options, Some(layer), retry)));
-        lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        #[cfg(test)]
+        lazy.loads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
-        // context and its memos stay; only the record of what was asked for moves on.
+        // context and its memos stay; only the record of what was asked for moves on. Such a load (a retry of a file
+        // that stays unreadable) is no growth either: it brings the background load of every name no nearer.
         if extended.resolves_like(layer) {
             lazy.engine.store(Arc::new(Engine { layer: Some(extended), ctx: engine.ctx.clone() }));
             return;
         }
+        lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
         // rebuilding them for every growth was most of what a session reading across a project spent.
         let named_types = Arc::new(self.named_types.with_fallback(extended.named_types.clone()));
@@ -753,7 +796,11 @@ impl Revision {
     /// diagnostics. `None` for a key the project has no component under.
     pub(crate) fn lazy_component(&self, options: &PipelineOptions, key: &str) -> Option<ComponentAnswer> {
         let (id, index) = self.lazy_target(options, key)?;
-        let resolved = self.lazy_resolved(options, id, index)?;
+        let (resolved, read_against) = self.lazy_resolved_at(options, id, index)?;
+        #[cfg(test)]
+        if let Some(between) = self.lazy.as_ref().and_then(|lazy| lazy.between.lock().ok()?.take()) {
+            between(self);
+        }
         // A lazy revision counts call sites with its context, on the first answer that needs them.
         let sites = self.lazy.as_ref().map(|lazy| relevance_inputs::project_sites(&lazy.engine.load_full().ctx));
         let entry = resolved.answer(&sites.unwrap_or_default());
@@ -763,7 +810,10 @@ impl Revision {
             diagnostics.extend_shared(chunk, key);
         }
         // A panic in the dependency loader may have left any component's types unexpanded, so every answer carries it.
-        if let Some(layer) = self.lazy.as_ref().and_then(|lazy| lazy.engine.load_full().layer.clone()) {
+        // A provisional answer carries the read warnings of the layer it was read against: a later load that read the
+        // file again ends the warning in the newest layer, not the gap in this answer.
+        let layer = read_against.or_else(|| self.lazy.as_ref().and_then(|lazy| lazy.engine.load_full().layer.clone()));
+        if let Some(layer) = layer {
             diagnostics.extend(layer.panic_diagnostics(), None);
         }
         Some(ComponentAnswer { key: key.to_owned(), entry, diagnostics: diagnostics.finish() })
@@ -789,6 +839,134 @@ mod read_retry_tests {
 
     const BAD_PROPS: &str = "export interface BadProps { bad: string }\n";
     const BAD2_PROPS: &str = "export interface Bad2Props { bad2: string }\n";
+    const FIRST: &str = "export interface FirstProps { first: string }\n";
+
+    fn warned(answer: &ComponentAnswer) -> Vec<String> {
+        let file = |diagnostic: &crate::types::Diagnostic| diagnostic.file.clone().unwrap_or_default();
+        let io = |diagnostic: &&crate::types::Diagnostic| diagnostic.code == crate::types::DiagnosticCode::IoError;
+        answer.diagnostics.iter().filter(io).map(file).collect()
+    }
+
+    /// A walk that passes an unreadable `export *` target and finds the name in a later one gives the resolver that
+    /// barrel's mapping for this layer: the props are in the answer, with the warning. The mapping is kept nowhere a
+    /// complete answer is (`export_of`, which the index writes). Once the file reads and an edit arrives, the answer is a
+    /// cold run's. On the base the props were lost: the resolver had no mapping for the barrel.
+    #[test]
+    fn an_export_found_past_an_unreadable_star_target_reaches_the_resolver_for_its_layer() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        let first = root.join("node_modules/barrel-kit/first.d.ts");
+        std::fs::write(&first, [0xff; FIRST.len()]).unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        let answer = revision.lazy_component(&options, "S").unwrap();
+        assert_eq!(props(&answer), ["own", "second"]);
+        assert_eq!(warned(&answer), [first.to_string()]);
+        let layer = revision.lazy.as_ref().unwrap().engine.load().layer.clone().unwrap();
+        let barrel = root.join("node_modules/barrel-kit/index.d.ts");
+        assert_eq!(layer.export_of(&barrel, "SecondProps"), None, "not kept as a complete answer");
+        assert!(layer.export_for_resolver(&barrel, "SecondProps").is_some());
+
+        std::fs::write(&first, FIRST).unwrap();
+        let s = root.join("src/s/S.tsx");
+        std::fs::write(&s, std::fs::read_to_string(&s).unwrap() + "// edited\n").unwrap();
+        let next = revision.next_lazy(&options, &s).unwrap().0;
+        assert_eq!(next.lazy_component(&options, "S").unwrap(), cold(&root, "S"));
+    }
+
+    /// A component answered provisionally that also reads a project file: an edit to that file names it in the delta,
+    /// and its next answer is a cold run's. On the base the delta scanned only the memo, which a provisional answer is
+    /// not in, so the key was missing.
+    #[test]
+    fn an_edit_names_every_provisional_component_in_the_delta() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        std::fs::write(root.join("node_modules/bad-kit/props.d.ts"), [0xff; BAD_PROPS.len()]).unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        assert_eq!(props(&revision.lazy_component(&options, "A2").unwrap()), ["local", "own"]);
+        let local = root.join("src/a2/local.ts");
+        std::fs::write(&local, "export interface LocalProps { local: string; more: string }\n").unwrap();
+        let (next, update) = revision.next_lazy(&options, &local).unwrap();
+        assert!(update.updated_keys.contains(&"A2".to_owned()), "{:?}", update.updated_keys);
+        let answer = next.lazy_component(&options, "A2").unwrap();
+        assert_eq!(props(&answer), ["local", "more", "own"]);
+        assert_eq!(answer, cold(&root, "A2"));
+    }
+
+    /// A load that only retries a file that stays unreadable adds nothing the resolver reads, so it is no growth:
+    /// repeated retries of one component never bring the background load of every name nearer. On the base each
+    /// retry counted, and the third started it.
+    #[test]
+    fn retries_of_a_file_that_stays_unreadable_are_no_growth() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        std::fs::write(root.join("node_modules/bad-kit/props.d.ts"), [0xff; BAD_PROPS.len()]).unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        drop(revision.lazy_component(&options, "A"));
+        let lazy = revision.lazy.as_ref().unwrap();
+        let growths = lazy.growths.load(Relaxed);
+        for retry in 1..=5_u32 {
+            set_clock(&revision, start + READ_RETRY * retry);
+            assert_eq!(cost(&revision, || drop(revision.lazy_component(&options, "A"))), (1, 1), "retry {retry}");
+        }
+        assert_eq!(lazy.growths.load(Relaxed), growths, "no retry is a growth");
+    }
+
+    /// Another request reads the unreadable file again between this request's resolution and its diagnostics: the
+    /// answer still carries the warning of the layer it was read against, so incomplete props never come without it.
+    /// On the base the diagnostics came from the newest layer, where the warning had ended.
+    #[test]
+    fn an_answer_carries_the_warnings_of_the_layer_it_was_read_against() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        let bad2 = root.join("node_modules/bad2-kit/props.d.ts");
+        std::fs::write(&bad2, [0xff; BAD2_PROPS.len()]).unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        let (recover_file, recover_options) = (bad2.clone(), options.clone());
+        *revision.lazy.as_ref().unwrap().between.lock().unwrap() = Some(Box::new(move |revision: &Revision| {
+            std::fs::write(&recover_file, BAD2_PROPS).unwrap();
+            assert_eq!(props(&revision.lazy_component(&recover_options, "C").unwrap()), ["bad2", "own"]);
+        }));
+        let answer = revision.lazy_component(&options, "B").unwrap();
+        assert_eq!(props(&answer), ["own"]);
+        assert_eq!(warned(&answer), [bad2.to_string()], "the gap in the props comes with its warning");
+    }
+
+    /// Two hundred demands in one load, each behind its own unreadable file: each mark holds exactly the file its own
+    /// walk could not read, 200 entries in all, not 200 for each.
+    #[test]
+    fn each_unread_walk_holds_only_its_own_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let kit = root.join("node_modules/many-kit");
+        std::fs::create_dir_all(&kit).unwrap();
+        std::fs::write(
+            kit.join("package.json"),
+            r#"{ "name": "many-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        )
+        .unwrap();
+        let index: String = (0..200).map(|n| format!("export {{ P{n} }} from './p{n}';\n")).collect();
+        std::fs::write(kit.join("index.d.ts"), index).unwrap();
+        for n in 0..200 {
+            std::fs::write(kit.join(format!("p{n}.d.ts")), [0xff; 8]).unwrap();
+        }
+        let demands: Vec<Demand> = (0..200)
+            .map(|n| Demand {
+                from: root.join("src/Card.tsx"),
+                specifier: "many-kit".into(),
+                name: format!("P{n}").into(),
+            })
+            .collect();
+        let layer = dependency_types::load(demands.clone(), &options(&root, false), None);
+        let suspects = layer.suspect_counts();
+        assert_eq!(suspects.len(), 200, "one mark per unread walk");
+        assert!(suspects.iter().all(|count| *count == 1), "each holds its own file only");
+        assert_eq!(layer.unread(&demands).len(), 200);
+    }
 
     fn project() -> (tempfile::TempDir, Utf8PathBuf) {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -819,6 +997,19 @@ mod read_retry_tests {
             ("node_modules/c-kit/index.d.ts", "export * from '../bad2-kit/props';\n".to_owned()),
             ("src/b/B.tsx", component("B", "bad2-kit", "Bad2Props")),
             ("src/c/C.tsx", component("C", "c-kit", "Bad2Props")),
+            ("src/a2/local.ts", "export interface LocalProps { local: string }\n".to_owned()),
+            (
+                "src/a2/A2.tsx",
+                "import type { BadProps } from 'bad-kit';\nimport type { LocalProps } from './local';\n\
+                 interface A2Props extends BadProps, LocalProps { own: string }\n\
+                 export function A2(props: A2Props) { return null; }\n"
+                    .to_owned(),
+            ),
+            ("node_modules/barrel-kit/package.json", kit("barrel-kit")),
+            ("node_modules/barrel-kit/index.d.ts", "export * from './first';\nexport * from './second';\n".to_owned()),
+            ("node_modules/barrel-kit/first.d.ts", FIRST.to_owned()),
+            ("node_modules/barrel-kit/second.d.ts", "export interface SecondProps { second: string }\n".to_owned()),
+            ("src/s/S.tsx", component("S", "barrel-kit", "SecondProps")),
         ];
         for (path, body) in files {
             let path = root.join(path);
@@ -849,9 +1040,9 @@ mod read_retry_tests {
     /// The layer loads and component resolutions `request` cost.
     fn cost(revision: &Revision, request: impl FnOnce()) -> (usize, usize) {
         let lazy = revision.lazy.as_ref().unwrap();
-        let before = (lazy.growths.load(Relaxed), lazy.resolutions.load(Relaxed));
+        let before = (lazy.loads.load(Relaxed), lazy.resolutions.load(Relaxed));
         request();
-        (lazy.growths.load(Relaxed) - before.0, lazy.resolutions.load(Relaxed) - before.1)
+        (lazy.loads.load(Relaxed) - before.0, lazy.resolutions.load(Relaxed) - before.1)
     }
 
     /// The files the context's member and props memos were read in (each component reads a member of its own theme).

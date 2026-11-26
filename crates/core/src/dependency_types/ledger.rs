@@ -222,6 +222,12 @@ impl DependencyLayer {
         earliest
     }
 
+    /// How many files each of this layer's own unread walks holds, for tests.
+    #[cfg(test)]
+    pub(crate) fn suspect_counts(&self) -> Vec<usize> {
+        self.ledger.marks.values().filter(|mark| mark.unread.is_some()).map(|mark| mark.suspects.len()).collect()
+    }
+
     /// Every node of the chain whose latest follow reached a walk that is unread, its own or one below it.
     pub(crate) fn unread_walks(&self) -> UnreadWalks {
         let mut walks = UnreadWalks::default();

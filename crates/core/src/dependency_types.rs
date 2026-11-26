@@ -376,6 +376,10 @@ pub(crate) struct DependencyLayer {
     pub(crate) import_map: Arc<ImportResolutionMap>,
     /// `(module, name)` → the declaring `(file, name)`, or `None` when the module's types do not export it.
     exports: dashmap::ReadOnlyView<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>, FxBuildHasher>,
+    /// `(module, name)` → the declaring `(file, name)` a walk found past a file it could not read: the resolver's
+    /// mapping of a barrel to its declaration while that walk is unread (the ledger marks it). Never in `exports`,
+    /// the loader's own lookups or the index; a complete answer in `exports` wins.
+    partial_exports: FxHashMap<(PathKey, CompactString), (Utf8PathBuf, CompactString)>,
     /// `(directory, specifier)` → module, for every resolution the loader made.
     resolutions: FxHashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     files: FxHashSet<PathKey>,
@@ -426,6 +430,20 @@ impl DependencyLayer {
     /// The declaring `(file, name)` of `name` exported from `module`, when the loader answered it.
     pub(crate) fn export_of(&self, module: &Utf8Path, name: &str) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
         self.export_entry(&(PathKey::from(module), CompactString::from(name)))
+    }
+
+    /// [`Self::export_of`] for the resolver: a complete answer, else one a walk found past a file it could not read
+    /// (`partial_exports`), which holds for this layer while that walk is unread.
+    pub(crate) fn export_for_resolver(
+        &self,
+        module: &Utf8Path,
+        name: &str,
+    ) -> Option<Option<(Utf8PathBuf, CompactString)>> {
+        let key = (PathKey::from(module), CompactString::from(name));
+        if let Some(found) = self.export_entry(&key) {
+            return Some(found.clone());
+        }
+        self.chain().find_map(|layer| layer.partial_exports.get(&key)).map(|found| Some(found.clone()))
     }
 
     fn export_entry(&self, key: &(PathKey, CompactString)) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
@@ -519,6 +537,7 @@ struct Loader<'a> {
     parsed: FxDashMap<PathKey, ParseCell>,
     resolutions: FxDashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
+    partial_exports: FxDashMap<(PathKey, CompactString), (Utf8PathBuf, CompactString)>,
     claimed: FxDashSet<(PathKey, CompactString)>,
     declaring: FxDashSet<PathKey>,
     react_files: FxDashSet<PathKey>,
@@ -565,6 +584,7 @@ impl<'a> Loader<'a> {
             parsed: DashMap::default(),
             resolutions: DashMap::default(),
             exports: DashMap::default(),
+            partial_exports: DashMap::default(),
             claimed: DashSet::default(),
             declaring: DashSet::default(),
             react_files: DashSet::default(),
@@ -872,6 +892,9 @@ impl Loader<'_> {
             };
         }
         let found = self.find_export(&module, &demand.name);
+        if let (Some(declaring), true) = (&found.value, found.incomplete()) {
+            self.partial_exports.insert((PathKey::from(module.as_path()), demand.name.clone()), declaring.clone());
+        }
         let loaded = match found.value {
             Some((file, name)) => self.load_declaration(scope, file, name, &node),
             None if !found.unread.is_empty() => Partial::DONE,
@@ -1375,6 +1398,9 @@ pub(crate) fn load_at(
                 for (key, value) in layer.exports.iter() {
                     loader.exports.insert(key.clone(), value.clone());
                 }
+                for (key, value) in &layer.partial_exports {
+                    loader.partial_exports.insert(key.clone(), value.clone());
+                }
                 for (key, data) in &layer.parsed {
                     loader.parsed.insert(key.clone(), Arc::new(OnceLock::from(Ok(data.clone()))));
                 }
@@ -1486,6 +1512,7 @@ pub(crate) fn load_at(
         files,
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
+        partial_exports: loader.partial_exports.into_iter().collect(),
         // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer
         // follows it again.
         demands,

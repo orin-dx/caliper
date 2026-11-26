@@ -505,10 +505,21 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
                 1 => {
                     let (name, imports, _) = MODEL_COMPONENTS[next(MODEL_COMPONENTS.len())];
                     let file = root.join(format!("src/{name}.tsx"));
+                    let answers = |session: &WatchSession| -> Vec<String> {
+                        let answer = |name: &&str| comparable(&root, &session.component(name).unwrap());
+                        MODEL_COMPONENTS.iter().map(|(name, _, _)| answer(name)).collect()
+                    };
+                    let before = answers(&session);
                     std::fs::write(&file, model_source(name, imports, step + 1)).unwrap();
-                    drop(session.update_file(&file));
+                    let update = session.update_file(&file);
                     edited_since_change = true;
                     log.push(format!("edit {name}"));
+                    // Every component whose answer the edit changes is in the delta, a provisional one included.
+                    let after = answers(&session);
+                    for ((component, _, _), (before, after)) in MODEL_COMPONENTS.iter().zip(before.iter().zip(&after)) {
+                        let named = update.updated_keys.iter().any(|key| key == component);
+                        assert!(before == after || named, "{component} changed, not in the delta: {}", context(&log));
+                    }
                 }
                 _ => {
                     let (name, _, reads) = MODEL_COMPONENTS[next(MODEL_COMPONENTS.len())];
