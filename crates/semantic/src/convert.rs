@@ -1976,8 +1976,10 @@ impl Converter {
             let prop_type = without_undefined(prop_type, !required);
             fields.push(ObjectField::new(property.member_name().to_string(), prop_type, required, String::new()));
         }
-        let sides: Vec<TypeInfo> =
-            indexes.iter().flat_map(|index| [index.key_type.clone(), index.value_type.clone()]).collect();
+        let mut sides: Vec<&TypeInfo> = Vec::with_capacity(indexes.len() * 2);
+        for index in indexes {
+            sides.extend([&index.key_type, &index.value_type]);
+        }
         let mut sides = self.convert_all(&sides, cx).await?.into_iter();
         for index in indexes {
             let (Some(key), Some(value)) = (sides.next(), sides.next()) else { break };
