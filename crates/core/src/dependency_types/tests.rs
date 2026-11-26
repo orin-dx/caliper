@@ -522,6 +522,44 @@ fn component_props_of_a_member_of_a_value_with_a_mapped_type_bind_the_key() {
     );
 }
 
+/// The same `Primitive` behind a barrel whose first `export *` target could not be read: the walk finds `Primitive.div`
+/// in the next target, and `ComponentProps<typeof Primitive.div>` reads it there, with the warning.
+#[test]
+fn component_props_of_a_member_found_past_an_unreadable_star_target_bind_the_key() {
+    let (_tmp, root) = project(&[
+        ("node_modules/prim-kit/package.json", r#"{ "name": "prim-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/prim-kit/index.d.ts", "export * from './first';\nexport * from './prim';\n"),
+        (
+            "node_modules/prim-kit/prim.d.ts",
+            "import * as React from 'react';\n\
+             declare const NODES: readonly [\"a\", \"div\"];\n\
+             type Primitives = { [E in (typeof NODES)[number]]: PrimitiveForwardRefComponent<E> };\n\
+             type PrimitivePropsWithRef<E extends React.ElementType> = Own<E> & { asChild?: boolean };\n\
+             interface Own<E> { tag?: E }\n\
+             interface PrimitiveForwardRefComponent<E extends React.ElementType> \
+             extends React.ForwardRefExoticComponent<PrimitivePropsWithRef<E>> {}\n\
+             declare const Primitive: Primitives;\n\
+             export { Primitive };\n",
+        ),
+        (
+            "src/Box.tsx",
+            "import { Primitive } from 'prim-kit';\nimport * as React from 'react';\n\
+             export function Box(props: React.ComponentProps<typeof Primitive.div> & { extra?: number }) { return null; }\n",
+        ),
+    ]);
+    let first = root.join("node_modules/prim-kit/first.d.ts");
+    std::fs::write(&first, [0xff; 8]).unwrap();
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "Box"),
+        [("asChild".into(), "boolean".into()), ("extra".into(), "number".into()), ("tag".into(), "\"div\"".into())]
+    );
+    let io = |d: &&Diagnostic| d.code == DiagnosticCode::IoError && d.file.as_deref() == Some(first.as_str());
+    assert_eq!(output.diagnostics.iter().filter(io).count(), 1, "{:?}", output.diagnostics);
+}
+
 /// antd's `ComponentProps<typeof RcTooltip>`: the package's default export is an imported component re-exported as
 /// the default, declared as `declare const Tooltip: ForwardRefExoticComponent<TooltipProps & RefAttributes<R>>`.
 #[test]
@@ -804,8 +842,8 @@ fn a_wildcard_export_does_not_answer_for_a_failed_explicit_re_export_of_the_same
     let layer = load(demands, &options(&root, true), None);
 
     let index = root.join("node_modules/shadow-kit/index.d.ts");
-    assert_eq!(layer.export_of(&index, "Props"), Some(&None));
-    assert_eq!(layer.export_of(&index, "Ns.x"), Some(&None));
+    assert_eq!(layer.export_of_complete(&index, "Props"), Some(&None));
+    assert_eq!(layer.export_of_complete(&index, "Ns.x"), Some(&None));
     let src = root.join("src");
     assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Props"), Some(Unresolved::Unresolvable));
     assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Ns.x"), Some(Unresolved::Unresolvable));
@@ -870,11 +908,17 @@ fn the_loader_flattens_star_exports_and_cycles_and_records_why_a_demand_failed()
 
     let dist = root.join("node_modules/ui-kit/dist");
     let index = dist.join("index.d.ts");
-    assert_eq!(layer.export_of(&index, "B"), Some(&Some((dist.join("cycle-b.d.ts"), "B".into()))));
-    assert_eq!(layer.export_of(&dist.join("cycle-a.d.ts"), "B"), Some(&Some((dist.join("cycle-b.d.ts"), "B".into()))));
-    assert_eq!(layer.export_of(&index, "ButtonProps"), Some(&Some((dist.join("button.d.ts"), "ButtonProps".into()))));
+    assert_eq!(layer.export_of_complete(&index, "B"), Some(&Some((dist.join("cycle-b.d.ts"), "B".into()))));
+    assert_eq!(
+        layer.export_of_complete(&dist.join("cycle-a.d.ts"), "B"),
+        Some(&Some((dist.join("cycle-b.d.ts"), "B".into())))
+    );
+    assert_eq!(
+        layer.export_of_complete(&index, "ButtonProps"),
+        Some(&Some((dist.join("button.d.ts"), "ButtonProps".into())))
+    );
     // `Missing` was looked for around the cycle, so its answer depended on the walk and was not kept.
-    assert_eq!(layer.export_of(&index, "Missing"), None);
+    assert_eq!(layer.export_of_complete(&index, "Missing"), None);
     let mut files: Vec<&str> = layer.files.iter().map(std::borrow::Borrow::<str>::borrow).collect();
     files.sort_unstable();
     assert_eq!(
@@ -978,7 +1022,10 @@ fn chained_layer_and_flatten_resolve_like_one_cold_load() {
     assert_eq!(chained.missing(&demands), Vec::<Demand>::new());
     let dist = root.join("node_modules/ui-kit/dist");
     for name in names {
-        assert_eq!(chained.export_of(&dist.join("index.d.ts"), name), cold.export_of(&dist.join("index.d.ts"), name));
+        assert_eq!(
+            chained.export_of_complete(&dist.join("index.d.ts"), name),
+            cold.export_of_complete(&dist.join("index.d.ts"), name)
+        );
     }
     for name in names.iter().filter(|name| name.starts_with("Missing")) {
         assert_eq!(chained.unresolved_reason(&root.join("src"), "ui-kit", name), Some(Unresolved::NotExported));
@@ -1894,7 +1941,7 @@ fn an_export_walk_continues_past_a_target_it_cannot_read_and_keeps_only_what_it_
         let barrel = root.join("node_modules/walk/index.d.ts");
         let demands: Vec<Demand> = TARGETS.iter().map(|(_, name)| demand(&root, "walk", name)).collect();
         let export = |layer: &DependencyLayer, (_, name): (&str, &str)| -> Option<Option<(Utf8PathBuf, String)>> {
-            let found = layer.export_of(&barrel, name)?;
+            let found = layer.export_of_complete(&barrel, name)?;
             Some(found.as_ref().map(|(declaring, name)| (declaring.clone(), name.to_string())))
         };
         let declared = |(file, name): (&str, &str)| Some(Some((target(&root, file), name.to_owned())));

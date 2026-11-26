@@ -213,8 +213,10 @@ fn value_member_props_at_depth(
         if lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}")).is_some() {
             break;
         }
-        if let Some(Some((declaring_file, qualified))) =
-            ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&base_file, &format!("{base_name}.{member}")))
+        if let Some(Some((declaring_file, qualified))) = ctx
+            .dependencies
+            .as_ref()
+            .and_then(|layer| layer.export_for_resolver(&base_file, &format!("{base_name}.{member}")))
         {
             let (declaring_name, declared_member) = qualified.split_once('.')?;
             (base_file, base_name, member) =

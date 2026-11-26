@@ -537,12 +537,18 @@ const MODEL_COMPONENTS: &[(&str, &str, &[&str])] = &[
     ("B", "BProps", &["index", "a", "stub", "b", "nest"]),
     ("N", "Nest", &["index", "a", "stub", "b", "nest", "deep", "leaf"]),
     ("All", "AProps, BProps, Nest", &["index", "a", "stub", "b", "nest", "deep", "leaf"]),
+    ("Direct", "BProps", &["b"]),
 ];
+
+/// The components that import from a module of the package other than its index: `Direct` loads `b.d.ts`'s
+/// declaration without the barrel, so a later barrel walk past an unreadable `a.d.ts` adds only its partial mapping.
+const MODEL_SPECIFIERS: &[(&str, &str)] = &[("Direct", "mk/b")];
 
 fn model_source(name: &str, imports: &str, edit: usize) -> String {
     let own = name.to_lowercase();
+    let from = MODEL_SPECIFIERS.iter().find(|(component, _)| *component == name).map_or("mk", |(_, from)| from);
     format!(
-        "import type {{ {imports} }} from 'mk';\ninterface {name}Own extends {imports} {{ own_{own}: string }}\n\
+        "import type {{ {imports} }} from '{from}';\ninterface {name}Own extends {imports} {{ own_{own}: string }}\n\
          export function {name}(props: {name}Own) {{ return null; }}\n// edit {edit}\n"
     )
 }

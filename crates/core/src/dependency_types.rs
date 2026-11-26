@@ -350,6 +350,9 @@ struct Totals {
     files: usize,
     react_files: usize,
     exports: usize,
+    /// Partial mappings a layer added or changed from the chain's ([`DependencyLayer::partial_exports`]): the resolver
+    /// reads them, so a load that only adds one is a change.
+    partial_exports: usize,
     resolutions: usize,
     unresolved: usize,
 }
@@ -429,12 +432,18 @@ impl DependencyLayer {
         self.chain().any(|layer| layer.files.contains(file.as_str()))
     }
 
-    /// The declaring `(file, name)` of `name` exported from `module`, when the loader answered it.
-    pub(crate) fn export_of(&self, module: &Utf8Path, name: &str) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
+    /// The declaring `(file, name)` of `name` exported from `module`, when a walk that read every file answered it: what
+    /// the index writes. The resolver reads [`Self::export_for_resolver`], which a partial walk's answer also reaches.
+    #[cfg(test)]
+    pub(crate) fn export_of_complete(
+        &self,
+        module: &Utf8Path,
+        name: &str,
+    ) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
         self.export_entry(&(PathKey::from(module), CompactString::from(name)))
     }
 
-    /// [`Self::export_of`] for the resolver: a complete answer, else one a walk found past a file it could not read
+    /// [`Self::export_of_complete`] for the resolver: a complete answer, else one a walk found past a file it could not read
     /// (`partial_exports`), which holds for this layer while that walk is unread.
     pub(crate) fn export_for_resolver(
         &self,
@@ -495,12 +504,13 @@ impl DependencyLayer {
     }
 
     /// Whether `other`, a layer this one was extended from, resolves every name the way this one does: extending only
-    /// adds, so equal counts mean nothing was added.
+    /// adds, so equal counts mean nothing was added. A partial mapping counts only where it differs from the chain's.
     pub(crate) fn resolves_like(&self, other: &DependencyLayer) -> bool {
         let (a, b) = (self.totals, other.totals);
         a.files == b.files
             && a.react_files == b.react_files
             && a.exports == b.exports
+            && a.partial_exports == b.partial_exports
             && a.resolutions == b.resolutions
             && a.unresolved == b.unresolved
     }
@@ -1495,11 +1505,21 @@ pub(crate) fn load_at(
     let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
     let demands: FxHashSet<DemandKey> = loader.demands.into_iter().collect();
     let files: FxHashSet<PathKey> = files.into_iter().collect();
+    // A walk that found the mapping the chain already holds adds nothing the resolver reads.
+    let partial_exports: FxHashMap<_, _> = loader
+        .partial_exports
+        .into_iter()
+        .filter(|(key, found)| {
+            parent.as_ref().and_then(|layer| layer.chain().find_map(|layer| layer.partial_exports.get(key)))
+                != Some(found)
+        })
+        .collect();
     let below = parent.as_ref().map(|layer| layer.totals).unwrap_or_default();
     let totals = Totals {
         files: below.files + files.len(),
         react_files: below.react_files + react_files.len(),
         exports: below.exports + exports.len(),
+        partial_exports: below.partial_exports + partial_exports.len(),
         resolutions: below.resolutions + resolutions.len(),
         unresolved: below.unresolved + unresolved.len(),
     };
@@ -1516,7 +1536,7 @@ pub(crate) fn load_at(
         files,
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
-        partial_exports: loader.partial_exports.into_iter().collect(),
+        partial_exports,
         // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer
         // follows it again.
         demands,

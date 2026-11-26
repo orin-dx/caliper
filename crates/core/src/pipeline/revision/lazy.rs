@@ -217,6 +217,15 @@ fn group_by_name(global: &GlobalSourceData, options: &PipelineOptions) -> FxHash
     by_name
 }
 
+/// Names each of `ids` in a delta: its name is touched and its file affected. Every path that reports answers which
+/// may differ goes through this, for the memoized and the provisional ones alike.
+fn touch(ids: impl Iterator<Item = ComponentId>, touched: &mut FxHashSet<String>, affected: &mut Vec<Utf8PathBuf>) {
+    for id in ids {
+        touched.insert(id.name);
+        affected.push(id.file);
+    }
+}
+
 fn demands_by_file(file_demands: Vec<(Utf8PathBuf, Vec<Demand>)>) -> FxHashMap<PathKey, Arc<[Demand]>> {
     file_demands
         .into_iter()
@@ -381,10 +390,7 @@ impl Revision {
         }
         // A provisional answer is never carried over: the edit makes every walk past an unreadable file due, so each
         // may answer differently, whatever file it read.
-        for entry in previous.provisional.iter() {
-            touched.insert(entry.key().name.clone());
-            affected_files.push(entry.key().file.clone());
-        }
+        touch(previous.provisional.iter().map(|entry| entry.key().clone()), &mut touched, &mut affected_files);
         // A name the changed file declared before or after keeps no memo, but its keys can still move.
         for groups in [&previous.by_name, &by_name] {
             for (name, group) in groups {
@@ -453,13 +459,15 @@ impl Revision {
     }
 
     /// The revision after a change that can alter how every import resolves, rebuilt from scratch. Every name the
-    /// previous revision had resolved is reported, since any answer may differ.
+    /// previous revision had answered, memoized or provisional, is reported, since any answer may differ.
     pub(super) fn rebuilt_lazy(&self, options: &PipelineOptions) -> Option<(Revision, IncrementalUpdate)> {
         let previous = self.lazy.as_ref()?;
         let start = Instant::now();
         let next = Revision::cold_lazy(options, self.id + 1);
-        let touched: FxHashSet<String> = previous.memo.iter().map(|entry| entry.key().name.clone()).collect();
-        let mut affected_files: Vec<Utf8PathBuf> = previous.memo.iter().map(|entry| entry.key().file.clone()).collect();
+        let (mut touched, mut affected_files) = (FxHashSet::default(), Vec::new());
+        let memo = previous.memo.iter().map(|entry| entry.key().clone());
+        let provisional = previous.provisional.iter().map(|entry| entry.key().clone());
+        touch(memo.chain(provisional), &mut touched, &mut affected_files);
         affected_files.sort();
         affected_files.dedup();
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -872,7 +880,7 @@ mod read_retry_tests {
 
     /// A walk that passes an unreadable `export *` target and finds the name in a later one gives the resolver that
     /// barrel's mapping for this layer: the props are in the answer, with the warning. The mapping is kept nowhere a
-    /// complete answer is (`export_of`, which the index writes). Once the file reads and an edit arrives, the answer is
+    /// complete answer is (`export_of_complete`, which the index writes). Once the file reads and an edit arrives, the answer is
     /// a cold run's.
     #[test]
     fn an_export_found_past_an_unreadable_star_target_reaches_the_resolver_for_its_layer() {
@@ -887,7 +895,7 @@ mod read_retry_tests {
         assert_eq!(warned(&answer), [first.to_string()]);
         let layer = revision.lazy.as_ref().unwrap().engine.load().layer.clone().unwrap();
         let barrel = root.join("node_modules/barrel-kit/index.d.ts");
-        assert_eq!(layer.export_of(&barrel, "SecondProps"), None, "not kept as a complete answer");
+        assert_eq!(layer.export_of_complete(&barrel, "SecondProps"), None, "not kept as a complete answer");
         assert!(layer.export_for_resolver(&barrel, "SecondProps").is_some());
 
         std::fs::write(&first, FIRST).unwrap();
@@ -1033,6 +1041,48 @@ mod read_retry_tests {
         assert!(!after.contains("N.tsx") && after.contains("U2.tsx"), "{after:?}");
     }
 
+    /// `D` loads `second.d.ts`'s declaration directly; then `S`, in the same directory, finds it through the barrel
+    /// past an unreadable `export *` target. That load adds only the barrel's partial mapping, and the resolver reads
+    /// it: `S` has the props a fresh session over the same unreadable file gives.
+    #[test]
+    fn a_barrel_mapping_to_a_declaration_loaded_directly_reaches_the_resolver() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        let first = root.join("node_modules/barrel-kit/first.d.ts");
+        std::fs::write(&first, [0xff; FIRST.len()]).unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        assert_eq!(props(&revision.lazy_component(&options, "D").unwrap()), ["own", "second"]);
+        let answer = revision.lazy_component(&options, "S").unwrap();
+        let fresh = Revision::cold_lazy(&options, 0);
+        set_clock(&fresh, start);
+        assert_eq!(props(&answer), ["own", "second"]);
+        assert_eq!(answer, fresh.lazy_component(&options, "S").unwrap());
+        // A retry that finds the same mapping again changes nothing the resolver reads: no growth.
+        let growths = revision.layer_growths();
+        set_clock(&revision, start + DEGRADED_RETRY);
+        assert_eq!(cost(&revision, || drop(revision.lazy_component(&options, "S"))), (1, 1));
+        assert_eq!(revision.layer_growths(), growths);
+    }
+
+    /// A provisional component, then a change that can alter how every import resolves (the rebuild path): its key is
+    /// in the delta, and once the file reads its answer is a cold run's.
+    #[test]
+    fn a_rebuild_names_every_provisional_component_in_the_delta() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        let bad = root.join("node_modules/bad-kit/props.d.ts");
+        std::fs::write(&bad, [0xff; BAD_PROPS.len()]).unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        assert_eq!(props(&revision.lazy_component(&options, "A").unwrap()), ["own"]);
+        std::fs::write(&bad, BAD_PROPS).unwrap();
+        let (next, update) = revision.rebuilt_lazy(&options).unwrap();
+        assert!(update.updated_keys.contains(&"A".to_owned()), "{:?}", update.updated_keys);
+        assert_eq!(next.lazy_component(&options, "A").unwrap(), cold(&root, "A"));
+    }
+
     fn project() -> (tempfile::TempDir, Utf8PathBuf) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
@@ -1075,6 +1125,12 @@ mod read_retry_tests {
             ("node_modules/barrel-kit/first.d.ts", FIRST.to_owned()),
             ("node_modules/barrel-kit/second.d.ts", "export interface SecondProps { second: string }\n".to_owned()),
             ("src/s/S.tsx", component("S", "barrel-kit", "SecondProps")),
+            (
+                "src/s/D.tsx",
+                "import type { SecondProps } from 'barrel-kit/second';\nimport type { Missing } from 'barrel-kit';\n\
+                 interface DProps extends SecondProps { own: string }\nexport function D(props: DProps) { return null; }\n"
+                    .to_owned(),
+            ),
             ("node_modules/nest-kit/package.json", kit("nest-kit")),
             (
                 "node_modules/nest-kit/index.d.ts",

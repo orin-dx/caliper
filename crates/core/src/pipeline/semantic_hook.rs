@@ -54,6 +54,10 @@ enum Settled {
     /// ([`AnswerCache::degraded`]) until [`DEGRADED_RETRY`] passes or a file changes, and the request after that asks
     /// the checker again.
     Degraded(Vec<Diagnostic>),
+    /// The checker was unavailable for every target ([`SemanticOutcome::unavailable`]: not running, timed out,
+    /// crashed): what it said. Held for every component at once ([`AnswerCache::outage`]), so a batch of components
+    /// asks it once, not once each.
+    Unavailable(Vec<Diagnostic>),
     /// The checker stopped without answering. Held as a refusal like [`Settled::Degraded`], with the warning that says
     /// so ([`stopped_warning`]): a checker that keeps stopping would otherwise be asked by every request.
     Stopped,
@@ -105,24 +109,28 @@ struct AnswerCache {
     /// answer: a request within [`DEGRADED_RETRY`] of it gets the structural props and these diagnostics without asking
     /// the checker, which would spend a restart or a timeout to fail again; one after it asks again.
     degraded: FxHashMap<(String, u64), (Instant, Vec<Diagnostic>)>,
+    /// The size of `degraded` at which the expired refusals are dropped next.
+    prune_at: usize,
+    /// When the checker was last unavailable for every target ([`Settled::Unavailable`]), and what it said: until
+    /// [`DEGRADED_RETRY`] passes, every request without a kept answer is refused with it.
+    outage: Option<(Instant, Vec<Diagnostic>)>,
     /// The one copy of each prop the kept answers hold, for this generation.
     props: PropInterner,
 }
 
-/// The most refusals [`AnswerCache::degraded`] holds. A key asked once and never again would otherwise stay for the
-/// session; past the bound the expired ones go first, then the oldest.
+/// The size of [`AnswerCache::degraded`] at which its expired refusals are first dropped. A key asked once and never
+/// again would otherwise stay for the session.
 const DEGRADED_HELD: usize = 256;
 
 impl AnswerCache {
-    /// Hold `key`'s refusal from `at`. At the bound, the refusals past [`DEGRADED_RETRY`] are dropped first (a scan
-    /// only when the map is full), then the oldest, so the map never holds more than [`DEGRADED_HELD`].
+    /// Hold `key`'s refusal from `at`. Once the map reaches `prune_at`, the refusals past [`DEGRADED_RETRY`] are
+    /// dropped and the next prune waits until the map doubles. A refusal is never dropped before its retry: the map
+    /// holds at most twice the refusals of one retry interval, and a batch larger than [`DEGRADED_HELD`] repeated within
+    /// it asks nothing.
     fn hold_degraded(&mut self, key: (String, u64), at: Instant, said: Vec<Diagnostic>) {
-        if self.degraded.len() >= DEGRADED_HELD && !self.degraded.contains_key(&key) {
+        if self.degraded.len() >= self.prune_at.max(DEGRADED_HELD) {
             self.degraded.retain(|_, (held, _)| at.saturating_duration_since(*held) < DEGRADED_RETRY);
-            if self.degraded.len() >= DEGRADED_HELD {
-                let oldest = self.degraded.iter().min_by_key(|(_, (held, _))| *held).map(|(key, _)| key.clone());
-                oldest.map(|oldest| self.degraded.remove(&oldest));
-            }
+            self.prune_at = 2 * self.degraded.len();
         }
         self.degraded.insert(key, (at, said));
     }
@@ -230,6 +238,7 @@ impl SemanticHook {
         cache.generation += 1;
         cache.answers.clear();
         cache.degraded.clear();
+        cache.outage = None;
         for pending in cache.pending.values() {
             pending.priority.cancel();
         }
@@ -276,7 +285,11 @@ impl SemanticHook {
             }
             Found::Joined(pending) => pending,
             Found::Degraded(diagnostics) => {
-                answer.diagnostics.extend(diagnostics);
+                answer.diagnostics.extend(
+                    diagnostics
+                        .into_iter()
+                        .map(|diagnostic| Diagnostic { affects: vec![answer.key.clone()], ..diagnostic }),
+                );
                 return answer;
             }
             Found::Asking(pending) => {
@@ -287,7 +300,9 @@ impl SemanticHook {
 
         match pending.wait(self.wait_for(&answer, priority)) {
             Some(Settled::Answered(answered)) => self.apply(&mut answer, answered, mode, cx),
-            Some(Settled::Degraded(diagnostics)) => answer.diagnostics.extend(diagnostics),
+            Some(Settled::Degraded(diagnostics) | Settled::Unavailable(diagnostics)) => {
+                answer.diagnostics.extend(diagnostics)
+            }
             Some(Settled::Stopped) => answer.diagnostics.push(stopped_warning(&answer.key)),
             Some(Settled::Cancelled) | None => {
                 let mut pending =
@@ -316,6 +331,13 @@ impl SemanticHook {
                     return (Found::Degraded(said.clone()), generation);
                 }
                 Some(_) => drop(cache.degraded.remove(key)),
+                None => {}
+            }
+            match &cache.outage {
+                Some((at, said)) if now.saturating_duration_since(*at) < DEGRADED_RETRY => {
+                    return (Found::Degraded(said.clone()), generation);
+                }
+                Some(_) => cache.outage = None,
                 None => {}
             }
             if let Some(pending) = cache.pending.get(key) {
@@ -357,6 +379,7 @@ impl SemanticHook {
                             cache.answers.insert(key, answered.clone());
                         }
                         Settled::Degraded(said) => cache.hold_degraded(key, now(), said.clone()),
+                        Settled::Unavailable(said) => cache.outage = Some((now(), said.clone())),
                         Settled::Stopped => cache.hold_degraded(key, now(), vec![stopped_warning(&asked)]),
                         // Not an answer, nor one the checker failed to give: the next request asks.
                         Settled::Cancelled => {}
@@ -470,6 +493,10 @@ fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Settled {
             diagnostic
         })
         .collect();
+    // The mark for every target is the one `SemanticOutcome::unavailable` makes; a listed mark is per key.
+    if unavailable.is_some() && unavailable == SemanticOutcome::unavailable(String::new()).unavailable {
+        return Settled::Unavailable(diagnostics);
+    }
     if unavailable.is_some_and(|unasked| unasked.covers(asked)) {
         return Settled::Degraded(diagnostics);
     }
@@ -681,8 +708,8 @@ mod tests {
         assert_eq!(messages, [CHECKER_PENDING]);
     }
 
-    /// Refusals for keys never asked again do not pile up: the map holds at most [`DEGRADED_HELD`], the expired ones go
-    /// first and then the oldest, and a fresh refusal is never dropped for an expired one.
+    /// Refusals for keys never asked again do not pile up: once the map reaches its prune size the expired ones go, and
+    /// a refusal is never dropped before its retry, however many keys were refused within it.
     #[test]
     fn refusals_for_keys_never_asked_again_are_bounded() {
         let mut cache = AnswerCache::default();
@@ -698,9 +725,45 @@ mod tests {
         for n in 1..=DEGRADED_HELD {
             cache.hold_degraded(key(DEGRADED_HELD + n), later + Duration::from_millis(n as u64), Vec::new());
         }
-        assert_eq!(cache.degraded.len(), DEGRADED_HELD, "never more than the bound");
-        assert!(!cache.degraded.contains_key(&key(DEGRADED_HELD)), "the oldest fresh one went");
-        assert!(cache.degraded.contains_key(&key(2 * DEGRADED_HELD)), "the newest stays");
+        assert_eq!(cache.degraded.len(), DEGRADED_HELD + 1, "no fresh refusal is dropped before its retry");
+        let expired = later + DEGRADED_RETRY * 2;
+        for n in 0..DEGRADED_HELD {
+            cache.hold_degraded(key(3 * DEGRADED_HELD + n), expired, Vec::new());
+        }
+        assert_eq!(cache.degraded.len(), DEGRADED_HELD, "at twice the size the expired ones went, the fresh stayed");
+        assert!((0..DEGRADED_HELD).all(|n| cache.degraded.contains_key(&key(3 * DEGRADED_HELD + n))));
+    }
+
+    /// A batch of 300 components while the checker is down asks it once, and while one rejects each component asks
+    /// once per component; the same batch again within the retry asks nothing either way.
+    #[test]
+    fn a_batch_larger_than_the_prune_size_repeated_within_the_retry_asks_nothing() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(root.join("Button.tsx"), BUTTON).unwrap();
+        let options = crate::pipeline::PipelineOptions { src_dirs: vec![root], ..Default::default() };
+        let structural = crate::pipeline::WatchSession::lazy(options.clone());
+        drop(structural.initialize());
+        let answer = structural.component("Button").unwrap();
+        let cx = CollapseContext::of(&options);
+        for (reply, first) in [(Reply::Down, 1), (Reply::Rejected, 300)] {
+            let checker = Arc::new(Replies { reply, recovered: false.into(), asked: 0.into() });
+            let mut hook = SemanticHook::new(checker.clone(), Duration::from_secs(60));
+            let start = Instant::now();
+            hook.now = Arc::new(move || start);
+            let batch = || {
+                for n in 0..300 {
+                    let asked = ComponentAnswer { key: format!("C{n}"), ..answer.clone() };
+                    let refined = hook.refine(asked, options.html_attributes, cx, Priority::Background);
+                    assert_eq!(refined.diagnostics.iter().filter(|d| d.affects == [format!("C{n}")]).count(), 1);
+                }
+            };
+            batch();
+            assert_eq!(checker.asked.load(SeqCst), first, "{reply:?}");
+            batch();
+            assert_eq!(checker.asked.load(SeqCst), first, "{reply:?}: the repeat asks nothing");
+        }
     }
 
     /// What [`Replies`] answers while the checker has not recovered.
