@@ -20,9 +20,17 @@ const EDITS: usize = 12;
 struct Lcg(u64);
 
 impl Lcg {
+    /// A value in `0..n`. Zero is a bug in the caller (a choice among no candidates), so it names the caller.
+    #[track_caller]
     fn below(&mut self, n: usize) -> usize {
+        assert!(n > 0, "Lcg::below(0): a choice among no candidates");
         self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         usize::try_from((self.0 >> 33) % n as u64).unwrap()
+    }
+
+    /// One of `items`, or `None` when there are none: the only way to choose among a list that may be empty.
+    fn pick<T: Copy>(&mut self, items: &[T]) -> Option<T> {
+        (!items.is_empty()).then(|| items[self.below(items.len())])
     }
 }
 
@@ -61,7 +69,7 @@ impl File {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 struct State {
     /// The name `types.ts` exports its props type as, `Shared<n>`.
     types_name: usize,
@@ -160,26 +168,40 @@ fn index(file: File) -> usize {
     FILES.iter().position(|candidate| *candidate == file).unwrap()
 }
 
-/// Applies one random edit to the state and the files, and returns the file it touched and a name for the edit.
-fn edit(state: &mut State, root: &Utf8Path, rng: &mut Lcg) -> (File, String) {
-    let touch = |state: &State, file: File| {
-        let path = root.join(file.name());
-        if state.exists[index(file)] {
-            std::fs::write(&path, state.render(file)).unwrap();
-        } else {
-            // A file already gone (a change to a deleted file's model state) stays gone.
-            drop(std::fs::remove_file(&path));
-        }
-    };
-    let (file, what) = match rng.below(9) {
+/// What an edit does to the files, so a generator test can check it applies to the state it was chosen from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    /// Changes one field of the model and rewrites one file (which stays gone if it is gone).
+    Model,
+    /// Removes a file that existed.
+    Delete,
+    /// Puts back a file that was gone.
+    Readd,
+    /// Rewrites a file unchanged, with every file present.
+    Rewrite,
+}
+
+#[derive(Clone, Debug)]
+struct Edit {
+    file: File,
+    kind: Kind,
+    label: String,
+}
+
+/// Picks one random edit and applies it to the model. Total: every kind of edit chooses among candidates computed from
+/// the state, and a kind with none (a delete with every file gone) becomes a re-add, so no seed can ask for a choice
+/// among nothing.
+fn next_edit(state: &mut State, rng: &mut Lcg) -> Edit {
+    let model = |file, what: &str| (file, Kind::Model, what.to_owned());
+    let (file, kind, what) = match rng.below(9) {
         0 => {
             // A prop's type changes: the shared type's `size`, or `Card`'s `label`.
             if rng.below(2) == 0 {
                 state.size_is_number = !state.size_is_number;
-                (File::Types, "change size's type")
+                model(File::Types, "change size's type")
             } else {
                 state.card_label_is_number = !state.card_label_is_number;
-                (File::Card, "change label's type")
+                model(File::Card, "change label's type")
             }
         }
         1 => {
@@ -187,15 +209,15 @@ fn edit(state: &mut State, root: &Utf8Path, rng: &mut Lcg) -> (File, String) {
             match rng.below(3) {
                 0 => {
                     state.shared_extra = (state.shared_extra + 1) % 3;
-                    (File::Types, "add or remove a shared member")
+                    model(File::Types, "add or remove a shared member")
                 }
                 1 => {
                     state.own_extra = (state.own_extra + 1) % 3;
-                    (File::Button, "add or remove an own prop")
+                    model(File::Button, "add or remove an own prop")
                 }
                 _ => {
                     state.local_extra = (state.local_extra + 1) % 3;
-                    (File::Local, "add or remove a declared member")
+                    model(File::Local, "add or remove a declared member")
                 }
             }
         }
@@ -204,63 +226,81 @@ fn edit(state: &mut State, root: &Utf8Path, rng: &mut Lcg) -> (File, String) {
             match rng.below(3) {
                 0 => {
                     state.types_name = (state.types_name + 1) % 2;
-                    (File::Types, "rename the type where it is declared")
+                    model(File::Types, "rename the type where it is declared")
                 }
                 1 => {
                     state.index_name = (state.index_name + 1) % 2;
-                    (File::Index, "rename the type where it is re-exported")
+                    model(File::Index, "rename the type where it is re-exported")
                 }
                 _ => {
                     state.button_name = (state.button_name + 1) % 2;
-                    (File::Button, "rename the type where it is imported")
+                    model(File::Button, "rename the type where it is imported")
                 }
             }
         }
         3 => {
-            // Delete a file that exists.
+            // Delete a file that exists; with none left, put one back.
             let alive: Vec<File> = FILES.iter().copied().filter(|file| state.exists[index(*file)]).collect();
-            let file = alive[rng.below(alive.len())];
-            state.exists[index(file)] = false;
-            (file, "delete a file")
-        }
-        4 => {
-            // Put a deleted file back, or, with none gone, touch one unchanged.
-            let gone: Vec<File> = FILES.iter().copied().filter(|file| !state.exists[index(*file)]).collect();
-            if gone.is_empty() {
-                (FILES[rng.below(FILES.len())], "rewrite a file unchanged")
-            } else {
-                let file = gone[rng.below(gone.len())];
-                state.exists[index(file)] = true;
-                (file, "re-add a file")
+            match rng.pick(&alive) {
+                Some(file) => {
+                    state.exists[index(file)] = false;
+                    (file, Kind::Delete, "delete a file".to_owned())
+                }
+                None => readd(state, rng),
             }
         }
+        4 => readd(state, rng),
         5 => {
             if rng.below(2) == 0 {
                 state.button_via_index = !state.button_via_index;
-                (File::Button, "change an import path")
+                model(File::Button, "change an import path")
             } else {
                 state.fancy_wraps_card = !state.fancy_wraps_card;
-                (File::Wrapped, "change the wrapped component")
+                model(File::Wrapped, "change the wrapped component")
             }
         }
         6 => {
             if rng.below(2) == 0 {
                 state.toggle_exported = !state.toggle_exported;
-                (File::Toggle, "toggle an export")
+                model(File::Toggle, "toggle an export")
             } else {
                 state.button_exported = !state.button_exported;
-                (File::Button, "toggle an export")
+                model(File::Button, "toggle an export")
             }
         }
         _ => {
             // Break a file, or fix a broken one.
             let file = FILES[rng.below(FILES.len())];
             state.broken[index(file)] = !state.broken[index(file)];
-            (file, if state.broken[index(file)] { "make a file unparsable" } else { "fix a file" })
+            model(file, if state.broken[index(file)] { "make a file unparsable" } else { "fix a file" })
         }
     };
-    touch(state, file);
-    (file, format!("{what} ({})", file.name()))
+    Edit { file, kind, label: format!("{what} ({})", file.name()) }
+}
+
+/// Put a deleted file back, or, with none gone, touch one unchanged.
+fn readd(state: &mut State, rng: &mut Lcg) -> (File, Kind, String) {
+    let gone: Vec<File> = FILES.iter().copied().filter(|file| !state.exists[index(*file)]).collect();
+    match rng.pick(&gone) {
+        Some(file) => {
+            state.exists[index(file)] = true;
+            (file, Kind::Readd, "re-add a file".to_owned())
+        }
+        None => (FILES[rng.below(FILES.len())], Kind::Rewrite, "rewrite a file unchanged".to_owned()),
+    }
+}
+
+/// Applies one random edit to the state and the files, and returns the file it touched and a name for the edit.
+fn edit(state: &mut State, root: &Utf8Path, rng: &mut Lcg) -> (File, String) {
+    let Edit { file, label, .. } = next_edit(state, rng);
+    let path = root.join(file.name());
+    if state.exists[index(file)] {
+        std::fs::write(&path, state.render(file)).unwrap();
+    } else {
+        // A file already gone (a change to a deleted file's model state) stays gone.
+        drop(std::fs::remove_file(&path));
+    }
+    (file, label)
 }
 
 fn options(root: &Utf8Path) -> PipelineOptions {
@@ -299,10 +339,17 @@ fn same(watched: &ExtractionOutput, cold: &ExtractionOutput, context: &str) {
     assert_eq!(watched, cold_json, "canonical JSON: {context}");
 }
 
+/// Seeds that once broke the generator, kept in the default run.
+const REGRESSION_SEEDS: [u64; 1] = [555_123];
+
+fn pinned_seed() -> Option<u64> {
+    std::env::var("SEED").ok().and_then(|seed| seed.parse().ok())
+}
+
 fn seeds() -> Vec<u64> {
-    match std::env::var("SEED").ok().and_then(|seed| seed.parse().ok()) {
+    match pinned_seed() {
         Some(seed) => vec![seed],
-        None => (1..=SEEDS).collect(),
+        None => (1..=SEEDS).chain(REGRESSION_SEEDS).collect(),
     }
 }
 
@@ -370,8 +417,62 @@ fn session_equals_cold_after_any_edits() {
     assert_eq!(steps, total);
     // Many edits change the output, and some add or remove a component (a deleted or broken file, a toggled export);
     // without a seed pinned, both must be common or the model is not exercising what it claims.
-    if total == usize::try_from(SEEDS).unwrap() * EDITS {
+    if pinned_seed().is_none() {
         assert!(moved * 2 >= total, "only {moved} of {total} edits changed the output");
         assert!(membership * 8 >= total, "only {membership} of {total} edits changed the set of components");
     }
+}
+
+/// Runs the generator alone (no extraction) and checks each edit applies to the state it was chosen from.
+fn sweep(seed: u64, steps: usize) -> Vec<(State, Edit)> {
+    let mut rng = Lcg(seed);
+    let mut state = State::new();
+    let mut taken = Vec::new();
+    for step in 1..=steps {
+        let before = state.clone();
+        let edit = next_edit(&mut state, &mut rng);
+        let context = format!("seed {seed}, step {step}, {edit:?}");
+        let (was, is) = (before.exists[index(edit.file)], state.exists[index(edit.file)]);
+        match edit.kind {
+            Kind::Model => {
+                assert_eq!(before.exists, state.exists, "{context}");
+                assert_ne!(before, state, "a model edit changes the model: {context}");
+            }
+            Kind::Delete => assert!(was && !is, "delete of a file that was not there: {context}"),
+            Kind::Readd => assert!(!was && is, "re-add of a file that was not gone: {context}"),
+            Kind::Rewrite => {
+                assert!(before.exists.iter().all(|exists| *exists), "rewrite while a file is gone: {context}");
+                assert_eq!(before, state, "{context}");
+            }
+        }
+        assert!(
+            state.shared_extra < 3 && state.own_extra < 3 && state.local_extra < 3,
+            "member counts stay in range: {context}"
+        );
+        assert!(state.types_name < 2 && state.index_name < 2 && state.button_name < 2, "{context}");
+        taken.push((before, edit));
+    }
+    taken
+}
+
+#[test]
+fn edit_generator_is_total_for_any_seed() {
+    let (mut fallbacks, mut deletes) = (0, 0);
+    for seed in 0..2000 {
+        let steps = 12 + usize::try_from(seed % 19).unwrap();
+        for (before, edit) in sweep(seed, steps) {
+            deletes += usize::from(edit.kind == Kind::Delete);
+            fallbacks += usize::from(edit.kind == Kind::Readd && before.exists.iter().all(|exists| !exists));
+        }
+    }
+    // The sweep must reach the empty-project corner and the ordinary delete, or it proves nothing about either.
+    assert!(deletes > 0 && fallbacks > 0, "{deletes} deletes, {fallbacks} re-adds into an empty project");
+}
+
+#[test]
+fn seed_555123_deletes_nothing_from_an_empty_project() {
+    let taken = sweep(555_123, EDITS);
+    let (before, edit) = &taken[EDITS - 1];
+    assert!(before.exists.iter().all(|exists| !exists), "every file is gone before step {EDITS}");
+    assert_eq!(edit.kind, Kind::Readd);
 }
