@@ -2019,6 +2019,8 @@ impl Converter {
                 self.rpc.note("readonly classified", properties.len() as u64);
                 // Nothing to merge until a property is settled: a list the answer settles not at all gets no vector.
                 let mut settled: Option<Vec<Option<bool>>> = None;
+                // Counted as the properties are classified, so the references to ask are sized without another pass.
+                let mut unresolved = 0;
                 for (index, property) in properties.iter().enumerate() {
                     match property.settled_readonly() {
                         Some(value) => settled
@@ -2031,7 +2033,10 @@ impl Converter {
                                 merge
                             })
                             .push(Some(value)),
-                        None => settled.iter_mut().for_each(|settled| settled.push(None)),
+                        None => {
+                            unresolved += 1;
+                            settled.iter_mut().for_each(|settled| settled.push(None));
+                        }
                     }
                 }
                 let wrong_length = || CallError::Rejected("an isReadonlySymbol batch of another length".to_string());
@@ -2040,20 +2045,23 @@ impl Converter {
                     let answers = self.rpc.readonly_symbols(references).await?;
                     return (answers.len() == properties.len()).then(|| Arc::from(answers)).ok_or_else(wrong_length);
                 };
-                let asked: Vec<&SymbolRef> = if settled.iter().any(Option::is_none) {
+                let mut asked: Vec<&SymbolRef> = Vec::with_capacity(unresolved);
+                if unresolved > 0 {
                     #[cfg(test)]
                     self.rpc.note("readonly references built", 1);
-                    references.iter().zip(&settled).filter(|(_, settled)| settled.is_none()).map(|(r, _)| *r).collect()
-                } else {
-                    Vec::new()
-                };
+                    asked.extend(
+                        references.iter().zip(&settled).filter(|(_, settled)| settled.is_none()).map(|(r, _)| *r),
+                    );
+                }
                 let answers = if asked.is_empty() { Vec::new() } else { self.rpc.readonly_symbols(&asked).await? };
                 // There is one answer for each property the answer did not settle. A missing one is never read as
                 // `false`: that would be silence as evidence.
                 let mut answers = answers.into_iter();
-                let flags: Option<Arc<[bool]>> =
-                    settled.iter().map(|settled| settled.or_else(|| answers.next())).collect();
-                flags.ok_or_else(wrong_length)
+                let mut flags = Vec::with_capacity(settled.len());
+                for settled in settled {
+                    flags.push(settled.or_else(|| answers.next()).ok_or_else(wrong_length)?);
+                }
+                Ok(Arc::from(flags))
             })
             .await?;
         // `listed` names the same symbol list every time, so the cached flags are one per property.
