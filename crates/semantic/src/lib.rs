@@ -450,7 +450,7 @@ async fn reroot(old: Vec<Arc<Rpc>>, files: &[String]) -> Result<Vec<Arc<Rpc>>, C
     let mut tasks = JoinSet::new();
     for (lane, rpc) in old.iter().enumerate() {
         let (rpc, files) = (rpc.clone(), files.clone());
-        tasks.spawn(async move { (lane, rpc.updated(&[], &[], Some(&files)).await) });
+        tasks.spawn(async move { (lane, rpc.rerooted(&files).await) });
     }
     let mut rooted: Vec<Option<Rpc>> = old.iter().map(|_| None).collect();
     while let Some(joined) = tasks.join_next().await {
@@ -739,6 +739,8 @@ async fn session(
     {
         tracing::warn!("could not write the recording to {path}: {error}");
     }
+    // The requests on the snapshot answered from: a whole run's, its opening and any rooting anew included; on a
+    // checker kept between answers, those since the snapshot was built or brought up to date.
     tracing::debug!(
         requests = ?rpc.calls(),
         files = files.len(),
@@ -1340,15 +1342,29 @@ mod tests {
     }
 
     /// Stands in for the checker: numbers each snapshot a `createSnapshot` or `updateSnapshot` makes, refuses every
-    /// question about them, and records which were released.
+    /// question about them, and records which were released, the most alive at once, every request in the order
+    /// handled and whether the session was closed.
+    #[derive(Default)]
     struct Numbering {
         made: Arc<Mutex<Vec<u64>>>,
         released: Arc<Mutex<Vec<u64>>>,
+        peak: Arc<AtomicU64>,
+        handled: Arc<Mutex<Vec<String>>>,
+        closed: Arc<std::sync::atomic::AtomicBool>,
+        /// The snapshot whose rooting anew (`updateSnapshot` with `reconfigurePrograms`) is refused.
+        refuse_rooting: Option<u64>,
     }
 
     impl checker::Served for Numbering {
         fn handle(&self, method: &str, params: &[u8]) -> Result<String, checker::Failure> {
+            let value: serde_json::Value = serde_json::from_slice(params).unwrap_or_default();
+            let refused = method == "updateSnapshot"
+                && self.refuse_rooting.is_some()
+                && value["snapshot"].as_u64() == self.refuse_rooting
+                && value["changes"]["reconfigurePrograms"].is_array();
+            self.handled.lock().unwrap().push(if refused { "refused".to_string() } else { method.to_string() });
             match method {
+                _ if refused => Err(checker::Failure { message: "refused".to_string(), panicked: false }),
                 "initialize" => Ok("null".to_string()),
                 "release" => {
                     let params: serde_json::Value = serde_json::from_slice(params).unwrap();
@@ -1363,6 +1379,8 @@ mod tests {
                     let mut made = self.made.lock().unwrap();
                     let snapshot = made.len() as u64 + 1;
                     made.push(snapshot);
+                    let alive = made.len() - self.released.lock().unwrap().len();
+                    self.peak.fetch_max(alive as u64, Ordering::Relaxed);
                     let projects: Vec<_> =
                         (0..count).map(|n| serde_json::json!({ "id": format!("p{snapshot}-{n}") })).collect();
                     Ok(serde_json::json!({ "snapshot": snapshot, "projects": projects }).to_string())
@@ -1373,7 +1391,88 @@ mod tests {
 
         fn discard(&self, _method: &str, _answer: &str) {}
 
-        fn close(&self) {}
+        fn close(&self) {
+            self.closed.store(true, Ordering::Release);
+        }
+    }
+
+    /// A run of `request` that takes an early session of 4 lanes a [`Numbering`] checker opened over all but the last of
+    /// its files, refusing to root `refuse_rooting` anew; returns how the session was taken, and the checker as seen once
+    /// its session closed (the run stops it, and its threads close the session on their own).
+    fn through_an_early_fake(request: &SemanticRequest, refuse_rooting: Option<u64>) -> (Taken, Numbering) {
+        let fake = Numbering { refuse_rooting, ..Numbering::default() };
+        let seen = Numbering {
+            made: fake.made.clone(),
+            released: fake.released.clone(),
+            peak: fake.peak.clone(),
+            handled: fake.handled.clone(),
+            closed: fake.closed.clone(),
+            refuse_rooting,
+        };
+        let mut early_roots = root_files(request);
+        early_roots.pop();
+        let (timeout, files) = (request.request_timeout, early_roots.clone());
+        let handle = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().ok()?;
+            let checker = Backend::spawn(4, move || fake).ok()?;
+            let opened = runtime.block_on(Rpc::open_programs(checker.client(), timeout, None, &files, false, 4));
+            let programs: Vec<Arc<Rpc>> = opened.ok()?.into_iter().map(Arc::new).collect();
+            Some(Opened { runtime, checker, programs: Ok(programs) })
+        });
+        let early = EarlyStart {
+            handle: Some(handle),
+            project_root: request.project_root.clone(),
+            tsconfig: None,
+            timeout,
+            roots: early_roots,
+            reads: None,
+        };
+
+        let (_, taken) = resolve_taking(request.clone(), None, Some(early));
+
+        let waited = std::time::Instant::now();
+        while !seen.closed.load(Ordering::Acquire) && waited.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        (taken, seen)
+    }
+
+    /// Four lanes rooted anew in a session run: the old snapshots and the new ones are alive together only while the
+    /// lanes are rooted (8 at the peak), and all 8 are released, once each, before the checker is stopped.
+    #[test]
+    fn four_lanes_rooted_anew_release_both_generations_once() {
+        let (_dir, root) = shared_types_project(4);
+
+        let (taken, seen) = through_an_early_fake(&request_over(&root), None);
+
+        assert_eq!(taken, Taken::Rooted);
+        let mut released = seen.released.lock().unwrap().clone();
+        released.sort_unstable();
+        assert_eq!(*seen.made.lock().unwrap(), (1..=8).collect::<Vec<u64>>());
+        assert_eq!(released, (1..=8).collect::<Vec<u64>>());
+        assert_eq!(seen.peak.load(Ordering::Relaxed), 8);
+        assert!(seen.closed.load(Ordering::Acquire));
+    }
+
+    /// A lane whose rooting is refused, whichever it is: the run stops that checker, whose shutdown takes every snapshot
+    /// the rooting leaves, and sends it nothing more than the updates already on their way: no release, no question.
+    /// What the run answers with is a checker started again.
+    #[test]
+    fn a_lane_that_cannot_be_rooted_has_its_checker_stopped_and_asked_nothing_more() {
+        let (_dir, root) = shared_types_project(4);
+        let request = request_over(&root);
+        // The old lanes are snapshots 1 (created) to 4 (made beside it), in lane order.
+        for refused in 1..=4 {
+            let (taken, seen) = through_an_early_fake(&request, Some(refused));
+
+            assert_eq!(taken, Taken::Rebuilt, "lane {refused}");
+            assert!(seen.closed.load(Ordering::Acquire), "lane {refused}: the checker was not stopped");
+            assert_eq!(*seen.released.lock().unwrap(), Vec::<u64>::new(), "lane {refused}");
+            let handled = seen.handled.lock().unwrap().clone();
+            let at = handled.iter().position(|method| method == "refused").unwrap();
+            let after = &handled[at + 1..];
+            assert!(after.iter().all(|method| method == "updateSnapshot"), "lane {refused}: {handled:?}");
+        }
     }
 
     /// Every snapshot made for a run that roots three lanes anew is released, once each, at the end of a session run
@@ -1386,7 +1485,7 @@ mod tests {
             let request = request_over(&root).with_teardown(teardown);
             let made = Arc::new(Mutex::new(Vec::new()));
             let released = Arc::new(Mutex::new(Vec::new()));
-            let session = Numbering { made: made.clone(), released: released.clone() };
+            let session = Numbering { made: made.clone(), released: released.clone(), ..Numbering::default() };
             let checker = Backend::spawn(3, move || session).unwrap();
             let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
             let files = root_files(&request);
@@ -1410,6 +1509,37 @@ mod tests {
             // The lanes' old snapshots are released by the rooting itself; the new ones by the session teardown.
             let expected = if released_by_run { made } else { made[..3].to_vec() };
             assert_eq!(released, expected);
+        }
+    }
+
+    /// The lanes rooted anew count their requests with those of the lanes they replace, as lanes opened beside the
+    /// first do: one count per run, whichever way the early session was taken. On the base each rooted lane began at
+    /// nothing, and the run's count left out the opening and the rooting.
+    #[test]
+    fn lanes_rooted_anew_count_their_requests_with_the_run() {
+        let (_dir, root) = shared_types_project(3);
+        let request = request_over(&root);
+        let session = Numbering::default();
+        let checker = Backend::spawn(3, move || session).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        let files = root_files(&request);
+
+        let (old, rooted) = runtime.block_on(async {
+            let timeout = request.request_timeout;
+            let opened = Rpc::open_programs(checker.client(), timeout, None, &files[..2], false, 3).await.unwrap();
+            let opened: Vec<Arc<Rpc>> = opened.into_iter().map(Arc::new).collect();
+            let old = opened[0].clone();
+            let rooted = reroot(opened, &files).await.unwrap();
+            rooted[2].release().await;
+            (old, rooted)
+        });
+        runtime.block_on(checker.shutdown());
+
+        let expected: std::collections::BTreeMap<&str, u64> =
+            [("createSnapshot", 1), ("release", 4), ("updateSnapshot", 5)].into();
+        assert_eq!(old.calls(), expected);
+        for lane in &rooted {
+            assert_eq!(lane.calls(), expected);
         }
     }
 }

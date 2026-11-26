@@ -19,7 +19,7 @@ use tokio::sync::OnceCell;
 
 use crate::asked::{BatchAnswers, Mine, Taken, Theirs};
 use crate::convert::declared_in;
-use crate::rpc::{Asking, CallError, CompactSymbol, JsDocTag, Rpc, SymbolInfo, SymbolRef, decode, flag};
+use crate::rpc::{Ask, CallError, CompactSymbol, JsDocTag, Rpc, SymbolInfo, SymbolRef, decode, flag};
 
 /// One prop to look up, and which of its JSDoc to ask for.
 pub(crate) struct Asked<'a> {
@@ -80,7 +80,7 @@ pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Res
     // A round asks what nobody is asking and then waits for what another conversion is: it sends before it waits, so
     // no wait is for an answer that waits on one of ours. A question an asker gave up on is asked by the next round.
     loop {
-        let mut requests: Vec<(&'static str, Asking<'_>)> = Vec::new();
+        let mut requests: Vec<Ask<'_>> = Vec::new();
         let mut pending: Vec<Pending> = Vec::new();
         let mut theirs: Vec<Theirs> = Vec::new();
         let (mut described, mut tagged, mut declaring) =
@@ -93,7 +93,7 @@ pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Res
                     Taken::Kept => {}
                     Taken::Mine(mine) => {
                         described.insert(key.clone());
-                        requests.push(("getDocumentationComment", Asking::Symbol { symbol: &property.reference }));
+                        requests.push(Ask::DocumentationComment { symbol: &property.reference });
                         pending.push(Pending::Description(mine));
                     }
                     Taken::Theirs(other) => theirs.push(other),
@@ -104,7 +104,7 @@ pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Res
                     Taken::Kept => {}
                     Taken::Mine(mine) => {
                         tagged.insert(key.clone());
-                        requests.push(("getJsDocTags", Asking::Symbol { symbol: &property.reference }));
+                        requests.push(Ask::JsDocTags { symbol: &property.reference });
                         pending.push(Pending::Tags(mine));
                     }
                     Taken::Theirs(other) => theirs.push(other),
@@ -121,7 +121,7 @@ pub(crate) async fn declared(rpc: &Rpc, memo: &Memo, asked: &[Asked<'_>]) -> Res
                     Taken::Kept => {}
                     Taken::Mine(mine) => {
                         declaring.insert(declaration);
-                        requests.push(("getSymbolOfDeclarationForChecker", Asking::Location { location: declaration }));
+                        requests.push(Ask::SymbolOfDeclaration { location: declaration });
                         pending.push(Pending::Symbol(mine));
                     }
                     Taken::Theirs(other) => theirs.push(other),
@@ -228,7 +228,7 @@ async fn parent_names(
             match memo.parents.take((*parent).clone()) {
                 Taken::Kept => {}
                 Taken::Mine(mine) => {
-                    requests.push(("getParentOfSymbolForChecker", Asking::Symbol { symbol }));
+                    requests.push(Ask::ParentOfSymbol { symbol });
                     pending.push(mine);
                 }
                 Taken::Theirs(other) => theirs.push(other),
@@ -319,6 +319,7 @@ mod tests {
             flags: 4,
             declarations: declarations.iter().map(|declaration| declaration.to_string()).collect(),
             parent: parent.map(|id| CompactSymbol { id, file: None }),
+            readonly: None,
         }
     }
 

@@ -357,19 +357,8 @@ impl ResolutionContext {
         named_types: Arc<crate::named_type_index::NamedTypeIndex>,
     ) -> Self {
         let resolvers = ModuleResolvers::new(options);
-        // A tsconfig that can't be read or parsed would otherwise fail every aliased import one by one.
-        let tsconfig_diagnostic = governing_tsconfig(options).and_then(|path| {
-            let error = resolvers.main.resolve_tsconfig(path.as_std_path()).err()?;
-            Some(
-                Diagnostic::new(
-                    DiagnosticSeverity::Warning,
-                    DiagnosticCode::IoError,
-                    format!("Could not use the tsconfig '{path}': {error}"),
-                )
-                .with_file(path.to_string())
-                .with_help("Its `paths` aliases are not applied; imports that rely on them will not resolve."),
-            )
-        });
+        // First, on the context's own cache: what the context resolves next is what it resolved before any sharing.
+        let tsconfig_diagnostic = tsconfig_diagnostic(options, &resolvers.main);
 
         let mut enum_bare_index: FxHashMap<CompactString, CompactString> = FxHashMap::default();
         // Sorted so a bare name shared by several files binds to the same one regardless of hash order.
@@ -702,7 +691,34 @@ pub fn resolve_package_dts_path(
     react::resolve_package_types_file(&resolvers.main, &resolvers.types_first, &importing_file, package_name)
 }
 
-/// The two resolvers of a run, configured the way TypeScript resolves this project's modules (`resolve_options`).
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread checked the governing tsconfig (`tsconfig_diagnostic`).
+    pub(crate) static TSCONFIG_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Why the governing tsconfig cannot be used, if it cannot: one that can't be read or parsed would otherwise fail every
+/// aliased import one by one. Asked of `resolver` before it resolves anything, which also loads the governing config
+/// with its references into its cache.
+fn tsconfig_diagnostic(options: &PipelineOptions, resolver: &Resolver) -> Option<Diagnostic> {
+    #[cfg(test)]
+    TSCONFIG_CHECKS.with(|checks| checks.set(checks.get() + 1));
+    let path = governing_tsconfig(options)?;
+    let error = resolver.resolve_tsconfig(path.as_std_path()).err()?;
+    Some(
+        Diagnostic::new(
+            DiagnosticSeverity::Warning,
+            DiagnosticCode::IoError,
+            format!("Could not use the tsconfig '{path}': {error}"),
+        )
+        .with_file(path.to_string())
+        .with_help("Its `paths` aliases are not applied; imports that rely on them will not resolve."),
+    )
+}
+
+/// The two resolvers of a run, configured the way TypeScript resolves this project's modules (`resolve_options`). Each
+/// consumer (the dependency loader, a `ResolutionContext`) builds its own and shares it with no other, for the reason
+/// in `new`.
 pub(crate) struct ModuleResolvers {
     pub(crate) main: Resolver,
     /// Only `types` and the custom conditions: `resolve_dts` takes the first `exports` key that matches any condition,
@@ -716,6 +732,9 @@ impl ModuleResolvers {
         let custom = custom_conditions(options);
         let types_first =
             ResolveOptions { condition_names: std::iter::once("types".into()).chain(custom).collect(), ..main.clone() };
+        // A cache each, not `clone_with_options`: `oxc_resolver` caches a tsconfig reached through another's
+        // `references` without its own references, and a directory's nearest tsconfig once, so one resolver's answers
+        // would depend on what the other resolved first.
         ModuleResolvers { main: Resolver::new(main), types_first: Resolver::new(types_first) }
     }
 }

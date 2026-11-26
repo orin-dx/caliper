@@ -501,6 +501,62 @@ mod tests {
         assert!(kept(&root, &cache).is_none(), "and what its reads noted still discards it");
     }
 
+    /// A program opened early over some of the request's roots and brought to the rest ([`crate::reroot`]) reads the
+    /// files only an added root reaches while it is rooted anew (`updateSnapshot`), not when it was opened: those reads
+    /// are noted too, so an edit to such a file discards the answer kept after it. An edit to a file nothing reaches
+    /// keeps it.
+    #[test]
+    fn an_edit_to_a_file_only_a_root_added_to_an_early_program_reaches_discards_the_answer() {
+        let (_dir, root, cache) = project();
+        std::fs::write(root.join("dee.ts"), "export type Dee = 'one' | 'two';\n").unwrap();
+        std::fs::write(
+            root.join("Cee.tsx"),
+            "import type { Dee } from './dee';\nexport function Cee(props: { dee: Dee }) { return null; }\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("unrelated.ts"), "export type Unrelated = 1;\n").unwrap();
+        let timeout = std::time::Duration::from_secs(60);
+        let files = crate::root_files(&request(&root));
+        let cee = root.join("Cee.tsx").to_string();
+        assert!(files.contains(&cee), "{files:?}");
+        let roots: Vec<Utf8PathBuf> = files.iter().filter(|file| **file != cee).map(Utf8PathBuf::from).collect();
+        assert_eq!(roots.len(), 2, "{roots:?}");
+        // The program opened early over the other two roots asks nothing about `dee.ts`.
+        let mut opening = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, true);
+        let opening = opening.as_mut().unwrap();
+        let opened = opening.handle.take().unwrap().join().unwrap().unwrap();
+        assert!(opened.programs.is_ok());
+        let asked: Vec<String> = opening
+            .reads
+            .as_ref()
+            .unwrap()
+            .asked
+            .lock()
+            .unwrap()
+            .keys()
+            .map(|question| format!("{question:?}"))
+            .collect();
+        assert!(asked.iter().any(|question| question.contains("types.ts")), "{asked:?}");
+        assert!(!asked.iter().any(|question| question.contains("dee.ts")), "{asked:?}");
+        opened.runtime.block_on(opened.checker.shutdown());
+
+        let early = crate::start_early(root.clone(), Some(root.join("tsconfig.json")), timeout, &roots, true).unwrap();
+        let reads = early.reads.clone().unwrap();
+
+        // What `resolve_cached_early` does, told which way the early session was taken.
+        let (outcome, taken) = crate::resolve_taking(request(&root), Some(reads.clone()), Some(early));
+        save(&cache.join(FILE), request_key(&request(&root)), &reads, &outcome);
+
+        assert_eq!(taken, crate::Taken::Rooted);
+        assert_eq!(outcome, resolve(request(&root)));
+        assert!(outcome.components.iter().any(|component| component.key == "Cee"), "{outcome:?}");
+        assert!(kept(&root, &cache).is_some(), "the answer from a program rooted anew is kept");
+        std::fs::write(root.join("unrelated.ts"), "export type Unrelated = 2;\n").unwrap();
+        assert!(kept(&root, &cache).is_some(), "an edit to a file nothing reaches keeps it");
+        std::fs::write(root.join("dee.ts"), "export type Dee = 'one' | 'two' | 'three';\n").unwrap();
+        assert!(kept(&root, &cache).is_none(), "an edit to a file only the added root reaches discards it");
+    }
+
     /// An early start that did not note what it read cannot feed the kept answer: the answer saved after it would carry
     /// no questions, and an edit to a file the checker read would not discard it.
     #[test]
