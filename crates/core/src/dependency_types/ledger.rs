@@ -555,6 +555,11 @@ impl<'a> LedgerBuilder<'a> {
     }
 
     /// `demand`'s own walk could not read `files`.
+    /// `demand` is no longer made by any project file: its mark becomes clean, though this load does not follow it.
+    pub(super) fn forget(&self, demand: &Demand) {
+        self.retried.insert(demand.key());
+    }
+
     pub(super) fn unread_demand(&self, demand: &Demand, mut files: Vec<PathKey>) {
         files.sort();
         files.dedup();

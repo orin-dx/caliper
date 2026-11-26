@@ -195,19 +195,47 @@ struct Change<'c> {
 }
 
 /// The bare names `file` declares in an enum or const-array map keyed `file:name`.
-/// Whether a source file of `changed`'s directory other than `changed` makes the demand `walk`, read from disk: asked
-/// only for a due walk that `changed` no longer makes.
-fn demanded_in_directory<'f>(
-    walk: &dependency_types::Demand,
-    changed: &Utf8Path,
-    files: impl Iterator<Item = &'f Utf8Path>,
-) -> bool {
-    files.filter(|file| *file != changed && file.parent() == changed.parent()).any(|file| {
-        let Ok(source) = std::fs::read_to_string(file) else { return false };
-        let data = crate::extractor::parse_file(file, &source);
-        dependency_types::project_demands(file, &data)
-            .iter()
-            .any(|demand| demand.specifier == walk.specifier && demand.name == walk.name)
+/// Each project file's dependency demands in an eager revision, the live set every retry is drawn from; files that
+/// demand nothing are absent, and a lazy revision keeps its own ([`Lazy`]).
+type LiveDemands = FxHashMap<Utf8PathBuf, Arc<[Demand]>>;
+
+/// The due walks of `layer` that a project file still demands, each re-homed to a live importer (the demand that file
+/// makes now), and the ones no file demands any more. One pass over the live demands of the walks' directories.
+fn live_due_walks(layer: &DependencyLayer, live: &LiveDemands) -> (Vec<Demand>, Vec<Demand>) {
+    let due = layer.due_walks(dependency_types::Retry::Always);
+    if due.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let dirs: FxHashSet<&Utf8Path> =
+        due.iter().filter(|walk| !layer.is_dependency_file(&walk.from)).filter_map(|walk| walk.from.parent()).collect();
+    let candidates: Vec<&Demand> = live
+        .iter()
+        .filter(|(file, _)| file.parent().is_some_and(|dir| dirs.contains(dir)))
+        .flat_map(|(_, demands)| demands.iter())
+        .collect();
+    let (mut kept, mut gone) = (Vec::new(), Vec::new());
+    for walk in due {
+        // A walk a package file's import began is reached through a project demand, not made by a project file.
+        if layer.is_dependency_file(&walk.from) {
+            kept.push(walk);
+            continue;
+        }
+        match candidates.iter().find(|demand| demand.same_walk(&walk)) {
+            Some(owner) => kept.push((*owner).clone()),
+            None => gone.push(walk),
+        }
+    }
+    (kept, gone)
+}
+
+/// The rule every eager revision keeps: each due walk a project file began is a demand some project file makes now,
+/// recorded under that file. Checked in debug builds after each revision.
+fn due_walks_are_live(layer: Option<&DependencyLayer>, live: &LiveDemands) -> bool {
+    layer.is_none_or(|layer| {
+        layer.due_walks(dependency_types::Retry::Always).iter().all(|walk| {
+            layer.is_dependency_file(&walk.from)
+                || live.get(&walk.from).is_some_and(|demands| demands.iter().any(|demand| demand.same_walk(walk)))
+        })
     })
 }
 
@@ -236,6 +264,8 @@ pub(crate) struct Revision {
     resolved: FxHashMap<ComponentId, Arc<Resolved>>,
     /// Every component's call sites in this revision, which its answers are decided against when they become output.
     sites: Arc<ProjectSites>,
+    /// Each project file's dependency demands, in an eager revision with `load_dependencies`.
+    demands: Arc<LiveDemands>,
     /// The project's source files.
     files: Arc<FxHashSet<Utf8PathBuf>>,
     /// `.d.ts` files the cold run parsed or loaded from the parse cache, and how many the cache answered.
@@ -443,6 +473,8 @@ struct Applied<'c> {
     change: Change<'c>,
     /// The changed file's dependency demands after the change; empty when it was deleted or demands are not loaded.
     demands: Vec<Demand>,
+    /// Every project file's demands after the change, in an eager revision.
+    live: Arc<LiveDemands>,
 }
 
 impl Revision {
@@ -500,21 +532,25 @@ impl Revision {
         // Every change, an edit or a deletion, makes every walk past a file that could not be read due, whichever file
         // it was: each is followed again, as a lazy session follows it on its next request. Only names no earlier
         // revision loaded cost a load; the new layer keeps everything the old one had. A deleted file demands nothing.
+        let mut live = self.demands.clone();
+        if extend_dependencies {
+            let map = Arc::make_mut(&mut live);
+            match demands.is_empty() {
+                true => drop(map.remove(changed)),
+                false => drop(map.insert(changed.to_owned(), Arc::from(demands.as_slice()))),
+            }
+        }
         if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
             let mut missing = layer.missing(&demands);
-            // A walk of an import this change removed is not followed again, unless another file of the directory
-            // still makes that demand: the loader keeps one demand per directory, recorded under whichever file made
-            // it first.
-            let removed = |walk: &dependency_types::Demand| {
-                walk.from == changed
-                    && !demands.iter().any(|now| now.specifier == walk.specifier && now.name == walk.name)
-                    && !demanded_in_directory(walk, changed, files.iter().map(|file| file.as_path()))
-            };
-            missing.extend(layer.due_walks(dependency_types::Retry::Always).into_iter().filter(|walk| !removed(walk)));
+            // Only a walk some project file still demands is followed again, under that file's demand (the loader
+            // keeps one per directory, recorded under whichever file made it first, which may have dropped it); the
+            // walk of a demand no file makes any more ends, as a fresh run would never follow it.
+            let (due, gone) = live_due_walks(layer, &live);
+            missing.extend(due);
             missing.sort();
             missing.dedup();
-            if !missing.is_empty() {
-                let extended = dependency_types::load(missing, options, Some(layer));
+            if !missing.is_empty() || !gone.is_empty() {
+                let extended = dependency_types::load_forgetting(missing, &gone, options, Some(layer));
                 // What the load added that declares into React (a retry that read an augmentation) can change every
                 // answer that reads React's augmentations, whichever file it was.
                 react_namespace |= extended.declares_into_react();
@@ -530,6 +566,7 @@ impl Revision {
             dependencies,
             change: Change { file: changed, created, bare_names, react_namespace },
             demands,
+            live,
         }
     }
 }
@@ -585,6 +622,14 @@ impl Revision {
         if let Some(on_roots) = on_roots {
             on_roots(predicted_root_files(&global, options));
         }
+        let live: LiveDemands = match options.load_dependencies {
+            true => file_demands
+                .iter()
+                .filter(|(_, demands)| !demands.is_empty())
+                .map(|(file, demands)| (file.clone(), Arc::from(demands.as_slice())))
+                .collect(),
+            false => LiveDemands::default(),
+        };
         let demands: Vec<Demand> = file_demands.into_iter().flat_map(|(_, demands)| demands).collect();
 
         let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
@@ -631,6 +676,7 @@ impl Revision {
             tail_diagnostics,
             resolved,
             sites,
+            demands: Arc::new(live),
             files,
             dts_files_parsed,
             dts_cache_hits,
@@ -652,8 +698,9 @@ impl Revision {
         }
         let start = Instant::now();
 
-        let Applied { global, named_types, file_diagnostics, files, dependencies, change, .. } =
+        let Applied { global, named_types, file_diagnostics, files, dependencies, change, live, .. } =
             self.apply_change(options, changed, true);
+        debug_assert!(due_walks_are_live(dependencies.as_deref(), &live), "a due walk no project file demands");
 
         let global = Arc::new(global);
         let named_types = Arc::new(named_types);
@@ -706,6 +753,7 @@ impl Revision {
             tail_diagnostics: self.tail_diagnostics.clone(),
             resolved,
             sites,
+            demands: live,
             files: Arc::new(files),
             dts_files_parsed: self.dts_files_parsed,
             dts_cache_hits: self.dts_cache_hits,

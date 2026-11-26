@@ -121,6 +121,13 @@ pub(crate) struct Demand {
 }
 
 impl Demand {
+    /// Whether `other` is the same demand as this one: one directory, specifier and name, whichever file made it.
+    pub(crate) fn same_walk(&self, other: &Demand) -> bool {
+        self.specifier == other.specifier
+            && self.name == other.name
+            && self.from.parent().map_or("", Utf8Path::as_str) == other.from.parent().map_or("", Utf8Path::as_str)
+    }
+
     fn key(&self) -> DemandKey {
         let dir = self.from.parent().map_or("", Utf8Path::as_str);
         (Box::from(dir), self.specifier.clone(), self.name.clone())
@@ -1415,6 +1422,17 @@ pub(crate) fn load(
     load_at(demands, options, previous, Retry::Always, Stamp::unsessioned())
 }
 
+/// [`load`], and the walks of `forget` end: demands no project file makes any more, whose unread walks a later load
+/// must not follow again. Their marks become clean, so no due set holds them.
+pub(crate) fn load_forgetting(
+    demands: Vec<Demand>,
+    forget: &[Demand],
+    options: &PipelineOptions,
+    previous: Option<&Arc<DependencyLayer>>,
+) -> DependencyLayer {
+    load_with(demands, options, previous, (Retry::Always, Stamp::unsessioned(), Arc::new(Instant::now)), forget)
+}
+
 /// [`load`], following again only the walks `retry` makes due, and recording its failed reads with `stamp`.
 pub(crate) fn load_at(
     demands: Vec<Demand>,
@@ -1436,6 +1454,18 @@ pub(crate) fn load_timed(
     stamp: Stamp,
     clock: Clock,
 ) -> DependencyLayer {
+    load_with(demands, options, previous, (retry, stamp, clock), &[])
+}
+
+/// The loader behind every `load` function: `timing` is when walks are followed again and how failed reads are
+/// stamped and timed.
+fn load_with(
+    demands: Vec<Demand>,
+    options: &PipelineOptions,
+    previous: Option<&Arc<DependencyLayer>>,
+    (retry, stamp, clock): (Retry, Stamp, Clock),
+    forget: &[Demand],
+) -> DependencyLayer {
     // Its own resolvers, never another consumer's: `oxc_resolver` keeps a config reached through another's
     // `references` without that config's own references, so a shared cache would make what this load resolves depend
     // on what was resolved first.
@@ -1448,6 +1478,9 @@ pub(crate) fn load_timed(
     loader.ledger.retry = retry;
     loader.ledger.stamp = stamp;
     loader.ledger.clock = clock;
+    for demand in forget {
+        loader.ledger.forget(demand);
+    }
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
     match (previous, flatten) {

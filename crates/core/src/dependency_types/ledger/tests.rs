@@ -488,6 +488,38 @@ fn an_eager_edit_that_drops_a_shared_import_still_retries_it_for_the_other_file(
     }
 }
 
+/// The eager revision: `First` and `Second`, one directory, both import `aug-kit`, whose React augmentation could not
+/// be read. One drops its import while the other still needs it; then the other drops the last import just as the
+/// augmentation becomes readable. No file imports it now: `Box` has no augmented attribute, as a fresh run over the
+/// edited project, in either order.
+#[test]
+fn an_eager_walk_whose_last_importer_drops_it_is_not_followed_again() {
+    let importer = |name: &str| format!("import * as Aug from 'aug-kit';\nexport const aug{name} = Aug;\n");
+    for (first_drop, last_drop) in [("First", "Second"), ("Second", "First")] {
+        let (one, two) = (importer("First"), importer("Second"));
+        let (_tmp, root) = react_project(&[
+            ("src/pair/First.ts", one.as_str()),
+            ("src/pair/Second.ts", two.as_str()),
+            ("src/box/Box.tsx", BOX),
+        ]);
+        let session = WatchSession::new(react_options(&root));
+        drop(session.initialize());
+        let first = root.join(format!("src/pair/{first_drop}.ts"));
+        std::fs::write(&first, "export const none = 1;\n").unwrap();
+        drop(session.update_file(&first));
+        std::fs::write(root.join("node_modules/aug-kit/index.d.ts"), AUGMENTATION).unwrap();
+        let last = root.join(format!("src/pair/{last_drop}.ts"));
+        std::fs::write(&last, "export const none = 2;\n").unwrap();
+        drop(session.update_file(&last));
+
+        let fresh = WatchSession::new(react_options(&root));
+        drop(fresh.initialize());
+        assert!(!names(&fresh.component("Box")).contains(&"tw".to_owned()));
+        assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "{first_drop} dropped first");
+        assert!(session.component("Box") == fresh.component("Box"), "{first_drop} dropped first");
+    }
+}
+
 /// The eager revision: `Card` sits behind a file that could not be read, which then reads on disk, and `Plain`,
 /// unrelated, is deleted: a deletion makes the walk due as an edit does, and `Card` answers as a fresh session does.
 #[test]
