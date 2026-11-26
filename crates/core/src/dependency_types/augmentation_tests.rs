@@ -255,7 +255,7 @@ fn a_file_an_augmentation_search_could_not_read_is_searched_again_on_the_next_ru
     let unreadable = load(import_demand(&root, "reexp"), &options(&root), None);
     std::fs::write(&inner, text).unwrap();
     assert_eq!(
-        unreadable.panics.iter().map(|d| d.file.as_deref()).collect::<Vec<_>>(),
+        unreadable.read_warnings().iter().map(|d| d.file.as_deref()).collect::<Vec<_>>(),
         [Some(inner.as_str())],
         "the read failure is reported"
     );

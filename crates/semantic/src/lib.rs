@@ -718,7 +718,8 @@ async fn session(
         };
         match instantiated {
             // A component answered after the heap passed may have met a refused request it read as an answer.
-            // Its fallbacks stand: they name what the checker said, not the heap.
+            // Its fallbacks stand: they name what the checker said, not the heap. Each keeps its mark, so a rejection
+            // during instantiation stays transient through the merge.
             Ok(mut instantiated) if watch.passed() => {
                 outcome.fallbacks.append(&mut instantiated.fallbacks);
                 left.extend(instantiated.components.into_iter().map(|component| component.key));
@@ -775,15 +776,18 @@ impl Answered {
     }
 }
 
-/// The checker's verdict that `target` keeps its structural result.
-fn fallback_of(target: &Target, reason: &str) -> SemanticFallback {
+/// The checker's verdict that `target` keeps its structural result: a fact about the component (not exported, not in
+/// the program, a type the checker answered that cannot be read as props, an instantiation that does not form), kept
+/// and stored like an answer.
+pub(crate) fn fallback_of(target: &Target, reason: &str) -> SemanticFallback {
     SemanticFallback { key: target.key.clone(), reason: reason.to_string(), transient: false }
 }
 
 /// `target` keeps its structural result because the checker rejected a request about it: a panic, a stopped checker
 /// or an answer it could not decode, none of which says anything about the component, so the fallback is
-/// [`SemanticFallback::transient`].
-fn rejected_fallback_of(target: &Target, reason: &str) -> SemanticFallback {
+/// [`SemanticFallback::transient`]. Every `CallError::Rejected` a component meets goes through here, the
+/// instantiation's included (`instantiate::answer`).
+pub(crate) fn rejected_fallback_of(target: &Target, reason: &str) -> SemanticFallback {
     SemanticFallback { transient: true, ..fallback_of(target, reason) }
 }
 

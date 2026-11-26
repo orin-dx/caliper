@@ -1666,7 +1666,7 @@ fn an_export_in_a_file_that_could_not_be_read_is_found_on_the_next_run() {
     std::fs::write(&props, text).unwrap();
     assert_eq!(
         unreadable
-            .panics
+            .read_warnings()
             .iter()
             .map(|d| (d.file.as_deref(), d.severity == crate::types::DiagnosticSeverity::Warning))
             .collect::<Vec<_>>(),
@@ -1856,9 +1856,9 @@ fn a_file_that_could_not_be_read_is_read_again_by_the_next_load_on_every_path() 
         let next = load(demands.clone(), &cached, None);
         let oracle = load(demands.clone(), &PipelineOptions { use_cache: false, ..options(&root, true) }, None);
 
-        let reported: Vec<Option<&str>> = failed.panics.iter().map(|d| d.file.as_deref()).collect();
+        let warnings = failed.read_warnings();
+        let reported: Vec<Option<&str>> = warnings.iter().map(|d| d.file.as_deref()).collect();
         assert_eq!(reported, [Some(file.as_str())], "{path:?}: the failed read is reported");
-        assert!(failed.degraded, "{path:?}");
         let expected = answers(&oracle, &root, &demands);
         let lost: Vec<PathKey> = lost.iter().map(|lost| PathKey::from(root.join(lost).as_path())).collect();
         assert!(expected.0, "{path:?}: the oracle follows the demand: {expected:?}");
@@ -1924,7 +1924,8 @@ fn an_export_walk_continues_past_a_target_it_cannot_read_and_keeps_only_what_it_
         let kept_exports: Vec<_> =
             TARGETS.iter().enumerate().map(|(at, &t)| if at < unreadable { declared(t) } else { None }).collect();
         assert_eq!(exports, kept_exports, "{unreadable}: only the answers found before it are kept");
-        assert!(failed.degraded, "{unreadable}");
+        let reported: Vec<Option<String>> = failed.read_warnings().into_iter().map(|d| d.file).collect();
+        assert_eq!(reported, [Some(file.to_string())], "{unreadable}: the failed read is reported");
 
         let all: Vec<_> = TARGETS.iter().map(|&t| declared(t)).collect();
         assert_eq!(TARGETS.iter().map(|&t| export(&oracle, t)).collect::<Vec<_>>(), all, "the oracle");

@@ -427,26 +427,33 @@ impl Revision {
             let engine = lazy.engine.load_full();
             let (entry, diagnostics, depends_on, evidence, attributes) =
                 resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
-            let missing = match &engine.layer {
+            // The names the resolution reached that the layer lacks, and the demands below them whose walk passed a
+            // file that could not be read (the layer's ledger): the next load follows both.
+            let (missing, unread) = match &engine.layer {
                 Some(layer) => {
-                    let mut missing = Vec::new();
-                    for file in &depends_on.files {
-                        if let Some(demands) = lazy.demands.get(file) {
-                            missing.extend(layer.missing(demands));
-                        }
-                    }
-                    missing
+                    let roots: Vec<Demand> = depends_on
+                        .files
+                        .iter()
+                        .filter_map(|file| lazy.demands.get(file))
+                        .flat_map(|demands| demands.iter().cloned())
+                        .collect();
+                    let unread = layer.unread(&roots);
+                    let mut missing = layer.missing(&roots);
+                    missing.extend(unread.iter().cloned());
+                    missing.sort();
+                    missing.dedup();
+                    (missing, !unread.is_empty())
                 }
-                None => Vec::new(),
+                None => (Vec::new(), false),
             };
             // A resolution against a layer that lacked a name it reached is discarded, and so is its context's memo.
             // A load that left the same names missing answered none of them (a demand whose load panicked stays
-            // unanswered), so asking again would never end.
+            // unanswered, a file that stays unreadable), so asking again would never end.
             if missing.is_empty() || missing == asked_for {
                 let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes });
-                // A name a file that could not be read left missing may load on the next request, whichever component
+                // A walk past a file that could not be read may answer more on the next request, whichever component
                 // asks: the answer without it is this request's alone.
-                if engine.layer.as_ref().is_some_and(|layer| layer.awaits_read(&missing)) {
+                if unread {
                     return Some(resolved);
                 }
                 return Some(lazy.memo.entry(id.clone()).or_insert(resolved).clone());
@@ -534,10 +541,15 @@ impl Revision {
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
         let next = Engine { layer: Some(extended), ctx };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
-        // behind; the rest hold for the larger layer, so the next component does not rebuild them.
+        // behind; the rest hold for the larger layer, so the next component does not rebuild them. While a walk of the
+        // old layer is unread (its ledger), any memo may hold a declaration read without what lay past the file it
+        // could not read, a package's own included, and none is kept.
+        let unread_below = layer.any_unread();
         let covered = |file: &str| lazy.demands.get(file).is_none_or(|demands| layer.covers(demands));
         next.ctx.inherit_memos(&engine.ctx, |deps, read_in| {
-            covered(read_in) && deps.files.iter().all(|file| covered(std::borrow::Borrow::<str>::borrow(file)))
+            !unread_below
+                && covered(read_in)
+                && deps.files.iter().all(|file| covered(std::borrow::Borrow::<str>::borrow(file)))
         });
         lazy.engine.store(Arc::new(next));
     }

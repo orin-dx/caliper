@@ -33,7 +33,7 @@ use rustc_hash::FxHashMap;
 use crate::component;
 use crate::convert::Converter;
 use crate::rpc::{CallError, FileDiagnostic, Rpc, SignatureInfo, SignatureKind, SymbolRef};
-use crate::{Target, fallback_of};
+use crate::{Target, fallback_of, rejected_fallback_of};
 
 /// The file the instantiations are declared in, in the project's root directory. It exists only in the checker's memory.
 const PROBE_FILE: &str = "__caliper_instantiations__.ts";
@@ -132,14 +132,15 @@ pub(crate) async fn answer(
         .enumerate()
         .map(|(index, (target, instantiation))| probe_line(index, &target.file_path, instantiation))
         .collect();
-    let all_fall_back = |outcome: &mut SemanticOutcome, reason: &str| {
-        outcome.fallbacks.extend(pending.iter().map(|(target, _)| fallback_of(target, reason)));
+    // A rejected request says nothing about the components, so their fallbacks are transient: asked again, kept nowhere.
+    let all_rejected = |outcome: &mut SemanticOutcome, reason: &str| {
+        outcome.fallbacks.extend(pending.iter().map(|(target, _)| rejected_fallback_of(target, reason)));
     };
 
     let layered = match rpc.layered(root_files, &[(probe.to_string(), text.join("\n"))]).await {
         Ok(layered) => Arc::new(layered),
         Err(CallError::Rejected(message)) => {
-            all_fall_back(&mut outcome, &format!("the checker could not instantiate a generic component: {message}"));
+            all_rejected(&mut outcome, &format!("the checker could not instantiate a generic component: {message}"));
             return Ok(outcome);
         }
         Err(fatal) => return Err(fatal),
@@ -149,7 +150,7 @@ pub(crate) async fn answer(
     match answered {
         Ok(answered) => Ok(answered),
         Err(CallError::Rejected(message)) => {
-            all_fall_back(&mut outcome, &format!("the checker rejected a request: {message}"));
+            all_rejected(&mut outcome, &format!("the checker rejected a request: {message}"));
             Ok(outcome)
         }
         Err(fatal) => Err(fatal),
@@ -185,25 +186,32 @@ async fn answer_layered(
 
     let converter = Converter::new(layered.clone(), reverse);
     for (index, (target, instantiation)) in pending.iter().enumerate() {
+        // The checker's verdict on the instantiation is the component's fallback; a request it rejected is transient.
+        let verdict = |reason: String| fallback_of(target, &reason);
+        let rejected =
+            |message: String| rejected_fallback_of(target, &format!("the checker rejected a request: {message}"));
         let read = match (errors.get(&index), probes.get(&format!("CaliperProbe{index}"))) {
-            (Some(error), _) => {
-                Err(format!("the instantiation {} could not be formed: {error}", written(target, instantiation)))
+            (Some(error), _) => Err(verdict(format!(
+                "the instantiation {} could not be formed: {error}",
+                written(target, instantiation)
+            ))),
+            (None, None) => {
+                Err(verdict(format!("the instantiation {} was not declared", written(target, instantiation))))
             }
-            (None, None) => Err(format!("the instantiation {} was not declared", written(target, instantiation))),
             (None, Some(symbol)) => {
                 let kept = arguments_keep_their_meaning(layered, &probes, index, instantiation).await;
                 match kept {
-                    Ok(false) => Err(format!(
+                    Ok(false) => Err(verdict(format!(
                         "the instantiation {} could not be formed: a name in its type arguments means something \
                          else where the instantiation is written than in the component's module",
                         written(target, instantiation)
-                    )),
+                    ))),
                     Ok(true) => match read_probe(layered, &converter, interner, symbol, target).await {
-                        Ok(read) => read,
-                        Err(CallError::Rejected(message)) => Err(format!("the checker rejected a request: {message}")),
+                        Ok(read) => read.map_err(verdict),
+                        Err(CallError::Rejected(message)) => Err(rejected(message)),
                         Err(fatal) => return Err(fatal),
                     },
-                    Err(CallError::Rejected(message)) => Err(format!("the checker rejected a request: {message}")),
+                    Err(CallError::Rejected(message)) => Err(rejected(message)),
                     Err(fatal) => return Err(fatal),
                 }
             }
@@ -212,7 +220,7 @@ async fn answer_layered(
             Ok(component::Props { props, composes, whole }) => {
                 outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes, whole });
             }
-            Err(reason) => outcome.fallbacks.push(fallback_of(target, &reason)),
+            Err(fallback) => outcome.fallbacks.push(fallback),
         }
     }
     Ok(outcome)
@@ -304,5 +312,48 @@ mod tests {
         assert_ne!(div, a);
         assert!(a.contains(&"href".to_string()) && !div.contains(&"href".to_string()));
         eprintln!("Poly<\"div\">: {} props, Poly<\"a\">: {} props", div.len(), a.len());
+    }
+
+    /// A request the checker rejects while it instantiates says nothing about the component, so the fallback it gives
+    /// is transient: no session or kept answer stores it, and the next request asks again. The checker rejects the
+    /// derived snapshot here because the one it derives from was released. On the base the rejection was a verdict.
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn a_rejected_instantiation_is_a_transient_fallback() {
+        let root = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generic");
+        let file = root.join("Poly.tsx");
+        let target = Target {
+            key: "Poly".to_string(),
+            file_path: file.clone(),
+            display_name: "Poly".to_string(),
+            exports: vec![caliper_docgen_core::types::ComponentExport::named("Poly")],
+            described: Default::default(),
+            react_wanted: None,
+            layering: None,
+        };
+        let instantiation = Instantiation { export: "Poly".to_string(), arguments: vec!["\"div\"".to_string()] };
+        let timeout = std::time::Duration::from_secs(60);
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+
+        let outcome = runtime.block_on(async {
+            let checker = crate::checker::Backend::start(&root, 1).unwrap();
+            let tsconfig = root.join("tsconfig.json");
+            let files = [file.to_string()];
+            let rpc = Rpc::open_programs(checker.client(), timeout, Some(tsconfig.as_str()), &files, false, 1)
+                .await
+                .unwrap()
+                .remove(0);
+            rpc.release().await;
+            let pending = vec![(target, instantiation)];
+            let outcome = answer(&rpc, &files, &root, &PropInterner::default(), false, pending).await;
+            checker.shutdown().await;
+            outcome.expect("a rejection is not fatal")
+        });
+
+        assert_eq!(outcome.components, []);
+        let fallbacks: Vec<(&str, bool)> =
+            outcome.fallbacks.iter().map(|fallback| (fallback.key.as_str(), fallback.transient)).collect();
+        assert_eq!(fallbacks, [("Poly", true)], "{:?}", outcome.fallbacks);
+        assert!(outcome.is_degraded());
     }
 }

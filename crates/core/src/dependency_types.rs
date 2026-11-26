@@ -27,12 +27,15 @@ use crate::resolver::{ModuleResolution, ModuleResolvers};
 use crate::types::options::PipelineOptions;
 use crate::types::*;
 
+mod ledger;
+use ledger::{LedgerBuilder, Node, ReadLedger};
+
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
 type FxDashSet<K> = DashSet<K, FxBuildHasher>;
 /// The files that augment React which the module a `(scope, specifier)` resolved to leads to, parsed, once the first
-/// demand of the scope has searched them; incomplete when the search could not read a file, for every demand of the
-/// scope.
-type ModuleCell = Arc<OnceLock<Partial<Vec<(Utf8PathBuf, Arc<SourceData>)>>>>;
+/// demand of the scope, whose key it holds, has searched them; incomplete when the search could not read a file, for
+/// every demand of the scope.
+type ModuleCell = Arc<OnceLock<(DemandKey, Partial<Vec<(Utf8PathBuf, Arc<SourceData>)>>)>>;
 
 /// A file's data, read and parsed once per load whoever asks first, a failed read included (`Loader::parse_source`).
 type ParseCell = Arc<OnceLock<Result<Option<Arc<SourceData>>, ReadFailed>>>;
@@ -51,8 +54,8 @@ struct ReadFailed;
 
 /// What a walk or search found in the files it could read, and whether it passed one it could not ([`ReadFailed`]).
 /// An incomplete answer is used by the load that made it, as the best it has, and kept nowhere: not in the loader's
-/// maps, the layer or the index; the demand it served is not counted as followed, and a lazy session does not memoize
-/// a component that needed it, so the next load over the layer looks again.
+/// maps, the layer or the index. The demand it served is marked unread in the layer's [`ReadLedger`], which is what
+/// makes the next load follow it again and a lazy session not memoize a component that reached it.
 #[must_use]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Partial<T> {
@@ -374,25 +377,19 @@ pub(crate) struct DependencyLayer {
     claimed: FxHashSet<(PathKey, CompactString)>,
     /// Every parsed file's data (stubs included), so an extension reuses them.
     parsed: FxHashMap<PathKey, Option<Arc<SourceData>>>,
-    /// The panics this layer's own demands hit, contained, and the dependency files it could not read; the demands they
-    /// covered stay unanswered.
+    /// The panics this layer's own demands hit, contained; the demands they covered stay unanswered.
     panics: Vec<Diagnostic>,
-    /// The demands a file that could not be read left unfollowed, in this layer or, once flattened, the ones it took
-    /// in; the next load over the layer follows them again.
-    failed: FxHashSet<DemandKey>,
-    /// A dependency file could not be read while this layer, or one it extends, was loaded ([`ReadFailed`]). The layer
-    /// holds nothing derived from it, but what it holds is not the whole answer, so no load over it writes the index.
-    degraded: bool,
+    /// The dependency files this layer's load could not read or read again, and what those reads left unfollowed.
+    ledger: ReadLedger,
 }
 
 impl DependencyLayer {
-    /// The contained panics of this layer and the ones it extends, in message order, and the files they could not read
-    /// that no layer of the chain has read since: a session whose next load read the file answers as a fresh one.
+    /// The contained panics of this layer and the ones it extends, and a warning for each file whose latest read in
+    /// the chain failed ([`DependencyLayer::read_warnings`]), in message order: a session whose next load read the file
+    /// answers as a fresh one.
     pub(crate) fn panic_diagnostics(&self) -> Vec<Diagnostic> {
-        let unread =
-            |diagnostic: &Diagnostic| diagnostic.file.as_deref().is_none_or(|file| self.parsed_data(file).is_none());
-        let mut all: Vec<Diagnostic> =
-            self.chain().flat_map(|layer| layer.panics.iter().filter(|d| unread(d)).cloned()).collect();
+        let mut all: Vec<Diagnostic> = self.chain().flat_map(|layer| layer.panics.iter().cloned()).collect();
+        all.extend(self.read_warnings());
         all.sort_by(|a, b| a.message.cmp(&b.message));
         all
     }
@@ -473,23 +470,22 @@ impl DependencyLayer {
             && a.unresolved == b.unresolved
     }
 
-    /// Whether this layer has followed every one of `demands`.
+    /// Whether this layer has followed every one of `demands`, none of them past a file it could not read.
     pub(crate) fn covers(&self, demands: &[Demand]) -> bool {
-        demands.iter().all(|d| self.has_demand(&d.key()))
+        self.missing(demands).is_empty()
     }
 
-    /// The demands of `demands` this layer has not followed.
+    /// The demands of `demands` a load over this layer follows: those it has not followed, and those whose walk passed
+    /// a file it could not read ([`DependencyLayer::unread`] gives the ones they lead to as well).
     pub(crate) fn missing(&self, demands: &[Demand]) -> Vec<Demand> {
-        demands.iter().filter(|d| !self.has_demand(&d.key())).cloned().collect()
-    }
-
-    /// Whether one of `demands` is unfollowed because a file it needed could not be read: a load over this layer may
-    /// yet answer it, so what was resolved without it holds for one request only. A demand whose load panicked is not.
-    pub(crate) fn awaits_read(&self, demands: &[Demand]) -> bool {
         demands
             .iter()
-            .map(Demand::key)
-            .any(|key| !self.has_demand(&key) && self.chain().any(|layer| layer.failed.contains(&key)))
+            .filter(|d| {
+                let key = d.key();
+                !self.has_demand(&key) || self.awaits_retry(&key)
+            })
+            .cloned()
+            .collect()
     }
 }
 
@@ -510,8 +506,8 @@ struct Loader<'a> {
     /// For each module in `augmenters`, the stamps of the other packages its search read files from.
     augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
-    /// The demands of `demands` that met a file that could not be read: not followed, as far as the layer says.
-    failed: FxDashSet<DemandKey>,
+    /// What this load could not read or read again, and the walk that met it.
+    ledger: LedgerBuilder<'a>,
     unresolved: FxDashMap<DemandKey, Unresolved>,
     /// Whether each directory `package_of` passed has a `package.json` file.
     package_manifests: FxDashMap<Box<str>, ProbeCell>,
@@ -527,10 +523,8 @@ struct Loader<'a> {
     scans: FxDashMap<PathKey, ScanCell>,
     /// Something was resolved or answered that the index did not hold.
     learned: AtomicBool,
-    /// The diagnostics of demands that panicked and of dependency files that could not be read.
+    /// The diagnostics of demands that panicked.
     panics: Mutex<Vec<Diagnostic>>,
-    /// A dependency file existed but could not be read ([`ReadFailed`]).
-    read_failed: AtomicBool,
     /// How many times each file was read, and how long each read waits first, so a test can make readers meet.
     #[cfg(test)]
     reads: FxDashMap<PathKey, usize>,
@@ -557,7 +551,7 @@ impl<'a> Loader<'a> {
             augmenters: DashMap::default(),
             augmenter_crossed: DashMap::default(),
             demands: DashSet::default(),
-            failed: DashSet::default(),
+            ledger: LedgerBuilder::new(parent),
             unresolved: DashMap::default(),
             package_manifests: DashMap::default(),
             packages: DashMap::default(),
@@ -567,7 +561,6 @@ impl<'a> Loader<'a> {
             scans: DashMap::default(),
             learned: AtomicBool::new(false),
             panics: Mutex::new(Vec::new()),
-            read_failed: AtomicBool::new(false),
             #[cfg(test)]
             reads: DashMap::default(),
             #[cfg(test)]
@@ -579,7 +572,7 @@ impl<'a> Loader<'a> {
 impl Loader<'_> {
     /// The text of a dependency file. One that is missing is skipped quietly (`Ok(None)`), since resolution found it a
     /// moment ago and a dangling link or a racing uninstall declares nothing. One that exists but cannot be read is
-    /// [`ReadFailed`], reported once.
+    /// [`ReadFailed`], recorded in the ledger, which reports it.
     fn read(&self, file: &Utf8Path) -> Result<Option<String>, ReadFailed> {
         #[cfg(test)]
         {
@@ -587,17 +580,19 @@ impl Loader<'_> {
             std::thread::sleep(self.read_pause);
         }
         match std::fs::read_to_string(file) {
-            Ok(source) => Ok(Some(source)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Ok(source) => {
+                self.ledger.read_done(file);
+                Ok(Some(source))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.ledger.read_done(file);
+                Ok(None)
+            }
             Err(error) => {
-                self.read_failed.store(true, Ordering::Relaxed);
                 let mut diagnostic = Diagnostic::io_read_error(file, &error);
                 // The package's types are not the project's, and the run still produces its output.
                 diagnostic.severity = crate::types::DiagnosticSeverity::Warning;
-                let mut failures = self.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                if !failures.iter().any(|known| known.file == diagnostic.file) {
-                    failures.push(diagnostic);
-                }
+                self.ledger.read_failed(file, diagnostic);
                 Err(ReadFailed)
             }
         }
@@ -816,12 +811,13 @@ impl Loader<'_> {
         #[cfg(test)]
         assert!(&*demand.name != DEMAND_PANIC_TEST_NAME, "injected panic");
         let key = demand.key();
-        if self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone()) {
+        let known = self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone());
+        // A demand whose last walk passed a file it could not read is followed again, once per load.
+        if known && !self.ledger.retries(&key) {
             return;
         }
         if self.follow(scope, &demand, &key).incomplete {
-            // Not followed, as far as the layer says (`load`): the next load over it follows the demand again.
-            self.failed.insert(key);
+            self.ledger.unread_demand(&demand);
         }
     }
 
@@ -829,8 +825,9 @@ impl Loader<'_> {
     /// file it needed could not be read: what the readable files gave is loaded for this load, and no reason is kept,
     /// since the name is unknown, not absent.
     fn follow<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand, key: &DemandKey) -> Partial<()> {
+        let node = Node::Demand(key.clone());
         if demand.name.is_empty() {
-            return self.module_demand(scope, demand);
+            return self.module_demand(scope, demand, &node);
         }
         let module = match self.resolve(&demand.from, &demand.specifier) {
             Ok(module) => module,
@@ -847,7 +844,7 @@ impl Loader<'_> {
             let qualified = CompactString::from(format!("React.{}", demand.name));
             return match self.parse(&module) {
                 Ok(Some(data)) if declares(&data, &module, &qualified) => {
-                    self.load_declaration(scope, module, qualified)
+                    self.load_declaration(scope, module, qualified, &node)
                 }
                 Ok(_) => Partial::DONE,
                 Err(ReadFailed) => Partial::UNREAD,
@@ -855,7 +852,7 @@ impl Loader<'_> {
         }
         let found = self.find_export(&module, &demand.name);
         let loaded = match found.value {
-            Some((file, name)) => self.load_declaration(scope, file, name),
+            Some((file, name)) => self.load_declaration(scope, file, name, &node),
             None if found.incomplete => Partial::DONE,
             None => {
                 let cause = self.unresolved_cause(&module, &demand.name);
@@ -945,34 +942,45 @@ impl Loader<'_> {
     ///
     /// Directories with the same resolution scope resolve a specifier to the same module, so the first of them to ask
     /// resolves it, finds and reads the files that augment React, and loads their declarations; the rest wait for the
-    /// files and ask nothing. A file the search could not read leaves every demand of the scope incomplete alike, and
-    /// the augmentations of the files it did read are loaded all the same.
-    fn module_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand) -> Partial<()> {
+    /// files and ask nothing, and reach what the first reached. A file the search could not read leaves every demand of
+    /// the scope incomplete alike, and the augmentations of the files it did read are loaded all the same.
+    fn module_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand, node: &Node) -> Partial<()> {
         let dir = demand.from.parent().map_or("", Utf8Path::as_str);
         let key = (self.resolution_scope(dir), demand.specifier.clone());
         let cell = self.module_demands.entry(key).or_default().clone();
         let mut first = false;
-        let augmenting = cell.get_or_init(|| {
+        let (searched_by, augmenting) = cell.get_or_init(|| {
             first = true;
-            let Ok(module) = self.resolve(&demand.from, &demand.specifier) else {
-                return Partial::complete(Vec::new());
-            };
-            if self.in_project(&module) || Self::is_react(&module) {
-                return Partial::complete(Vec::new());
-            }
-            let Partial { value: files, mut incomplete } = self.augmenting_files(&module);
-            let mut parsed = Vec::new();
-            for file in files {
-                match self.parse(&file) {
-                    Ok(Some(data)) => parsed.push((file, data)),
-                    Ok(None) => {}
-                    Err(ReadFailed) => incomplete = true,
-                }
-            }
-            Partial { value: parsed, incomplete }
+            (demand.key(), self.search_module(demand))
         });
-        let loaded = if first { self.load_augmentations(scope, &augmenting.value) } else { Partial::DONE };
+        let loaded = match first {
+            true => self.load_augmentations(scope, &augmenting.value, node),
+            false => {
+                self.ledger.reached(node, Node::Demand(searched_by.clone()));
+                Partial::DONE
+            }
+        };
         loaded.and(Partial { value: (), incomplete: augmenting.incomplete })
+    }
+
+    /// The files that augment React which the module `demand` resolves to leads to, parsed.
+    fn search_module(&self, demand: &Demand) -> Partial<Vec<(Utf8PathBuf, Arc<SourceData>)>> {
+        let Ok(module) = self.resolve(&demand.from, &demand.specifier) else {
+            return Partial::complete(Vec::new());
+        };
+        if self.in_project(&module) || Self::is_react(&module) {
+            return Partial::complete(Vec::new());
+        }
+        let Partial { value: files, mut incomplete } = self.augmenting_files(&module);
+        let mut parsed = Vec::new();
+        for file in files {
+            match self.parse(&file) {
+                Ok(Some(data)) => parsed.push((file, data)),
+                Ok(None) => {}
+                Err(ReadFailed) => incomplete = true,
+            }
+        }
+        Partial { value: parsed, incomplete }
     }
 
     /// The nearest directory at or above `dir` where module resolution can start to differ: one with a `package.json`
@@ -1016,6 +1024,7 @@ impl Loader<'_> {
         &'s self,
         scope: &rayon::Scope<'s>,
         augmenting: &[(Utf8PathBuf, Arc<SourceData>)],
+        from: &Node,
     ) -> Partial<()> {
         let mut loaded = Partial::DONE;
         for (file, data) in augmenting {
@@ -1025,7 +1034,7 @@ impl Loader<'_> {
                 if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':'))
                     && name.starts_with("React.")
                 {
-                    loaded = loaded.and(self.load_declaration(scope, file.clone(), CompactString::from(name)));
+                    loaded = loaded.and(self.load_declaration(scope, file.clone(), CompactString::from(name), from));
                 }
             }
         }
@@ -1114,8 +1123,15 @@ impl Loader<'_> {
     /// ones as new demands. React's own declarations stay with the resolver's React handling (builtins, curated HTML
     /// attributes), so React's files never enter the layer, but what they import does: `CSSProperties` extends
     /// csstype's `Properties`. Incomplete, claiming nothing, when `file` could not be read (an export the index
-    /// answered, whose declaring file this load had not read); the demands it spawns answer for themselves.
-    fn load_declaration<'s>(&'s self, scope: &rayon::Scope<'s>, file: Utf8PathBuf, name: CompactString) -> Partial<()> {
+    /// answered, whose declaring file this load had not read); the demands it spawns answer for themselves, and the
+    /// ledger records that `from` reached each declaration and each declaration the demands it spawned.
+    fn load_declaration<'s>(
+        &'s self,
+        scope: &rayon::Scope<'s>,
+        file: Utf8PathBuf,
+        name: CompactString,
+        from: &Node,
+    ) -> Partial<()> {
         if self.in_project(&file) {
             return Partial::DONE;
         }
@@ -1125,12 +1141,15 @@ impl Loader<'_> {
             Ok(None) => return Partial::DONE,
             Err(ReadFailed) => return Partial::UNREAD,
         };
-        // `Primitive.div` is a member of the value `Primitive`, whose declared type has it.
-        let mut stack: Vec<CompactString> =
-            name.split_once('.').map(|(head, _)| CompactString::from(head)).into_iter().collect();
-        stack.push(name);
-        while let Some(name) = stack.pop() {
+        // `Primitive.div` is a member of the value `Primitive`, whose declared type has it. Each name goes with the node
+        // that reached it.
+        let mut stack: Vec<(CompactString, Node)> =
+            name.split_once('.').map(|(head, _)| (CompactString::from(head), from.clone())).into_iter().collect();
+        stack.push((name, from.clone()));
+        while let Some((name, reached_from)) = stack.pop() {
             let claim = (PathKey::from(file.as_path()), name.clone());
+            let node = Node::Claim(claim.clone());
+            self.ledger.reached(&reached_from, node.clone());
             if self.parent.is_some_and(|parent| parent.has_claimed(&claim)) || !self.claimed.insert(claim) {
                 continue;
             }
@@ -1144,20 +1163,21 @@ impl Loader<'_> {
             // The type a value is declared with (`declare const Primitive: Primitives`) goes with the value.
             let value_type = CompactString::from(format!("typeof {name}"));
             if declares(&data, &file, &value_type) {
-                stack.push(value_type);
+                stack.push((value_type, node.clone()));
             }
             let mut refs = FxHashSet::default();
             declaration_refs(&data, &file, &name, &mut refs);
             for reference in refs {
                 let qualified = react.then(|| CompactString::from(format!("React.{reference}")));
                 if declares(&data, &file, &reference) {
-                    stack.push(reference);
+                    stack.push((reference, node.clone()));
                 } else if declares(&data, &file, &format!("typeof {reference}")) {
                     // `typeof NODES` names a value that has only its declared type.
-                    stack.push(CompactString::from(format!("typeof {reference}")));
+                    stack.push((CompactString::from(format!("typeof {reference}")), node.clone()));
                 } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
-                    stack.push(qualified);
+                    stack.push((qualified, node.clone()));
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
+                    self.ledger.reached(&node, Node::Demand(demand.key()));
                     self.spawn_demand(scope, demand);
                 }
             }
@@ -1303,11 +1323,9 @@ pub(crate) fn load(
         options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
     let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
     let flatten = previous.filter(|_| parent.is_none());
-    let loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
+    let mut loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
-    // The flattened chain's failed demands that this load does not follow again stay failed.
-    let mut inherited_failed: FxHashSet<DemandKey> = FxHashSet::default();
     match (previous, flatten) {
         (None, _) => {
             if let Some(path) = &index_path {
@@ -1346,7 +1364,7 @@ pub(crate) fn load(
                 for (module, files) in &layer.augmenters {
                     loader.augmenters.insert(module.clone(), files.clone());
                 }
-                inherited_failed.extend(layer.failed.iter().cloned());
+                loader.ledger.inherit(&layer.ledger);
                 // The demands a panic covered stay unanswered in the flattened layer, so its report stays too.
                 loader
                     .panics
@@ -1363,11 +1381,10 @@ pub(crate) fn load(
             loader.spawn_demand(scope, demand);
         }
     });
-    // A read failed in this load or a layer below it: what is held is not the whole answer.
-    let degraded = loader.read_failed.load(Ordering::Relaxed) || previous.is_some_and(|layer| layer.degraded);
+    // Only a cold load writes the index, and not when a read failed: what it holds is not the whole answer.
     if let (None, Some(path)) = (previous, &index_path)
         && loader.learned.load(Ordering::Relaxed)
-        && !degraded
+        && !loader.ledger.any_failed()
     {
         write_index(path, &loader);
     }
@@ -1414,10 +1431,7 @@ pub(crate) fn load(
     let exports = loader.exports.into_read_only();
     let resolutions: FxHashMap<_, _> = loader.resolutions.into_iter().collect();
     let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
-    let failed: FxHashSet<DemandKey> = loader.failed.into_iter().collect();
-    let demands: FxHashSet<DemandKey> = loader.demands.into_iter().filter(|key| !failed.contains(key)).collect();
-    inherited_failed.retain(|key| !demands.contains(key));
-    inherited_failed.extend(failed);
+    let demands: FxHashSet<DemandKey> = loader.demands.into_iter().collect();
     let files: FxHashSet<PathKey> = files.into_iter().collect();
     let below = parent.as_ref().map(|layer| layer.totals).unwrap_or_default();
     let totals = Totals {
@@ -1440,15 +1454,15 @@ pub(crate) fn load(
         files,
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
-        // A demand that met a file it could not read is left out, so a load over this layer follows it again.
+        // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer follows
+        // it again.
         demands,
-        failed: inherited_failed,
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
         // Only files that were read: the next load reads a failed one again.
         parsed: loader.parsed.into_iter().filter_map(|(key, cell)| Some((key, cell.get()?.clone().ok()?))).collect(),
         panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
-        degraded,
+        ledger: loader.ledger.finish(),
     }
 }
 
