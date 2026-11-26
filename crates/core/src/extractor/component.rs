@@ -589,8 +589,9 @@ impl TypeofAlias {
 /// expression, so nothing declared in one (an alias's or interface's type parameters, `infer`, a mapped key) encloses
 /// a cast.
 struct TypeDeclarations<'n> {
-    /// The candidate slots of each name, so a declaration visits only the aliases it can shadow.
-    slots: FxHashMap<&'n str, Vec<usize>>,
+    /// The candidate of each name the module declares one `typeof` alias of, so a declaration visits only the alias
+    /// it can shadow.
+    slots: FxHashMap<&'n str, usize>,
     scopes: Vec<oxc_span::Span>,
     /// Per candidate name, how many declarations the module itself makes.
     module_level: Vec<usize>,
@@ -601,19 +602,16 @@ struct TypeDeclarations<'n> {
 impl TypeDeclarations<'_> {
     /// Records a declaration of `name` in `scope`, or in the innermost open scope when `None`.
     fn declare(&mut self, name: &str, scope: Option<oxc_span::Span>) {
-        let Some(slots) = self.slots.get(name) else {
+        let Some(&index) = self.slots.get(name) else {
             #[cfg(test)]
             steps::count_examined(1);
             return;
         };
         #[cfg(test)]
-        steps::count_examined(1 + slots.len() as u64);
-        let scope = scope.or_else(|| self.scopes.last().copied());
-        for &index in slots {
-            match scope {
-                None => self.module_level[index] += 1,
-                Some(scope) => self.shadowed_in[index].push(scope),
-            }
+        steps::count_examined(2);
+        match scope.or_else(|| self.scopes.last().copied()) {
+            None => self.module_level[index] += 1,
+            Some(scope) => self.shadowed_in[index].push(scope),
         }
     }
 
@@ -757,7 +755,7 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
         }
         Some(out)
     }
-    let mut candidates: Vec<(&str, String)> = Vec::new();
+    let mut queries: Vec<(&str, &TSTypeQuery<'_>)> = Vec::new();
     for statement in &program.body {
         let declaration = match statement {
             Statement::ExportDeclaration(export) => Some(&export.declaration),
@@ -772,6 +770,19 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
         if declaration.type_parameters.is_some() || query.type_arguments.is_some() {
             continue;
         }
+        queries.push((declaration.id.name.as_str(), query));
+    }
+    // A name with two `typeof` aliases is ambiguous whatever else the module declares, so it is dropped here, counted
+    // and nothing more: no queried name is built for it and the walk keeps no slot for it.
+    let mut aliases_of: FxHashMap<&str, usize> = FxHashMap::default();
+    for (name, _) in &queries {
+        *aliases_of.entry(*name).or_default() += 1;
+    }
+    let mut candidates: Vec<(&str, String)> = Vec::new();
+    for (name, query) in queries {
+        if aliases_of[name] != 1 {
+            continue;
+        }
         let queried = match &query.expr_name {
             TSTypeQueryExprName::IdentifierReference(id) => Some(id.name.as_str().to_owned()),
             TSTypeQueryExprName::QualifiedName(qualified) => {
@@ -780,7 +791,7 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
             TSTypeQueryExprName::ThisExpression(_) | TSTypeQueryExprName::TSImportType(_) => None,
         };
         if let Some(queried) = queried {
-            candidates.push((declaration.id.name.as_str(), queried));
+            candidates.push((name, queried));
         }
     }
     if candidates.is_empty() {
@@ -788,10 +799,8 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
     }
     #[cfg(test)]
     steps::count_walk();
-    let mut slots: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
-    for (index, (name, _)) in candidates.iter().enumerate() {
-        slots.entry(*name).or_default().push(index);
-    }
+    let slots: FxHashMap<&str, usize> =
+        candidates.iter().enumerate().map(|(index, (name, _))| (*name, index)).collect();
     let mut declarations = TypeDeclarations {
         slots,
         scopes: Vec::new(),

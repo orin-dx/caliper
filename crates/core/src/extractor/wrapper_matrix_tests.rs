@@ -1203,6 +1203,33 @@ fn the_typeof_alias_walk_grows_with_the_declarations_not_with_the_aliases() {
     assert_eq!(work(40) - 6, 2 * (work(20) - 6));
 }
 
+/// Review round 23: a name the module gives N `typeof` aliases is ambiguous and dropped before the walk: it costs one
+/// lookup per declaration, not N per declaration, and no queried name is built for it.
+#[test]
+fn a_name_given_many_typeof_aliases_costs_work_proportional_to_them() {
+    let work = |n: usize| {
+        let mut source = String::from(HEADER);
+        source.push_str("declare const ns: { make(): unknown };\ntype Other = typeof ns.make;\n");
+        for _ in 0..n {
+            source.push_str("type Factory = typeof ns.make;\n");
+        }
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
+        super::component::steps::take_examined();
+        super::component::steps::take_written();
+        let aliases = super::component::typeof_aliases(&parsed.program);
+        let mut names: Vec<&str> = aliases.keys().map(|name| name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["Other"], "{n}");
+        (super::component::steps::take_examined(), super::component::steps::take_written())
+    };
+    // The header's six type-space names are a lookup each, `Other` a lookup and its slot, each `Factory` a lookup
+    // (`ns` is a value). Only `Other`'s queried name, `ns.make`, is written.
+    assert_eq!(work(2), (6 + 2 + 2, 8));
+    assert_eq!(work(500), (6 + 2 + 500, 8));
+    assert_eq!(work(1000).0 - 8, 2 * (work(500).0 - 8));
+}
+
 /// The forms where origin/main read a cast differently from its own plain call; the differential holds their rows to
 /// main's plain call instead (`the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain_call`).
 const MAIN_DIFFERS_FROM_ITS_PLAIN_CALL: &[&str] = &["wrapper with two type arguments", "Object.assign argument"];
