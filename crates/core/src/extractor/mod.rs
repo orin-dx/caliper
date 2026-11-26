@@ -1318,11 +1318,24 @@ impl<'src> SourceDataCollector<'src> {
         self.classify_extends(&name, type_args)
     }
 
+    /// The dotted name an expression is written as, read as origin/main read it: no wrapper is peeled, so
+    /// `(Button as typeof Button).defaultProps` names `unknown`. Static metadata and assignment targets read this.
     pub(super) fn expression_to_ident_name<'a>(&self, expr: &Expression<'a>) -> String {
-        match component::beneath(expr) {
+        match expr {
             Expression::Identifier(id) => id.name.as_str().to_owned(),
             Expression::StaticMemberExpression(me) => {
                 format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str())
+            }
+            _ => "unknown".to_owned(),
+        }
+    }
+
+    /// The same name read through every wrapper (`component::beneath`), for a class's heritage.
+    pub(super) fn peeled_ident_name<'a>(&self, expr: &Expression<'a>) -> String {
+        match component::beneath(expr) {
+            Expression::Identifier(id) => id.name.as_str().to_owned(),
+            Expression::StaticMemberExpression(me) => {
+                format!("{}.{}", self.peeled_ident_name(&me.object), me.property.name.as_str())
             }
             _ => "unknown".to_owned(),
         }

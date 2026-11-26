@@ -1908,6 +1908,87 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "Object.assign with a second module-level Root | typeof itself",
             "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nnamespace N { export const Root = 1; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
         ),
+        // Round 28: a receiver read through a cast; static metadata assigned through a cast.
+        (
+            "member callee receiver unshadowed | plain",
+            "import * as ui from './ui';\nexport const Themed = ui.wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "member callee receiver unshadowed | typeof itself",
+            "import * as ui from './ui';\nexport const Themed = (ui as typeof ui).wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "member callee receiver shadowed by a namespace local | plain",
+            "import * as ui from './ui';\nnamespace N { const ui = { wrap<T>(r: React.FC<T>): React.FC<T> { return r; } }; export const Themed = ui.wrap<Props>((props: Props) => <div />); }",
+        ),
+        (
+            "member callee receiver shadowed by a namespace local | typeof itself",
+            "import * as ui from './ui';\nnamespace N { const ui = { wrap<T>(r: React.FC<T>): React.FC<T> { return r; } }; export const Themed = (ui as typeof ui).wrap<Props>((props: Props) => <div />); }",
+        ),
+        (
+            "static defaultProps unshadowed | plain",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nButton.defaultProps = { label: 'local' };",
+        ),
+        (
+            "static defaultProps unshadowed | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\n(Button as typeof Button).defaultProps = { label: 'local' };",
+        ),
+        (
+            "static defaultProps shadowed by a parameter | plain",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { Button.defaultProps = { label: 'local' }; }",
+        ),
+        (
+            "static defaultProps shadowed by a parameter | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { (Button as typeof Button).defaultProps = { label: 'local' }; }",
+        ),
+        (
+            "static displayName unshadowed | plain",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nButton.displayName = 'Renamed';",
+        ),
+        (
+            "static displayName unshadowed | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\n(Button as typeof Button).displayName = 'Renamed';",
+        ),
+        (
+            "static displayName shadowed by a parameter | plain",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { Button.displayName = 'Renamed'; }",
+        ),
+        (
+            "static displayName shadowed by a parameter | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { (Button as typeof Button).displayName = 'Renamed'; }",
+        ),
+        (
+            "static a member set to a component unshadowed | plain",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nButton.Item = Item;",
+        ),
+        (
+            "static a member set to a component unshadowed | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\n(Button as typeof Button).Item = Item;",
+        ),
+        (
+            "static a member set to a component shadowed by a parameter | plain",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { Button.Item = Item; }",
+        ),
+        (
+            "static a member set to a component shadowed by a parameter | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { (Button as typeof Button).Item = Item; }",
+        ),
+        (
+            "static a member set to an inline component unshadowed | plain",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nButton.Inline = (p: ItemProps) => <div />;",
+        ),
+        (
+            "static a member set to an inline component unshadowed | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\n(Button as typeof Button).Inline = (p: ItemProps) => <div />;",
+        ),
+        (
+            "static a member set to an inline component shadowed by a parameter | plain",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { Button.Inline = (p: ItemProps) => <div />; }",
+        ),
+        (
+            "static a member set to an inline component shadowed by a parameter | typeof itself",
+            "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { (Button as typeof Button).Inline = (p: ItemProps) => <div />; }",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -1958,7 +2039,12 @@ fn factory_parity_output(source: &str) -> String {
                 if exports.is_empty() { String::new() } else { format!(" exported as {}", exports.join(",")) };
             // The callee whose declared result the resolver reads, if any.
             let via = m.wrapper_callee.as_ref().map(|callee| format!(" via {}", callee.name)).unwrap_or_default();
-            format!("{}:{}{rule}{exported}{via}", m.component_name, m.props_type_name)
+            // The defaults a static `defaultProps` assignment supplies.
+            let mut defaults: Vec<&str> = m.param_defaults.keys().map(String::as_str).collect();
+            defaults.sort_unstable();
+            let defaults =
+                if defaults.is_empty() { String::new() } else { format!(" defaults {}", defaults.join(",")) };
+            format!("{}:{}{rule}{exported}{via}{defaults}", m.component_name, m.props_type_name)
         })
         .chain(data.diagnostics.iter().map(|d| format!("{:?} {:?}: {}", d.severity, d.code, d.message)))
         .collect();
@@ -2026,8 +2112,42 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // Round 26 adds one: `(wrap as typeof wrap)<Props>(render)` with `wrap` declared once keeps the callee, as main's
     // plain call does (`a_callee_through_a_cast_is_attached_only_when_its_name_is_declared_once`). Round 27 adds three:
     // an `Object.assign` through a cast at module level
-    // (`an_object_assign_through_a_cast_attaches_only_at_module_level_to_a_parent_declared_once`).
-    assert_eq!(read_as_the_plain_call, 48);
+    // (`an_object_assign_through_a_cast_attaches_only_at_module_level_to_a_parent_declared_once`). Round 28 adds one: a
+    // member callee's receiver read through a cast when declared once
+    // (`a_receiver_through_a_cast_is_read_only_for_a_callee_and_only_when_declared_once`).
+    assert_eq!(read_as_the_plain_call, 49);
+}
+
+/// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
+/// declares the receiver's root once; otherwise it is named as origin/main named it (`unknown.wrap`). A static
+/// assignment's target (`defaultProps`, `displayName`, a member set to a component or to an inline one) is never read
+/// through a cast, as on origin/main, whether a parameter shadows the component or not.
+#[test]
+fn a_receiver_through_a_cast_is_read_only_for_a_callee_and_only_when_declared_once() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    let now = |id: &str| factory_parity_output(&cases[id]);
+    let main = |id: &str| base[id];
+    let receiver = "member callee receiver unshadowed";
+    assert_eq!(now(&format!("{receiver} | plain")), main(&format!("{receiver} | plain")));
+    assert!(main(&format!("{receiver} | typeof itself")).ends_with("via unknown.wrap"));
+    assert_eq!(now(&format!("{receiver} | typeof itself")), main(&format!("{receiver} | plain")), "declared once");
+    let shadowed = "member callee receiver shadowed by a namespace local";
+    for cast in ["plain", "typeof itself"] {
+        let id = format!("{shadowed} | {cast}");
+        assert_eq!(now(&id), main(&id), "{id}");
+    }
+    for kind in ["defaultProps", "displayName", "a member set to a component", "a member set to an inline component"] {
+        for shadow in ["unshadowed", "shadowed by a parameter"] {
+            for cast in ["plain", "typeof itself"] {
+                let id = format!("static {kind} {shadow} | {cast}");
+                assert_eq!(now(&id), main(&id), "{id}");
+            }
+        }
+    }
+    // The finding: through the cast, a parameter's `defaultProps` does not reach the exported `Button`.
+    assert!(!main("static defaultProps shadowed by a parameter | typeof itself").contains("defaults"));
 }
 
 /// Round 27: export propagation finds an `Object.assign`'s parent by its bare name, so one written through a cast,

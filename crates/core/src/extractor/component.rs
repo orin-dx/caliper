@@ -588,6 +588,11 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
         if let Some(root) = peeled_callee_root(it) {
             self.cast_names.push(root);
         }
+        if let Some(Expression::StaticMemberExpression(member)) = callee_of(it)
+            && let Some(root) = cast_chain_root(&member.object)
+        {
+            self.cast_names.push(root);
+        }
         if object_assign_beyond_main(it)
             && let Some(Expression::Identifier(parent)) = aliased_component(it)
         {
@@ -605,6 +610,20 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
             self.cast_names.push(id.name.as_str());
         }
         oxc_ast_visit::walk::walk_variable_declarator(self, it);
+    }
+}
+
+/// The identifier a receiver chain is rooted at when a cast main read no callee through is written anywhere in it: `ui`
+/// for `(ui as typeof ui)` and for `(ui as typeof ui).theme`. `None` for a chain without one, or rooted elsewhere.
+pub(super) fn cast_chain_root<'a>(mut expr: &Expression<'a>) -> Option<&'a str> {
+    let mut cast = false;
+    loop {
+        cast |= wrapped_beyond_main(expr);
+        match beneath(expr) {
+            Expression::Identifier(root) => return cast.then_some(root.name.as_str()),
+            Expression::StaticMemberExpression(member) => expr = &member.object,
+            _ => return None,
+        }
     }
 }
 
@@ -1395,7 +1414,7 @@ impl<'src> SourceDataCollector<'src> {
     /// (bare or `React.`-qualified). Returns the matched bare name for use in
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
-        let super_name = self.expression_to_ident_name(super_class(class)?.named()?);
+        let super_name = self.peeled_ident_name(super_class(class)?.named()?);
         match self.react_type_export(&super_name)?.as_str() {
             "Component" => Some("Component"),
             "PureComponent" => Some("PureComponent"),
@@ -1692,7 +1711,13 @@ impl<'src> SourceDataCollector<'src> {
         match callee_of(call)? {
             Expression::Identifier(id) => Some(id.name.as_str().to_owned()),
             Expression::StaticMemberExpression(me) => {
-                Some(format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str()))
+                // A receiver written through a cast main did not read is read through it only when the file declares
+                // its root once (`unique_cast_names`); otherwise it is named as main named it (`unknown.wrap`).
+                let receiver = match cast_chain_root(&me.object) {
+                    Some(root) if self.unique_cast_names.contains(root) => self.peeled_ident_name(&me.object),
+                    Some(_) | None => self.expression_to_ident_name(&me.object),
+                };
+                Some(format!("{receiver}.{}", me.property.name.as_str()))
             }
             _ => None,
         }

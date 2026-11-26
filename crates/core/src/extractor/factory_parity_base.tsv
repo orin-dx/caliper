@@ -207,6 +207,26 @@ Object.assign as an exported declaration's initializer | plain	Base:Props"functi
 Object.assign as an exported declaration's initializer | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Compound' passes component 'Root' to a call that does not look like a component wrapper | Root:Props"functionDeclaration" exported as Root
 Object.assign with a second module-level Root | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
 Object.assign with a second module-level Root | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Root:Props"functionDeclaration" exported as Root
+member callee receiver unshadowed | plain	Base:Props"functionDeclaration" | Themed:Props"hocWrapper" exported as Themed via ui.wrap
+member callee receiver unshadowed | typeof itself	Base:Props"functionDeclaration" | Themed:Props"hocWrapper" exported as Themed via unknown.wrap
+member callee receiver shadowed by a namespace local | plain	Base:Props"functionDeclaration" | Themed:Props"hocWrapper" exported as Themed via ui.wrap
+member callee receiver shadowed by a namespace local | typeof itself	Base:Props"functionDeclaration" | Themed:Props"hocWrapper" exported as Themed via unknown.wrap
+static defaultProps unshadowed | plain	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button defaults label | Item:ItemProps"functionDeclaration" exported as Item
+static defaultProps unshadowed | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static defaultProps shadowed by a parameter | plain	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button defaults label | Item:ItemProps"functionDeclaration" exported as Item
+static defaultProps shadowed by a parameter | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static displayName unshadowed | plain	Base:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" exported as Item | Renamed:Props"functionDeclaration" exported as Button
+static displayName unshadowed | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static displayName shadowed by a parameter | plain	Base:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" exported as Item | Renamed:Props"functionDeclaration" exported as Button
+static displayName shadowed by a parameter | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static a member set to a component unshadowed | plain	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static a member set to a component unshadowed | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static a member set to a component shadowed by a parameter | plain	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static a member set to a component shadowed by a parameter | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static a member set to an inline component unshadowed | plain	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Inline:ItemProps"attachedSubComponent" exported as Button.Inline | Item:ItemProps"functionDeclaration" exported as Item
+static a member set to an inline component unshadowed | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
+static a member set to an inline component shadowed by a parameter | plain	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Inline:ItemProps"attachedSubComponent" exported as Button.Inline | Item:ItemProps"functionDeclaration" exported as Item
+static a member set to an inline component shadowed by a parameter | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button | Item:ItemProps"functionDeclaration" exported as Item
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via toolkit.createElement
 an element built from forwardRef, plain	Button:Props"forwardRef" exported as Button
