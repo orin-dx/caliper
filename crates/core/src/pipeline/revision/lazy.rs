@@ -180,13 +180,23 @@ pub(super) struct Lazy {
     /// How many times [`Lazy::shared_unread`] asked a layer, for tests.
     #[cfg(test)]
     shared_unread_builds: std::sync::atomic::AtomicUsize,
+    /// How many shared walks resolutions asked the ledger about one by one, for tests.
+    #[cfg(test)]
+    shared_walk_visits: std::sync::atomic::AtomicUsize,
     /// Run once by the next [`Revision::lazy_component`] between its resolution and its diagnostics, for tests.
     #[cfg(test)]
     between: Mutex<Option<Between>>,
 }
 
-/// A layer, and the unread walks the shared demands lead to in it ([`Lazy::shared_unread`]).
-type SharedUnread = (Arc<dependency_types::DependencyLayer>, Arc<[Demand]>);
+/// A layer, and what the shared demands lead to in it ([`Lazy::shared_unread`]).
+type SharedUnread = (Arc<dependency_types::DependencyLayer>, Arc<SharedWalks>);
+
+/// The unread walks the shared demands lead to in one layer, and their footprint (`None` when one of them has a file
+/// read since): one copy per layer, which every resolution that reads React's augmentations shares.
+pub(super) struct SharedWalks {
+    unread: Arc<[Demand]>,
+    footprint: Option<dependency_types::Footprint>,
+}
 
 /// What a test runs inside a request ([`Lazy::between`]).
 #[cfg(test)]
@@ -199,7 +209,7 @@ impl Lazy {
     }
 
     /// The unread walks the shared demands lead to in `layer` ([`Lazy::shared_unread`]).
-    fn shared_unread(&self, layer: &Arc<dependency_types::DependencyLayer>) -> Arc<[Demand]> {
+    fn shared_unread(&self, layer: &Arc<dependency_types::DependencyLayer>) -> Arc<SharedWalks> {
         let mut held = self.shared_unread.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some((at, unread)) = held.as_ref()
             && Arc::ptr_eq(at, layer)
@@ -209,8 +219,9 @@ impl Lazy {
         #[cfg(test)]
         self.shared_unread_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let unread: Arc<[Demand]> = Arc::from(layer.unread(&self.shared));
-        *held = Some((layer.clone(), unread.clone()));
-        unread
+        let walks = Arc::new(SharedWalks { footprint: layer.footprint(&unread), unread });
+        *held = Some((layer.clone(), walks.clone()));
+        walks
     }
 
     fn moment(&self) -> dependency_types::Moment {
@@ -350,6 +361,8 @@ impl Revision {
             loads: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             shared_unread_builds: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            shared_walk_visits: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             between: Mutex::new(None),
         };
@@ -506,6 +519,8 @@ impl Revision {
                 #[cfg(test)]
                 shared_unread_builds: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
+                shared_walk_visits: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
                 between: Mutex::new(None),
             }),
         };
@@ -606,22 +621,26 @@ impl Revision {
                         .flat_map(|demands| demands.iter().cloned())
                         .collect();
                     let retry = lazy.retry();
-                    let mut unread = layer.unread(&roots);
+                    let unread = layer.unread(&roots);
                     // React's augmentations come from every module the project imports, whichever file imports it, and
-                    // the first load followed those for every component. Asked of the ledger only, which answers at
-                    // once while no walk is unread.
-                    if depends_on.reads_augmentations {
-                        unread.extend(lazy.shared_unread(layer).iter().cloned());
-                        unread.sort();
-                        unread.dedup();
-                    }
+                    // the first load followed those for every component: their unread walks and footprint are the
+                    // layer's, built once and shared, and asked again only once that footprint is due.
+                    let shared = depends_on.reads_augmentations.then(|| lazy.shared_unread(layer));
+                    let shared = shared.filter(|walks| !walks.unread.is_empty());
                     let mut missing = layer.missing_at(&roots, retry);
                     missing.extend(layer.missing_at(&unread, retry));
+                    if let Some(walks) = &shared
+                        && !walks.footprint.as_ref().is_some_and(|held| layer.footprint_holds(held, lazy.moment()))
+                    {
+                        #[cfg(test)]
+                        lazy.shared_walk_visits.fetch_add(walks.unread.len(), std::sync::atomic::Ordering::Relaxed);
+                        missing.extend(layer.missing_at(&walks.unread, retry));
+                    }
                     missing.sort();
                     missing.dedup();
-                    (missing, unread)
+                    (missing, (unread, shared))
                 }
-                None => (Vec::new(), Vec::new()),
+                None => (Vec::new(), (Vec::new(), None)),
             };
             // A resolution against a layer that lacked a name it reached is discarded, and so is its context's memo.
             // A load that left the same names missing answered none of them (a demand whose load panicked stays
@@ -633,8 +652,11 @@ impl Revision {
                 // With no footprint, a file one of the walks could not read was read since in this same layer, so the
                 // walk is due: this pass already asked for it (`missing == asked_for`) and the load left it as it was.
                 // The answer and its warnings both come from `engine`; held nowhere, the next request asks again.
-                if !unread.is_empty() {
-                    if let Some(footprint) = engine.layer.as_ref().and_then(|layer| layer.footprint(&unread)) {
+                let (own, shared) = unread;
+                if !own.is_empty() || shared.is_some() {
+                    let own = (!own.is_empty()).then(|| engine.layer.as_ref().and_then(|layer| layer.footprint(&own)));
+                    let parts = own.into_iter().chain(shared.map(|walks| walks.footprint.clone()));
+                    if let Some(footprint) = parts.collect::<Option<Vec<_>>>().map(dependency_types::Footprint::union) {
                         lazy.provisional.insert(id.clone(), (resolved.clone(), footprint));
                     }
                     return Some((resolved, engine.layer.clone()));
@@ -1229,6 +1251,8 @@ mod read_retry_tests {
         let lazy = revision.lazy.as_ref().unwrap();
         let (builds, loads) = (lazy.shared_unread_builds.load(Relaxed), lazy.loads.load(Relaxed));
         assert!(builds <= loads + 1, "{builds} builds for {loads} loads");
+        // While their footprint holds, no resolution asks about the 200 shared walks one by one.
+        assert_eq!(lazy.shared_walk_visits.load(Relaxed), 0);
     }
 
     fn project() -> (tempfile::TempDir, Utf8PathBuf) {

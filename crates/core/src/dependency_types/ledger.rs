@@ -218,6 +218,16 @@ impl UnreadWalks {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Footprint(Box<[Unreadable]>);
 
+impl Footprint {
+    /// The footprint of an answer read through each of `parts`: every file in any of them, once.
+    pub(crate) fn union(parts: Vec<Footprint>) -> Footprint {
+        let mut files: Vec<Unreadable> = parts.into_iter().flat_map(|part| part.0.into_vec()).collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        files.dedup_by(|a, b| a.path == b.path);
+        Footprint(files.into_boxed_slice())
+    }
+}
+
 /// A file an answer's walks could not read, and the stamp and time of the failed read the answer saw.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Unreadable {

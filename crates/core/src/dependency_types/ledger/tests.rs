@@ -454,6 +454,63 @@ fn an_eager_retry_of_a_pure_barrel_walk_resolves_its_demander_again() {
     assert_eq!(session.component("Card"), fresh.component("Card"));
 }
 
+/// The eager revision: two components of one directory import `SoloProps`, whose file could not be read; the loader
+/// keeps one demand for the directory, recorded under one of the two files. Each file in turn drops its import while
+/// the file becomes readable: the other component, which still imports it, answers as a fresh session does.
+#[test]
+fn an_eager_edit_that_drops_a_shared_import_still_retries_it_for_the_other_file() {
+    let importer = |name: &str| {
+        format!(
+            "import type {{ SoloProps }} from 'solo-kit';\ninterface {name}Props extends SoloProps {{ own: string }}\n\
+             export function {name}(props: {name}Props) {{ return null; }}\n"
+        )
+    };
+    let dropped = |name: &str| format!("export function {name}(props: {{ own: string }}) {{ return null; }}\n");
+    for (edited, other) in [("First", "Second"), ("Second", "First")] {
+        let (first, second) = (importer("First"), importer("Second"));
+        let (_tmp, root) = project(
+            &[SOLO, &[("src/pair/First.tsx", first.as_str()), ("src/pair/Second.tsx", second.as_str())]].concat(),
+        );
+        let props = root.join("node_modules/solo-kit/props.d.ts");
+        let text = std::fs::read_to_string(&props).unwrap();
+        std::fs::write(&props, UNREADABLE).unwrap();
+        let session = WatchSession::new(options(&root));
+        drop(session.initialize());
+        std::fs::write(&props, text).unwrap();
+        let file = root.join(format!("src/pair/{edited}.tsx"));
+        std::fs::write(&file, dropped(edited)).unwrap();
+        drop(session.update_file(&file));
+
+        let fresh = WatchSession::new(options(&root));
+        drop(fresh.initialize());
+        assert_eq!(names(&session.component(other)), ["own", "tone"], "{edited} dropped its import");
+        assert_eq!(session.component(other), fresh.component(other), "{edited} dropped its import");
+    }
+}
+
+/// The eager revision: `Card` sits behind a file that could not be read, which then reads on disk, and `Plain`,
+/// unrelated, is deleted: a deletion makes the walk due as an edit does, and `Card` answers as a fresh session does.
+#[test]
+fn an_eager_deletion_follows_every_unread_walk_again() {
+    let card = "import type { SoloProps } from 'solo-kit';\ninterface CardProps extends SoloProps { own: string }\n\
+                export function Card(props: CardProps) { return null; }\n";
+    let plain = "export function Plain(props: { title: string }) { return null; }\n";
+    let (_tmp, root) = project(&[SOLO, &[("src/card/Card.tsx", card), ("src/plain/Plain.tsx", plain)]].concat());
+    let props = root.join("node_modules/solo-kit/props.d.ts");
+    let text = std::fs::read_to_string(&props).unwrap();
+    std::fs::write(&props, UNREADABLE).unwrap();
+    let session = WatchSession::new(options(&root));
+    drop(session.initialize());
+    std::fs::write(&props, text).unwrap();
+    std::fs::remove_file(root.join("src/plain/Plain.tsx")).unwrap();
+    drop(session.update_file(&root.join("src/plain/Plain.tsx")));
+
+    let fresh = WatchSession::new(options(&root));
+    drop(fresh.initialize());
+    assert_eq!(names(&session.component("Card")), ["own", "tone"]);
+    assert_eq!(session.component("Card"), fresh.component("Card"));
+}
+
 /// The eager revision: `Tag` reaches a walk that could not read a file, which then reads on disk. An edit to a file
 /// that reaches no unread walk (`Plain`) follows every unread walk again, as an edit makes each one due in a lazy
 /// session: `Tag` answers as a fresh session does.
@@ -1198,24 +1255,50 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
             }
         }
     }
-    // The eager revision, under each single unreadable file: once it reads, an edit to `Plain`, which reaches no
-    // package, follows every due walk again, and every component answers as a fresh run does (the footprint rule: a
-    // retry of any walk a component's resolution consulted, through a barrel whose target it never read included,
-    // resolves it again).
+    // The eager revision, under each single unreadable file: once it reads, one change follows every due walk again,
+    // and every component answers as a fresh run over the changed project does (the footprint rule: a retry of any
+    // walk a component's resolution consulted, through a barrel whose target it never read included, resolves it
+    // again). The changes: an edit to `Plain`, which reaches no package; its deletion; and `A` or `All` dropping its
+    // import of `AProps`, which the other still makes from the same directory (one demand, recorded under either).
+    let changes: [(&str, fn(&Utf8Path) -> Utf8PathBuf); 4] = [
+        ("edit Plain", |root| {
+            let plain = root.join("src/plain/Plain.tsx");
+            std::fs::write(&plain, format!("{MODEL_PLAIN}// edited\n")).unwrap();
+            plain
+        }),
+        ("delete Plain", |root| {
+            let plain = root.join("src/plain/Plain.tsx");
+            std::fs::remove_file(&plain).unwrap();
+            plain
+        }),
+        ("A drops its import", |root| {
+            let file = root.join("src/A.tsx");
+            std::fs::write(&file, "export function A(props: { own_a: string }) { return null; }\n").unwrap();
+            file
+        }),
+        ("All drops its import", |root| {
+            let file = root.join("src/All.tsx");
+            std::fs::write(&file, "export function All(props: { own_all: string }) { return null; }\n").unwrap();
+            file
+        }),
+    ];
     for file in &names {
-        let (_tmp, root) = model_project();
-        set_unreadable(&root, &[*file].into(), false);
-        let session = WatchSession::new(options(&root));
-        drop(session.initialize());
-        set_unreadable(&root, &std::collections::BTreeSet::new(), false);
-        let plain = root.join("src/plain/Plain.tsx");
-        std::fs::write(&plain, format!("{MODEL_PLAIN}// edited\n")).unwrap();
-        drop(session.update_file(&plain));
-        for (name, _, _) in MODEL_COMPONENTS {
-            let answer = session.component(name).unwrap();
-            let cold = oracle.ask(name, &[], false);
-            if !warned_names(&root, &answer).is_empty() || comparable(&root, &answer) != cold {
-                failures.push(format!("[eager retry] {file}: {name} is not a fresh run's"));
+        for (change, apply) in &changes {
+            let (_tmp, root) = model_project();
+            set_unreadable(&root, &[*file].into(), false);
+            let session = WatchSession::new(options(&root));
+            drop(session.initialize());
+            set_unreadable(&root, &std::collections::BTreeSet::new(), false);
+            let changed = apply(&root);
+            drop(session.update_file(&changed));
+            let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..options(&root) });
+            drop(fresh.initialize());
+            for (name, _, _) in MODEL_COMPONENTS {
+                let answer = session.component(name).unwrap();
+                let cold = comparable(&root, &fresh.component(name).unwrap());
+                if !warned_names(&root, &answer).is_empty() || comparable(&root, &answer) != cold {
+                    failures.push(format!("[eager retry] {file}, {change}: {name} is not a fresh run's"));
+                }
             }
         }
     }

@@ -195,6 +195,22 @@ struct Change<'c> {
 }
 
 /// The bare names `file` declares in an enum or const-array map keyed `file:name`.
+/// Whether a source file of `changed`'s directory other than `changed` makes the demand `walk`, read from disk: asked
+/// only for a due walk that `changed` no longer makes.
+fn demanded_in_directory<'f>(
+    walk: &dependency_types::Demand,
+    changed: &Utf8Path,
+    files: impl Iterator<Item = &'f Utf8Path>,
+) -> bool {
+    files.filter(|file| *file != changed && file.parent() == changed.parent()).any(|file| {
+        let Ok(source) = std::fs::read_to_string(file) else { return false };
+        let data = crate::extractor::parse_file(file, &source);
+        dependency_types::project_demands(file, &data)
+            .iter()
+            .any(|demand| demand.specifier == walk.specifier && demand.name == walk.name)
+    })
+}
+
 fn bare_names_declared<V>(file: &Utf8Path, map: &FxHashMap<String, V>) -> Vec<String> {
     let prefix = format!("{file}:");
     map.keys().filter_map(|key| key.strip_prefix(prefix.as_str()).map(str::to_owned)).collect()
@@ -475,36 +491,37 @@ impl Revision {
                 if options.load_dependencies {
                     demands = dependency_types::project_demands(changed, &data);
                 }
-                // Only names no earlier revision loaded cost a load; the new layer keeps everything the old one had.
-                if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
-                    // An edit makes every walk past a file that could not be read due, whichever file it was: each is
-                    // followed again, as a lazy session follows it on its next request.
-                    // A walk of an import this edit removed is not one: a fresh run would not follow it.
-                    let mut missing = layer.missing(&demands);
-                    let removed = |walk: &dependency_types::Demand| {
-                        walk.from == changed
-                            && !demands.iter().any(|now| now.specifier == walk.specifier && now.name == walk.name)
-                    };
-                    missing.extend(
-                        layer.due_walks(dependency_types::Retry::Always).into_iter().filter(|walk| !removed(walk)),
-                    );
-                    missing.sort();
-                    missing.dedup();
-                    if !missing.is_empty() {
-                        let extended = dependency_types::load(missing, options, Some(layer));
-                        // What the load added that declares into React (a retry that read an augmentation) can change
-                        // every answer that reads React's augmentations, whichever file it was.
-                        react_namespace |= extended.declares_into_react();
-                        named_types.fallback = Some(extended.named_types.clone());
-                        dependencies = Some(Arc::new(extended));
-                    }
-                }
                 named_types.merge_file(&data);
                 react_namespace |= named_types.declares_react_namespace(changed);
                 global.merge(changed, data);
                 files.insert(changed.to_owned())
             }
         };
+        // Every change, an edit or a deletion, makes every walk past a file that could not be read due, whichever file
+        // it was: each is followed again, as a lazy session follows it on its next request. Only names no earlier
+        // revision loaded cost a load; the new layer keeps everything the old one had. A deleted file demands nothing.
+        if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
+            let mut missing = layer.missing(&demands);
+            // A walk of an import this change removed is not followed again, unless another file of the directory
+            // still makes that demand: the loader keeps one demand per directory, recorded under whichever file made
+            // it first.
+            let removed = |walk: &dependency_types::Demand| {
+                walk.from == changed
+                    && !demands.iter().any(|now| now.specifier == walk.specifier && now.name == walk.name)
+                    && !demanded_in_directory(walk, changed, files.iter().map(|file| file.as_path()))
+            };
+            missing.extend(layer.due_walks(dependency_types::Retry::Always).into_iter().filter(|walk| !removed(walk)));
+            missing.sort();
+            missing.dedup();
+            if !missing.is_empty() {
+                let extended = dependency_types::load(missing, options, Some(layer));
+                // What the load added that declares into React (a retry that read an augmentation) can change every
+                // answer that reads React's augmentations, whichever file it was.
+                react_namespace |= extended.declares_into_react();
+                named_types.fallback = Some(extended.named_types.clone());
+                dependencies = Some(Arc::new(extended));
+            }
+        }
         Applied {
             global,
             named_types,
