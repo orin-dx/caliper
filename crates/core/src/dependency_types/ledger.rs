@@ -169,6 +169,9 @@ impl Mark {
 #[derive(Default)]
 pub(crate) struct UnreadWalks {
     demands: FxHashSet<DemandKey>,
+    /// Every node of the chain whose latest follow reached an unread walk: what a load over this layer asks of each
+    /// earlier node it meets.
+    nodes: FxHashSet<Node>,
     /// The directories of `demands`, so a project file whose directory none is in costs no key.
     dirs: FxHashSet<Box<str>>,
     /// The files of the declarations whose references reach an unread walk.
@@ -223,6 +226,9 @@ struct Unreadable {
 pub(super) struct ReadLedger {
     reads: FxHashMap<PathKey, Read>,
     marks: FxHashMap<Node, Mark>,
+    /// How many earlier nodes `finish` walked the ledger from to learn whether they reach an unread walk, for tests.
+    #[cfg(test)]
+    traversals: usize,
 }
 
 impl ReadLedger {
@@ -410,6 +416,7 @@ impl DependencyLayer {
             }
         }
         for node in marked {
+            walks.nodes.insert(node.clone());
             match node {
                 Node::Demand(key) => {
                     walks.dirs.insert(key.0.clone());
@@ -470,7 +477,7 @@ pub(super) struct LedgerBuilder<'a> {
     unread: FxDashMap<DemandKey, (Demand, Arc<[PathKey]>)>,
     /// One copy of each list of files a walk could not read: the demands of one augmentation search (every directory
     /// of a resolution scope importing the module) share the search's list instead of each holding its own.
-    suspect_lists: FxDashSet<Arc<[PathKey]>>,
+    suspect_lists: FxDashMap<Arc<[PathKey]>, ()>,
     /// The demands followed again because their last walk was unread.
     retried: FxDashSet<DemandKey>,
     /// When this load follows again a demand an earlier one left unread.
@@ -492,7 +499,7 @@ impl<'a> LedgerBuilder<'a> {
             reads: DashMap::default(),
             edges: DashMap::default(),
             unread: DashMap::default(),
-            suspect_lists: DashSet::default(),
+            suspect_lists: DashMap::default(),
             retried: DashSet::default(),
         }
     }
@@ -536,11 +543,12 @@ impl<'a> LedgerBuilder<'a> {
     pub(super) fn unread_demand(&self, demand: &Demand, mut files: Vec<PathKey>) {
         files.sort();
         files.dedup();
-        let shared = match self.suspect_lists.get(files.as_slice()) {
-            Some(shared) => shared.clone(),
-            None => {
-                let list: Arc<[PathKey]> = Arc::from(files);
-                self.suspect_lists.insert(list.clone());
+        // One entry call, so two threads with the same list keep one copy.
+        let shared = match self.suspect_lists.entry(Arc::from(files)) {
+            dashmap::mapref::entry::Entry::Occupied(held) => held.key().clone(),
+            dashmap::mapref::entry::Entry::Vacant(new) => {
+                let list = new.key().clone();
+                new.insert(());
                 list
             }
         };
@@ -581,6 +589,8 @@ impl<'a> LedgerBuilder<'a> {
         let unread: FxHashMap<Node, (Demand, Arc<[PathKey]>)> =
             unread.into_iter().map(|(key, walk)| (Node::Demand(key), walk)).collect();
         let mut marks: FxHashMap<Node, Mark> = FxHashMap::default();
+        #[cfg(test)]
+        let traversals = std::cell::Cell::new(0);
         if !unread.is_empty() || has_earlier {
             let edges: FxHashMap<Node, Vec<Node>> = edges.into_iter().collect();
             let followed = |node: &Node| {
@@ -588,18 +598,25 @@ impl<'a> LedgerBuilder<'a> {
                     || unread.contains_key(node)
                     || matches!(node, Node::Demand(key) if retried.contains(key))
             };
-            // The walks that are unread: this load's own, and the earlier ones this load met without following.
+            // The walks that are unread: this load's own, and the earlier ones this load met without following. Over a
+            // parent, whether an earlier node reaches one is the parent's cached answer, asked once per layer; only a
+            // flatten, whose earlier marks it took in itself, walks from each.
+            let below = parent.filter(|_| inherited.marks.is_empty()).map(DependencyLayer::unread_walks);
+            let reaches_earlier = |node: &Node| match &below {
+                Some(walks) => walks.nodes.contains(node),
+                None => {
+                    #[cfg(test)]
+                    traversals.set(traversals.get() + 1);
+                    earlier(node).is_some() && !unread_below([node.clone()], earlier).is_empty()
+                }
+            };
             let mut marked: FxHashSet<&Node> = unread.keys().collect();
             let mut queue: Vec<&Node> = marked.iter().copied().collect();
             let mut reached_by: FxHashMap<&Node, Vec<&Node>> = FxHashMap::default();
             for (from, tos) in &edges {
                 for to in tos {
                     reached_by.entry(to).or_default().push(from);
-                    if !followed(to)
-                        && !marked.contains(to)
-                        && earlier(to).is_some()
-                        && !unread_below([to.clone()], earlier).is_empty()
-                    {
+                    if !followed(to) && !marked.contains(to) && reaches_earlier(to) {
                         marked.insert(to);
                         queue.push(to);
                     }
@@ -625,10 +642,24 @@ impl<'a> LedgerBuilder<'a> {
             }
         }
         if parent.is_some() {
-            return ReadLedger { reads, marks };
+            return ReadLedger {
+                reads,
+                marks,
+                #[cfg(test)]
+                traversals: traversals.get(),
+            };
         }
         let mut merged = inherited;
-        merged.absorb(&ReadLedger { reads, marks });
+        merged.absorb(&ReadLedger {
+            reads,
+            marks,
+            #[cfg(test)]
+            traversals: 0,
+        });
+        #[cfg(test)]
+        {
+            merged.traversals = traversals.get();
+        }
         merged.reads.retain(|_, read| matches!(read, Read::Failed(_)));
         merged.marks.retain(|_, mark| !mark.is_clean());
         merged

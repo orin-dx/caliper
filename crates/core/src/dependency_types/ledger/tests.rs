@@ -275,6 +275,93 @@ fn the_unread_walks_are_built_once_per_layer_that_changed_the_ledger() {
     assert_eq!(layer.unread_walk_builds(), 1, "one build for the chain");
 }
 
+/// A chain of 200 declarations ends at one file that could not be read. A later load asks for each of the other 199
+/// by name: each is a claim the first load made, which this load meets without walking it. Whether each reaches the
+/// unread walk is the parent's answer, computed once: no walk of the ledger per claim, and each still leads there.
+#[test]
+fn a_load_that_meets_many_earlier_claims_asks_the_parent_once() {
+    let mut files: Vec<(String, String)> = vec![(
+        "node_modules/chain-kit/package.json".into(),
+        r#"{ "name": "chain-kit", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
+    )];
+    let mut index = String::new();
+    for n in 0..200 {
+        index.push_str(&format!("export {{ D{n} }} from './d{n}';\n"));
+        let (next, from) = if n == 199 {
+            ("Leaf".to_owned(), "leaf".to_owned())
+        } else {
+            (format!("D{}", n + 1), format!("d{}", n + 1))
+        };
+        let body = format!(
+            "import type {{ {next} }} from './{from}';\nexport interface D{n} extends {next} {{ f{n}: string }}\n"
+        );
+        files.push((format!("node_modules/chain-kit/d{n}.d.ts"), body));
+    }
+    files.push(("node_modules/chain-kit/index.d.ts".into(), index));
+    files.push(("node_modules/chain-kit/leaf.d.ts".into(), "export interface Leaf { leaf: string }\n".into()));
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = project(&files);
+    std::fs::write(root.join("node_modules/chain-kit/leaf.d.ts"), UNREADABLE).unwrap();
+    let demand = |n: usize| Demand {
+        from: root.join("src/Card.tsx"),
+        specifier: "chain-kit".into(),
+        name: format!("D{n}").into(),
+    };
+    let options = options(&root);
+    let now = Moment { at: std::time::Instant::now(), edits: Edits::default() };
+    let first =
+        Arc::new(load_at(vec![demand(0)], &options, None, Retry::Due(now), Stamp { moment: now, load: Load(1) }));
+    let later = load_at(
+        (1..200).map(demand).collect(),
+        &options,
+        Some(&first),
+        Retry::Due(now),
+        Stamp { moment: now, load: Load(2) },
+    );
+    assert_eq!(later.ledger.traversals, 0, "no walk of the ledger per earlier claim");
+    assert_eq!(first.unread_walk_builds(), 1, "the parent's answer, built once");
+    assert!(!later.unread(&[demand(150)]).is_empty(), "a claim met still leads to the unread walk");
+}
+
+/// A barrel walks an `export *` cycle, then an unreadable target, then finds `NameProps` in a later file: a partial
+/// mapping to that file. Once the target reads and declares `NameProps` first, the cycle still keeps the answer out of
+/// `exports`, and the newest walk's outcome supersedes the older layer's mapping: the resolver is not sent to the
+/// later file.
+#[test]
+fn the_newest_walk_of_a_barrel_name_supersedes_an_older_partial_mapping() {
+    let (_tmp, root) = project(&[
+        ("node_modules/cyc-kit/package.json", r#"{ "name": "cyc-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/cyc-kit/index.d.ts",
+            "export * from './loop';\nexport * from './first';\nexport * from './second';\n",
+        ),
+        ("node_modules/cyc-kit/loop.d.ts", "export * from './index';\n"),
+        ("node_modules/cyc-kit/first.d.ts", "export interface NameProps { first: string }\n"),
+        ("node_modules/cyc-kit/second.d.ts", "export interface NameProps { second: string }\n"),
+    ]);
+    let first = root.join("node_modules/cyc-kit/first.d.ts");
+    let text = std::fs::read_to_string(&first).unwrap();
+    std::fs::write(&first, UNREADABLE).unwrap();
+    let demand = Demand { from: root.join("src/Card.tsx"), specifier: "cyc-kit".into(), name: "NameProps".into() };
+    let (index, second) = (root.join("node_modules/cyc-kit/index.d.ts"), root.join("node_modules/cyc-kit/second.d.ts"));
+    let options = options(&root);
+    let failed = Arc::new(load(vec![demand.clone()], &options, None));
+    assert_eq!(failed.export_for_resolver(&index, "NameProps"), Some(Some((second.clone(), "NameProps".into()))));
+
+    let card = "import type { NameProps } from 'cyc-kit';\ninterface CardProps extends NameProps { own: string }\n\
+                export function Card(props: CardProps) { return null; }\n";
+    write(&root, "src/Card.tsx", card);
+    let session = WatchSession::lazy(options.clone());
+    drop(session.initialize());
+    std::fs::write(&first, text).unwrap();
+    let recovered = load(failed.due_walks(Retry::Always), &options, Some(&failed));
+    assert_ne!(
+        recovered.export_for_resolver(&index, "NameProps"),
+        Some(Some((second, "NameProps".into()))),
+        "the older layer's mapping no longer stands"
+    );
+}
+
 /// A module's augmentation search could not read two files. A retry reads one of them again and still fails on the
 /// other: an answer resolved before the retry no longer holds, though the walk's latest mark (one file, a new retry
 /// time) would say it did. So does an answer whose files were read again and failed again, by any load.
@@ -686,7 +773,9 @@ fn a_component_that_meets_a_declaration_an_earlier_load_left_unread_is_not_kept_
 
 /// The model's package: a barrel of `export *` targets with a re-export stub, a named re-export of a declaration that
 /// extends a type from a nested file, a chain of two more below it, and Radix's mapped `Primitive` behind the last
-/// `export *`. Each of its declaration files can be made unreadable.
+/// `export *`. A second barrel, `cyc`, walks a re-export cycle before `first` and finds `NameProps` in `second` while
+/// `first`, which declares it too, cannot be read. Each declaration file can be made unreadable, `cyc/first` alone of
+/// the second barrel's.
 const MODEL_PACKAGE: &[(&str, &str)] = &[
     ("node_modules/mk/package.json", r#"{ "name": "mk", "version": "1.0.0", "types": "index.d.ts" }"#),
     (
@@ -696,6 +785,13 @@ const MODEL_PACKAGE: &[(&str, &str)] = &[
     ("node_modules/mk/a.d.ts", "export interface AProps { a: string }\n"),
     ("node_modules/mk/stub.d.ts", "export * from './b';\n"),
     ("node_modules/mk/b.d.ts", "export interface BProps { b: string }\n"),
+    (
+        "node_modules/mk/cyc/index.d.ts",
+        "export * from './loop';\nexport * from './first';\nexport * from './second';\n",
+    ),
+    ("node_modules/mk/cyc/loop.d.ts", "export * from './index';\n"),
+    ("node_modules/mk/cyc/first.d.ts", "export interface NameProps { first: string }\n"),
+    ("node_modules/mk/cyc/second.d.ts", "export interface NameProps { second: string }\n"),
     (
         "node_modules/mk/nest.d.ts",
         "import type { Deep } from './deep';\nexport interface Nest extends Deep { n: string }\n",
@@ -760,6 +856,12 @@ const MODEL_COMPONENTS: &[(&str, &str, &[&str])] = &[
          interface DirectOwn extends BProps, Nest { own_direct: string }\n\
          export function Direct(props: DirectOwn) { return null; }\n",
         &["index", "a", "stub", "b", "nest", "deep", "leaf", "prim"],
+    ),
+    (
+        "Cyc",
+        "import type { NameProps } from 'mk/cyc';\ninterface CycOwn extends NameProps { own_cyc: string }\n\
+         export function Cyc(props: CycOwn) { return null; }\n",
+        &["cyc/index", "cyc/loop", "cyc/first", "cyc/second"],
     ),
     (
         "Q",
@@ -891,8 +993,10 @@ impl ModelRun<'_> {
         if comparable(&self.root, &answer) != expected {
             self.fail("fresh session", format!("{name} warned {warned:?}"));
         }
+        // A re-export cycle's answer reaches the resolver only as a partial mapping: with the unreadable target
+        // declaring nothing, a fresh run maps nothing, so that oracle does not say what `Cyc`'s readable files give.
         let readable = self.oracle.ask(name, &warned, true);
-        if format!("{:?}", prop_names(&answer)) != readable {
+        if name != "Cyc" && format!("{:?}", prop_names(&answer)) != readable {
             self.fail("readable files", format!("{name} {:?}, expected {readable}", prop_names(&answer)));
         }
         let again = self.session.component(name).unwrap();
@@ -946,6 +1050,7 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
     let names: Vec<&str> = MODEL_PACKAGE
         .iter()
         .filter_map(|(path, _)| path.strip_prefix("node_modules/mk/")?.strip_suffix(".d.ts"))
+        .filter(|name| !name.starts_with("cyc/") || *name == "cyc/first")
         .collect();
     let mut oracle = ModelOracle::new();
     let mut failures: Vec<String> = Vec::new();
@@ -1046,10 +1151,19 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
                     log: Vec::new(),
                     failures: &mut failures,
                 };
-                run.request(first);
-                run.request(second);
+                let degraded = !run.request(first).is_empty();
+                // A pair the unreadable file degraded neither of has nothing for the edits below to recover.
+                if !degraded && run.request(second).is_empty() {
+                    continue;
+                }
                 set_unreadable(&run.root, &std::collections::BTreeSet::new(), false);
                 run.log.push(format!("{file} reads"));
+                // A project edit makes the walk due: the retry's answer for a degraded `first` is a fresh session's.
+                if degraded {
+                    let (_, body, _) = MODEL_COMPONENTS.iter().find(|(name, _, _)| name == first).unwrap();
+                    run.edit(&run.root.join(format!("src/{first}.tsx")), &model_source(body, 1));
+                    run.request(first);
+                }
                 let tsconfig = run.root.join("tsconfig.json");
                 run.edit(&tsconfig, &format!("{MODEL_TSCONFIG}\n"));
             }

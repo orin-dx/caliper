@@ -377,10 +377,11 @@ pub(crate) struct DependencyLayer {
     pub(crate) import_map: Arc<ImportResolutionMap>,
     /// `(module, name)` → the declaring `(file, name)`, or `None` when the module's types do not export it.
     exports: dashmap::ReadOnlyView<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>, FxBuildHasher>,
-    /// `(module, name)` → the declaring `(file, name)` a walk found past a file it could not read: the resolver's
-    /// mapping of a barrel to its declaration while that walk is unread (the ledger marks it). Never in `exports`,
-    /// the loader's own lookups or the index; a complete answer in `exports` wins.
-    partial_exports: FxHashMap<(PathKey, CompactString), (Utf8PathBuf, CompactString)>,
+    /// `(module, name)` → what this layer's walk of it found when the answer was not kept: the declaring `(file, name)`
+    /// found past a file it could not read (the resolver's mapping while that walk is unread), or `None` when a newer
+    /// walk found nothing or was not kept for a cycle, which ends an older layer's mapping. The newest layer's entry
+    /// stands. Never in `exports`, the loader's own lookups or the index; a complete answer in `exports` wins.
+    partial_exports: FxHashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
     /// `(directory, specifier)` → module, for every resolution the loader made.
     resolutions: FxHashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     files: FxHashSet<PathKey>,
@@ -463,7 +464,12 @@ impl DependencyLayer {
         if let Some(found) = self.export_entry(&key) {
             return Some(found.clone());
         }
-        self.chain().find_map(|layer| layer.partial_exports.get(&key)).map(|found| Some(found.clone()))
+        self.chain().find_map(|layer| layer.partial_exports.get(&key)).and_then(|found| found.clone().map(Some))
+    }
+
+    /// The newest partial mapping of `key` in the chain, `None` inside when that walk ended an older one.
+    fn partial_export(&self, key: &(PathKey, CompactString)) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
+        self.chain().find_map(|layer| layer.partial_exports.get(key))
     }
 
     fn export_entry(&self, key: &(PathKey, CompactString)) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
@@ -558,7 +564,7 @@ struct Loader<'a> {
     parsed: FxDashMap<PathKey, ParseCell>,
     resolutions: FxDashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
-    partial_exports: FxDashMap<(PathKey, CompactString), (Utf8PathBuf, CompactString)>,
+    partial_exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
     claimed: FxDashSet<(PathKey, CompactString)>,
     declaring: FxDashSet<PathKey>,
     react_files: FxDashSet<PathKey>,
@@ -913,8 +919,19 @@ impl Loader<'_> {
             };
         }
         let found = self.find_export(&module, &demand.name);
-        if let (Some(declaring), true) = (&found.value, found.incomplete()) {
-            self.partial_exports.insert((PathKey::from(module.as_path()), demand.name.clone()), declaring.clone());
+        // The newest walk of `(module, name)` decides the resolver's partial mapping: what it found past a file it
+        // could not read, or, over an older layer's mapping, that it found nothing or another file it did not keep
+        // (a re-export cycle), so the older mapping no longer stands.
+        let mapping = (PathKey::from(module.as_path()), demand.name.clone());
+        // A flatten took the chain's mappings into its own map first, so an older one may be there too.
+        let superseded = || {
+            self.partial_exports.contains_key(&mapping)
+                || self.parent.is_some_and(|parent| parent.partial_export(&mapping).is_some())
+        };
+        match (found.incomplete(), &found.value) {
+            (true, Some(declaring)) => drop(self.partial_exports.insert(mapping.clone(), Some(declaring.clone()))),
+            (true, None) | (false, _) if superseded() => drop(self.partial_exports.insert(mapping.clone(), None)),
+            (true, None) | (false, _) => {}
         }
         let loaded = match found.value {
             Some((file, name)) => self.load_declaration(scope, file, name, &node),
