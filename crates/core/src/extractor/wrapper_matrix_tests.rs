@@ -699,61 +699,6 @@ fn a_hook_called_through_an_assertion_is_still_a_hook_call() {
     assert_eq!(names("(notAHook as () => object)"), Vec::<String>::new());
 }
 
-/// Finding 2: an initializer, a wrapper's argument and `Object.assign`'s first argument are read through an
-/// instantiation beneath any other wrapper, as through the others: `memo(List<Row>)` is `List` memoized. The props the
-/// type arguments give are pinned by `an_instantiated_component_binds_its_type_parameters_or_says_it_did_not`.
-#[test]
-fn an_instantiated_value_is_read_through_at_every_initializer_and_argument_site() {
-    let prelude = "interface ListProps<T> { items?: T[] }\n\
-                   interface ItemProps { size?: string }\n\
-                   declare function withTheme<C>(c: C): C;\n\
-                   function List<T>(props: ListProps<T>) { return <div />; }\n";
-    let sites: [(&str, &[&str]); 4] = [
-        ("export const Alias = {V};", &["Alias"]),
-        ("export const Memo = memo({V});", &["Memo"]),
-        ("export const Themed = withTheme({V});", &["Themed"]),
-        ("export const Root = Object.assign({V}, { Item: (props: ItemProps) => <div /> });", &["Item", "Root"]),
-    ];
-    let sorted = |mappings: &[serde_json::Value]| {
-        let mut names: Vec<String> =
-            mappings.iter().map(|m| m["component_name"].as_str().unwrap().to_owned()).collect();
-        names.sort();
-        names
-    };
-    let mut failures = Vec::new();
-    for (site, expected) in sites {
-        let plain = tsx(&format!("{prelude}{}", site.replace("{V}", "List")));
-        if sorted(&plain) != expected {
-            failures.push(format!("{site} plain: {:?}", sorted(&plain)));
-        }
-        for value in [
-            "List<string>",
-            "(List<string>)",
-            "(List<string>) as any",
-            "(List<string>)!",
-            "(List<string>) satisfies unknown",
-            "((List as any)<string>)!",
-        ] {
-            let actual = tsx(&format!("{prelude}{}", site.replace("{V}", value)));
-            if sorted(&actual) != sorted(&plain) {
-                failures.push(format!("{site} with {value}: {:?}", sorted(&actual)));
-            }
-        }
-    }
-    // An initializer's function under an instantiation keeps its parameter defaults.
-    let annotated = |arrow: &str| tsx(&format!("export const Button: React.FC<Props> = {arrow};"));
-    let plain = annotated("<T,>({ label = 'x' }) => <div />");
-    assert_eq!(plain[0]["param_defaults"]["label"]["value"], "'x'", "{plain:#?}");
-    for arrow in
-        ["((<T,>({ label = 'x' }) => <div />)<string>)!", "((<T,>({ label = 'x' }) => <div />)<string>) as any"]
-    {
-        if annotated(arrow) != plain {
-            failures.push(format!("React.FC annotation with {arrow}: {:#?}", annotated(arrow)));
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
-
 /// Finding 5: a type literal's member has every type declared for its name, so it declines only when each one does.
 #[test]
 fn a_namespace_member_declared_several_times_declines_only_when_every_declaration_does() {
@@ -1106,94 +1051,106 @@ fn the_closed_list_is_one_match_without_a_catch_all_arm() {
     assert_eq!(body.matches(") => true").count(), 3, "the closed list is object, symbol and void:\n{body}");
 }
 
-// Review round 6.
+// Review round 9: an instantiation at an initializer or an argument (`memo(List<Row>)`, `const RowList = List<Row>`)
+// is read as origin/main reads it. Binding its type arguments is a follow-up with its own model.
 
-const LIST: &str = "interface ListProps<T> { items?: T[] }\n\
-                    interface ItemProps { size?: string }\n\
-                    interface Row { id: string }\n\
-                    declare function withTheme<C>(c: C): C;\n\
-                    function List<T>(props: ListProps<T>) { return <div />; }\n";
+// BEGIN PARITY CASES. Copied verbatim into a scratch test on origin/main (oxc 0.158) to print
+// `instantiation_parity_base.tsv`; keep the two in step.
 
-/// The mappings of `source` after `HEADER`, by name, and the messages of its `GenericArgumentMismatch` diagnostics.
-fn with_mismatches(source: &str) -> (Vec<serde_json::Value>, Vec<String>) {
-    let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &format!("{HEADER}{source}"));
-    let mismatches = data
-        .diagnostics
+const PARITY_PRELUDE: &str = "import React, { memo } from 'react';\n\
+                              interface ListProps<T> { items?: T[] }\n\
+                              interface ItemProps { size?: string }\n\
+                              interface CardProps { title?: string }\n\
+                              declare function withTheme<C>(c: C): C;\n\
+                              function List<T>(props: ListProps<T>) { return <div />; }\n\
+                              function View<P>(props: P) { return <div />; }\n";
+
+/// An initializer or argument site with an instantiation, and a control without one.
+const PARITY_CASES: &[(&str, &str)] = &[
+    ("alias", "export const RowList = List<string>;"),
+    ("alias, no instantiation", "export const RowList = List;"),
+    ("alias chain", "export const RowList = List<string>;\nexport const PublicList = RowList;"),
+    ("alias chain, no instantiation", "export const RowList = List;\nexport const PublicList = RowList;"),
+    ("default export", "export default List<string>;"),
+    ("default export, no instantiation", "export default List;"),
+    ("props type is the type parameter", "export const CardView = View<CardProps>;"),
+    ("memo", "export const RowList = memo(List<string>);"),
+    ("memo, no instantiation", "export const RowList = memo(List);"),
+    ("wrapper", "export const RowList = withTheme(List<string>);"),
+    ("Object.assign", "export const RowList = Object.assign(List<string>, { Item: (props: ItemProps) => <div /> });"),
+    ("parenthesized", "export const RowList = (List<string>);"),
+    ("non-null", "export const RowList = (List<string>)!;"),
+    ("as any", "export const RowList = (List<string>) as any;"),
+    ("satisfies", "export const RowList = (List<string>) satisfies unknown;"),
+    ("asserted beneath", "export const RowList = (List as any)<string>;"),
+    ("imported", "import { Grid } from './grid';\nexport const RowGrid = Grid<string>;"),
+    ("FC annotation", "export const Button: React.FC<CardProps> = ((<T,>({ title = 'x' }) => <div />)<string>)!;"),
+];
+
+/// Every mapping of a row (name, props type and arguments, type parameters, rule) and every diagnostic, sorted.
+fn parity_output(source: &str) -> String {
+    let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &format!("{PARITY_PRELUDE}{source}"));
+    let mut lines: Vec<String> = data
+        .component_mappings
         .iter()
-        .filter(|diagnostic| diagnostic.code == DiagnosticCode::GenericArgumentMismatch)
-        .map(|diagnostic| format!("{:?}: {}", diagnostic.severity, diagnostic.message))
+        .map(|m| {
+            format!(
+                "{}:{}{}{}{}",
+                m.component_name,
+                m.props_type_name,
+                serde_json::to_string(&m.props_type_args).unwrap_or_default(),
+                serde_json::to_string(&m.type_params).unwrap_or_default(),
+                serde_json::to_string(&m.rule).unwrap_or_default()
+            )
+        })
+        .chain(data.diagnostics.iter().map(|d| format!("{:?} {:?}: {}", d.severity, d.code, d.message)))
         .collect();
-    let mut mappings = tsx(source);
-    mappings.sort_by(|a, b| a["component_name"].as_str().cmp(&b["component_name"].as_str()));
-    (mappings, mismatches)
+    lines.sort();
+    lines.join(" | ")
 }
 
-/// Finding 1: `List<Row>` binds `List`'s type parameter at every site that makes a component of it, so the props are
-/// `ListProps<Row>`; a form whose arguments cannot be bound keeps `ListProps<T>` and says so once.
+// END PARITY CASES.
+
+/// Parity with origin/main (f4a88f93, oxc 0.158) at the sites where OXC 0.159 changed nothing: what each row extracts
+/// and reports, exactly. Regenerate `instantiation_parity_base.tsv` from a scratch test on origin/main that prints
+/// `id<TAB>parity_output(source)` for each case, never by hand.
 #[test]
-fn an_instantiated_component_binds_its_type_parameters_or_says_it_did_not() {
-    let sites = [
-        "export const RowList = {V};",
-        "export const RowList = memo({V});",
-        "export const RowList = withTheme({V});",
-        "export const RowList = Object.assign({V}, { Item: (props: ItemProps) => <div /> });",
-    ];
-    let row = serde_json::json!([{ "n": "Row", "a": [] }]);
-    let mut failures = Vec::new();
-    for site in sites {
-        let (plain, none) = with_mismatches(&format!("{LIST}{}", site.replace("{V}", "List")));
-        let list = plain.iter().find(|m| m["component_name"] == "RowList").unwrap().clone();
-        assert_eq!(list["props_type_name"], "ListProps", "{list:#}");
-        assert_eq!(list["props_type_args"], serde_json::json!([{ "n": "T", "a": [] }]), "{list:#}");
-        assert_eq!(list["type_params"], serde_json::json!(["T"]), "{list:#}");
-        assert_eq!(none, Vec::<String>::new());
-        let mut bound = plain.clone();
-        for mapping in &mut bound {
-            if mapping["component_name"] == "RowList" {
-                mapping["props_type_args"] = row.clone();
-                mapping["type_params"] = serde_json::json!([]);
-            }
-        }
-        for value in ["List<Row>", "(List<Row>)", "(List<Row>)!", "(List<Row>) satisfies unknown", "(List<Row>) as any"]
-        {
-            let actual = with_mismatches(&format!("{LIST}{}", site.replace("{V}", value)));
-            if actual != (bound.clone(), Vec::new()) {
-                failures.push(format!("{site} with {value}: {actual:#?}"));
-            }
-        }
-        for value in ["((List as any)<Row>)!", "List<Row, Row>"] {
-            let (mappings, mismatches) = with_mismatches(&format!("{LIST}{}", site.replace("{V}", value)));
-            if mappings != plain || mismatches.len() != 1 || !mismatches[0].starts_with("Warning: 'RowList' gives") {
-                failures.push(format!("{site} with {value}: {mappings:#?} {mismatches:?}"));
-            }
-        }
-    }
-    // A type parameter used inside a props type argument is not bound.
-    let grid = "interface GridProps<T> { rows?: T }\nfunction Grid<T>(props: GridProps<T[]>) { return <div />; }\n";
-    let (plain, _) = with_mismatches(&format!("{grid}export const RowGrid = Grid;"));
-    let (mappings, mismatches) = with_mismatches(&format!("{grid}export const RowGrid = Grid<string>;"));
-    assert_eq!(mappings, plain);
-    assert_eq!(
-        mismatches,
-        ["Warning: 'RowGrid' gives component 'Grid' type arguments that are not applied to its props (a type \
-          parameter is used inside a props type argument): the props keep 'Grid''s type parameters"]
-    );
+fn an_instantiated_value_is_read_as_origin_main_reads_it() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("instantiation_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    assert_eq!(base.len(), PARITY_CASES.len(), "the base table and the cases are out of step");
+    let failures: Vec<String> = PARITY_CASES
+        .iter()
+        .filter_map(|(id, source)| {
+            let now = parity_output(source);
+            let main = base.get(id).copied().unwrap_or("not in the base table");
+            (main != now).then(|| format!("{id}:\n  main {main}\n  now  {now}"))
+        })
+        .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Finding 1, the imported sibling: `ComponentProps<typeof Imported>` cannot carry type arguments, so it says so.
+/// Finding 1 of round 9: the declarations of every `typeof` alias's name are counted in one scan of the module body,
+/// however many aliases there are, and a module with none is not scanned or walked.
 #[test]
-fn an_instantiated_imported_component_says_its_type_arguments_are_not_applied() {
-    let import = "import { List } from './list';\n";
-    let (plain, none) = with_mismatches(&format!("{import}export const RowList = List;"));
-    assert_eq!(none, Vec::<String>::new());
-    let (mappings, mismatches) = with_mismatches(&format!("{import}export const RowList = List<string>;"));
-    assert_eq!(mappings, plain);
-    assert_eq!(
-        mismatches,
-        ["Warning: 'RowList' gives imported component 'List' type arguments that are not applied to its props: the \
-          props keep 'List''s type parameters"]
-    );
+fn every_typeof_alias_is_counted_in_one_scan_of_the_module() {
+    let cost = |aliases: usize| {
+        let mut source = String::new();
+        for i in 0..aliases {
+            source.push_str(&format!("declare function make{i}(): unknown;\ntype Factory{i} = typeof make{i};\n"));
+        }
+        source.push_str("export const Button = memo((props: Props) => <div />);\n");
+        super::component::steps::take_scanned();
+        super::component::steps::take_walks();
+        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &format!("{HEADER}{source}"));
+        assert_eq!(data.component_mappings.len(), 1, "{source}");
+        (super::component::steps::take_scanned(), super::component::steps::take_walks())
+    };
+    // `HEADER` has two statements and the module one more, besides each alias's two.
+    assert_eq!(cost(0), (0, 0));
+    assert_eq!(cost(1), (5, 1));
+    assert_eq!(cost(10), (23, 1));
+    assert_eq!(cost(40), (83, 1));
 }
 
 /// Finding 3: a name declared again in an inner scope shadows the module's `typeof` alias only there; the module's

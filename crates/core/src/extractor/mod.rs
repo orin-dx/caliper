@@ -293,8 +293,6 @@ pub(super) struct SourceDataCollector<'src> {
     /// The alias shape `try_rename_identifier_wrapped_component` read for the current declarator when its component was
     /// not collected yet.
     pub(super) alias_candidate: Option<component::AliasShape>,
-    /// Aliases that instantiate their component (`memo(List<Row>)`), bound in `finish()` once type parameters are known.
-    pub(super) pending_instantiations: Vec<component::PendingInstantiation>,
     /// Calls to a plain function bound to a PascalCase name, resolved by what the callee returns.
     pub(super) pending_factory_calls: Vec<wrapper::PendingFactoryCall>,
     /// The own props factory calls bound to PascalCase names give, attached to the mappings detection builds from them.
@@ -372,7 +370,6 @@ impl<'src> SourceDataCollector<'src> {
             pending_factory_calls: Vec::new(),
             pending_factory_props: Vec::new(),
             alias_candidate: None,
-            pending_instantiations: Vec::new(),
             pending_function_aliases: Vec::new(),
             cast_component_aliases: Default::default(),
             pending_local_exports: Vec::new(),
@@ -405,17 +402,6 @@ impl<'src> SourceDataCollector<'src> {
         let (line, column) = line_and_column(self.source, span.start);
         self.data.diagnostics.push(
             Diagnostic::new(DiagnosticSeverity::Info, code, message)
-                .with_file(self.file_path.to_string())
-                .with_position(line, column),
-        );
-    }
-
-    /// A candidate kept with less than its source says (type arguments left unapplied): a warning, as its output is
-    /// wrong for it, where a skip is information.
-    pub(super) fn record_degraded(&mut self, code: DiagnosticCode, message: impl Into<String>, span: Span) {
-        let (line, column) = line_and_column(self.source, span.start);
-        self.data.diagnostics.push(
-            Diagnostic::new(DiagnosticSeverity::Warning, code, message)
                 .with_file(self.file_path.to_string())
                 .with_position(line, column),
         );
@@ -671,7 +657,6 @@ impl<'src> SourceDataCollector<'src> {
                 }
             }
         }
-        self.bind_alias_instantiations();
         let mut named_by_display_name = FxHashSet::default();
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
             if let Some(index) = self.data.component_mappings.iter().position(|m| m.is_binding_named(&obj_name)) {
