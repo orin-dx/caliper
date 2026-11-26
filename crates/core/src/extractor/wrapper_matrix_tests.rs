@@ -77,7 +77,16 @@ impl Callee {
         Self::TypeAssertionObjectResult,
     ];
 
-    fn expect(self) -> Expect {
+    /// What the wrapper gives a site that reads `signatures`: a function type returning `object` declines a call, but
+    /// has no construct signature, so it says nothing about an `extends` target.
+    fn expect(self, signatures: super::component::Signatures) -> Expect {
+        match (self, signatures) {
+            (
+                Self::AsObjectResult | Self::AsUnknownAsObjectResult | Self::TypeAssertionObjectResult,
+                super::component::Signatures::Construct,
+            ) => return Expect::SameWithoutCallee,
+            (_, super::component::Signatures::Call | super::component::Signatures::Construct) => {}
+        }
         match self {
             Self::Plain
             | Self::Parenthesized
@@ -431,7 +440,13 @@ fn every_detection_form_extracts_the_same_component_through_every_wrapper() {
                 let source = (form.source)(callee, value);
                 let (actual, errors) = extracted(&path, &source);
                 // A form that reads no callee is written the same whatever the callee wrapper.
-                let expect = if source == plain { Expect::Same } else { callee.expect() };
+                // The class forms wrap an `extends` target, which is constructed.
+                let signatures = if form.name.contains("class") {
+                    super::component::Signatures::Construct
+                } else {
+                    super::component::Signatures::Call
+                };
+                let expect = if source == plain { Expect::Same } else { callee.expect(signatures) };
                 let expected: Vec<serde_json::Value> = match expect {
                     Expect::Same => unwrapped.clone(),
                     Expect::SameWithoutCallee => unwrapped
@@ -853,7 +868,35 @@ const DIFFERENTIAL_ASSERTIONS: &[(&str, &str, &str, bool, Option<&str>)] = &[
         true,
         None,
     ),
+    // Round 12: construct and call signatures side by side; `CONSTRUCT_CLOSED` gives the construct side's entries.
+    (
+        "construct Component, call void",
+        "",
+        "({b} as unknown as { new <P>(props: P): React.Component<P>; (...args: any[]): void })",
+        false,
+        Some("void"),
+    ),
+    (
+        "construct object, call FC",
+        "",
+        "({b} as unknown as { new (...args: any[]): object; (...args: any[]): React.FC<Props> })",
+        false,
+        None,
+    ),
+    ("constructor type, object", "", "({b} as unknown as new (...args: any[]) => object)", false, None),
+    ("constructor type, Component", "", "({b} as unknown as new <P>(props: P) => React.Component<P>)", false, None),
+    (
+        "namespace member construct Component, call void",
+        "",
+        "({o} as unknown as { {m}: { new <P>(props: P): React.Component<P>; (...args: any[]): void } }).{m}",
+        false,
+        Some("void"),
+    ),
 ];
+
+/// The assertions whose construct signatures all give a closed-list entry, for a site that constructs (`extends`).
+const CONSTRUCT_CLOSED: &[(&str, &str)] =
+    &[("construct object, call FC", "object"), ("constructor type, object", "object")];
 
 /// The closed list as the oracle states it: the call results TypeScript cannot assign to `ReactNode | ComponentType |
 /// ReactElement` under any instantiation. `bigint` is a member of `ReactNode` since @types/react 18.3.
@@ -935,7 +978,14 @@ fn differential_cases() -> Vec<Case> {
             let (object, property) = member.unwrap_or((callee, callee));
             let fill = |text: &str| text.replace("{b}", callee).replace("{o}", object).replace("{m}", property);
             let source = format!("{DIFFERENTIAL_HEADER}{}\n{}", fill(prelude), template.replace("{C}", &fill(wrapped)));
-            cases.push(Case { id: format!("{form} | {assertion}"), source, keeps: *keeps, closed: *closed });
+            // The class form's target is constructed: its construct signatures' entry, which only `CONSTRUCT_CLOSED`
+            // names (every other row's shape is a call signature).
+            let closed = if *form == "class" {
+                CONSTRUCT_CLOSED.iter().find(|(name, _)| name == assertion).map(|(_, entry)| *entry)
+            } else {
+                *closed
+            };
+            cases.push(Case { id: format!("{form} | {assertion}"), source, keeps: *keeps, closed });
         }
     }
     cases
@@ -1016,7 +1066,7 @@ fn the_cast_forms_round_10_names_extract_what_origin_main_extracts_for_the_plain
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    assert_eq!(main_differs_from_its_plain_call, [98, 108, 0, 0]);
+    assert_eq!(main_differs_from_its_plain_call, [101, 112, 0, 0]);
 }
 
 /// Review round 11, finding 2: a namespace read for its name (`React` in `React.createContext`, `Object.assign`,
@@ -1174,7 +1224,7 @@ fn each_closed_list_entry_declines_every_form() {
     assert_eq!(by_reason.iter().map(|(_, n)| n).sum::<usize>(), declined.len(), "{}", declined.join("\n"));
     assert_eq!(
         by_reason,
-        [("object", 52), ("symbol", 20), ("void", 28), ("factory callee withheld", 90)],
+        [("object", 52), ("symbol", 20), ("void", 40), ("factory callee withheld", 93)],
         "{}",
         declined.join("\n")
     );
@@ -1666,4 +1716,45 @@ fn a_factory_asserted_to_an_element_shaped_object_still_renders() {
     assert_eq!(div("{ type: string; props: {}; key: string | null }"), ["Div"]);
     assert_eq!(div("{}"), ["Div"]);
     assert_eq!(div("object"), Vec::<String>::new());
+}
+
+/// Review round 12: an `extends` target is constructed, so its construct signatures say what it gives; a callee is
+/// called, so its call signatures do; a namespace member is read with the kind its site uses. A signature of the
+/// other kind is no evidence either way.
+#[test]
+fn a_heritage_reads_construct_signatures_and_a_call_reads_call_signatures() {
+    let class = |target: &str| {
+        tsx(&format!("export class Button extends {target}<Props> {{ render() {{ return <div />; }} }}"))
+    };
+    let plain_class = class("React.Component");
+    assert_eq!(plain_class.len(), 1, "{plain_class:#?}");
+    for target in [
+        "(React.Component as unknown as { new <P>(props: P): React.Component<P>; (): void })",
+        "(React.Component as unknown as new <P>(props: P) => React.Component<P>)",
+        "(React.Component as unknown as () => object)",
+        "(React as unknown as { Component: { new <P>(props: P): React.Component<P>; (): void } }).Component",
+        "(React as unknown as { Component(): void }).Component",
+    ] {
+        assert_eq!(class(target), plain_class, "{target}");
+    }
+    for target in [
+        "(React.Component as unknown as { new (props: unknown): object; (): React.FC<Props> })",
+        "(React.Component as unknown as new (props: unknown) => void)",
+        "(React as unknown as { Component: new (props: unknown) => symbol }).Component",
+    ] {
+        assert_eq!(class(target), Vec::<serde_json::Value>::new(), "{target}");
+    }
+    let call = |callee: &str| tsx(&format!("export const Button = {callee}((props: Props) => <div />);"));
+    let plain_call = call("memo");
+    assert_eq!(plain_call.len(), 1, "{plain_call:#?}");
+    for callee in [
+        "(memo as unknown as { new (c: unknown): object; (c: unknown): React.FC<Props> })",
+        "(memo as unknown as new (c: unknown) => object)",
+    ] {
+        assert_eq!(call(callee), plain_call, "{callee}");
+    }
+    assert_eq!(
+        call("(memo as unknown as { new (c: unknown): React.FC<Props>; (c: unknown): object })"),
+        Vec::<serde_json::Value>::new()
+    );
 }

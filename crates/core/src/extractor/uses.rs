@@ -206,7 +206,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn record_call(&mut self, call: &CallExpression<'_>) {
         // A call is a use of the value called, whatever an assertion says it returns: `(Helper as H)(props)` calls
         // `Helper`.
-        let peeled = super::component::peel(&call.callee);
+        let peeled = super::component::called(call);
         if let Expression::Identifier(callee) = peeled.expr {
             self.uses_of(callee.name.as_str()).calls += 1;
         }

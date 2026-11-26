@@ -29,6 +29,10 @@ memo | unknown, then function object	Button:Props
 memo | function object, then unknown	Button:Props
 memo | satisfies	Button:Props
 memo | non-null	Button:Props
+memo | construct Component, call void	Button:Props
+memo | construct object, call FC	Button:Props
+memo | constructor type, object	Button:Props
+memo | constructor type, Component	Button:Props
 memo | returns any, function	Button:Props
 memo | returns any, callable literal	Button:Props
 memo | returns any, union	Button:Props
@@ -147,6 +151,11 @@ React.memo | namespace member function object	Button:Props
 React.memo | namespace method object	Button:Props
 React.memo | namespace method FC	Button:Props
 React.memo | namespace call signature, member typeof itself	Button:Props
+React.memo | construct Component, call void	Button:Props
+React.memo | construct object, call FC	Button:Props
+React.memo | constructor type, object	Button:Props
+React.memo | constructor type, Component	Button:Props
+React.memo | namespace member construct Component, call void	Button:Props
 React.memo | returns any, function	Button:Props
 React.memo | returns any, callable literal	Button:Props
 React.memo | returns any, union	Button:Props
@@ -276,6 +285,10 @@ forwardRef | unknown, then function object	Button:Props
 forwardRef | function object, then unknown	Button:Props
 forwardRef | satisfies	Button:Props
 forwardRef | non-null	Button:Props
+forwardRef | construct Component, call void	Button:Props
+forwardRef | construct object, call FC	Button:Props
+forwardRef | constructor type, object	Button:Props
+forwardRef | constructor type, Component	Button:Props
 forwardRef | returns any, function	Button:Props
 forwardRef | returns any, callable literal	Button:Props
 forwardRef | returns any, union	Button:Props
@@ -394,6 +407,11 @@ React.forwardRef, typed render | namespace member function object	Button:Props
 React.forwardRef, typed render | namespace method object	Button:Props
 React.forwardRef, typed render | namespace method FC	Button:Props
 React.forwardRef, typed render | namespace call signature, member typeof itself	Button:Props
+React.forwardRef, typed render | construct Component, call void	Button:Props
+React.forwardRef, typed render | construct object, call FC	Button:Props
+React.forwardRef, typed render | constructor type, object	Button:Props
+React.forwardRef, typed render | constructor type, Component	Button:Props
+React.forwardRef, typed render | namespace member construct Component, call void	Button:Props
 React.forwardRef, typed render | returns any, function	Button:Props
 React.forwardRef, typed render | returns any, callable literal	Button:Props
 React.forwardRef, typed render | returns any, union	Button:Props
@@ -523,6 +541,10 @@ wrapper call | unknown, then function object	Button:Props
 wrapper call | function object, then unknown	Button:Props
 wrapper call | satisfies	Button:Props
 wrapper call | non-null	Button:Props
+wrapper call | construct Component, call void	Button:Props
+wrapper call | construct object, call FC	Button:Props
+wrapper call | constructor type, object	Button:Props
+wrapper call | constructor type, Component	Button:Props
 wrapper call | returns any, function	Button:Props
 wrapper call | returns any, callable literal	Button:Props
 wrapper call | returns any, union	Button:Props
@@ -641,6 +663,11 @@ Object.assign | namespace member function object	Impl:Props
 Object.assign | namespace method object	Impl:Props
 Object.assign | namespace method FC	Impl:Props
 Object.assign | namespace call signature, member typeof itself	Impl:Props
+Object.assign | construct Component, call void	Impl:Props
+Object.assign | construct object, call FC	Impl:Props
+Object.assign | constructor type, object	Impl:Props
+Object.assign | constructor type, Component	Impl:Props
+Object.assign | namespace member construct Component, call void	Impl:Props
 Object.assign | returns any, function	Impl:Props
 Object.assign | returns any, callable literal	Impl:Props
 Object.assign | returns any, union	Impl:Props
@@ -770,6 +797,10 @@ PascalCase call returned | unknown, then function object	-
 PascalCase call returned | function object, then unknown	-
 PascalCase call returned | satisfies	-
 PascalCase call returned | non-null	-
+PascalCase call returned | construct Component, call void	-
+PascalCase call returned | construct object, call FC	-
+PascalCase call returned | constructor type, object	-
+PascalCase call returned | constructor type, Component	-
 PascalCase call returned | returns any, function	-
 PascalCase call returned | returns any, callable literal	-
 PascalCase call returned | returns any, union	-
@@ -888,6 +919,11 @@ element factory | namespace member function object	Button:Props
 element factory | namespace method object	Button:Props
 element factory | namespace method FC	Button:Props
 element factory | namespace call signature, member typeof itself	Button:Props
+element factory | construct Component, call void	-
+element factory | construct object, call FC	-
+element factory | constructor type, object	-
+element factory | constructor type, Component	-
+element factory | namespace member construct Component, call void	Button:Props
 element factory | returns any, function	-
 element factory | returns any, callable literal	-
 element factory | returns any, union	-
@@ -1017,6 +1053,10 @@ factory | unknown, then function object	Button:createButton
 factory | function object, then unknown	Button:createButton
 factory | satisfies	Button:createButton
 factory | non-null	Button:createButton
+factory | construct Component, call void	Button:createButton
+factory | construct object, call FC	Button:createButton
+factory | constructor type, object	Button:createButton
+factory | constructor type, Component	Button:createButton
 factory | returns any, function	Button:createButton
 factory | returns any, callable literal	Button:createButton
 factory | returns any, union	Button:createButton
@@ -1127,6 +1167,10 @@ generic wrapper | unknown, then function object	Wrapped:Props
 generic wrapper | function object, then unknown	Wrapped:Props
 generic wrapper | satisfies	Wrapped:Props
 generic wrapper | non-null	Wrapped:Props
+generic wrapper | construct Component, call void	Wrapped:Props
+generic wrapper | construct object, call FC	Wrapped:Props
+generic wrapper | constructor type, object	Wrapped:Props
+generic wrapper | constructor type, Component	Wrapped:Props
 generic wrapper | returns any, function	Wrapped:Props
 generic wrapper | returns any, callable literal	Wrapped:Props
 generic wrapper | returns any, union	Wrapped:Props
@@ -1245,6 +1289,11 @@ wrapper naming the props | namespace member function object	Base:ItemProps Butto
 wrapper naming the props | namespace method object	Base:ItemProps Button:Props
 wrapper naming the props | namespace method FC	Base:ItemProps Button:Props
 wrapper naming the props | namespace call signature, member typeof itself	Base:ItemProps Button:Props
+wrapper naming the props | construct Component, call void	Base:ItemProps
+wrapper naming the props | construct object, call FC	Base:ItemProps
+wrapper naming the props | constructor type, object	Base:ItemProps
+wrapper naming the props | constructor type, Component	Base:ItemProps
+wrapper naming the props | namespace member construct Component, call void	Base:ItemProps Button:Props
 wrapper naming the props | returns any, function	Base:ItemProps
 wrapper naming the props | returns any, callable literal	Base:ItemProps
 wrapper naming the props | returns any, union	Base:ItemProps
@@ -1374,6 +1423,10 @@ wrapper with two type arguments | unknown, then function object	Base:ItemProps B
 wrapper with two type arguments | function object, then unknown	Base:ItemProps Button:wrap2
 wrapper with two type arguments | satisfies	Base:ItemProps Button:wrap2
 wrapper with two type arguments | non-null	Base:ItemProps Button:wrap2
+wrapper with two type arguments | construct Component, call void	Base:ItemProps Button:wrap2
+wrapper with two type arguments | construct object, call FC	Base:ItemProps Button:wrap2
+wrapper with two type arguments | constructor type, object	Base:ItemProps Button:wrap2
+wrapper with two type arguments | constructor type, Component	Base:ItemProps Button:wrap2
 wrapper with two type arguments | returns any, function	Base:ItemProps Button:wrap2
 wrapper with two type arguments | returns any, callable literal	Base:ItemProps Button:wrap2
 wrapper with two type arguments | returns any, union	Base:ItemProps Button:wrap2
@@ -1484,6 +1537,10 @@ Object.assign argument | unknown, then function object	Root:Props
 Object.assign argument | function object, then unknown	Root:Props
 Object.assign argument | satisfies	Root:Props
 Object.assign argument | non-null	Root:Props
+Object.assign argument | construct Component, call void	Root:Props
+Object.assign argument | construct object, call FC	Root:Props
+Object.assign argument | constructor type, object	Root:Props
+Object.assign argument | constructor type, Component	Root:Props
 Object.assign argument | returns any, function	Root:Props
 Object.assign argument | returns any, callable literal	Root:Props
 Object.assign argument | returns any, union	Root:Props
@@ -1594,6 +1651,10 @@ memo argument | unknown, then function object	Button:Props
 memo argument | function object, then unknown	Button:Props
 memo argument | satisfies	Button:Props
 memo argument | non-null	Button:Props
+memo argument | construct Component, call void	Button:Props
+memo argument | construct object, call FC	Button:Props
+memo argument | constructor type, object	Button:Props
+memo argument | constructor type, Component	Button:Props
 memo argument | returns any, function	Button:Props
 memo argument | returns any, callable literal	Button:Props
 memo argument | returns any, union	Button:Props
@@ -1712,6 +1773,11 @@ context | namespace member function object	-
 context | namespace method object	-
 context | namespace method FC	-
 context | namespace call signature, member typeof itself	-
+context | construct Component, call void	-
+context | construct object, call FC	-
+context | constructor type, object	-
+context | constructor type, Component	-
+context | namespace member construct Component, call void	-
 context | returns any, function	-
 context | returns any, callable literal	-
 context | returns any, union	-
@@ -1849,6 +1915,11 @@ class | namespace member function object	-
 class | namespace method object	-
 class | namespace method FC	-
 class | namespace call signature, member typeof itself	-
+class | construct Component, call void	-
+class | construct object, call FC	-
+class | constructor type, object	-
+class | constructor type, Component	-
+class | namespace member construct Component, call void	-
 class | returns any, function	-
 class | returns any, callable literal	-
 class | returns any, union	-
@@ -1978,6 +2049,10 @@ call-only helper | unknown, then function object	Button:Props
 call-only helper | function object, then unknown	Button:Props
 call-only helper | satisfies	Button:Props Helper:Props
 call-only helper | non-null	Button:Props
+call-only helper | construct Component, call void	Button:Props
+call-only helper | construct object, call FC	Button:Props
+call-only helper | constructor type, object	Button:Props
+call-only helper | constructor type, Component	Button:Props
 call-only helper | returns any, function	Button:Props
 call-only helper | returns any, callable literal	Button:Props
 call-only helper | returns any, union	Button:Props

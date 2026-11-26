@@ -159,17 +159,30 @@ fn layers<'a, 'b>(
     }
 }
 
-/// See [`Peeled`]. For what a callee or an `extends` target is: OXC 0.159 keeps `(f<T>)(x)` and `extends (B<T>)` as an
-/// instantiation node beneath the call or heritage clause, where 0.158 moved its type arguments onto them.
-pub(super) fn peel<'a, 'b>(expr: &'b Expression<'a>) -> Peeled<'b, 'a> {
+/// How a site uses the value it peels, and so which signatures of an asserted type answer it.
+#[derive(Clone, Copy)]
+pub(super) enum Signatures {
+    /// A callee, `f(…)`: its call signatures.
+    Call,
+    /// An `extends` target, which the class constructs: its construct signatures. The closed list is the same: an
+    /// `object`, `symbol` or `void` instance is no `React.Component`. Other primitives are not instances either, but
+    /// they are left as no evidence, like every type off the list.
+    Construct,
+}
+
+/// See [`Peeled`]. For what a callee (`Signatures::Call`) or an `extends` target (`Signatures::Construct`) is: OXC
+/// 0.159 keeps `(f<T>)(x)` and `extends (B<T>)` as an instantiation node beneath the call or heritage clause, where
+/// 0.158 moved its type arguments onto them. A namespace a member is read from is never called itself: the member is
+/// read with the site's signatures, and only for that member.
+pub(super) fn peel<'a, 'b>(expr: &'b Expression<'a>, signatures: Signatures) -> Peeled<'b, 'a> {
     let (expr, type_arguments, outermost) = layers(expr);
     let evidence = match (outermost, expr) {
-        (Some(ty), _) => asserted(ty, expr),
+        (Some(ty), _) => asserted(ty, expr, signatures),
         // `(React as { forwardRef: typeof React.forwardRef }).forwardRef`: the namespace's assertion gives the member
         // the type it declares for it.
-        (None, Expression::StaticMemberExpression(member)) => match receiver(&member.object) {
+        (None, Expression::StaticMemberExpression(member)) => match receiver(&member.object, signatures) {
             Typed::Own => Evidence::Identity,
-            Typed::Asserted(ty) => member_evidence(ty, member.property.name.as_str(), expr),
+            Typed::Asserted(ty) => member_evidence(ty, member.property.name.as_str(), expr, signatures),
             Typed::Unread => Evidence::Unknown,
         },
         (None, _) => Evidence::Identity,
@@ -187,11 +200,13 @@ enum Typed<'b, 'a> {
     Unread,
 }
 
-fn receiver<'a, 'b>(expr: &'b Expression<'a>) -> Typed<'b, 'a> {
+/// `signatures` is the site's: only whether an assertion keeps the namespace's own type is read with it, which does not
+/// depend on the signatures.
+fn receiver<'a, 'b>(expr: &'b Expression<'a>, signatures: Signatures) -> Typed<'b, 'a> {
     let (expr, _, outermost) = layers(expr);
     let declared = match (outermost, expr) {
         (Some(ty), _) => Some(ty),
-        (None, Expression::StaticMemberExpression(object)) => match receiver(&object.object) {
+        (None, Expression::StaticMemberExpression(object)) => match receiver(&object.object, signatures) {
             Typed::Own => None,
             Typed::Asserted(ty) => match member(ty, object.property.name.as_str()) {
                 Member::Property(ty) => Some(ty),
@@ -203,7 +218,7 @@ fn receiver<'a, 'b>(expr: &'b Expression<'a>) -> Typed<'b, 'a> {
     };
     match declared {
         None => Typed::Own,
-        Some(ty) if matches!(asserted(ty, expr), Evidence::Identity) => Typed::Own,
+        Some(ty) if matches!(asserted(ty, expr, signatures), Evidence::Identity) => Typed::Own,
         Some(ty) => Typed::Asserted(ty),
     }
 }
@@ -304,40 +319,67 @@ fn member<'a, 'b>(ty: &'b TSType<'a>, name: &str) -> Member<'b, 'a> {
     }
 }
 
-/// What calling `expr`, a member read from a namespace asserted to `ty`, is.
-fn member_evidence<'a, 'b>(ty: &'b TSType<'a>, name: &str, expr: &Expression<'_>) -> Evidence<'b, 'a> {
+/// What calling or constructing `expr`, a member read from a namespace asserted to `ty`, is.
+fn member_evidence<'a, 'b>(
+    ty: &'b TSType<'a>,
+    name: &str,
+    expr: &Expression<'_>,
+    signatures: Signatures,
+) -> Evidence<'b, 'a> {
     match member(ty, name) {
-        Member::Property(ty) => asserted(ty, expr),
+        Member::Property(ty) => asserted(ty, expr, signatures),
         // The member has every type declared for it: no component only when each declaration says so.
         Member::Declared(literal) => combine(declarations(literal, name).map(|declaration| match declaration {
-            MemberDeclaration::Typed(Some(ty)) => asserted(ty, expr),
+            MemberDeclaration::Typed(Some(ty)) => asserted(ty, expr, signatures),
             MemberDeclaration::Typed(None) => Evidence::Unknown,
-            MemberDeclaration::Method(result) => results(std::iter::once(result)),
+            // A method declares a call signature, which says nothing about constructing the member.
+            MemberDeclaration::Method(result) => match signatures {
+                Signatures::Call => results(std::iter::once(result)),
+                Signatures::Construct => Evidence::Unknown,
+            },
         })),
         Member::Unread => Evidence::Unknown,
     }
 }
 
-/// What asserting `ty` on `beneath` says about calling it. One exhaustive match: a new type kind in an OXC release
-/// has to be placed here before it compiles.
-fn asserted<'a, 'b>(ty: &'b TSType<'a>, beneath: &Expression<'_>) -> Evidence<'b, 'a> {
+/// What asserting `ty` on `beneath` says about calling or constructing it, as `signatures` says the site does. One
+/// exhaustive match: a new type kind in an OXC release has to be placed here before it compiles.
+fn asserted<'a, 'b>(ty: &'b TSType<'a>, beneath: &Expression<'_>, signatures: Signatures) -> Evidence<'b, 'a> {
+    let result = |annotation: &'b TSTypeAnnotation<'a>| Some(&annotation.type_annotation);
     match ty {
         TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_) => Evidence::Identity,
-        TSType::TSParenthesizedType(inner) => asserted(&inner.type_annotation, beneath),
+        TSType::TSParenthesizedType(inner) => asserted(&inner.type_annotation, beneath, signatures),
         TSType::TSTypeQuery(query) if query.type_arguments.is_none() && query_names(&query.expr_name, beneath) => {
             Evidence::Identity
         }
         TSType::TSTypeReference(reference) => Evidence::Reference(reference),
-        TSType::TSFunctionType(function) => results(std::iter::once(Some(&function.return_type.type_annotation))),
-        TSType::TSTypeLiteral(literal) => results(literal.members.iter().filter_map(|signature| match signature {
-            TSSignature::TSCallSignatureDeclaration(call) => {
-                Some(call.return_type.as_ref().map(|annotation| &annotation.type_annotation))
-            }
-            TSSignature::TSPropertySignature(_)
-            | TSSignature::TSMethodSignature(_)
-            | TSSignature::TSIndexSignature(_)
-            | TSSignature::TSConstructSignatureDeclaration(_) => None,
-        })),
+        // A function type has only a call signature, a constructor type only a construct signature.
+        TSType::TSFunctionType(function) => match signatures {
+            Signatures::Call => results(std::iter::once(result(&function.return_type))),
+            Signatures::Construct => Evidence::Unknown,
+        },
+        TSType::TSConstructorType(constructor) => match signatures {
+            Signatures::Construct => results(std::iter::once(result(&constructor.return_type))),
+            Signatures::Call => Evidence::Unknown,
+        },
+        TSType::TSTypeLiteral(literal) => {
+            results(literal.members.iter().filter_map(|signature| match (signature, signatures) {
+                (TSSignature::TSCallSignatureDeclaration(call), Signatures::Call) => {
+                    Some(call.return_type.as_deref().and_then(result))
+                }
+                (TSSignature::TSConstructSignatureDeclaration(construct), Signatures::Construct) => {
+                    Some(construct.return_type.as_deref().and_then(result))
+                }
+                (TSSignature::TSCallSignatureDeclaration(_), Signatures::Construct)
+                | (TSSignature::TSConstructSignatureDeclaration(_), Signatures::Call)
+                | (
+                    TSSignature::TSPropertySignature(_)
+                    | TSSignature::TSMethodSignature(_)
+                    | TSSignature::TSIndexSignature(_),
+                    Signatures::Call | Signatures::Construct,
+                ) => None,
+            }))
+        }
         TSType::TSTypeQuery(_)
         | TSType::TSBigIntKeyword(_)
         | TSType::TSBooleanKeyword(_)
@@ -352,7 +394,6 @@ fn asserted<'a, 'b>(ty: &'b TSType<'a>, beneath: &Expression<'_>) -> Evidence<'b
         | TSType::TSVoidKeyword(_)
         | TSType::TSArrayType(_)
         | TSType::TSConditionalType(_)
-        | TSType::TSConstructorType(_)
         | TSType::TSImportType(_)
         | TSType::TSIndexedAccessType(_)
         | TSType::TSInferType(_)
@@ -751,31 +792,37 @@ pub(super) mod steps {
     }
 }
 
-/// A value read only for its name (the namespace a member is read from, a link of a heritage chain), beneath every
-/// wrapper. Nothing calls it, so its own type's call signatures are no evidence: what calling `ns.member` gives is the
-/// member's evidence, which [`peel`] of the member reads from the namespace's assertion.
+/// A value read only for its name (the namespace a member is read from, a link of a heritage chain, a hook's callee),
+/// beneath every wrapper. No evidence is read: what calling or constructing `ns.member` gives is the member's evidence,
+/// which [`peel`] of the member reads from the namespace's assertion.
 pub(super) fn beneath<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    peel(expr).expr
+    layers(expr).0
 }
 
 /// What a call invokes, when its name still describes the call: `(forwardRef as F)(…)` and `(forwardRef<R, P>)(…)`
 /// call `forwardRef`; `(Object as (v: object) => object)(…)` calls nothing by a name. See [`Peeled::named`].
 pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
-    peel(&call.callee).named()
+    called(call).named()
+}
+
+/// A call's callee, peeled for its call signatures.
+pub(super) fn called<'a, 'b>(call: &'b CallExpression<'a>) -> Peeled<'b, 'a> {
+    peel(&call.callee, Signatures::Call)
 }
 
 /// The type arguments a call is made with: its own, or those of the instantiation it calls (`(forwardRef<R, P>)(…)`).
 pub(super) fn call_type_arguments<'a, 'b>(
     call: &'b CallExpression<'a>,
 ) -> Option<&'b TSTypeParameterInstantiation<'a>> {
-    call.type_arguments.as_deref().or_else(|| peel(&call.callee).type_arguments)
+    call.type_arguments.as_deref().or_else(|| layers(&call.callee).1)
 }
 
 /// What a class extends and the type arguments it extends it with: `extends React.Component<P>` and
-/// `extends (React.Component<P>)` both give `React.Component` and `P`.
+/// `extends (React.Component<P>)` both give `React.Component` and `P`. The class constructs its base, so an assertion
+/// on it is read for its construct signatures.
 pub(super) fn super_class<'a, 'b>(class: &'b Class<'a>) -> Option<Peeled<'b, 'a>> {
     let heritage = class.heritage.as_ref()?;
-    let peeled = peel(&heritage.expression);
+    let peeled = peel(&heritage.expression, Signatures::Construct);
     Some(Peeled { type_arguments: heritage.type_arguments.as_deref().or(peeled.type_arguments), ..peeled })
 }
 

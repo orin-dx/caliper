@@ -227,7 +227,7 @@ impl<'a> Visit<'a> for OwnBody<'_> {
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         // Calling a hook is the evidence, whatever an assertion says the hook returns.
-        if self.nested == 0 && callee_name(super::component::peel(&it.callee).expr).is_some_and(is_hook_name) {
+        if self.nested == 0 && callee_name(super::component::beneath(&it.callee)).is_some_and(is_hook_name) {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);

@@ -374,7 +374,7 @@ impl<'src> SourceDataCollector<'src> {
     /// adds (`resolver::callee`). `None` for a call without type arguments, and for a callee asserted to another type
     /// (`(wrap as G)<P>(…)`), whose declaration no longer describes the call.
     pub(super) fn wrapper_callee<'a>(&mut self, call: &CallExpression<'a>) -> Option<WrapperCallee> {
-        if !self.describes_call(&super::component::peel(&call.callee)) {
+        if !self.describes_call(&super::component::called(call)) {
             return None;
         }
         let type_arguments = super::component::call_type_arguments(call)?;
@@ -495,7 +495,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_factory_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        let peeled = super::component::peel(&call.callee);
+        let peeled = super::component::called(call);
         let Expression::Identifier(callee) = peeled.expr else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
