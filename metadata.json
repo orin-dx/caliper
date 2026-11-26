@@ -1,0 +1,52 @@
+{
+  "cli_version": "0.13.5-nightly.202611160626.76f1b5129",
+  "checkpoint_id": "01M8AM9XHFS2J5YM7NFXTRAYQT",
+  "strategy": "manual-commit",
+  "branch": "fix-527d",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".changeset/degraded-results-are-not-kept.md",
+    "crates/core/src/dependency_types.rs",
+    "crates/core/src/dependency_types/augmentation_tests.rs",
+    "crates/core/src/dependency_types/tests.rs",
+    "crates/semantic/src/lib.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 13362,
+    "cache_read_tokens": 644020,
+    "output_tokens": 4402,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 132,
+      "cache_creation_tokens": 193790,
+      "cache_read_tokens": 13019586,
+      "output_tokens": 73404,
+      "api_call_count": 66
+    },
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 365,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 361,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
