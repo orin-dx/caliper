@@ -1241,10 +1241,8 @@ fn a_typeof_alias_is_shadowed_only_where_its_name_is_declared_again() {
             .collect();
         assert_eq!(
             skipped,
-            [
-                "'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC \
-              wrapper, or identifier alias)"
-            ],
+            ["'Button' is built by a call to 'createButton' through a type assertion that replaces its type, so the \
+                 declaration that would give its props is not read and it is not listed"],
             "{other}"
         );
     }
@@ -1436,6 +1434,52 @@ fn an_element_factory_renders_its_argument_unless_asserted_to_give_no_element() 
     assert_eq!(rendered("(React as { createElement: (t: any) => symbol }).createElement"), 0);
     // A component wrapper renders its argument by its name, whatever it returns.
     assert_eq!(rendered("memo"), 1);
+}
+
+/// Round 8: a rendering factory called through an assertion that replaces its type is not listed, as its props come
+/// only from the declaration the assertion withholds; the skip says so, once. A result on the closed list says the
+/// call gives no component and keeps the generic skip; the plain call is listed with no skip.
+#[test]
+fn a_factory_called_through_an_assertion_says_why_it_is_not_listed() {
+    let outcome = |callee: &str| {
+        let source = format!(
+            "{HEADER}declare const other: unknown;\n\
+             function createButton() {{ return (props: Props) => <div />; }}\n\
+             export const Button = {callee}();"
+        );
+        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
+        let names: Vec<String> = data.component_mappings.iter().map(|m| m.component_name.clone()).collect();
+        let skips: Vec<String> = data
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+            .map(|d| d.message.clone())
+            .collect();
+        (names, skips)
+    };
+    assert_eq!(outcome("createButton"), (vec!["Button".to_owned()], Vec::new()));
+    assert_eq!(outcome("(createButton as typeof createButton)"), (vec!["Button".to_owned()], Vec::new()));
+    let withheld = "'Button' is built by a call to 'createButton' through a type assertion that replaces its type, \
+                    so the declaration that would give its props is not read and it is not listed";
+    for callee in [
+        "(createButton as F)",
+        "(createButton as typeof other)",
+        "(createButton as object)",
+        "(createButton as () => React.FC<Props>)",
+        "(createButton as () => React.ComponentType<Props>)",
+        "(createButton as () => React.FC<Props> | null)",
+        "(createButton as { (): React.FC<Props> })",
+        "(createButton as () => string)",
+        "(createButton as () => React.ReactNode)",
+        "(createButton as () => unknown)",
+    ] {
+        assert_eq!(outcome(callee), (Vec::new(), vec![withheld.to_owned()]), "{callee}");
+    }
+    let generic = "'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, \
+                   HOC wrapper, or identifier alias)";
+    for callee in ["(createButton as () => object)", "(createButton as () => void)"] {
+        assert_eq!(outcome(callee), (Vec::new(), vec![generic.to_owned()]), "{callee}");
+    }
 }
 
 /// The components a `.tsx` source after `HEADER` publishes, by name, in order.

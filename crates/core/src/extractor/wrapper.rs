@@ -495,13 +495,25 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_factory_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
-        // The callee's declared result is what the resolver reads, so a callee asserted to another type is not one.
-        let callee = super::component::peel(&call.callee);
-        let (true, Expression::Identifier(callee)) = (self.describes_call(&callee), callee.expr) else { return false };
+        let peeled = super::component::peel(&call.callee);
+        let Expression::Identifier(callee) = peeled.expr else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
         let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);
         if super::is_constant_name(name) || explained || element_builder || self.react_api(call).is_some() {
+            return false;
+        }
+        // The callee's declared result is what the resolver reads, so a callee asserted to another type is not one.
+        // Unless the assertion says the call gives no component (`NotRenderable`), the binding may still be one, so
+        // the skip says why it is not listed.
+        if !self.describes_call(&peeled) {
+            if !matches!(peeled.evidence, super::component::Evidence::NotRenderable) {
+                self.decline_reason = Some(format!(
+                    "'{name}' is built by a call to '{}' through a type assertion that replaces its type, so the \
+                     declaration that would give its props is not read and it is not listed",
+                    callee.name
+                ));
+            }
             return false;
         }
         let type_args = super::component::call_type_arguments(call)
