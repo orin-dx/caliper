@@ -295,6 +295,7 @@ mod tests {
             flags: 4,
             declarations: vec![declaration.to_string()],
             parent: None,
+            readonly: None,
         }
     }
 

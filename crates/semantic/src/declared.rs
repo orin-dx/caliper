@@ -319,6 +319,7 @@ mod tests {
             flags: 4,
             declarations: declarations.iter().map(|declaration| declaration.to_string()).collect(),
             parent: parent.map(|id| CompactSymbol { id, file: None }),
+            readonly: None,
         }
     }
 
