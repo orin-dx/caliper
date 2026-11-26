@@ -144,7 +144,11 @@ impl<'src> SourceDataCollector<'src> {
         recognition == super::component::Recognition::Plain
             || (self.function_depth == 0
                 && self.unique_binding(parent)
-                && self.resolves_to_global("Object")
+                && super::well_known::matches_well_known(
+                    self,
+                    super::well_known::OBJECT.name,
+                    &super::well_known::OBJECT,
+                )
                 && !self.object_assign_assigned)
     }
 
@@ -297,7 +301,9 @@ impl<'src> SourceDataCollector<'src> {
         // An element factory asserted to give a string (`(createElement as (t: any) => string)(Foo)`) builds no
         // element of its argument.
         let renders_argument = super::component::is_component_wrapper(&*self, call)
-            || peeled.named().is_some_and(|callee| super::evidence::is_element_factory_callee(callee, &*self));
+            || peeled.named().is_some_and(|callee| {
+                super::evidence::is_element_factory_callee(callee, super::well_known::beyond_main(&call.callee), &*self)
+            });
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;
         }

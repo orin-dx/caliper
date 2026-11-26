@@ -38,6 +38,7 @@ mod reexports;
 mod uses;
 mod values;
 mod visit;
+mod well_known;
 mod wrapper;
 pub(crate) mod written;
 
@@ -745,21 +746,33 @@ impl<'src> SourceDataCollector<'src> {
     /// (the global `React`, or `const { forwardRef } = React`) is read as written.
     pub(super) fn react_api(&self, call: &CallExpression<'_>) -> Option<ReactApi> {
         let import_of = |local: &str| self.data.imports.iter().find(|import| import.local_name.as_str() == local);
+        // A callee written through a wrapper origin/main did not read matches React only through the table.
+        let beyond_main = well_known::beyond_main(&call.callee);
         match component::callee_of(call)? {
             Expression::Identifier(id) => match import_of(id.name.as_str()) {
                 Some(import) if is_react_module(&import.specifier) => {
-                    ReactApi::of_export(import.exported_name.as_str())
+                    let api = ReactApi::of_export(import.exported_name.as_str())?;
+                    let resolves = || {
+                        well_known::react_export(import.exported_name.as_str())
+                            .is_some_and(|entry| well_known::matches_well_known(self, id.name.as_str(), entry))
+                    };
+                    (!beyond_main || resolves()).then_some(api)
                 }
                 Some(_) => None,
+                None if beyond_main => None,
                 None => ReactApi::of_export(id.name.as_str()),
             },
             Expression::StaticMemberExpression(member) => {
                 // `callee_of` judged the member; the namespace is only read for its name. Through a wrapper main did
-                // not read (`component::main_peel`), only when the name resolves to the global or to an import.
+                // not read (`component::main_peel`), only when the name resolves to React's import (`well_known`).
                 let object = match component::main_peel(&member.object) {
-                    Expression::Identifier(object) => object,
+                    Expression::Identifier(object) if !beyond_main => object,
                     _ => match component::beneath(&member.object) {
-                        Expression::Identifier(object) if self.not_a_local_declaration(object.name.as_str()) => object,
+                        Expression::Identifier(object)
+                            if well_known::matches_well_known(self, object.name.as_str(), &well_known::REACT) =>
+                        {
+                            object
+                        }
                         _ => return None,
                     },
                 };
@@ -772,7 +785,7 @@ impl<'src> SourceDataCollector<'src> {
                         Some(api)
                     }
                     Some(_) => None,
-                    None => (object.name == "React").then_some(api),
+                    None => (object.name == well_known::REACT.name).then_some(api),
                 }
             }
             _ => None,
@@ -1613,8 +1626,13 @@ mod scope_tests;
 mod wrapper_matrix_tests;
 
 impl evidence::Scope for SourceDataCollector<'_> {
-    fn trusts_peeled_receiver(&self, name: &str) -> bool {
-        self.not_a_local_declaration(name)
+    fn declarations(&self, name: &str) -> u32 {
+        self.binding_counts.get(name).copied().unwrap_or(0)
+    }
+
+    fn import_of(&self, local: &str) -> Option<(&str, &str)> {
+        let import = self.data.imports.iter().find(|import| import.local_name.as_str() == local)?;
+        Some((import.exported_name.as_str(), import.specifier.as_str()))
     }
 
     fn may_be_react(&self, name: &str) -> bool {
@@ -1632,7 +1650,10 @@ impl evidence::Scope for SourceDataCollector<'_> {
     fn is_preact_h(&self, receiver: Option<&str>) -> bool {
         self.data.imports.iter().any(|import| {
             let binds = match receiver {
-                None => import.local_name.as_str() == "h" && import.exported_name.as_str() == "h",
+                None => {
+                    import.local_name.as_str() == well_known::H.name
+                        && import.exported_name.as_str() == well_known::H.name
+                }
                 Some(object) => {
                     import.local_name.as_str() == object && matches!(import.exported_name.as_str(), "*" | "default")
                 }

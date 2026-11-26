@@ -2338,6 +2338,23 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "Object.assign roles, a default export of a target declared twice | peeled",
             "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nnamespace N { const Root = 1; }\nexport default (Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
         ),
+        // Round 33: a global's name imported or shadowed, behind a cast.
+        (
+            "well-known table: Promise, an import of its name (finding 2) | plain",
+            "import Promise from './codec';\nexport const Button = (props: Props) => Promise.resolve(<div />);",
+        ),
+        (
+            "well-known table: Promise, an import of its name (finding 2) | peeled",
+            "import Promise from './codec';\nexport const Button = (props: Props) => (Promise as typeof Promise).resolve(<div />);",
+        ),
+        (
+            "well-known table: Promise, a parameter of its name | plain",
+            "function g(Promise: unknown) { return Promise; }\nexport const Button = (props: Props) => Promise.resolve(<div />);",
+        ),
+        (
+            "well-known table: Promise, a parameter of its name | peeled",
+            "function g(Promise: unknown) { return Promise; }\nexport const Button = (props: Props) => (Promise as typeof Promise).resolve(<div />);",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -2378,6 +2395,87 @@ fn factory_parity_cases() -> Vec<(String, String)> {
     cases.push((
         "react_api behind a type assertion, a parameter of its name | peeled".to_owned(),
         "// ts\nimport * as React from 'react';\ninterface Props { label?: string }\nfunction f(React: unknown) { return React; }\nexport const Button = (<typeof React>React).forwardRef<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    // Round 33: each well-known entry behind a `<T>x` assertion, a `.ts` file's form.
+    cases.push((
+        "well-known table: forwardRef, an import declared once | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { forwardRef } from 'react';\nexport const Button = forwardRef<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: forwardRef, an import declared once | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { forwardRef } from 'react';\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: forwardRef, an aliased import | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { forwardRef as fr } from 'react';\nexport const Button = fr<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: forwardRef, an aliased import | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { forwardRef as fr } from 'react';\nexport const Button = (<typeof fr>fr)<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: forwardRef, an aliased import shadowed by a namespace local (finding 1) | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { forwardRef as fr } from 'react';\nnamespace N { export function fr<E, P>(tag: string): symbol { return Symbol(); } }\nexport const Button = fr<HTMLButtonElement, Props>('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: forwardRef, an aliased import shadowed by a namespace local (finding 1) | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { forwardRef as fr } from 'react';\nnamespace N { export function fr<E, P>(tag: string): symbol { return Symbol(); } }\nexport const Button = (<typeof fr>fr)<HTMLButtonElement, Props>('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: forwardRef, an aliased import shadowed by a parameter | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { forwardRef as fr } from 'react';\nfunction g(fr: unknown) { return fr; }\nexport const Button = fr<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: forwardRef, an aliased import shadowed by a parameter | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { forwardRef as fr } from 'react';\nfunction g(fr: unknown) { return fr; }\nexport const Button = (<typeof fr>fr)<HTMLElement, Props>((props, ref) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: memo, an import declared once | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { memo } from 'react';\nexport const Button = memo((props: Props) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: memo, an import declared once | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { memo } from 'react';\nexport const Button = (<typeof memo>memo)((props: Props) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: memo, an import shadowed by a parameter | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { memo } from 'react';\nfunction g(memo: unknown) { return memo; }\nexport const Button = memo((props: Props) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: memo, an import shadowed by a parameter | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { memo } from 'react';\nfunction g(memo: unknown) { return memo; }\nexport const Button = (<typeof memo>memo)((props: Props) => null);".to_owned(),
+    ));
+    cases.push((
+        "well-known table: createElement, an import declared once | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { createElement } from 'react';\nexport const Button = (props: Props) => createElement('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: createElement, an import declared once | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { createElement } from 'react';\nexport const Button = (props: Props) => (<typeof createElement>createElement)('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: createElement, an import shadowed by a parameter | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { createElement } from 'react';\nfunction g(createElement: unknown) { return createElement; }\nexport const Button = (props: Props) => createElement('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: createElement, an import shadowed by a parameter | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { createElement } from 'react';\nfunction g(createElement: unknown) { return createElement; }\nexport const Button = (props: Props) => (<typeof createElement>createElement)('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: h, an import declared once | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { h } from 'preact';\nexport const Button = (props: Props) => h('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: h, an import declared once | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { h } from 'preact';\nexport const Button = (props: Props) => (<typeof h>h)('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: h, an import shadowed by a parameter | plain".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { h } from 'preact';\nfunction g(h: unknown) { return h; }\nexport const Button = (props: Props) => h('button');".to_owned(),
+    ));
+    cases.push((
+        "well-known table: h, an import shadowed by a parameter | peeled".to_owned(),
+        "// ts\ninterface Props { label?: string }\nimport { h } from 'preact';\nfunction g(h: unknown) { return h; }\nexport const Button = (props: Props) => (<typeof h>h)('button');".to_owned(),
     ));
     cases
 }
@@ -2488,7 +2586,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // Round 31 adds three: a peeled receiver that resolves to its well-known global or import
     // (`a_well_known_name_on_a_peeled_path_must_resolve_to_it`). Round 32 adds two: a peeled `Object.assign` whose
     // target is trusted, bound and exported by default (`an_object_assign_call_is_read_by_its_argument_roles`).
-    assert_eq!(read_as_the_plain_call, 61);
+    // Round 33 adds three: a forwardRef or createElement import behind `<T>x` that resolves
+    // (`every_well_known_entry_resolves_before_a_peeled_match`).
+    assert_eq!(read_as_the_plain_call, 64);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2548,6 +2648,37 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let peeled = format!("recognition: {row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 33: every well-known entry (`well_known::WELL_KNOWN`) a peeled path matches resolves first: a global must be
+/// declared nowhere (an import of its name is another binding), an import must be the name's one declaration and come
+/// from the entry's module, aliased or not. Each plain form is origin/main's; each peeled form reads as the plain form
+/// where the name resolves, and as origin/main read it otherwise.
+#[test]
+fn every_well_known_entry_resolves_before_a_peeled_match() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, resolves) in [
+        ("well-known table: forwardRef, an import declared once", true),
+        ("well-known table: forwardRef, an aliased import", true),
+        ("well-known table: forwardRef, an aliased import shadowed by a namespace local (finding 1)", false),
+        ("well-known table: forwardRef, an aliased import shadowed by a parameter", false),
+        ("well-known table: memo, an import declared once", true),
+        ("well-known table: memo, an import shadowed by a parameter", false),
+        ("well-known table: createElement, an import declared once", true),
+        ("well-known table: createElement, an import shadowed by a parameter", false),
+        ("well-known table: h, an import declared once", true),
+        ("well-known table: h, an import shadowed by a parameter", false),
+        ("well-known table: Promise, an import of its name (finding 2)", false),
+        ("well-known table: Promise, a parameter of its name", false),
+    ] {
+        let plain = format!("{row} | plain");
+        let peeled = format!("{row} | peeled");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if resolves { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
 }

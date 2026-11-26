@@ -591,7 +591,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
         if let AssignmentTarget::StaticMemberExpression(target) = &it.left
             && target.property.name == "assign"
-            && matches!(&target.object, Expression::Identifier(object) if object.name == "Object")
+            && super::well_known::is_named(&target.object, &super::well_known::OBJECT)
         {
             self.assigns_object_assign = true;
         }
@@ -650,8 +650,7 @@ impl Recognition {
     /// read (`record_object_assign_declarator`) read its arguments through `peel_expr`.
     pub(super) fn of_object_assign(call: &CallExpression<'_>, inline: bool) -> Self {
         let callee = matches!(&call.callee, Expression::StaticMemberExpression(callee)
-            if callee.property.name == "assign"
-                && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"));
+            if callee.property.name == "assign" && super::well_known::is_named(&callee.object, &super::well_known::OBJECT));
         let arguments = !inline
             || (matches!(call.arguments.first(), Some(Argument::Identifier(_)))
                 && matches!(call.arguments.get(1), Some(Argument::ObjectExpression(_))));
@@ -1732,7 +1731,11 @@ impl<'src> SourceDataCollector<'src> {
             Some(Expression::StaticMemberExpression(member)) => member.property.name.as_str(),
             _ => return false,
         };
-        name == "forwardRef" && self.react_api(call).is_none()
+        // Another module's own `forwardRef` (React Aria's), by name: through a wrapper main did not read, only when the
+        // name's one declaration is an import.
+        name == super::well_known::FORWARD_REF.name
+            && self.react_api(call).is_none()
+            && (!super::well_known::beyond_main(&call.callee) || self.resolves_to_import(name))
     }
 
     /// Extract the callee name of a call expression (simple ident or member expr).
@@ -1768,8 +1771,7 @@ pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<
 /// Whether the call is `Object.assign(...)`.
 pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
     matches!(callee_of(call), Some(Expression::StaticMemberExpression(callee))
-        if callee.property.name == "assign"
-            && matches!(beneath(&callee.object), Expression::Identifier(object) if object.name == "Object"))
+        if callee.property.name == "assign" && super::well_known::is_named(beneath(&callee.object), &super::well_known::OBJECT))
 }
 
 /// Whether a call wrapping a component returns a component, by the ecosystem's conventions:

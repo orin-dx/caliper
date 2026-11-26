@@ -314,6 +314,10 @@ Object.assign roles, a default export of a target declared once | plain	Base:Pro
 Object.assign roles, a default export of a target declared once | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
 Object.assign roles, a default export of a target declared twice | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Root:Props"functionDeclaration" exported as Root,default
 Object.assign roles, a default export of a target declared twice | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Root:Props"functionDeclaration" exported as Root
+well-known table: Promise, an import of its name (finding 2) | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
+well-known table: Promise, an import of its name (finding 2) | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+well-known table: Promise, a parameter of its name | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
+well-known table: Promise, a parameter of its name | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via toolkit.createElement
 an element built from forwardRef, plain	Button:Props"forwardRef" exported as Button
@@ -323,3 +327,23 @@ react_api behind a type assertion, an import declared once | plain	Button:Props"
 react_api behind a type assertion, an import declared once | peeled	Button:Props"forwardRef" exported as Button
 react_api behind a type assertion, a parameter of its name | plain	Button:Props"forwardRef" exported as Button
 react_api behind a type assertion, a parameter of its name | peeled	Button:Props"forwardRef" exported as Button
+well-known table: forwardRef, an import declared once | plain	Button:Props"forwardRef" exported as Button
+well-known table: forwardRef, an import declared once | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+well-known table: forwardRef, an aliased import | plain	Button:Props"forwardRef" exported as Button
+well-known table: forwardRef, an aliased import | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+well-known table: forwardRef, an aliased import shadowed by a namespace local (finding 1) | plain	Button:Props"forwardRef" exported as Button
+well-known table: forwardRef, an aliased import shadowed by a namespace local (finding 1) | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+well-known table: forwardRef, an aliased import shadowed by a parameter | plain	Button:Props"forwardRef" exported as Button
+well-known table: forwardRef, an aliased import shadowed by a parameter | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+well-known table: memo, an import declared once | plain	Button:Props"hocWrapper" exported as Button
+well-known table: memo, an import declared once | peeled	Button:Props"hocWrapper" exported as Button
+well-known table: memo, an import shadowed by a parameter | plain	Button:Props"hocWrapper" exported as Button
+well-known table: memo, an import shadowed by a parameter | peeled	Button:Props"hocWrapper" exported as Button
+well-known table: createElement, an import declared once | plain	Button:Props"typedFunctionExpression" exported as Button
+well-known table: createElement, an import declared once | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+well-known table: createElement, an import shadowed by a parameter | plain	Button:Props"typedFunctionExpression" exported as Button
+well-known table: createElement, an import shadowed by a parameter | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+well-known table: h, an import declared once | plain	
+well-known table: h, an import declared once | peeled	
+well-known table: h, an import shadowed by a parameter | plain	
+well-known table: h, an import shadowed by a parameter | peeled	

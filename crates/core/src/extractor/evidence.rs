@@ -16,27 +16,29 @@ pub(super) type NoRender = &'static str;
 /// Names whose type, as a return annotation, means the function renders.
 const ELEMENT_TYPE_NAMES: &[&str] = &["Element", "ReactElement", "ReactNode", "ReactPortal", "JSX"];
 
-/// Callees that produce an element, by name. Preact's `h` is not here: so short a name proves nothing until it is
-/// known to be imported from Preact (`Scope::is_preact_h`).
-const ELEMENT_FACTORIES: &[&str] = &["createElement", "cloneElement", "jsx", "jsxs", "jsxDEV", "createPortal"];
-
 /// Whether a callee name names an element factory, given the receiver it was called on (`Preact` in `Preact.h(…)`).
 /// `h` counts only as Preact's own binding, bare or on Preact's namespace: `codec.h(…)` and a local helper called `h`
 /// are not factories.
 pub(super) fn is_element_factory_name(name: &str, receiver: Option<&str>, scope: &dyn Scope) -> bool {
-    if name == "h" {
+    if name == super::well_known::H.name {
         return scope.is_preact_h(receiver);
     }
-    ELEMENT_FACTORIES.contains(&name)
+    super::well_known::ELEMENT_FACTORIES.iter().any(|entry| entry.name == name)
 }
 
-/// Whether a call's callee is an element factory: see [`is_element_factory_name`].
-pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Scope) -> bool {
+/// Whether a call's peeled callee is an element factory: see [`is_element_factory_name`]. Written through a wrapper
+/// origin/main did not read (`beyond_main`), a bare callee must resolve to a factory import and a receiver to React's
+/// or Preact's (`well_known`).
+pub(super) fn is_element_factory_callee(callee: &Expression<'_>, beyond_main: bool, scope: &dyn Scope) -> bool {
+    use super::well_known::{FACTORY_IMPORTS, PREACT, REACT, matches_any, receiver_among};
     match callee {
-        Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), None, scope),
+        Expression::Identifier(id) => {
+            (!beyond_main || matches_any(scope, id.name.as_str(), FACTORY_IMPORTS))
+                && is_element_factory_name(id.name.as_str(), None, scope)
+        }
         Expression::StaticMemberExpression(m) => {
-            let receiver = well_known_receiver(&m.object, scope).or(Some(""));
-            is_element_factory_name(m.property.name.as_str(), receiver, scope)
+            let receiver = receiver_among(scope, &m.object, beyond_main, &[&REACT, &PREACT]);
+            is_element_factory_name(m.property.name.as_str(), Some(receiver), scope)
         }
         _ => false,
     }
@@ -58,25 +60,10 @@ pub(super) trait Scope {
     /// Whether `h` called bare (`receiver` is `None`) or on `receiver` (`Preact.h`) is Preact's, by where it was
     /// imported from.
     fn is_preact_h(&self, receiver: Option<&str>) -> bool;
-    /// Whether a receiver read only through a wrapper (`(Preact as typeof Preact).h`) may be matched against a
-    /// well-known global or import by its name: the name resolves to the global (no declaration in the file) or to an
-    /// import (its one declaration). A parameter or local of the same name is a second declaration.
-    fn trusts_peeled_receiver(&self, name: &str) -> bool;
-}
-
-/// The identifier a member expression's receiver names for a match against a well-known global or import (`React`,
-/// `Preact`, `Promise`): written plainly, as origin/main read it; written through a wrapper, only when
-/// [`Scope::trusts_peeled_receiver`] holds. `None` otherwise.
-pub(super) fn well_known_receiver<'a>(object: &Expression<'a>, scope: &dyn Scope) -> Option<&'a str> {
-    match object {
-        Expression::Identifier(object) => Some(object.name.as_str()),
-        _ => match super::component::beneath(object) {
-            Expression::Identifier(object) if scope.trusts_peeled_receiver(object.name.as_str()) => {
-                Some(object.name.as_str())
-            }
-            _ => None,
-        },
-    }
+    /// How many times the file declares `name`, any kind in any scope (`well_known::matches_well_known`).
+    fn declarations(&self, name: &str) -> u32;
+    /// The exported name and module specifier of the import that binds `local`, if one does.
+    fn import_of(&self, local: &str) -> Option<(&str, &str)>;
 }
 
 fn leftmost_and_rightmost<'n>(name: &'n TSTypeName<'_>) -> Option<(&'n str, &'n str)> {
@@ -160,12 +147,13 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
         let callee = super::component::callee_of(it);
         let name = callee.and_then(callee_name);
         let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
-        if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, self.scope)) {
+        let beyond_main = super::well_known::beyond_main(&it.callee);
+        if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, beyond_main, self.scope)) {
             self.found = true;
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
             || matches!(callee, Some(Expression::StaticMemberExpression(member))
-                if well_known_receiver(&member.object, self.scope) == Some("Promise")
+                if super::well_known::is_receiver(self.scope, &member.object, &super::well_known::PROMISE)
                     && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
             walk::walk_call_expression(self, it);
@@ -400,8 +388,12 @@ impl Scope for Foreign<'_> {
         false
     }
 
-    fn trusts_peeled_receiver(&self, _name: &str) -> bool {
-        false
+    fn declarations(&self, _name: &str) -> u32 {
+        u32::MAX
+    }
+
+    fn import_of(&self, _local: &str) -> Option<(&str, &str)> {
+        None
     }
 
     fn is_element_helper(&self, _name: &str) -> bool {
