@@ -531,39 +531,179 @@ fn chain_names(chain: &str, expr: &Expression<'_>) -> bool {
 /// declaration of the same name shadows it.
 pub(crate) struct TypeofAlias {
     pub(super) chain: CompactString,
-    /// The shadowing scopes, sorted and with nested ones merged into the scope around them: disjoint, as scopes nest
-    /// or are apart and never partly overlap.
-    shadowed_in: Vec<oxc_span::Span>,
+    shadowed_in: ShadowScopes,
 }
 
 impl TypeofAlias {
-    fn new(chain: &str, mut shadowed_in: Vec<oxc_span::Span>) -> Self {
-        shadowed_in.sort_unstable_by_key(|scope| (scope.start, std::cmp::Reverse(scope.end)));
-        let mut merged: Vec<oxc_span::Span> = Vec::with_capacity(shadowed_in.len());
-        for scope in shadowed_in {
+    fn new(chain: &str, shadowed_in: Vec<oxc_span::Span>) -> Self {
+        Self { chain: CompactString::from(chain), shadowed_in: ShadowScopes::new(shadowed_in) }
+    }
+
+    /// Whether a reference to the alias at `at` means it: no scope around `at` declares the name again.
+    pub(super) fn means_at(&self, at: oxc_span::Span) -> bool {
+        !self.shadowed_in.contains(at)
+    }
+}
+
+/// The scopes inside a module that declare a name again, sorted and with nested ones merged into the scope around
+/// them: disjoint, as scopes nest or are apart and never partly overlap.
+#[derive(Default)]
+pub(crate) struct ShadowScopes(Vec<oxc_span::Span>);
+
+impl ShadowScopes {
+    fn new(mut scopes: Vec<oxc_span::Span>) -> Self {
+        scopes.sort_unstable_by_key(|scope| (scope.start, std::cmp::Reverse(scope.end)));
+        let mut merged: Vec<oxc_span::Span> = Vec::with_capacity(scopes.len());
+        for scope in scopes {
             match merged.last_mut() {
                 Some(last) if scope.start < last.end => last.end = last.end.max(scope.end),
                 Some(_) | None => merged.push(scope),
             }
         }
-        Self { chain: CompactString::from(chain), shadowed_in: merged }
+        Self(merged)
     }
 
-    /// Whether a reference to the alias at `at` means it: no scope around `at` declares the name again. A binary
-    /// search for the last scope that starts at or before `at`.
-    pub(super) fn means_at(&self, at: oxc_span::Span) -> bool {
-        let (mut low, mut high) = (0, self.shadowed_in.len());
+    /// Whether a scope encloses `at`: a binary search for the last scope that starts at or before it.
+    pub(super) fn contains(&self, at: oxc_span::Span) -> bool {
+        let (mut low, mut high) = (0, self.0.len());
         while low < high {
             #[cfg(test)]
             steps::count_probed();
             let middle = low + (high - low) / 2;
-            if self.shadowed_in[middle].start <= at.start {
+            if self.0[middle].start <= at.start {
                 low = middle + 1;
             } else {
                 high = middle;
             }
         }
-        !low.checked_sub(1).is_some_and(|index| at.end <= self.shadowed_in[index].end)
+        low.checked_sub(1).is_some_and(|index| at.end <= self.0[index].end)
+    }
+}
+
+/// What a module itself declares as a value under a name: how many declarations it makes at module level, and the
+/// scopes inside it that declare the name (a parameter, a local `const`, a nested function). An import is the
+/// module's binding of another module's value, not its own declaration.
+pub(crate) struct LocalValue {
+    pub(super) module_level: usize,
+    pub(super) shadowed_in: ShadowScopes,
+}
+
+/// Every value declaration of one of `names` in the module, from one walk ([`LocalValue`]). A function, an arrow, a
+/// class, a block (a `catch` body included), a `catch` clause, a `for` statement, a `switch`, a static block, a
+/// namespace and a `declare module`/`declare global` body are scopes; a `var` is read in the block that declares it.
+pub(super) fn local_values(
+    program: &Program<'_>,
+    names: &rustc_hash::FxHashSet<&str>,
+) -> FxHashMap<CompactString, LocalValue> {
+    let mut declarations = ValueDeclarations { names, scopes: Vec::new(), found: FxHashMap::default() };
+    oxc_ast_visit::Visit::visit_program(&mut declarations, program);
+    declarations
+        .found
+        .into_iter()
+        .map(|(name, (module_level, scopes))| {
+            (CompactString::from(name), LocalValue { module_level, shadowed_in: ShadowScopes::new(scopes) })
+        })
+        .collect()
+}
+
+struct ValueDeclarations<'n> {
+    names: &'n rustc_hash::FxHashSet<&'n str>,
+    scopes: Vec<oxc_span::Span>,
+    found: FxHashMap<String, (usize, Vec<oxc_span::Span>)>,
+}
+
+impl ValueDeclarations<'_> {
+    fn declare(&mut self, name: &str) {
+        if !self.names.contains(name) {
+            return;
+        }
+        let entry = self.found.entry(name.to_owned()).or_default();
+        match self.scopes.last() {
+            None => entry.0 += 1,
+            Some(scope) => entry.1.push(*scope),
+        }
+    }
+
+    fn within(&mut self, scope: oxc_span::Span, walk: impl FnOnce(&mut Self)) {
+        self.scopes.push(scope);
+        walk(self);
+        self.scopes.pop();
+    }
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for ValueDeclarations<'_> {
+    // An import binds another module's value; a type's name and anything inside a type is no value.
+    fn visit_import_declaration(&mut self, _it: &ImportDeclaration<'a>) {}
+
+    fn visit_ts_type_alias_declaration(&mut self, _it: &TSTypeAliasDeclaration<'a>) {}
+
+    fn visit_ts_interface_declaration(&mut self, _it: &TSInterfaceDeclaration<'a>) {}
+
+    fn visit_ts_type(&mut self, _it: &TSType<'a>) {}
+
+    fn visit_binding_identifier(&mut self, it: &BindingIdentifier<'a>) {
+        self.declare(&it.name);
+    }
+
+    fn visit_function(&mut self, it: &Function<'a>, flags: oxc_syntax::scope::ScopeFlags) {
+        // A declaration's name is declared where the declaration is; the rest (its name again, for an expression its
+        // only one) inside the function.
+        if let (true, Some(id)) = (it.is_declaration(), &it.id) {
+            self.declare(&id.name);
+        }
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_function(this, it, flags));
+    }
+
+    fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_arrow_function_expression(this, it));
+    }
+
+    fn visit_class(&mut self, it: &Class<'a>) {
+        if let (true, Some(id)) = (it.is_declaration(), &it.id) {
+            self.declare(&id.name);
+        }
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_class(this, it));
+    }
+
+    fn visit_block_statement(&mut self, it: &BlockStatement<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_block_statement(this, it));
+    }
+
+    fn visit_catch_clause(&mut self, it: &CatchClause<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_catch_clause(this, it));
+    }
+
+    fn visit_for_statement(&mut self, it: &ForStatement<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_for_statement(this, it));
+    }
+
+    fn visit_for_in_statement(&mut self, it: &ForInStatement<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_for_in_statement(this, it));
+    }
+
+    fn visit_for_of_statement(&mut self, it: &ForOfStatement<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_for_of_statement(this, it));
+    }
+
+    fn visit_switch_statement(&mut self, it: &SwitchStatement<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_switch_statement(this, it));
+    }
+
+    fn visit_static_block(&mut self, it: &StaticBlock<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_static_block(this, it));
+    }
+
+    fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
+        self.declare(&it.id.name);
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_namespace_declaration(this, it));
+    }
+
+    fn visit_ts_external_module_declaration(&mut self, it: &TSExternalModuleDeclaration<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_external_module_declaration(this, it));
+    }
+
+    fn visit_ts_global_declaration(&mut self, it: &TSGlobalDeclaration<'a>) {
+        self.within(it.span, |this| oxc_ast_visit::walk::walk_ts_global_declaration(this, it));
     }
 }
 

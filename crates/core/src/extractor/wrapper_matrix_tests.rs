@@ -1918,3 +1918,99 @@ fn a_cast_finds_its_shadowing_scope_by_binary_search() {
         assert!(probes(n) <= bound, "{n}: {} probes, bound {bound}", probes(n));
     }
 }
+
+/// Round 14: a known factory is known by the binding its callee resolves to, never by its name. Each factory name,
+/// crossed with each way the file can bind it and each way the call can be written: an import from React or Preact
+/// (named, namespace, default) makes it the factory; a declaration in the file, at module level or in a scope around
+/// the call, makes it the file's own function. A cast that keeps the callee's type reads the same binding.
+#[test]
+fn a_known_factory_is_known_by_its_binding_not_its_name() {
+    // (factory, the import that binds it, the call as written with `{F}` for the callee).
+    let builders: &[(&str, &str, &str)] = &[
+        ("createElement", "import { createElement } from 'react';", "{F}<Props>(Base, props)"),
+        ("cloneElement", "import { cloneElement } from 'react';", "{F}<Props>(Base)"),
+        ("createRef", "import { createRef } from 'react';", "{F}<Props>(Base)"),
+        ("h", "import { h } from 'preact';", "{F}<Props>(Base, props)"),
+        ("createElement", "import { createElement } from 'preact/compat';", "{F}<Props>(Base, props)"),
+        ("jsx", "import { jsx } from 'react/jsx-runtime';", "{F}<Props>(Base, props)"),
+        // The element builders under the names any module exports them under, as before: Preact's own, emotion's.
+        ("createElement", "import { createElement } from 'preact';", "{F}<Props>(Base, props)"),
+        ("jsx", "import { jsx } from '@emotion/react';", "{F}<Props>(Base, props)"),
+    ];
+    let casts = ["{f}", "({f} as typeof {f})", "({f} as Alias)", "({f} as any)", "({f} as unknown)"];
+    let outcome = |source: &str| {
+        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), source);
+        let mut names: Vec<String> = data.component_mappings.iter().map(|m| m.component_name.clone()).collect();
+        names.sort();
+        names
+    };
+    let base = "interface Props { label?: string }\nfunction Base(props: Props) { return <div />; }\n\
+                declare const props: Props;\n";
+    let mut failures = Vec::new();
+    for (factory, import, call) in builders {
+        for cast in casts {
+            let callee = cast.replace("{f}", factory);
+            let alias = format!("type Alias = typeof {factory};\n");
+            let row = |prelude: &str, expected: &[&str]| {
+                let source = format!("{prelude}\n{base}{alias}export const Button = {};", call.replace("{F}", &callee));
+                let actual = outcome(&source);
+                (actual != expected).then(|| format!("{factory} {cast} {prelude:?}: {actual:?}"))
+            };
+            // Imported: the factory, which builds an element or a ref and no component.
+            failures.extend(row(import, &["Base"]));
+            // Declared in the file: the file's own generic function, which may build a component, as any wrapper.
+            let local =
+                format!("function {factory}<P>(c: React.ComponentType<P>, p?: P): React.FC<P> {{ return c as any; }}");
+            failures.extend(row(&format!("import React from 'react';\n{local}"), &["Base", "Button"]));
+        }
+    }
+    // A namespace import's member is the module's factory; a local namespace of the same name is not.
+    for (namespace, expected) in [
+        ("import * as React from 'react';", &["Base"][..]),
+        ("import React from 'react';", &["Base"][..]),
+        ("import * as Preact from 'preact';", &["Base"][..]),
+    ] {
+        let receiver = if namespace.contains("Preact") { "Preact.h" } else { "React.createElement" };
+        for cast in casts {
+            let callee = cast.replace("{f}", receiver);
+            let source = format!(
+                "{namespace}\n{base}type Alias = typeof {receiver};\nexport const Button = {callee}<Props>(Base, props);"
+            );
+            if outcome(&source) != expected {
+                failures.push(format!("{namespace} {callee}: {:?}", outcome(&source)));
+            }
+        }
+    }
+    let local_react = format!(
+        "const React = {{ createElement<P>(c: unknown, p?: P): unknown {{ return c; }} }};\n{base}\
+         export const Button = React.createElement<Props>(Base, props);"
+    );
+    if outcome(&local_react) != ["Base", "Button"] {
+        failures.push(format!("a local React namespace: {:?}", outcome(&local_react)));
+    }
+    // A named import's member is that value's member, not React's API: `Children.createRef` is no `createRef`.
+    let member =
+        format!("import {{ Children }} from 'react';\n{base}export const Button = Children.createRef<Props>(Base);");
+    if outcome(&member) != ["Base", "Button"] {
+        failures.push(format!("a named import's member: {:?}", outcome(&member)));
+    }
+    // Finding 2: a local factory function with React's name keeps its real result.
+    let factory = "import React from 'react';\ninterface Props { label?: string }\n\
+                   function createRef(): React.FC<Props> { return (props) => <div />; }\nexport const Button = createRef();";
+    let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), factory);
+    let button = data.component_mappings.iter().find(|m| m.component_name == "Button").map(|m| m.rule);
+    if button != Some(crate::types::DetectionRule::FactoryResult) {
+        failures.push(format!("a local createRef factory: {button:?}"));
+    }
+    // A parameter of the factory's name in a scope around the call is the caller's value, not the import.
+    let shadowed = format!(
+        "import {{ h }} from 'preact';\n{base}export function make(h: <P>(c: unknown, p?: P) => React.FC<P>) {{\n\
+         return <Base />;\n}}\nexport const Button = h<Props>(Base, props);\n\
+         export function render(h: (c: unknown) => unknown) {{ return h(Base); }}\n\
+         export const Card = (props: Props, h: (c: unknown) => string) => h(Base);"
+    );
+    if outcome(&shadowed) != ["Base"] {
+        failures.push(format!("an import used where a parameter shadows it elsewhere: {:?}", outcome(&shadowed)));
+    }
+    assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
+}
