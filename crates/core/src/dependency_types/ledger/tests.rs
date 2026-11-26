@@ -429,6 +429,31 @@ fn an_eager_edit_resolves_again_every_component_that_reached_a_walk_it_followed_
     assert_eq!(names(&session.component("Tag")), ["label", "own", "tone"]);
 }
 
+/// The eager revision: `Card` imports `SoloProps` through a barrel that is only `export * from './props'`, and
+/// `props.d.ts` could not be read. The resolver recorded the barrel, not the target it never read. The file reads
+/// on disk and `Plain`, unrelated, is edited: the retry recovers the walk, and `Card`, which demanded it, is resolved
+/// again and has the prop, as a fresh session does.
+#[test]
+fn an_eager_retry_of_a_pure_barrel_walk_resolves_its_demander_again() {
+    let card = "import type { SoloProps } from 'solo-kit';\ninterface CardProps extends SoloProps { own: string }\n\
+                export function Card(props: CardProps) { return null; }\n";
+    let plain = "export function Plain(props: { title: string }) { return null; }\n";
+    let (_tmp, root) = project(&[SOLO, &[("src/card/Card.tsx", card), ("src/plain/Plain.tsx", plain)]].concat());
+    let props = root.join("node_modules/solo-kit/props.d.ts");
+    let text = std::fs::read_to_string(&props).unwrap();
+    std::fs::write(&props, UNREADABLE).unwrap();
+    let session = WatchSession::new(options(&root));
+    drop(session.initialize());
+    assert_eq!(names(&session.component("Card")), ["own"]);
+    std::fs::write(&props, text).unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+
+    let fresh = WatchSession::new(options(&root));
+    drop(fresh.initialize());
+    assert_eq!(names(&session.component("Card")), ["own", "tone"]);
+    assert_eq!(session.component("Card"), fresh.component("Card"));
+}
+
 /// The eager revision: `Tag` reaches a walk that could not read a file, which then reads on disk. An edit to a file
 /// that reaches no unread walk (`Plain`) follows every unread walk again, as an edit makes each one due in a lazy
 /// session: `Tag` answers as a fresh session does.
@@ -815,6 +840,9 @@ const MODEL_PACKAGE: &[(&str, &str)] = &[
     ),
 ];
 
+/// A project file that imports nothing from the package: an edit to it is unrelated to every model component.
+const MODEL_PLAIN: &str = "export function Plain(props: { title: string }) { return null; }\n";
+
 /// The model's resolution config. A config edit rewrites it with the same meaning, so the oracles need no copy of it,
 /// and the session takes its rebuild path.
 const MODEL_TSCONFIG: &str = "{ \"compilerOptions\": {} }\n";
@@ -878,6 +906,7 @@ fn model_source(body: &str, edit: usize) -> String {
 fn model_project() -> (tempfile::TempDir, Utf8PathBuf) {
     let (tmp, root) = project(MODEL_PACKAGE);
     write(&root, "tsconfig.json", MODEL_TSCONFIG);
+    write(&root, "src/plain/Plain.tsx", MODEL_PLAIN);
     for (name, body, _) in MODEL_COMPONENTS {
         write(&root, &format!("src/{name}.tsx"), &model_source(body, 0));
     }
@@ -1166,6 +1195,27 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
                 }
                 let tsconfig = run.root.join("tsconfig.json");
                 run.edit(&tsconfig, &format!("{MODEL_TSCONFIG}\n"));
+            }
+        }
+    }
+    // The eager revision, under each single unreadable file: once it reads, an edit to `Plain`, which reaches no
+    // package, follows every due walk again, and every component answers as a fresh run does (the footprint rule: a
+    // retry of any walk a component's resolution consulted, through a barrel whose target it never read included,
+    // resolves it again).
+    for file in &names {
+        let (_tmp, root) = model_project();
+        set_unreadable(&root, &[*file].into(), false);
+        let session = WatchSession::new(options(&root));
+        drop(session.initialize());
+        set_unreadable(&root, &std::collections::BTreeSet::new(), false);
+        let plain = root.join("src/plain/Plain.tsx");
+        std::fs::write(&plain, format!("{MODEL_PLAIN}// edited\n")).unwrap();
+        drop(session.update_file(&plain));
+        for (name, _, _) in MODEL_COMPONENTS {
+            let answer = session.component(name).unwrap();
+            let cold = oracle.ask(name, &[], false);
+            if !warned_names(&root, &answer).is_empty() || comparable(&root, &answer) != cold {
+                failures.push(format!("[eager retry] {file}: {name} is not a fresh run's"));
             }
         }
     }

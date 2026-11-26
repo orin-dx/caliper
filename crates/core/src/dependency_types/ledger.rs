@@ -200,9 +200,14 @@ impl UnreadWalks {
     }
 
     /// Whether what was read in `file` may change once a walk that could not read a file is followed again: a
-    /// declaration in it reached an unread walk, or it is itself a file whose latest read failed.
+    /// declaration in it reached an unread walk, it is itself a file whose latest read failed, or a demand made from
+    /// its directory did. The last is the footprint of a walk through a barrel whose target could not be read: the
+    /// resolver recorded the barrel, never the target, so only the demand ties the answer to the walk. A demand is
+    /// keyed by directory, so every file of that directory counts.
     pub(crate) fn touches(&self, file: &str) -> bool {
-        self.files.contains(file) || self.failed.contains(file)
+        self.files.contains(file)
+            || self.failed.contains(file)
+            || self.dirs.contains(Utf8Path::new(file).parent().map_or("", Utf8Path::as_str))
     }
 }
 
