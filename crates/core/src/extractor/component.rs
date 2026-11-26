@@ -588,11 +588,6 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
         if let Some(root) = peeled_callee_root(it) {
             self.cast_names.push(root);
         }
-        if let Some(Expression::StaticMemberExpression(member)) = callee_of(it)
-            && let Some(root) = cast_chain_root(&member.object)
-        {
-            self.cast_names.push(root);
-        }
         if object_assign_beyond_main(it)
             && let Some(Expression::Identifier(parent)) = aliased_component(it)
         {
@@ -611,19 +606,16 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
         }
         oxc_ast_visit::walk::walk_variable_declarator(self, it);
     }
-}
 
-/// The identifier a receiver chain is rooted at when a cast main read no callee through is written anywhere in it: `ui`
-/// for `(ui as typeof ui)` and for `(ui as typeof ui).theme`. `None` for a chain without one, or rooted elsewhere.
-pub(super) fn cast_chain_root<'a>(mut expr: &Expression<'a>) -> Option<&'a str> {
-    let mut cast = false;
-    loop {
-        cast |= wrapped_beyond_main(expr);
-        match beneath(expr) {
-            Expression::Identifier(root) => return cast.then_some(root.name.as_str()),
-            Expression::StaticMemberExpression(member) => expr = &member.object,
-            _ => return None,
+    fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
+        // A receiver written through a wrapper (`(Ui as typeof Ui).Button`): `receiver_identifier` reads it only when
+        // the file declares it once.
+        if !matches!(it.object, Expression::Identifier(_))
+            && let Expression::Identifier(receiver) = beneath(&it.object)
+        {
+            self.cast_names.push(receiver.name.as_str());
         }
+        oxc_ast_visit::walk::walk_static_member_expression(self, it);
     }
 }
 
@@ -1414,7 +1406,7 @@ impl<'src> SourceDataCollector<'src> {
     /// (bare or `React.`-qualified). Returns the matched bare name for use in
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
-        let super_name = self.peeled_ident_name(super_class(class)?.named()?);
+        let super_name = self.receiver_name(super_class(class)?.named()?);
         match self.react_type_export(&super_name)?.as_str() {
             "Component" => Some("Component"),
             "PureComponent" => Some("PureComponent"),
@@ -1636,12 +1628,12 @@ impl<'src> SourceDataCollector<'src> {
         let Some(init) = decl.init.as_ref() else { return false };
         let target = match peel_expr(init) {
             Expression::StaticMemberExpression(member) => {
-                let Expression::Identifier(object) = beneath(&member.object) else { return false };
+                let Some(object) = self.receiver_identifier(&member.object) else { return false };
                 let property = member.property.name.as_str();
-                if !self.imported_names.contains(object.name.as_str()) || !is_pascal_case(property) {
+                if !self.imported_names.contains(object) || !is_pascal_case(property) {
                     return false;
                 }
-                format!("{}.{property}", object.name)
+                format!("{object}.{property}")
             }
             // A constant is not a component whatever it is bound to; `const ORIGIN = Thing` says nothing about `Thing`.
             Expression::Identifier(id)
@@ -1711,13 +1703,7 @@ impl<'src> SourceDataCollector<'src> {
         match callee_of(call)? {
             Expression::Identifier(id) => Some(id.name.as_str().to_owned()),
             Expression::StaticMemberExpression(me) => {
-                // A receiver written through a cast main did not read is read through it only when the file declares
-                // its root once (`unique_cast_names`); otherwise it is named as main named it (`unknown.wrap`).
-                let receiver = match cast_chain_root(&me.object) {
-                    Some(root) if self.unique_cast_names.contains(root) => self.peeled_ident_name(&me.object),
-                    Some(_) | None => self.expression_to_ident_name(&me.object),
-                };
-                Some(format!("{receiver}.{}", me.property.name.as_str()))
+                Some(format!("{}.{}", self.receiver_name(&me.object), me.property.name.as_str()))
             }
             _ => None,
         }

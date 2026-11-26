@@ -1989,6 +1989,107 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "static a member set to an inline component shadowed by a parameter | typeof itself",
             "interface ItemProps { tone?: string }\nexport function Button(props: Props) { return <div />; }\nexport function Item(props: ItemProps) { return <div />; }\nexport function configure(Button: unknown) { (Button as typeof Button).Inline = (p: ItemProps) => <div />; }",
         ),
+        // Round 29: every receiver read through a wrapper goes through `receiver_identifier`.
+        (
+            "receiver of a alias, declared once | plain",
+            "import * as Ui from './ui';\nexport const PublicButton = Ui.Button;",
+        ),
+        (
+            "receiver of a alias, declared once | typeof itself",
+            "import * as Ui from './ui';\nexport const PublicButton = (Ui as typeof Ui).Button;",
+        ),
+        (
+            "receiver of a alias, shadowed by a namespace local | plain",
+            "import * as Ui from './ui';\nnamespace N { const Ui = { Button: 123 }; }\nexport const PublicButton = Ui.Button;",
+        ),
+        (
+            "receiver of a alias, shadowed by a namespace local | typeof itself",
+            "import * as Ui from './ui';\nnamespace N { const Ui = { Button: 123 }; }\nexport const PublicButton = (Ui as typeof Ui).Button;",
+        ),
+        (
+            "receiver of a alias, shadowed by a parameter | plain",
+            "import * as Ui from './ui';\nfunction f(Ui: unknown) { return Ui; }\nexport const PublicButton = Ui.Button;",
+        ),
+        (
+            "receiver of a alias, shadowed by a parameter | typeof itself",
+            "import * as Ui from './ui';\nfunction f(Ui: unknown) { return Ui; }\nexport const PublicButton = (Ui as typeof Ui).Button;",
+        ),
+        (
+            "receiver of a alias, imported and declared | plain",
+            "import * as Ui from './ui';\nconst Ui = { Button: 123 };\nexport const PublicButton = Ui.Button;",
+        ),
+        (
+            "receiver of a alias, imported and declared | typeof itself",
+            "import * as Ui from './ui';\nconst Ui = { Button: 123 };\nexport const PublicButton = (Ui as typeof Ui).Button;",
+        ),
+        (
+            "receiver of a callee, declared once | plain",
+            "import * as Ui from './ui';\nexport const Themed = Ui.wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "receiver of a callee, declared once | typeof itself",
+            "import * as Ui from './ui';\nexport const Themed = (Ui as typeof Ui).wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "receiver of a callee, shadowed by a namespace local | plain",
+            "import * as Ui from './ui';\nnamespace N { const Ui = { Button: 123 }; }\nexport const Themed = Ui.wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "receiver of a callee, shadowed by a namespace local | typeof itself",
+            "import * as Ui from './ui';\nnamespace N { const Ui = { Button: 123 }; }\nexport const Themed = (Ui as typeof Ui).wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "receiver of a callee, shadowed by a parameter | plain",
+            "import * as Ui from './ui';\nfunction f(Ui: unknown) { return Ui; }\nexport const Themed = Ui.wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "receiver of a callee, shadowed by a parameter | typeof itself",
+            "import * as Ui from './ui';\nfunction f(Ui: unknown) { return Ui; }\nexport const Themed = (Ui as typeof Ui).wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "receiver of a callee, imported and declared | plain",
+            "import * as Ui from './ui';\nconst Ui = { Button: 123 };\nexport const Themed = Ui.wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "receiver of a callee, imported and declared | typeof itself",
+            "import * as Ui from './ui';\nconst Ui = { Button: 123 };\nexport const Themed = (Ui as typeof Ui).wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "receiver of a heritage, declared once | plain",
+            "import * as Ui from 'react';\nexport class Card extends Ui.Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "receiver of a heritage, declared once | typeof itself",
+            "import * as Ui from 'react';\nexport class Card extends (Ui as typeof Ui).Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "receiver of a heritage, shadowed by a namespace local | plain",
+            "import * as Ui from 'react';\nnamespace N { const Ui = { Button: 123 }; }\nexport class Card extends Ui.Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "receiver of a heritage, shadowed by a namespace local | typeof itself",
+            "import * as Ui from 'react';\nnamespace N { const Ui = { Button: 123 }; }\nexport class Card extends (Ui as typeof Ui).Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "receiver of a heritage, shadowed by a parameter | plain",
+            "import * as Ui from 'react';\nfunction f(Ui: unknown) { return Ui; }\nexport class Card extends Ui.Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "receiver of a heritage, shadowed by a parameter | typeof itself",
+            "import * as Ui from 'react';\nfunction f(Ui: unknown) { return Ui; }\nexport class Card extends (Ui as typeof Ui).Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "receiver of a heritage, imported and declared | plain",
+            "import * as Ui from 'react';\nconst Ui = { Button: 123 };\nexport class Card extends Ui.Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "receiver of a heritage, imported and declared | typeof itself",
+            "import * as Ui from 'react';\nconst Ui = { Button: 123 };\nexport class Card extends (Ui as typeof Ui).Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "finding: a namespace-local receiver read through a cast",
+            "import * as Ui from './ui';\nnamespace N { const Ui = { Button: 123 }; export const PublicButton = (Ui as typeof Ui).Button; }",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -2114,8 +2215,10 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // an `Object.assign` through a cast at module level
     // (`an_object_assign_through_a_cast_attaches_only_at_module_level_to_a_parent_declared_once`). Round 28 adds one: a
     // member callee's receiver read through a cast when declared once
-    // (`a_receiver_through_a_cast_is_read_only_for_a_callee_and_only_when_declared_once`).
-    assert_eq!(read_as_the_plain_call, 49);
+    // (`a_receiver_through_a_cast_is_read_only_for_a_callee_and_only_when_declared_once`). Round 29 adds three: an
+    // alias, a callee and a heritage whose receiver is declared once
+    // (`every_receiver_read_through_a_cast_is_read_only_when_declared_once`).
+    assert_eq!(read_as_the_plain_call, 52);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2148,6 +2251,33 @@ fn a_receiver_through_a_cast_is_read_only_for_a_callee_and_only_when_declared_on
     }
     // The finding: through the cast, a parameter's `defaultProps` does not reach the exported `Button`.
     assert!(!main("static defaultProps shadowed by a parameter | typeof itself").contains("defaults"));
+}
+
+/// Round 29: every receiver read through a wrapper, for an imported member alias (`X = (Ui as typeof Ui).Button`), a
+/// callee (`(Ui as typeof Ui).wrap<P>(…)`) or a class's heritage (`extends (Ui as typeof Ui).Component`), goes through
+/// `receiver_identifier`: read only when the file declares the receiver once, origin/main's answer otherwise. Written
+/// plainly, each is origin/main's.
+#[test]
+fn every_receiver_read_through_a_cast_is_read_only_when_declared_once() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    let now = |id: &str| factory_parity_output(&cases[id]);
+    for consumer in ["alias", "callee", "heritage"] {
+        for shadow in
+            ["declared once", "shadowed by a namespace local", "shadowed by a parameter", "imported and declared"]
+        {
+            let plain = format!("receiver of a {consumer}, {shadow} | plain");
+            let cast = format!("receiver of a {consumer}, {shadow} | typeof itself");
+            assert_eq!(now(&plain), base[plain.as_str()], "{plain}");
+            // Declared once, the cast reads as the plain form; otherwise as origin/main read the cast.
+            let expected = if shadow == "declared once" { base[plain.as_str()] } else { base[cast.as_str()] };
+            assert_eq!(now(&cast), expected, "{cast}");
+        }
+    }
+    let finding = "finding: a namespace-local receiver read through a cast";
+    assert_eq!(now(finding), base[finding]);
+    assert!(!base[finding].contains("PublicButton:"), "{}", base[finding]);
 }
 
 /// Round 27: export propagation finds an `Object.assign`'s parent by its bare name, so one written through a cast,

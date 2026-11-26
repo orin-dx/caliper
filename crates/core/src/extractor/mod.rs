@@ -1330,12 +1330,31 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// The same name read through every wrapper (`component::beneath`), for a class's heritage.
-    pub(super) fn peeled_ident_name<'a>(&self, expr: &Expression<'a>) -> String {
-        match component::beneath(expr) {
-            Expression::Identifier(id) => id.name.as_str().to_owned(),
+    /// The identifier a member expression's receiver is, the one read every peeled receiver goes through: written
+    /// plainly (`Ui.Button`), as origin/main read it; written through a wrapper (`(Ui as typeof Ui).Button`), only when
+    /// the file declares it exactly once (`unique_cast_names`), as a second declaration may be the one meant. `None`
+    /// otherwise, which is origin/main's answer: no receiver.
+    pub(super) fn receiver_identifier<'a>(&self, object: &Expression<'a>) -> Option<&'a str> {
+        match object {
+            Expression::Identifier(id) => Some(id.name.as_str()),
+            _ => match component::beneath(object) {
+                Expression::Identifier(id) if self.unique_cast_names.contains(id.name.as_str()) => {
+                    Some(id.name.as_str())
+                }
+                _ => None,
+            },
+        }
+    }
+
+    /// The dotted name of a callee or a class's heritage, each receiver read by [`Self::receiver_identifier`]: `ui.wrap`,
+    /// or `unknown.wrap` as origin/main named a receiver it could not read.
+    pub(super) fn receiver_name<'a>(&self, expr: &Expression<'a>) -> String {
+        if let Some(id) = self.receiver_identifier(expr) {
+            return id.to_owned();
+        }
+        match expr {
             Expression::StaticMemberExpression(me) => {
-                format!("{}.{}", self.peeled_ident_name(&me.object), me.property.name.as_str())
+                format!("{}.{}", self.receiver_name(&me.object), me.property.name.as_str())
             }
             _ => "unknown".to_owned(),
         }
