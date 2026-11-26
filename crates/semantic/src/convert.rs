@@ -2056,19 +2056,26 @@ impl Converter {
                     );
                 }
                 let answers = if asked.is_empty() { Vec::new() } else { self.rpc.readonly_symbols(&asked).await? };
-                // There is one answer for each property the answer did not settle. A missing one is never read as
-                // `false`: that would be silence as evidence.
-                let mut answers = answers.into_iter();
-                let mut flags = Vec::with_capacity(settled.len());
-                for settled in settled {
-                    flags.push(settled.or_else(|| answers.next()).ok_or_else(wrong_length)?);
-                }
-                Ok(Arc::from(flags))
+                Self::merge_flags(&settled, unresolved, answers).ok_or_else(wrong_length)
             })
             .await?;
         // `listed` names the same symbol list every time, so the cached flags are one per property.
         debug_assert_eq!(readonly.len(), properties.len(), "the cached readonly flags are of another list");
         Ok(readonly)
+    }
+
+    /// The flags of a list in property order: each settled one, and the next of the checker's `answers` for each that
+    /// is not. `unresolved` is how many are not; fewer answers than that is `None`, since a missing answer is never
+    /// read as `false` (silence as evidence). The flags are collected straight into the shared slice from an
+    /// exact-size iterator, so a fully settled list costs that one allocation and no copy out of a vector.
+    fn merge_flags(settled: &[Option<bool>], unresolved: usize, answers: Vec<bool>) -> Option<Arc<[bool]>> {
+        if answers.len() < unresolved {
+            return None;
+        }
+        debug_assert_eq!(settled.iter().filter(|settled| settled.is_none()).count(), unresolved);
+        let mut answers = answers.into_iter();
+        // The `false` is never reached: there is an answer for each unsettled property, as checked above.
+        Some(settled.iter().map(|settled| settled.or_else(|| answers.next()).unwrap_or(false)).collect())
     }
 
     /// The parameter markers of the signatures of an object type, as the checker prints the type (see
@@ -2642,6 +2649,63 @@ mod tests {
         assert_eq!(flags, [("a", false), ("g", true), ("b", true), ("m", false), ("c", false)]);
         assert_eq!(calls.get("readonly merge data"), Some(&1), "{calls:?}");
         assert_eq!(calls.get("readonly references built"), Some(&1), "{calls:?}");
+    }
+
+    /// Counts the allocations of the thread that armed it, so a test can say how many a step makes.
+    struct Counting;
+
+    thread_local! {
+        static ALLOCATIONS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    }
+
+    fn count_allocation() {
+        // Fails only while the thread's storage is torn down, when nothing is being counted.
+        ALLOCATIONS.try_with(|count| count.set(count.get().map(|count| count + 1))).unwrap_or_default();
+    }
+
+    // SAFETY: every call is the system allocator's; only a thread-local counter is added.
+    #[allow(unsafe_code)]
+    unsafe impl std::alloc::GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            count_allocation();
+            unsafe { std::alloc::System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+            unsafe { std::alloc::System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, size: usize) -> *mut u8 {
+            count_allocation();
+            unsafe { std::alloc::System.realloc(ptr, layout, size) }
+        }
+    }
+
+    #[global_allocator]
+    static COUNTING: Counting = Counting;
+
+    /// What `f` returns and how many allocations it made on this thread.
+    fn allocations<T>(f: impl FnOnce() -> T) -> (T, u64) {
+        ALLOCATIONS.with(|count| count.set(Some(0)));
+        let out = f();
+        (out, ALLOCATIONS.with(|count| count.take()).unwrap_or_default())
+    }
+
+    /// A list the answer settles entirely holds its flags in one allocation, the shared slice, not a vector copied into
+    /// one; a list settled in part also takes the checker's answers in order, in one; and a short answer is an error,
+    /// never `false`.
+    #[test]
+    fn the_flags_of_a_list_are_collected_into_the_shared_slice_in_one_allocation() {
+        let settled = [Some(true), Some(false), Some(true), Some(false)];
+        let (flags, made) = allocations(|| Converter::merge_flags(&settled, 0, Vec::new()));
+        assert_eq!((flags.as_deref(), made), (Some([true, false, true, false].as_slice()), 1));
+
+        let mixed = [None, Some(true), None, Some(false), None];
+        let answers = vec![true, false, true];
+        let (flags, made) = allocations(|| Converter::merge_flags(&mixed, 3, answers));
+        assert_eq!((flags.as_deref(), made), (Some([true, true, false, false, true].as_slice()), 1));
+
+        assert_eq!(Converter::merge_flags(&mixed, 3, vec![true, false]), None);
     }
 
     /// A mapped type's properties have no declaration of their own: their check flags say whether they are `readonly`,
