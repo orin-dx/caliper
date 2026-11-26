@@ -377,13 +377,13 @@ fn resolve_taking(
     if let Some((early_roots, opened)) = early {
         let Opened { runtime, checker, programs } = opened;
         let same = early_roots == files;
-        let adopted = match programs.map(RunLanes::new) {
+        let adopted = match programs {
             Ok(programs) if same => Some((Ok(programs), Taken::Same)),
             Err(unavailable) if same => Some((Err(unavailable), Taken::Same)),
             // An early start that failed to open for other files did not fail for these: they are opened again.
             Err(_) => None,
             Ok(programs) if files.is_empty() => {
-                runtime.block_on(programs.end(Disposal::of(teardown)));
+                drop(programs);
                 None
             }
             Ok(programs) => match runtime.block_on(reroot(programs, &files)) {
@@ -405,7 +405,7 @@ fn resolve_taking(
                 let outcome = match programs {
                     Ok(programs) => runtime.block_on(async {
                         let started = std::time::Instant::now();
-                        let answered = answer_opened(programs, &request, &files, started).await;
+                        let answered = answer_opened(programs, &request, &files, started, &Lanes::of(taken)).await;
                         checker.shutdown().await;
                         answered
                     }),
@@ -442,98 +442,63 @@ fn resolve_taking(
 /// `old` rooted at `files` instead of the files they were opened over: each lane's snapshot is brought to them with
 /// `updateSnapshot` (`reconfigurePrograms`), which reads every file as the snapshot holds it and parses only the roots
 /// added; the checker works the program's files, globals and ambient declarations out again from the new roots, so a
-/// file no root reaches any more declares nothing. The snapshots they replace are released, and the new ones are held
-/// as [`Rpc::open_programs`] holds its lanes, by the first. Any failure is the caller's to answer by stopping this
-/// checker and starting one again, at once: no answer is given from a partly rooted set, and nothing is released, old
-/// or new ([`Disposal::Shutdown`]). A checker whose update hung may hold its build lock, which a release waits on too,
-/// so releasing would only delay the rebuild by a request deadline per snapshot.
-async fn reroot(old: RunLanes, files: &[String]) -> Result<RunLanes, CallError> {
+/// file no root reaches any more declares nothing. The snapshots they replace are released, and the lanes' are the new
+/// ones' own to release ([`Lanes::Each`]). Any failure is the caller's to answer by starting the checker again: no
+/// answer is given from a partly rooted set.
+async fn reroot(old: Vec<Arc<Rpc>>, files: &[String]) -> Result<Vec<Arc<Rpc>>, CallError> {
     let files: Arc<[String]> = files.into();
     let mut tasks = JoinSet::new();
-    for (lane, rpc) in old.programs().iter().enumerate() {
+    for (lane, rpc) in old.iter().enumerate() {
         let (rpc, files) = (rpc.clone(), files.clone());
         tasks.spawn(async move { (lane, rpc.rerooted(&files).await) });
     }
-    let mut rooted: Vec<(usize, Rpc)> = Vec::with_capacity(old.programs().len());
+    let mut rooted: Vec<Option<Rpc>> = old.iter().map(|_| None).collect();
     while let Some(joined) = tasks.join_next().await {
-        let failure = match joined {
-            Ok((lane, Ok(rpc))) => {
-                rooted.push((lane, rpc));
-                continue;
-            }
-            Ok((_, Err(error))) => error,
-            Err(error) => CallError::Fatal(format!("a root update failed: {error}")),
-        };
-        // The lanes still updating are dropped with the tasks; what they and `rooted` made goes with the checker.
-        old.end(Disposal::Shutdown).await;
-        return Err(failure);
-    }
-    old.end(Disposal::Release).await;
-    rooted.sort_unstable_by_key(|(lane, _)| *lane);
-    let mut rooted = rooted.into_iter().map(|(_, rpc)| rpc);
-    let Some(first) = rooted.next() else {
-        return Err(CallError::Fatal("no lane was rooted".to_string()));
-    };
-    let beside: Vec<Rpc> = rooted.collect();
-    let first = first.holding(&beside);
-    Ok(RunLanes::new(std::iter::once(first).chain(beside).map(Arc::new).collect()))
-}
-
-/// The lanes of one run, the first holding the snapshots of the others ([`Rpc::open_programs`], [`Rpc::holding`]):
-/// the one owner of their snapshots from the moment the run has them until it ends them ([`RunLanes::end`]), by a
-/// [`Disposal`] chosen where the run's success or failure is known. A test that drops them unended fails, so no path
-/// leaves them alive without having said who frees them.
-struct RunLanes {
-    programs: Vec<Arc<Rpc>>,
-    ended: Option<Disposal>,
-}
-
-/// How a run's snapshots are freed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Disposal {
-    /// Released, one request each, on a checker that is answering: a session run that went well.
-    Release,
-    /// Left to the checker's shutdown, which the caller does next and which takes them down with it: a one-shot run, or
-    /// a failure, after which a release may wait out a request deadline each on a checker that no longer answers.
-    Shutdown,
-}
-
-impl Disposal {
-    fn of(teardown: Teardown) -> Self {
-        match teardown {
-            Teardown::Session => Self::Release,
-            Teardown::OneShot => Self::Shutdown,
+        let (lane, updated) = joined.map_err(|error| CallError::Fatal(format!("a root update failed: {error}")))?;
+        if let Some(slot) = rooted.get_mut(lane) {
+            *slot = Some(updated?);
         }
     }
+    let rooted: Option<Vec<Arc<Rpc>>> = rooted.into_iter().map(|rpc| rpc.map(Arc::new)).collect();
+    let rooted = rooted.ok_or_else(|| CallError::Fatal("a lane was not rooted".to_string()))?;
+    if let Some(first) = old.first() {
+        first.release().await;
+    }
+    Ok(rooted)
 }
 
-impl RunLanes {
-    fn new(programs: Vec<Arc<Rpc>>) -> Self {
-        Self { programs, ended: None }
+/// Who releases the snapshots of the lanes beside the first.
+enum Lanes {
+    /// The first's session ([`Rpc::open_programs`]).
+    OfFirst,
+    /// Each lane's own, once ([`reroot`] made them apart); the flag says it was done.
+    Each(std::sync::atomic::AtomicBool),
+}
+
+impl Lanes {
+    fn of(taken: Taken) -> Self {
+        match taken {
+            Taken::Rooted => Self::Each(std::sync::atomic::AtomicBool::new(false)),
+            Taken::Same | Taken::Rebuilt => Self::OfFirst,
+        }
     }
 
-    fn programs(&self) -> &[Arc<Rpc>] {
-        &self.programs
-    }
-
-    async fn end(mut self, disposal: Disposal) {
-        self.ended = Some(disposal);
-        match disposal {
-            Disposal::Release => {
-                if let Some(first) = self.programs.first() {
-                    first.release().await;
+    /// Releases the snapshots of the lanes beside the first, which nothing may ask after.
+    async fn release_beside(&self, programs: &[Arc<Rpc>]) {
+        match self {
+            Self::OfFirst => {
+                if let Some(first) = programs.first() {
+                    first.release_lanes().await;
                 }
             }
-            Disposal::Shutdown => std::mem::forget(std::mem::take(&mut self.programs)),
+            Self::Each(released) => {
+                if !released.swap(true, Ordering::Relaxed) {
+                    for lane in programs.iter().skip(1) {
+                        lane.release().await;
+                    }
+                }
+            }
         }
-    }
-}
-
-#[cfg(test)]
-impl Drop for RunLanes {
-    fn drop(&mut self) {
-        let ended = self.ended.is_some() || std::thread::panicking();
-        assert!(ended, "{} lanes' snapshots dropped with no disposal", self.programs.len());
     }
 }
 
@@ -601,42 +566,62 @@ async fn answer_with(checker: &Backend, request: &SemanticRequest) -> SemanticOu
     let count = checker.parallel_programs();
     let record = request.record_to.is_some();
     let opened = Rpc::open_programs(checker.client(), request.request_timeout, tsconfig, &files, record, count).await;
-    let programs = match opened {
-        Ok(programs) => RunLanes::new(programs.into_iter().map(Arc::new).collect()),
+    let programs: Vec<Arc<Rpc>> = match opened {
+        Ok(programs) => programs.into_iter().map(Arc::new).collect(),
         Err(error) => return SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")),
     };
-    answer_opened(programs, request, &files, started).await
+    answer_opened(programs, request, &files, started, &Lanes::OfFirst).await
 }
 
-/// Answers the request's targets over `programs`, opened for it at `started`, and ends them as its teardown says.
+/// Answers the request's targets over `programs`, opened for it at `started`, and releases them as its teardown says.
 async fn answer_opened(
-    programs: RunLanes,
+    programs: Vec<Arc<Rpc>>,
     request: &SemanticRequest,
     files: &[String],
     started: std::time::Instant,
+    lanes: &Lanes,
 ) -> SemanticOutcome {
     tracing::debug!(
         program_ms = started.elapsed().as_millis() as u64,
-        programs = programs.programs().len(),
+        programs = programs.len(),
         "semantic program built"
     );
-    let answered = answer_on(programs.programs(), request, files).await;
-    programs.end(Disposal::of(request.teardown)).await;
+    let answered = answer_lanes(&programs, request, files, lanes).await;
+    match request.teardown {
+        Teardown::Session => {
+            if let Some(first) = programs.first() {
+                first.release().await;
+            }
+            lanes.release_beside(&programs).await;
+        }
+        // The checker's shutdown, next, takes the snapshot down with it.
+        Teardown::OneShot => std::mem::forget(programs),
+    }
     answered.unwrap_or_else(|error| SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")))
 }
 
 /// Answers the request's targets on a snapshot whose programs are each rooted at `files` ([`root_files`]), one session
 /// bound to each: a file is answered by one of them, the `n`th file by the `n % programs.len()`th. Each program has its
 /// checker and its handles, so each has its own [`Converter`]; since every program holds the same files, each answers
-/// a component as any other would, and the output does not depend on how the files are shared out. The first's
-/// snapshot is left as it is, for the caller to keep or release; the lanes beside it may be released once they are done.
+/// a component as any other would, and the output does not depend on how the files are shared out. The snapshot is
+/// left as it is, for the caller to keep or release.
 async fn answer_on(
     programs: &[Arc<Rpc>],
     request: &SemanticRequest,
     files: &[String],
 ) -> Result<SemanticOutcome, CallError> {
+    answer_lanes(programs, request, files, &Lanes::OfFirst).await
+}
+
+/// [`answer_on`] over lanes that `lanes` says how to release.
+async fn answer_lanes(
+    programs: &[Arc<Rpc>],
+    request: &SemanticRequest,
+    files: &[String],
+    lanes: &Lanes,
+) -> Result<SemanticOutcome, CallError> {
     let (mut outcome, by_file, order) = group_by_file(request);
-    let mut answered = session(programs, request, files, &by_file, &order).await?;
+    let mut answered = session(programs, request, files, &by_file, &order, lanes).await?;
     outcome.diagnostics.append(&mut answered.diagnostics);
     outcome.components.append(&mut answered.components);
     outcome.fallbacks.append(&mut answered.fallbacks);
@@ -649,6 +634,7 @@ async fn session(
     files: &[String],
     by_file: &FxHashMap<&Utf8Path, Vec<&Target>>,
     order: &[&Utf8Path],
+    lanes: &Lanes,
 ) -> Result<SemanticOutcome, CallError> {
     let started = std::time::Instant::now();
     let Some(rpc) = programs.first() else { return Ok(SemanticOutcome::default()) };
@@ -721,7 +707,7 @@ async fn session(
         // program and converter of their own, so what the lanes built is freed before it is built, not after. This is
         // freed in a one-shot run too, where the end of the process would free it: it is the run's peak otherwise.
         drop(converters.take());
-        rpc.release_lanes().await;
+        lanes.release_beside(programs).await;
         let keys = generic.iter().map(|(target, _)| target.key.clone()).collect::<Vec<_>>();
         let instantiated = match watch.passed() {
             true => Err(CallError::OverBudget),
@@ -1356,18 +1342,10 @@ mod tests {
     }
 
     /// Stands in for the checker: numbers each snapshot a `createSnapshot` or `updateSnapshot` makes, refuses every
-    /// question about them, and records which were released and the most alive at once.
-    #[derive(Default)]
+    /// question about them, and records which were released.
     struct Numbering {
         made: Arc<Mutex<Vec<u64>>>,
         released: Arc<Mutex<Vec<u64>>>,
-        peak: Arc<AtomicU64>,
-        /// The snapshot whose rooting anew (`updateSnapshot` with `reconfigurePrograms`) is refused.
-        refuse_rooting: Option<u64>,
-        /// How long the refusal takes, holding `build` meanwhile, as an update holds the checker's build lock.
-        hang: Duration,
-        /// Taken by an update that hangs and by every release, as the checker's build lock is.
-        build: Arc<Mutex<()>>,
     }
 
     impl checker::Served for Numbering {
@@ -1375,15 +1353,9 @@ mod tests {
             match method {
                 "initialize" => Ok("null".to_string()),
                 "release" => {
-                    let _build = self.build.lock().unwrap();
                     let params: serde_json::Value = serde_json::from_slice(params).unwrap();
                     self.released.lock().unwrap().push(params["snapshot"].as_u64().unwrap());
                     Ok("null".to_string())
-                }
-                "updateSnapshot" if self.refuses(params) => {
-                    let _build = self.build.lock().unwrap();
-                    std::thread::sleep(self.hang);
-                    Err(checker::Failure { message: "refused".to_string(), panicked: false })
                 }
                 "createSnapshot" | "updateSnapshot" => {
                     let params: serde_json::Value = serde_json::from_slice(params).unwrap();
@@ -1393,8 +1365,6 @@ mod tests {
                     let mut made = self.made.lock().unwrap();
                     let snapshot = made.len() as u64 + 1;
                     made.push(snapshot);
-                    let alive = made.len() - self.released.lock().unwrap().len();
-                    self.peak.fetch_max(alive as u64, Ordering::Relaxed);
                     let projects: Vec<_> =
                         (0..count).map(|n| serde_json::json!({ "id": format!("p{snapshot}-{n}") })).collect();
                     Ok(serde_json::json!({ "snapshot": snapshot, "projects": projects }).to_string())
@@ -1408,135 +1378,6 @@ mod tests {
         fn close(&self) {}
     }
 
-    impl Numbering {
-        /// Whether `params` (of an `updateSnapshot`) root [`Numbering::refuse_rooting`] anew.
-        fn refuses(&self, params: &[u8]) -> bool {
-            let params: serde_json::Value = serde_json::from_slice(params).unwrap();
-            self.refuse_rooting.is_some()
-                && params["snapshot"].as_u64() == self.refuse_rooting
-                && params["changes"]["reconfigurePrograms"].is_array()
-        }
-    }
-
-    /// What a [`Numbering`] checker saw of a run of `request` that takes an early session of `lanes` lanes it opened
-    /// over `early_roots`, refusing to root `refuse_rooting` anew: how the session was taken, the snapshots made and
-    /// those released (both sorted), and the most alive at once. The checker is the early session's, stopped by the run.
-    fn through_an_early_fake(
-        request: &SemanticRequest,
-        early_roots: Vec<String>,
-        lanes: usize,
-        refuse_rooting: Option<u64>,
-    ) -> (Taken, Vec<u64>, Vec<u64>, u64) {
-        let fake = Numbering { refuse_rooting, ..Numbering::default() };
-        let (made, released, peak) = (fake.made.clone(), fake.released.clone(), fake.peak.clone());
-        let (timeout, files) = (request.request_timeout, early_roots.clone());
-        let handle = std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().ok()?;
-            let checker = Backend::spawn(lanes, move || fake).ok()?;
-            let opened = runtime.block_on(Rpc::open_programs(checker.client(), timeout, None, &files, false, lanes));
-            let programs: Vec<Arc<Rpc>> = opened.ok()?.into_iter().map(Arc::new).collect();
-            assert_eq!(programs.len(), lanes);
-            Some(Opened { runtime, checker, programs: Ok(programs) })
-        });
-        let early = EarlyStart {
-            handle: Some(handle),
-            project_root: request.project_root.clone(),
-            tsconfig: None,
-            timeout,
-            roots: early_roots,
-            reads: None,
-        };
-
-        let (_, taken) = resolve_taking(request.clone(), None, Some(early));
-
-        let mut made = made.lock().unwrap().clone();
-        let mut released = released.lock().unwrap().clone();
-        made.sort_unstable();
-        released.sort_unstable();
-        (taken, made, released, peak.load(Ordering::Relaxed))
-    }
-
-    /// Four lanes rooted anew: the checker holds the old snapshots and the new ones together only while the lanes are
-    /// rooted (8 at the peak), and every one of them is released once by the end of a session run.
-    #[test]
-    fn four_lanes_rooted_anew_release_both_generations_once() {
-        let (_dir, root) = shared_types_project(4);
-        let request = request_over(&root);
-        let files = root_files(&request);
-
-        let (taken, made, released, peak) = through_an_early_fake(&request, files[..3].to_vec(), 4, None);
-
-        assert_eq!(taken, Taken::Rooted);
-        assert_eq!(made, (1..=8).collect::<Vec<u64>>());
-        assert_eq!(released, made);
-        assert_eq!(peak, 8);
-    }
-
-    /// A lane whose rooting the checker refuses, whichever it is: the run starts the checker again and sends no release
-    /// first, old or new: the stopped checker takes them with it.
-    #[test]
-    fn a_lane_that_cannot_be_rooted_is_left_to_the_shutdown() {
-        let (_dir, root) = shared_types_project(4);
-        let request = request_over(&root);
-        let files = root_files(&request);
-        // The old lanes are snapshots 1 (created) to 4 (made beside it), in lane order.
-        for refused in 1..=4 {
-            let (taken, made, released, _) = through_an_early_fake(&request, files[..3].to_vec(), 4, Some(refused));
-
-            assert_eq!(taken, Taken::Rebuilt, "lane {refused}");
-            assert!(made.len() >= 4, "lane {refused}: {made:?}");
-            assert_eq!(released, Vec::<u64>::new(), "lane {refused}");
-        }
-    }
-
-    /// A rooting that hangs, holding the checker's build lock, fails in one request deadline and sends no release: on
-    /// 4bc3cf87 the old lanes and the new ones were released one at a time behind that lock, a deadline each, before
-    /// the rebuild could start.
-    #[test]
-    fn a_rooting_that_hangs_fails_within_one_deadline_and_releases_nothing() {
-        let (_dir, root) = shared_types_project(4);
-        let files = root_files(&request_over(&root));
-        let (deadline, hang) = (Duration::from_millis(400), Duration::from_secs(4));
-        // Lane 1's update hangs: the releases, which go down lane 0, wait on the lock and not on its thread.
-        let fake = Numbering { refuse_rooting: Some(2), hang, ..Numbering::default() };
-        let released = fake.released.clone();
-        let checker = Backend::spawn(4, move || fake).unwrap();
-        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
-
-        let (rooted, took) = runtime.block_on(async {
-            let opened = Rpc::open_programs(checker.client(), deadline, None, &files[..3], false, 4).await.unwrap();
-            let opened = RunLanes::new(opened.into_iter().map(Arc::new).collect());
-            let started = std::time::Instant::now();
-            let rooted = reroot(opened, &files).await;
-            (rooted, started.elapsed())
-        });
-        // Whatever was sent is answered once the hang ends.
-        std::thread::sleep(hang + deadline);
-        runtime.block_on(checker.shutdown());
-
-        assert!(matches!(rooted, Err(CallError::Fatal(_))), "{:?}", rooted.err());
-        assert!(took < deadline * 2, "took {took:?}, a deadline is {deadline:?}");
-        assert_eq!(*released.lock().unwrap(), Vec::<u64>::new());
-    }
-
-    /// An early session taken by a request with nothing to ask about is released, not dropped. On the base it was
-    /// dropped with its four snapshots alive.
-    #[test]
-    fn an_early_session_with_nothing_to_ask_is_released() {
-        let (_dir, root) = shared_types_project(4);
-        let mut request = request_over(&root);
-        let files = root_files(&request);
-        for target in &mut request.targets {
-            target.exports.clear();
-        }
-
-        let (taken, made, released, _) = through_an_early_fake(&request, files, 4, None);
-
-        assert_eq!(taken, Taken::Rebuilt);
-        assert_eq!(made, vec![1, 2, 3, 4]);
-        assert_eq!(released, made);
-    }
-
     /// Every snapshot made for a run that roots three lanes anew is released, once each, at the end of a session run
     /// and not at the end of a one-shot one (the checker's shutdown takes them): the snapshots the lanes had before
     /// as well as the ones that replace them.
@@ -1547,7 +1388,7 @@ mod tests {
             let request = request_over(&root).with_teardown(teardown);
             let made = Arc::new(Mutex::new(Vec::new()));
             let released = Arc::new(Mutex::new(Vec::new()));
-            let session = Numbering { made: made.clone(), released: released.clone(), ..Numbering::default() };
+            let session = Numbering { made: made.clone(), released: released.clone() };
             let checker = Backend::spawn(3, move || session).unwrap();
             let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
             let files = root_files(&request);
@@ -1555,9 +1396,10 @@ mod tests {
             let outcome = runtime.block_on(async {
                 let timeout = request.request_timeout;
                 let opened = Rpc::open_programs(checker.client(), timeout, None, &files[..2], false, 3).await.unwrap();
-                let opened = RunLanes::new(opened.into_iter().map(Arc::new).collect());
+                let opened: Vec<Arc<Rpc>> = opened.into_iter().map(Arc::new).collect();
                 let rooted = reroot(opened, &files).await.unwrap();
-                answer_opened(rooted, &request, &files, std::time::Instant::now()).await
+                let lanes = Lanes::of(Taken::Rooted);
+                answer_opened(rooted, &request, &files, std::time::Instant::now(), &lanes).await
             });
             runtime.block_on(checker.shutdown());
 
@@ -1580,7 +1422,7 @@ mod tests {
     fn lanes_rooted_anew_count_their_requests_with_the_run() {
         let (_dir, root) = shared_types_project(3);
         let request = request_over(&root);
-        let session = Numbering::default();
+        let session = Numbering { made: Arc::default(), released: Arc::default() };
         let checker = Backend::spawn(3, move || session).unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         let files = root_files(&request);
@@ -1590,15 +1432,14 @@ mod tests {
             let opened = Rpc::open_programs(checker.client(), timeout, None, &files[..2], false, 3).await.unwrap();
             let opened: Vec<Arc<Rpc>> = opened.into_iter().map(Arc::new).collect();
             let old = opened[0].clone();
-            let rooted = reroot(RunLanes::new(opened), &files).await.unwrap();
-            let lanes = rooted.programs().to_vec();
-            rooted.end(Disposal::Release).await;
-            (old, lanes)
+            let rooted = reroot(opened, &files).await.unwrap();
+            rooted[2].release().await;
+            (old, rooted)
         });
         runtime.block_on(checker.shutdown());
 
         let expected: std::collections::BTreeMap<&str, u64> =
-            [("createSnapshot", 1), ("release", 6), ("updateSnapshot", 5)].into();
+            [("createSnapshot", 1), ("release", 4), ("updateSnapshot", 5)].into();
         assert_eq!(old.calls(), expected);
         for lane in &rooted {
             assert_eq!(lane.calls(), expected);

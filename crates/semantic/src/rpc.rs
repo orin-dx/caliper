@@ -574,8 +574,8 @@ pub(crate) struct Rpc {
     /// lanes beside it, a layered snapshot, a lane rooted anew ([`Rpc::rerooted`]) and the session a checker thread asks
     /// it through. A snapshot brought up to date for the next answer ([`Rpc::updated`]) or built afresh counts its own.
     calls: Arc<Mutex<BTreeMap<&'static str, u64>>>,
-    /// The snapshots of the other lanes of its run ([`Rpc::open_programs`], [`Rpc::holding`]), which [`Rpc::release`]
-    /// on this one releases too, unless [`Rpc::release_lanes`] released them already.
+    /// The snapshots of the other lanes [`Rpc::open_programs`] opened beside this one, which [`Rpc::release`] on this
+    /// one releases too, unless [`Rpc::release_lanes`] released them already.
     others: Mutex<Vec<u64>>,
 }
 
@@ -672,7 +672,8 @@ impl Rpc {
                 }
             }
         }
-        lanes.insert(0, first.holding(&lanes));
+        let others = lanes.iter().map(|rpc| rpc.snapshot).collect();
+        lanes.insert(0, Rpc { others: Mutex::new(others), ..first });
         Ok(lanes)
     }
 
@@ -902,14 +903,7 @@ impl Rpc {
         Ok(self)
     }
 
-    /// This session, which holds no lanes yet, holding the snapshots of `lanes`, the other lanes of its run:
-    /// [`Rpc::release`] and [`Rpc::release_lanes`] on it release them, and nothing else may.
-    pub(crate) fn holding(self, lanes: &[Rpc]) -> Rpc {
-        debug_assert!(self.take_lanes().is_empty(), "a session holding lanes already");
-        Rpc { others: Mutex::new(lanes.iter().map(|rpc| rpc.snapshot).collect()), ..self }
-    }
-
-    /// Releases the snapshot, and those of the lanes it holds ([`Rpc::holding`]).
+    /// Releases the snapshot, and those of the lanes opened beside it ([`Rpc::open_programs`]).
     pub(crate) async fn release(&self) {
         let lanes = self.take_lanes();
         for snapshot in std::iter::once(self.snapshot).chain(lanes) {
@@ -917,9 +911,9 @@ impl Rpc {
         }
     }
 
-    /// Releases the snapshots of the lanes this one holds ([`Rpc::holding`]) and keeps this one's: what they hold (each
-    /// lane's program and its checker's caches) is freed before the work that follows the lanes. Each is released once,
-    /// here or by [`Rpc::release`], never by both. Nothing may ask a lane after.
+    /// Releases the snapshots of the lanes opened beside this one ([`Rpc::open_programs`]) and keeps this one's: what
+    /// they hold (each lane's program and its checker's caches) is freed before the work that follows the lanes. Each is
+    /// released once, here or by [`Rpc::release`], never by both. Nothing may ask a lane after.
     pub(crate) async fn release_lanes(&self) {
         for snapshot in self.take_lanes() {
             self.call(&Release { snapshot }).await.ok();
