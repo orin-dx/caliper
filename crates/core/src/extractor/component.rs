@@ -546,80 +546,75 @@ pub(crate) struct TypeofAlias {
     pub(super) chain: CompactString,
 }
 
-/// How many times the file declares each of some names in type space, anywhere and in any scope: an alias, interface,
-/// enum, class, namespace, import, `import =`, type parameter (an `infer` included) or mapped key. One flat pass that
-/// counts; it knows no scopes.
-struct TypeNameCounts<'n> {
-    counts: FxHashMap<&'n str, usize>,
+/// What one flat pass over the file finds: how many times each name is declared, by any binding of any kind in any
+/// scope (a variable, function, parameter, class, import, alias, interface, enum, namespace, type parameter, mapped
+/// key, …: type and value names in one map), and the root names of the callees written through a cast main read no
+/// callee through (`wrapped_beyond_main`). It knows no scopes.
+pub(super) struct FileNames<'p> {
+    counts: FxHashMap<&'p str, usize>,
+    peeled_callees: Vec<&'p str>,
 }
 
-impl TypeNameCounts<'_> {
-    fn declare(&mut self, name: &str) {
-        let count = self.counts.get_mut(name);
+impl FileNames<'_> {
+    /// Whether the file declares `name` exactly once: the one declaration a use of it can mean.
+    fn declared_once(&self, name: &str) -> bool {
+        self.counts.get(name) == Some(&1)
+    }
+
+    /// The roots of the peeled callees the file declares exactly once (`SourceDataCollector::wrapper_callee`).
+    pub(super) fn unique_peeled_callees(&self) -> rustc_hash::FxHashSet<CompactString> {
+        self.peeled_callees
+            .iter()
+            .filter(|name| self.declared_once(name))
+            .map(|name| CompactString::from(*name))
+            .collect()
+    }
+}
+
+/// The one counting pass over `program` ([`FileNames`]).
+pub(super) fn file_names<'p>(program: &Program<'p>) -> FileNames<'p> {
+    #[cfg(test)]
+    steps::count_walk();
+    let mut names = FileNames { counts: FxHashMap::default(), peeled_callees: Vec::new() };
+    oxc_ast_visit::Visit::visit_program(&mut names, program);
+    names
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
+    fn visit_binding_identifier(&mut self, it: &BindingIdentifier<'a>) {
         #[cfg(test)]
-        steps::count_examined(if count.is_some() { 2 } else { 1 });
-        if let Some(count) = count {
-            *count += 1;
+        steps::count_examined(1);
+        *self.counts.entry(it.name.as_str()).or_default() += 1;
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        if let Some(root) = peeled_callee_root(it) {
+            self.peeled_callees.push(root);
         }
+        oxc_ast_visit::walk::walk_call_expression(self, it);
     }
 }
 
-impl<'a> oxc_ast_visit::Visit<'a> for TypeNameCounts<'_> {
-    fn visit_import_declaration(&mut self, it: &ImportDeclaration<'a>) {
-        // Every import binds its name in type space too (a value import may be a class or a namespace).
-        for specifier in it.specifiers.iter().flatten() {
-            self.declare(&specifier.local().name);
-        }
+/// The identifier a callee written through a cast main read no callee through is rooted at: `wrap` for `(wrap as
+/// typeof wrap)<P>(…)`, `ui` for `(ui as T).withContext<P>(…)`. `None` for any other callee.
+pub(super) fn peeled_callee_root<'a>(call: &CallExpression<'a>) -> Option<&'a str> {
+    if !wrapped_beyond_main(&call.callee) {
+        return None;
     }
-
-    fn visit_ts_type_alias_declaration(&mut self, it: &TSTypeAliasDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_type_alias_declaration(self, it);
+    let mut expr = called(call).expr;
+    while let Expression::StaticMemberExpression(member) = expr {
+        expr = peel_expr(&member.object);
     }
-
-    fn visit_ts_interface_declaration(&mut self, it: &TSInterfaceDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_interface_declaration(self, it);
-    }
-
-    fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_enum_declaration(self, it);
-    }
-
-    fn visit_class(&mut self, it: &Class<'a>) {
-        if let Some(id) = &it.id {
-            self.declare(&id.name);
-        }
-        oxc_ast_visit::walk::walk_class(self, it);
-    }
-
-    fn visit_ts_namespace_declaration(&mut self, it: &TSNamespaceDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_namespace_declaration(self, it);
-    }
-
-    fn visit_ts_import_equals_declaration(&mut self, it: &TSImportEqualsDeclaration<'a>) {
-        self.declare(&it.id.name);
-        oxc_ast_visit::walk::walk_ts_import_equals_declaration(self, it);
-    }
-
-    fn visit_ts_type_parameter(&mut self, it: &TSTypeParameter<'a>) {
-        self.declare(&it.name.name);
-        oxc_ast_visit::walk::walk_ts_type_parameter(self, it);
-    }
-
-    fn visit_ts_mapped_type(&mut self, it: &TSMappedType<'a>) {
-        self.declare(&it.key.name);
-        oxc_ast_visit::walk::walk_ts_mapped_type(self, it);
+    match expr {
+        Expression::Identifier(root) => Some(root.name.as_str()),
+        _ => None,
     }
 }
 
 /// The module-level aliases of a value's type, `type Factory = typeof createButton`, by alias name. An alias is kept
-/// only when the file declares its name once in type space, anywhere and in any scope ([`TypeNameCounts`]): a second
-/// declaration of the name, even one TypeScript would scope apart, makes every use of it `Unknown`, never a wrong
-/// identity. The module is walked once, and only when it has such an alias.
-pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, TypeofAlias> {
+/// only when the file declares its name once, anywhere and in any scope ([`FileNames`]): a second declaration of the
+/// name, even one TypeScript would scope apart, makes every use of it `Unknown`, never a wrong identity.
+pub(super) fn typeof_aliases(program: &Program<'_>, names: &FileNames<'_>) -> FxHashMap<CompactString, TypeofAlias> {
     /// `A.B.C` as one dotted string, written into one buffer left to right, so a long chain costs its length.
     fn chain(name: &TSTypeName<'_>, last: Option<&str>) -> Option<String> {
         let mut segments: Vec<&str> = last.into_iter().collect();
@@ -690,13 +685,9 @@ pub(super) fn typeof_aliases(program: &Program<'_>) -> FxHashMap<CompactString, 
     if candidates.is_empty() {
         return FxHashMap::default();
     }
-    #[cfg(test)]
-    steps::count_walk();
-    let mut names = TypeNameCounts { counts: candidates.iter().map(|(name, _)| (*name, 0)).collect() };
-    oxc_ast_visit::Visit::visit_program(&mut names, program);
     candidates
         .into_iter()
-        .filter(|(name, _)| names.counts.get(name) == Some(&1))
+        .filter(|(name, _)| names.declared_once(name))
         .map(|(name, queried)| (CompactString::from(name), TypeofAlias { chain: CompactString::from(queried) }))
         .collect()
 }
@@ -718,8 +709,7 @@ pub(super) mod steps {
 
     thread_local!(static WALKS: Cell<u64> = const { Cell::new(0) });
 
-    /// Counts the walks `typeof_aliases` makes of a whole module, so a test can show a module without an alias makes
-    /// none.
+    /// Counts the walks `file_names` makes of a whole module, so a test can show each module is walked once.
     pub(in crate::extractor) fn count_walk() {
         WALKS.with(|walks| walks.set(walks.get() + 1));
     }
@@ -730,7 +720,7 @@ pub(super) mod steps {
 
     thread_local!(static EXAMINED: Cell<u64> = const { Cell::new(0) });
 
-    /// Counts the name lookups and counter updates a declaration makes in `typeof_aliases`'s walk, so a test can
+    /// Counts the declarations `file_names`'s walk counts, so a test can
     /// show the work grows with the declarations, not with declarations times aliases.
     pub(in crate::extractor) fn count_examined(n: u64) {
         EXAMINED.with(|examined| examined.set(examined.get() + n));

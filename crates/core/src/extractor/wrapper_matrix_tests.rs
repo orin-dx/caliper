@@ -1193,12 +1193,15 @@ fn the_typeof_alias_walk_grows_with_the_declarations_not_with_the_aliases() {
         let allocator = oxc_allocator::Allocator::default();
         let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
         super::component::steps::take_examined();
-        assert_eq!(super::component::typeof_aliases(&parsed.program).len(), n);
+        assert_eq!(
+            super::component::typeof_aliases(&parsed.program, &super::component::file_names(&parsed.program)).len(),
+            n
+        );
         super::component::steps::take_examined()
     };
-    // Per alias: its own declaration (a lookup and its slot) and a type parameter (a lookup); the header's five
-    // imported names and its interface are a lookup each.
-    assert_eq!(work(10), 6 + 3 * 10);
+    // Per alias, the five names its lines declare (`make`, `Factory`, `g`, `T`, `t`); the header's five imported names
+    // and its interface.
+    assert_eq!(work(10), 6 + 5 * 10);
     assert_eq!(work(20) - 6, 2 * (work(10) - 6));
     assert_eq!(work(40) - 6, 2 * (work(20) - 6));
 }
@@ -1214,7 +1217,11 @@ fn many_blocks_of_one_namespace_cost_work_proportional_to_them() {
         let allocator = oxc_allocator::Allocator::default();
         let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
         super::component::steps::take_examined();
-        assert_eq!(super::component::typeof_aliases(&parsed.program).len(), usize::from(n == 0), "{n}");
+        assert_eq!(
+            super::component::typeof_aliases(&parsed.program, &super::component::file_names(&parsed.program)).len(),
+            usize::from(n == 0),
+            "{n}"
+        );
         super::component::steps::take_examined()
     };
     assert_eq!(work(1000), 2 * work(500) - work(0));
@@ -1235,7 +1242,7 @@ fn a_name_given_many_typeof_aliases_costs_work_proportional_to_them() {
         let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
         super::component::steps::take_examined();
         super::component::steps::take_written();
-        let aliases = super::component::typeof_aliases(&parsed.program);
+        let aliases = super::component::typeof_aliases(&parsed.program, &super::component::file_names(&parsed.program));
         let mut names: Vec<&str> = aliases.keys().map(|name| name.as_str()).collect();
         names.sort_unstable();
         assert_eq!(names, ["Other"], "{n}");
@@ -1786,6 +1793,55 @@ fn factory_parity_cases() -> Vec<(String, String)> {
              type SomeFactory = () => React.FC<{ tone?: string }>;\n\
              export const Card = (createButton as SomeFactory)();",
         ),
+        // Round 26: a callee written through a cast is attached only when the file declares its name once.
+        (
+            "callee declared once | plain",
+            "function wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee declared once | typeof itself",
+            "function wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = (wrap as typeof wrap)<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee declared twice at module level | plain",
+            "function wrap<T>(render: React.FC<T>): React.FC<T>;\nfunction wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee declared twice at module level | typeof itself",
+            "function wrap<T>(render: React.FC<T>): React.FC<T>;\nfunction wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = (wrap as typeof wrap)<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee declared again in a namespace | plain",
+            "namespace N { export function wrap<T>(render: React.FC<T>): React.FC<T> { return render; } }\nfunction wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee declared again in a namespace | typeof itself",
+            "namespace N { export function wrap<T>(render: React.FC<T>): React.FC<T> { return render; } }\nfunction wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = (wrap as typeof wrap)<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee name a parameter elsewhere | plain",
+            "function g(wrap: unknown) { return wrap; }\nfunction wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee name a parameter elsewhere | typeof itself",
+            "function g(wrap: unknown) { return wrap; }\nfunction wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = (wrap as typeof wrap)<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee imported and declared | plain",
+            "import { wrap } from './wrap';\nfunction wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = wrap<Props>((props: Props) => <div />);",
+        ),
+        (
+            "callee imported and declared | typeof itself",
+            "import { wrap } from './wrap';\nfunction wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\nexport const Button = (wrap as typeof wrap)<Props>((props: Props) => <div />);",
+        ),
+        (
+            "finding: a namespace's own wrap called through typeof itself",
+            "function wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\n\
+             namespace N {\n\
+             function wrap<T>(render: React.FC<T>): React.FC<T> { return render; }\n\
+             export const Inner = (wrap as typeof wrap)<Props>((props: Props) => <div />);\n\
+             }",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -1825,7 +1881,9 @@ fn factory_parity_output(source: &str) -> String {
             let rule = serde_json::to_string(&m.rule).unwrap_or_default();
             let exported =
                 if exports.is_empty() { String::new() } else { format!(" exported as {}", exports.join(",")) };
-            format!("{}:{}{rule}{exported}", m.component_name, m.props_type_name)
+            // The callee whose declared result the resolver reads, if any.
+            let via = m.wrapper_callee.as_ref().map(|callee| format!(" via {}", callee.name)).unwrap_or_default();
+            format!("{}:{}{rule}{exported}{via}", m.component_name, m.props_type_name)
         })
         .chain(data.diagnostics.iter().map(|d| format!("{:?} {:?}: {}", d.severity, d.code, d.message)))
         .collect();
@@ -1852,6 +1910,15 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     for (id, source) in &cases {
         let now = factory_parity_output(source);
         let main = base.get(id.as_str()).copied().unwrap_or("not in the base table");
+        // Through the namespace cast main attached the callee name `unknown.withContext`, which names no declaration;
+        // this head attaches none (round 6: a callee asserted to another type has no declaration to read).
+        let main_without_garbage_callee;
+        let main = if id.as_str() == "replacing cast: a member generic wrapper" {
+            main_without_garbage_callee = main.replace(" via unknown.withContext", "");
+            main_without_garbage_callee.as_str()
+        } else {
+            main
+        };
         let cast = id.rsplit_once(" | ").filter(|(_, cast)| *cast != "plain");
         // A component main listed that this head does not: never allowed, whatever main's plain call gives.
         let mappings = |output: &str| -> Vec<String> {
@@ -1881,11 +1948,43 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    assert_eq!(read_as_the_plain_call, 44);
+    // Round 26 adds one: `(wrap as typeof wrap)<Props>(render)` with `wrap` declared once keeps the callee, as main's
+    // plain call does (`a_callee_through_a_cast_is_attached_only_when_its_name_is_declared_once`).
+    assert_eq!(read_as_the_plain_call, 45);
 }
 
-/// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing
-/// scopes found in one walk of the module, however many aliases there are; a module with none is not walked.
+/// Round 26: a callee written through a cast is looked up by its bare name (`resolver::callee`), so it is attached only
+/// when the file declares that name exactly once, by the same flat count as the `typeof` aliases. Otherwise it is
+/// unset, as on origin/main: the component is found and the callee's declaration is not read. A plain call is
+/// origin/main's whatever the count.
+#[test]
+fn a_callee_through_a_cast_is_attached_only_when_its_name_is_declared_once() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    let attached = "Base:Props\"functionDeclaration\" | Button:Props\"hocWrapper\" exported as Button via wrap";
+    let unset = "Base:Props\"functionDeclaration\" | Button:Props\"hocWrapper\" exported as Button";
+    for (row, cast) in [
+        ("callee declared once", attached),
+        ("callee declared twice at module level", unset),
+        ("callee declared again in a namespace", unset),
+        ("callee name a parameter elsewhere", unset),
+        ("callee imported and declared", unset),
+    ] {
+        let plain = format!("{row} | plain");
+        let through = format!("{row} | typeof itself");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        assert_eq!(base[plain.as_str()], attached, "{plain}: origin/main");
+        assert_eq!(base[through.as_str()], unset, "{through}: origin/main");
+        assert_eq!(factory_parity_output(&cases[&through]), cast, "{through}");
+    }
+    let finding = "finding: a namespace's own wrap called through typeof itself";
+    assert_eq!(factory_parity_output(&cases[finding]), base[finding]);
+    assert!(!base[finding].contains(" via "), "{}", base[finding]);
+}
+
+/// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted in one walk of the
+/// module, however many aliases there are; a module with none is walked once too, for its callees (round 26).
 #[test]
 fn every_typeof_alias_is_counted_in_one_walk_of_the_module() {
     let cost = |aliases: usize| {
@@ -1897,10 +1996,11 @@ fn every_typeof_alias_is_counted_in_one_walk_of_the_module() {
         let allocator = oxc_allocator::Allocator::default();
         let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
         super::component::steps::take_walks();
-        let kept = super::component::typeof_aliases(&parsed.program).len();
+        let kept =
+            super::component::typeof_aliases(&parsed.program, &super::component::file_names(&parsed.program)).len();
         (kept, super::component::steps::take_walks())
     };
-    assert_eq!(cost(0), (0, 0));
+    assert_eq!(cost(0), (0, 1));
     assert_eq!(cost(1), (1, 1));
     assert_eq!(cost(10), (10, 1));
     assert_eq!(cost(40), (40, 1));
@@ -2057,10 +2157,10 @@ fn a_hook_called_through_a_never_assertion_is_still_a_hook_call() {
     assert_eq!(names("(useThing as () => string)"), ["Panel"]);
 }
 
-/// Finding 2: a module without a `typeof` alias is not walked for the names that could shadow one; a module with one is
-/// walked once.
+/// Finding 2, and round 26: every module is walked once for the names it declares, whether it has a `typeof` alias or
+/// not, as a callee written through a cast needs the count too.
 #[test]
-fn only_a_module_with_a_typeof_alias_is_walked_for_shadowing_names() {
+fn every_module_is_walked_once_for_the_names_it_declares() {
     let walks = |source: &str| {
         super::component::steps::take_walks();
         parse_file(Utf8Path::new("/fixtures/Button.tsx"), &format!("{HEADER}{source}"));
@@ -2068,7 +2168,7 @@ fn only_a_module_with_a_typeof_alias_is_walked_for_shadowing_names() {
     };
     let generic = "function g<Factory>(f: Factory) { return f; }\ntype Mapped = { [K in 'a']: K };\n\
                    export const Button = memo((props: Props) => <div />);";
-    assert_eq!(walks(generic), 0);
+    assert_eq!(walks(generic), 1);
     assert_eq!(walks(&format!("type Size = typeof size;\ndeclare const size: number;\n{generic}")), 1);
 }
 
@@ -2208,7 +2308,7 @@ fn a_typeof_alias_of_a_long_chain_is_named_in_linear_steps() {
         let allocator = oxc_allocator::Allocator::default();
         let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
         super::component::steps::take_written();
-        let aliases = super::component::typeof_aliases(&parsed.program);
+        let aliases = super::component::typeof_aliases(&parsed.program, &super::component::file_names(&parsed.program));
         assert_eq!(aliases.get("Factory").map(|alias| alias.chain.as_str()), Some(chain.join(".").as_str()));
         (super::component::steps::take_written(), chain.join(".").len() as u64 + 1)
     };

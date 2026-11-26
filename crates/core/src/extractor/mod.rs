@@ -227,7 +227,9 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
         .collect();
     collector.comments = comments;
     collector.element_helpers = evidence::element_helpers(&ret.program);
-    collector.typeof_aliases = component::typeof_aliases(&ret.program);
+    let names = component::file_names(&ret.program);
+    collector.typeof_aliases = component::typeof_aliases(&ret.program, &names);
+    collector.unique_peeled_callees = names.unique_peeled_callees();
     collector.visit_program(&ret.program);
     let mut data = collector.finish();
     data.jsx_usages = body_facts::attach(&ret.program, &mut data.component_mappings, source_type.is_jsx());
@@ -259,6 +261,9 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) element_helpers: FxHashSet<String>,
     /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
+    /// The roots of the callees written through a cast that the file declares exactly once
+    /// (`component::peeled_callee_root`, `component::FileNames`).
+    pub(super) unique_peeled_callees: FxHashSet<CompactString>,
     /// Tracks which JSDoc comment spans have already been consumed (by span_end).
     /// Prevents the same comment from leaking to both a component description and its first prop.
     pub(super) consumed_jsdoc: FxHashSet<u32>,
@@ -358,6 +363,7 @@ impl<'src> SourceDataCollector<'src> {
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
             typeof_aliases: FxHashMap::default(),
+            unique_peeled_callees: FxHashSet::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
             scope_path: Vec::new(),

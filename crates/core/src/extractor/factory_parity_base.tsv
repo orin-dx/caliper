@@ -3,7 +3,7 @@ named import | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a 
 named import | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 named import | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 named import | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-named import | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+named import | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via createElement
 named import | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 named import | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 named import | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -13,7 +13,7 @@ namespace import | rendered | typeof itself	Info SkippedCandidate: 'Button' take
 namespace import | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 namespace import | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 namespace import | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-namespace import | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+namespace import | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via R.createElement
 namespace import | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 namespace import | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 namespace import | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -23,7 +23,7 @@ default import | rendered | typeof itself	Info SkippedCandidate: 'Button' takes 
 default import | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 default import | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 default import | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-default import | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+default import | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via React.createElement
 default import | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 default import | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 default import | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -33,7 +33,7 @@ destructured from the namespace | rendered | typeof itself	Info SkippedCandidate
 destructured from the namespace | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 destructured from the namespace | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 destructured from the namespace | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-destructured from the namespace | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+destructured from the namespace | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via createElement
 destructured from the namespace | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 destructured from the namespace | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 destructured from the namespace | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -43,57 +43,57 @@ renamed from the namespace | rendered | typeof itself	Info SkippedCandidate: 'Bu
 renamed from the namespace | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 renamed from the namespace | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 renamed from the namespace | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-renamed from the namespace | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
-renamed from the namespace | wrapper | typeof itself	Base:Props"functionDeclaration" | Button:h"factoryResult" exported as Button
-renamed from the namespace | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Button:h"factoryResult" exported as Button
-renamed from the namespace | wrapper | any	Base:Props"functionDeclaration" | Button:h"factoryResult" exported as Button
-renamed from the namespace | wrapper | unknown	Base:Props"functionDeclaration" | Button:h"factoryResult" exported as Button
+renamed from the namespace | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via h
+renamed from the namespace | wrapper | typeof itself	Base:Props"functionDeclaration" | Button:h"factoryResult" exported as Button via h
+renamed from the namespace | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Button:h"factoryResult" exported as Button via h
+renamed from the namespace | wrapper | any	Base:Props"functionDeclaration" | Button:h"factoryResult" exported as Button via h
+renamed from the namespace | wrapper | unknown	Base:Props"functionDeclaration" | Button:h"factoryResult" exported as Button via h
 aliased member | rendered | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 aliased member | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 aliased member | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 aliased member | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 aliased member | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-aliased member | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
-aliased member | wrapper | typeof itself	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button
-aliased member | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button
-aliased member | wrapper | any	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button
-aliased member | wrapper | unknown	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button
+aliased member | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via ce
+aliased member | wrapper | typeof itself	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button via ce
+aliased member | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button via ce
+aliased member | wrapper | any	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button via ce
+aliased member | wrapper | unknown	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button via ce
 aliased import | rendered | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 aliased import | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 aliased import | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 aliased import | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 aliased import | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-aliased import | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
-aliased import | wrapper | typeof itself	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button
-aliased import | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button
-aliased import | wrapper | any	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button
-aliased import | wrapper | unknown	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button
+aliased import | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via ce
+aliased import | wrapper | typeof itself	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button via ce
+aliased import | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button via ce
+aliased import | wrapper | any	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button via ce
+aliased import | wrapper | unknown	Base:Props"functionDeclaration" | Button:ce"factoryResult" exported as Button via ce
 destructured require | rendered | plain	Button:Props"typedFunctionExpression" exported as Button
 destructured require | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 destructured require | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 destructured require | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 destructured require | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-destructured require | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+destructured require | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via createElement
 destructured require | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 destructured require | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 destructured require | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 destructured require | wrapper | unknown	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
-required namespace | rendered | plain	Button:Props"typedFunctionExpression" exported as Button | R:require"factoryResult"
-required namespace | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | R:require"factoryResult"
-required namespace | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | R:require"factoryResult"
-required namespace | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | R:require"factoryResult"
-required namespace | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | R:require"factoryResult"
-required namespace | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button | R:require"factoryResult"
-required namespace | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | R:require"factoryResult"
-required namespace | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | R:require"factoryResult"
-required namespace | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | R:require"factoryResult"
-required namespace | wrapper | unknown	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | R:require"factoryResult"
+required namespace | rendered | plain	Button:Props"typedFunctionExpression" exported as Button | R:require"factoryResult" via require
+required namespace | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | R:require"factoryResult" via require
+required namespace | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | R:require"factoryResult" via require
+required namespace | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | R:require"factoryResult" via require
+required namespace | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | R:require"factoryResult" via require
+required namespace | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via R.createElement | R:require"factoryResult" via require
+required namespace | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | R:require"factoryResult" via require
+required namespace | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | R:require"factoryResult" via require
+required namespace | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | R:require"factoryResult" via require
+required namespace | wrapper | unknown	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | R:require"factoryResult" via require
 local function | rendered | plain	Button:Props"typedFunctionExpression" exported as Button
 local function | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 local function | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 local function | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 local function | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-local function | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+local function | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via createElement
 local function | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 local function | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 local function | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -103,7 +103,7 @@ relative module | rendered | typeof itself	Info SkippedCandidate: 'Button' takes
 relative module | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 relative module | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 relative module | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-relative module | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+relative module | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via createElement
 relative module | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 relative module | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 relative module | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -113,7 +113,7 @@ Preact's h | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a ty
 Preact's h | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 Preact's h | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 Preact's h | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-Preact's h | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+Preact's h | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via h
 Preact's h | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 Preact's h | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 Preact's h | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -123,7 +123,7 @@ emotion's jsx | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a
 emotion's jsx | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 emotion's jsx | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 emotion's jsx | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-emotion's jsx | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+emotion's jsx | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via jsx
 emotion's jsx | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 emotion's jsx | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 emotion's jsx | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -133,7 +133,7 @@ relative jsx | rendered | typeof itself	Info SkippedCandidate: 'Button' takes a 
 relative jsx | rendered | alias of typeof itself	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 relative jsx | rendered | any	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 relative jsx | rendered | unknown	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
-relative jsx | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+relative jsx | wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via jsx
 relative jsx | wrapper | typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 relative jsx | wrapper | alias of typeof itself	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 relative jsx | wrapper | any	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
@@ -149,39 +149,50 @@ an alias's namespace is read where the alias is declared	Button:Props"typedFunct
 finding: a builder aliased under a withX name	Button:Props"functionDeclaration" exported as Button
 finding: a parameter shadowing an alias of the builder	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 finding: a var in a block, used after it	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
-an instantiation in parentheses	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+an instantiation in parentheses	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via React.createElement
 tagged factory, no props type names the tag | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is built from a tag and a config object, but no props type declared in this file gives the tag "button"
-tagged factory, no props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult" exported as Button
-tagged factory, no props type names the tag | rendered | any	Base:Props"functionDeclaration" | Button:make"factoryResult" exported as Button
+tagged factory, no props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult" exported as Button via make
+tagged factory, no props type names the tag | rendered | any	Base:Props"functionDeclaration" | Button:make"factoryResult" exported as Button via make
 tagged factory, a props type names the tag | rendered | plain	Base:Props"functionDeclaration" | Button:ButtonProps"taggedFactory" exported as Button
 generic wrapper, no type argument names props | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props
-generic wrapper, no type argument names props | rendered | typeof itself	Base:Props"functionDeclaration" | Button:makeX"factoryResult" exported as Button
+generic wrapper, no type argument names props | rendered | typeof itself	Base:Props"functionDeclaration" | Button:makeX"factoryResult" exported as Button via makeX
 unusable payload | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is built from the factory payload 'Payload', whose `props` member is not a named type
-unusable payload | rendered | typeof itself	Base:Props"functionDeclaration" | Button:makeX"factoryResult" exported as Button
+unusable payload | rendered | typeof itself	Base:Props"functionDeclaration" | Button:makeX"factoryResult" exported as Button via makeX
 wrapper call before its component | rendered | plain	Base2:Props"functionDeclaration" | Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props
 wrapper call before its component | rendered | typeof itself	Base:Props"functionDeclaration" | Button:Props"functionDeclaration" exported as Button
 anonymous default wrapper call | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a factory payload, which a tag-name argument needs
 anonymous default wrapper call | rendered | typeof itself	Base:Props"functionDeclaration"
-tagged factory, a props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult" exported as Button
-replacing cast: a tagged call beside a plain tagged factory	Base:Props"functionDeclaration" | Label:stringify"factoryResult" | Primary:RecipeProps"taggedFactory" exported as Primary
-replacing cast: a generic wrapper beside a tagged factory, same props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as Group | StyledGroup:GroupProps"taggedFactory"
-replacing cast: a generic wrapper beside a tagged factory, own props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as Group | Styled:StyledProps"taggedFactory"
+tagged factory, a props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult" exported as Button via make
+replacing cast: a tagged call beside a plain tagged factory	Base:Props"functionDeclaration" | Label:stringify"factoryResult" via stringify | Primary:RecipeProps"taggedFactory" exported as Primary
+replacing cast: a generic wrapper beside a tagged factory, same props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as Group via withContext | StyledGroup:GroupProps"taggedFactory"
+replacing cast: a generic wrapper beside a tagged factory, own props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as Group via withContext | Styled:StyledProps"taggedFactory"
 plain call: default export, no props type	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props
 replacing cast: default export, no props type	Base:Props"functionDeclaration" exported as default
-plain call: default export, a props type	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as default
+plain call: default export, a props type	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as default via withTheme
 replacing cast: default export, a props type	Base:Props"functionDeclaration" exported as default
 plain call: named export, no props type	Themed:Props"functionDeclaration" exported as Themed
 replacing cast: named export, no props type	Themed:Props"functionDeclaration" exported as Themed
-plain call: named export, a props type	Base:Props"functionDeclaration" | Themed:Props"wrapperTypeArgument" exported as Themed
-replacing cast: named export, a props type	Base:Props"functionDeclaration" | Themed:withTheme"factoryResult" exported as Themed
+plain call: named export, a props type	Base:Props"functionDeclaration" | Themed:Props"wrapperTypeArgument" exported as Themed via withTheme
+replacing cast: named export, a props type	Base:Props"functionDeclaration" | Themed:withTheme"factoryResult" exported as Themed via withTheme
 plain call: named export, a builder, no props type	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Themed' looks like a component built by a wrapper call, but none of its type arguments names a factory payload, which a tag-name argument needs
-replacing cast: named export, a builder, no props type	Base:Props"functionDeclaration" | Themed:makeX"factoryResult" exported as Themed
-replacing cast: an alias and a default export of a generic wrapper	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as default | Info SkippedCandidate: 'Alias' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
-replacing cast: a member generic wrapper	Base:Props"functionDeclaration" | Card:PublicProps"wrapperTypeArgument" exported as Card
-replacing cast: a generic wrapper to a named signature	Base:Props"functionDeclaration" | Card:withTheme"factoryResult" exported as Card
-replacing cast: a factory to a named type	Base:Props"functionDeclaration" | Card:createButton"factoryResult" exported as Card
+replacing cast: named export, a builder, no props type	Base:Props"functionDeclaration" | Themed:makeX"factoryResult" exported as Themed via makeX
+replacing cast: an alias and a default export of a generic wrapper	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as default via withContext | Info SkippedCandidate: 'Alias' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+replacing cast: a member generic wrapper	Base:Props"functionDeclaration" | Card:PublicProps"wrapperTypeArgument" exported as Card via unknown.withContext
+replacing cast: a generic wrapper to a named signature	Base:Props"functionDeclaration" | Card:withTheme"factoryResult" exported as Card via withTheme
+replacing cast: a factory to a named type	Base:Props"functionDeclaration" | Card:createButton"factoryResult" exported as Card via createButton
+callee declared once | plain	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button via wrap
+callee declared once | typeof itself	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button
+callee declared twice at module level | plain	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button via wrap
+callee declared twice at module level | typeof itself	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button
+callee declared again in a namespace | plain	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button via wrap
+callee declared again in a namespace | typeof itself	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button
+callee name a parameter elsewhere | plain	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button via wrap
+callee name a parameter elsewhere | typeof itself	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button
+callee imported and declared | plain	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button via wrap
+callee imported and declared | typeof itself	Base:Props"functionDeclaration" | Button:Props"hocWrapper" exported as Button
+finding: a namespace's own wrap called through typeof itself	Base:Props"functionDeclaration" | Inner:Props"hocWrapper" exported as Inner
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
-finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
+finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via toolkit.createElement
 an element built from forwardRef, plain	Button:Props"forwardRef" exported as Button
 an element built from forwardRef, aliased	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 an element built from memo, aliased	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
