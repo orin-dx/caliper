@@ -2171,6 +2171,100 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "recognition: factory callee behind an instantiation, a parameter of its name | peeled",
             "function createButton<T>(): React.FC<Props> { return (props) => <div />; }\nfunction g(createButton: unknown) { return createButton; }\nexport const Card = (createButton<unknown>)();",
         ),
+        // Round 31: a well-known global or import a peeled path relies on.
+        (
+            "well-known Preact h, an import declared once | plain",
+            "import * as Preact from 'preact';\nexport const Button = (props: Props) => Preact.h('button');",
+        ),
+        (
+            "well-known Preact h, an import declared once | peeled",
+            "import * as Preact from 'preact';\nexport const Button = (props: Props) => (Preact as typeof Preact).h('button');",
+        ),
+        (
+            "well-known Preact h, a parameter of its name (finding 1) | plain",
+            "import * as Preact from 'preact';\nexport const Button = (Preact: Props) => Preact.h('button');",
+        ),
+        (
+            "well-known Preact h, a parameter of its name (finding 1) | peeled",
+            "import * as Preact from 'preact';\nexport const Button = (Preact: Props) => (Preact as typeof Preact).h('button');",
+        ),
+        (
+            "well-known Preact h, a namespace local of its name | plain",
+            "import * as Preact from 'preact';\nnamespace N { const Preact = 1; }\nexport const Button = (props: Props) => Preact.h('button');",
+        ),
+        (
+            "well-known Preact h, a namespace local of its name | peeled",
+            "import * as Preact from 'preact';\nnamespace N { const Preact = 1; }\nexport const Button = (props: Props) => (Preact as typeof Preact).h('button');",
+        ),
+        (
+            "well-known React createElement, an import declared once | plain",
+            "import * as R from 'react';\nexport const Button = (props: Props) => R.createElement('button');",
+        ),
+        (
+            "well-known React createElement, an import declared once | peeled",
+            "import * as R from 'react';\nexport const Button = (props: Props) => (R as typeof R).createElement('button');",
+        ),
+        (
+            "well-known React createElement, a parameter of its name | plain",
+            "import * as R from 'react';\nexport const Button = (R: Props) => R.createElement('button');",
+        ),
+        (
+            "well-known React createElement, a parameter of its name | peeled",
+            "import * as R from 'react';\nexport const Button = (R: Props) => (R as typeof R).createElement('button');",
+        ),
+        (
+            "well-known React createElement, a namespace local of its name | plain",
+            "import * as R from 'react';\nnamespace N { const R = 1; }\nexport const Button = (props: Props) => R.createElement('button');",
+        ),
+        (
+            "well-known React createElement, a namespace local of its name | peeled",
+            "import * as R from 'react';\nnamespace N { const R = 1; }\nexport const Button = (props: Props) => (R as typeof R).createElement('button');",
+        ),
+        ("well-known Promise, the global | plain", "export const Button = (props: Props) => Promise.resolve(<div />);"),
+        (
+            "well-known Promise, the global | peeled",
+            "export const Button = (props: Props) => (Promise as typeof Promise).resolve(<div />);",
+        ),
+        (
+            "well-known Promise, a local of its name | plain",
+            "const Promise = { resolve: (x: unknown) => 1 };\nexport const Button = (props: Props) => Promise.resolve(<div />);",
+        ),
+        (
+            "well-known Promise, a local of its name | peeled",
+            "const Promise = { resolve: (x: unknown) => 1 };\nexport const Button = (props: Props) => (Promise as typeof Promise).resolve(<div />);",
+        ),
+        (
+            "well-known Object.assign, the global | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "well-known Object.assign, the global | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "well-known Object.assign, a local Object (finding 2) | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nconst Object = { assign: (root: unknown, members: unknown) => root };\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "well-known Object.assign, a local Object (finding 2) | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nconst Object = { assign: (root: unknown, members: unknown) => root };\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "well-known Object.assign, a parameter of its name | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction f(Object: unknown) { return Object; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "well-known Object.assign, a parameter of its name | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nfunction f(Object: unknown) { return Object; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "well-known Object.assign, assigned in the file | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign = ((root: unknown) => root) as typeof Object.assign;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "well-known Object.assign, assigned in the file | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign = ((root: unknown) => root) as typeof Object.assign;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -2300,7 +2394,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // alias, a callee and a heritage whose receiver is declared once
     // (`every_receiver_read_through_a_cast_is_read_only_when_declared_once`). Round 30 adds four: a peeled base or
     // `Object.assign` whose names are trusted (`a_peeled_candidate_is_accepted_only_when_its_names_are_trusted`).
-    assert_eq!(read_as_the_plain_call, 56);
+    // Round 31 adds three: a peeled receiver that resolves to its well-known global or import
+    // (`a_well_known_name_on_a_peeled_path_must_resolve_to_it`).
+    assert_eq!(read_as_the_plain_call, 59);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2360,6 +2456,37 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let peeled = format!("recognition: {row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 31: a peeled path matches a well-known global (`Object`, `Promise`) or import (`Preact`, `React`) by its name only
+/// when the name resolves to it: no declaration in the file for a global, the import as its one declaration for an
+/// import, and no `Object.assign =` for `Object.assign`. Each plain form is origin/main's; each peeled form reads as the
+/// plain form where the name resolves, and as origin/main read it otherwise.
+#[test]
+fn a_well_known_name_on_a_peeled_path_must_resolve_to_it() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, resolves) in [
+        ("well-known Preact h, an import declared once", true),
+        ("well-known Preact h, a parameter of its name (finding 1)", false),
+        ("well-known Preact h, a namespace local of its name", false),
+        ("well-known React createElement, an import declared once", true),
+        ("well-known React createElement, a parameter of its name", false),
+        ("well-known React createElement, a namespace local of its name", false),
+        ("well-known Promise, the global", true),
+        ("well-known Promise, a local of its name", false),
+        ("well-known Object.assign, the global", true),
+        ("well-known Object.assign, a local Object (finding 2)", false),
+        ("well-known Object.assign, a parameter of its name", false),
+        ("well-known Object.assign, assigned in the file", false),
+    ] {
+        let plain = format!("{row} | plain");
+        let peeled = format!("{row} | peeled");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if resolves { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
 }

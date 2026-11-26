@@ -120,10 +120,14 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Whether this head reads an `Object.assign` call's members onto `parent`, which export propagation finds by its
-    /// bare name: a `Plain` call as origin/main did; a `Peeled` one only at module level and only when the file declares
-    /// `parent` exactly once.
+    /// bare name: a `Plain` call as origin/main did; a `Peeled` one only at module level, only when the file declares
+    /// `parent` exactly once, and only when `Object` is the global one and the file does not assign `Object.assign`.
     pub(super) fn trusts_object_assign(&self, recognition: super::component::Recognition, parent: &str) -> bool {
-        recognition == super::component::Recognition::Plain || (self.function_depth == 0 && self.unique_binding(parent))
+        recognition == super::component::Recognition::Plain
+            || (self.function_depth == 0
+                && self.unique_binding(parent)
+                && self.resolves_to_global("Object")
+                && !self.object_assign_assigned)
     }
 
     /// Whether an identifier member of an `Object.assign` call is attached: always for a `Plain` call, for a `Peeled` one

@@ -35,10 +35,7 @@ pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Sco
     match callee {
         Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), None, scope),
         Expression::StaticMemberExpression(m) => {
-            let receiver = match super::component::beneath(&m.object) {
-                Expression::Identifier(object) => Some(object.name.as_str()),
-                _ => Some(""),
-            };
+            let receiver = well_known_receiver(&m.object, scope).or(Some(""));
             is_element_factory_name(m.property.name.as_str(), receiver, scope)
         }
         _ => false,
@@ -61,6 +58,25 @@ pub(super) trait Scope {
     /// Whether `h` called bare (`receiver` is `None`) or on `receiver` (`Preact.h`) is Preact's, by where it was
     /// imported from.
     fn is_preact_h(&self, receiver: Option<&str>) -> bool;
+    /// Whether a receiver read only through a wrapper (`(Preact as typeof Preact).h`) may be matched against a
+    /// well-known global or import by its name: the name resolves to the global (no declaration in the file) or to an
+    /// import (its one declaration). A parameter or local of the same name is a second declaration.
+    fn trusts_peeled_receiver(&self, name: &str) -> bool;
+}
+
+/// The identifier a member expression's receiver names for a match against a well-known global or import (`React`,
+/// `Preact`, `Promise`): written plainly, as origin/main read it; written through a wrapper, only when
+/// [`Scope::trusts_peeled_receiver`] holds. `None` otherwise.
+pub(super) fn well_known_receiver<'a>(object: &Expression<'a>, scope: &dyn Scope) -> Option<&'a str> {
+    match object {
+        Expression::Identifier(object) => Some(object.name.as_str()),
+        _ => match super::component::beneath(object) {
+            Expression::Identifier(object) if scope.trusts_peeled_receiver(object.name.as_str()) => {
+                Some(object.name.as_str())
+            }
+            _ => None,
+        },
+    }
 }
 
 fn leftmost_and_rightmost<'n>(name: &'n TSTypeName<'_>) -> Option<(&'n str, &'n str)> {
@@ -149,10 +165,8 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
             || matches!(callee, Some(Expression::StaticMemberExpression(member))
-                if matches!(
-                    super::component::beneath(&member.object),
-                    Expression::Identifier(id) if id.name == "Promise"
-                ) && matches!(member.property.name.as_str(), "resolve" | "all"))
+                if well_known_receiver(&member.object, self.scope) == Some("Promise")
+                    && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
             walk::walk_call_expression(self, it);
         }
@@ -383,6 +397,10 @@ impl Scope for Foreign<'_> {
     }
 
     fn is_preact_h(&self, _receiver: Option<&str>) -> bool {
+        false
+    }
+
+    fn trusts_peeled_receiver(&self, _name: &str) -> bool {
         false
     }
 

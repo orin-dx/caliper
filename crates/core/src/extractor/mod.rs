@@ -229,6 +229,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     collector.element_helpers = evidence::element_helpers(&ret.program);
     let names = component::file_names(&ret.program);
     collector.typeof_aliases = component::typeof_aliases(&ret.program, &names);
+    collector.object_assign_assigned = names.assigns_object_assign();
     collector.binding_counts = names.into_counts();
     collector.visit_program(&ret.program);
     let mut data = collector.finish();
@@ -263,6 +264,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
     /// How many times the file declares each name, any kind in any scope (`component::FileNames`).
     pub(super) binding_counts: FxHashMap<CompactString, u32>,
+    /// Whether the file assigns `Object.assign`, so a call through a wrapper may not be the built-in one.
+    pub(super) object_assign_assigned: bool,
     /// Tracks which JSDoc comment spans have already been consumed (by span_end).
     /// Prevents the same comment from leaking to both a component description and its first prop.
     pub(super) consumed_jsdoc: FxHashSet<u32>,
@@ -363,6 +366,7 @@ impl<'src> SourceDataCollector<'src> {
             element_helpers: FxHashSet::default(),
             typeof_aliases: FxHashMap::default(),
             binding_counts: FxHashMap::default(),
+            object_assign_assigned: false,
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
             scope_path: Vec::new(),
@@ -750,8 +754,15 @@ impl<'src> SourceDataCollector<'src> {
                 None => ReactApi::of_export(id.name.as_str()),
             },
             Expression::StaticMemberExpression(member) => {
-                // `callee_of` judged the member; the namespace is only read for its name.
-                let Expression::Identifier(object) = component::beneath(&member.object) else { return None };
+                // `callee_of` judged the member; the namespace is only read for its name. Through a wrapper main did
+                // not read (`component::main_peel`), only when the name resolves to the global or to an import.
+                let object = match component::main_peel(&member.object) {
+                    Expression::Identifier(object) => object,
+                    _ => match component::beneath(&member.object) {
+                        Expression::Identifier(object) if self.not_a_local_declaration(object.name.as_str()) => object,
+                        _ => return None,
+                    },
+                };
                 let api = ReactApi::of_export(member.property.name.as_str())?;
                 match import_of(object.name.as_str()) {
                     Some(import)
@@ -1353,11 +1364,18 @@ impl<'src> SourceDataCollector<'src> {
     /// Whether a name a `Peeled` candidate expects to be React's, a global (`Component`) or an import, is no local
     /// declaration: the file declares it nowhere, or once as an import (`component::Recognition`).
     pub(super) fn not_a_local_declaration(&self, name: &str) -> bool {
-        match self.binding_counts.get(name) {
-            None => true,
-            Some(1) => self.imported_names.contains(name),
-            Some(_) => false,
-        }
+        self.resolves_to_global(name) || self.resolves_to_import(name)
+    }
+
+    /// Whether a name resolves to a global (`Object`, `Promise`, an unimported `React`): the file declares it nowhere.
+    pub(super) fn resolves_to_global(&self, name: &str) -> bool {
+        !self.binding_counts.contains_key(name)
+    }
+
+    /// Whether a name resolves to an import: its one declaration in the file is the import. Which module it comes from
+    /// is each caller's own check (`react_api`, `is_preact_h`).
+    pub(super) fn resolves_to_import(&self, name: &str) -> bool {
+        self.binding_counts.get(name) == Some(&1) && self.imported_names.contains(name)
     }
 
     /// The dotted name of a callee or a class's heritage, each receiver read by [`Self::receiver_identifier`]: `ui.wrap`,
@@ -1595,6 +1613,10 @@ mod scope_tests;
 mod wrapper_matrix_tests;
 
 impl evidence::Scope for SourceDataCollector<'_> {
+    fn trusts_peeled_receiver(&self, name: &str) -> bool {
+        self.not_a_local_declaration(name)
+    }
+
     fn may_be_react(&self, name: &str) -> bool {
         SourceDataCollector::may_be_react(self, name)
     }

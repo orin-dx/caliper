@@ -551,12 +551,19 @@ pub(crate) struct TypeofAlias {
 /// key, …: type and value names in one map). It knows no scopes.
 pub(super) struct FileNames<'p> {
     counts: FxHashMap<&'p str, u32>,
+    /// Whether the file assigns `Object.assign` (`Object.assign = …`).
+    assigns_object_assign: bool,
 }
 
 impl FileNames<'_> {
     /// Whether the file declares `name` exactly once: the one declaration a use of it can mean.
     fn declared_once(&self, name: &str) -> bool {
         self.counts.get(name) == Some(&1)
+    }
+
+    /// Whether the file assigns `Object.assign`, for `SourceDataCollector::object_assign_assigned`.
+    pub(super) fn assigns_object_assign(&self) -> bool {
+        self.assigns_object_assign
     }
 
     /// The counts, owned, for `SourceDataCollector::binding_counts`.
@@ -569,7 +576,7 @@ impl FileNames<'_> {
 pub(super) fn file_names<'p>(program: &Program<'p>) -> FileNames<'p> {
     #[cfg(test)]
     steps::count_walk();
-    let mut names = FileNames { counts: FxHashMap::default() };
+    let mut names = FileNames { counts: FxHashMap::default(), assigns_object_assign: false };
     oxc_ast_visit::Visit::visit_program(&mut names, program);
     names
 }
@@ -579,6 +586,30 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
         #[cfg(test)]
         steps::count_examined(1);
         *self.counts.entry(it.name.as_str()).or_default() += 1;
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        if let AssignmentTarget::StaticMemberExpression(target) = &it.left
+            && target.property.name == "assign"
+            && matches!(&target.object, Expression::Identifier(object) if object.name == "Object")
+        {
+            self.assigns_object_assign = true;
+        }
+        oxc_ast_visit::walk::walk_assignment_expression(self, it);
+    }
+}
+
+/// An expression read through the wrappers origin/main's `peel_expr` read through: parentheses, `as`, `satisfies` and
+/// `!`, not a `<T>x` assertion or an instantiation.
+pub(super) fn main_peel<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    loop {
+        expr = match expr {
+            Expression::ParenthesizedExpression(inner) => &inner.expression,
+            Expression::TSAsExpression(inner) => &inner.expression,
+            Expression::TSSatisfiesExpression(inner) => &inner.expression,
+            Expression::TSNonNullExpression(inner) => &inner.expression,
+            _ => return expr,
+        };
     }
 }
 
@@ -607,18 +638,11 @@ impl Recognition {
     /// A factory callee as origin/main's factory rule read it: an identifier beneath `as`, `satisfies`, `!`,
     /// parentheses and instantiations, not beneath a `<T>x` assertion.
     pub(super) fn of_factory_callee(call: &CallExpression<'_>) -> Self {
-        let mut callee = &call.callee;
-        loop {
-            callee = match callee {
-                Expression::ParenthesizedExpression(inner) => &inner.expression,
-                Expression::TSAsExpression(inner) => &inner.expression,
-                Expression::TSSatisfiesExpression(inner) => &inner.expression,
-                Expression::TSNonNullExpression(inner) => &inner.expression,
-                Expression::TSInstantiationExpression(inner) => &inner.expression,
-                Expression::Identifier(_) => return Self::Plain,
-                _ => return Self::Peeled,
-            };
+        let mut callee = main_peel(&call.callee);
+        while let Expression::TSInstantiationExpression(inner) = callee {
+            callee = main_peel(&inner.expression);
         }
+        if matches!(callee, Expression::Identifier(_)) { Self::Plain } else { Self::Peeled }
     }
 
     /// An `Object.assign` call, by the path that reads it. Both read only a bare `Object.assign` callee; the
