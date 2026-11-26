@@ -124,8 +124,8 @@ pub(super) fn instantiated<'a, 'b>(mut expr: &'b Expression<'a>) -> Instantiated
 
 /// What the outermost assertion on a callee, or on the namespace it is read from, says about calling it. Only the
 /// outermost one counts: `(e as A) as B` has type `B` whatever `A` is. An assertion declines a candidate only on
-/// affirmative evidence ([`Evidence::NotRenderable`]); a type the extractor cannot read leaves the call the candidate
-/// its name makes it ([`Evidence::Unknown`]), as before assertions were read at all.
+/// affirmative evidence ([`Evidence::NotRenderable`], which only [`never_renders`] gives); every other type leaves the
+/// call the candidate its name makes it ([`Evidence::Unknown`]), as before assertions were read at all.
 #[derive(Clone, Copy)]
 pub(super) enum Evidence<'b, 'a> {
     /// No assertion, or one that keeps the callee's own type: `typeof` the same expression, `any` and `unknown`. The
@@ -134,15 +134,12 @@ pub(super) enum Evidence<'b, 'a> {
     /// A type reference (`(forwardRef as forwardRefType)`). The file may alias it to `typeof` the callee
     /// (`SourceDataCollector::describes_call`); otherwise it reads as [`Evidence::Unknown`].
     Reference(&'b TSTypeReference<'a>),
-    /// Every call signature of the asserted type returns what no component is, and at least one what React renders as a
-    /// node ([`Returns::Node`]): `(Greeting as (p: P) => string)(…)` gives no component, but a component may return
-    /// its result.
-    NoComponent,
-    /// Every call signature of the asserted type returns what neither a component nor a node is ([`Returns::Neither`]):
+    /// Every call signature of the asserted type returns a type on [`never_renders`]'s closed list:
     /// `(Object as (v: object) => object)(…)` neither is a component nor renders, whatever its name.
     NotRenderable,
-    /// Anything else: `typeof` another expression, a signature whose result may render or is not read, a type with no
-    /// call signature. The name still says what the call is; the callee's declaration no longer describes it.
+    /// Anything else: `typeof` another expression, a signature whose result is not on the closed list or is not
+    /// written, a type with no call signature. The name still says what the call is; the callee's declaration no
+    /// longer describes it.
     Unknown,
 }
 
@@ -158,23 +155,13 @@ pub(super) struct Peeled<'b, 'a> {
 }
 
 impl<'b, 'a> Peeled<'b, 'a> {
-    /// `expr`, when what it is called still says what a call expected to give a component or an element is
-    /// (`forwardRef`, `memo`, `Object.assign`, a HOC, an element factory, `map` over elements): always, unless the
-    /// assertion gives the call a result no component and no element is, such as a string.
+    /// `expr`, when what it is called still says what the call is (`forwardRef`, `memo`, `Object.assign`, a HOC, an
+    /// element factory, `map` over elements, a component invoked directly): always, unless the assertion gives the
+    /// call a result on [`never_renders`]'s closed list.
     pub(super) fn named(&self) -> Option<&'b Expression<'a>> {
         match self.evidence {
-            Evidence::NoComponent | Evidence::NotRenderable => None,
-            Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown => Some(self.expr),
-        }
-    }
-
-    /// `expr`, when what it is called still says what a component invoked directly is (`return Greeting(props)`):
-    /// always, unless the assertion gives the call a result React cannot render. A component may return a string,
-    /// number or `null`, so such a result is no evidence against the call.
-    pub(super) fn renderable(&self) -> Option<&'b Expression<'a>> {
-        match self.evidence {
             Evidence::NotRenderable => None,
-            Evidence::Identity | Evidence::Reference(_) | Evidence::NoComponent | Evidence::Unknown => Some(self.expr),
+            Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown => Some(self.expr),
         }
     }
 }
@@ -422,114 +409,79 @@ fn asserted<'a, 'b>(ty: &'b TSType<'a>, beneath: &Expression<'_>) -> Evidence<'b
 /// The evidence of a type's call signatures, given their declared results (`None` when one declares none): see
 /// [`combine`].
 fn results<'a, 'b>(signatures: impl Iterator<Item = Option<&'b TSType<'a>>>) -> Evidence<'b, 'a> {
-    combine(signatures.map(|result| match result.map(result_of) {
-        Some(Returns::Neither) => Evidence::NotRenderable,
-        Some(Returns::Node) => Evidence::NoComponent,
-        Some(Returns::Empty | Returns::Maybe) | None => Evidence::Unknown,
+    combine(signatures.map(|result| match result {
+        Some(result) if never_renders(result) => Evidence::NotRenderable,
+        Some(_) | None => Evidence::Unknown,
     }))
 }
 
 /// The evidence of several signatures or declarations of one callee, each read alone: [`Evidence::NotRenderable`] when
-/// every one is, [`Evidence::NoComponent`] when every one is that or `NotRenderable`, and [`Evidence::Unknown`]
-/// otherwise or when there are none. One that may give a component keeps the whole callee a candidate.
+/// there is one and every one is, [`Evidence::Unknown`] otherwise. One that may give a node, an element or a component
+/// keeps the whole callee a candidate.
 fn combine<'a, 'b>(all: impl Iterator<Item = Evidence<'b, 'a>>) -> Evidence<'b, 'a> {
-    let mut combined = None;
+    let mut any = false;
     for evidence in all {
-        combined = Some(match (combined, evidence) {
-            (None | Some(Evidence::NotRenderable), Evidence::NotRenderable) => Evidence::NotRenderable,
-            (None | Some(Evidence::NotRenderable | Evidence::NoComponent), Evidence::NoComponent)
-            | (Some(Evidence::NoComponent), Evidence::NotRenderable) => Evidence::NoComponent,
-            (_, Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown)
-            | (
-                Some(Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown),
-                Evidence::NoComponent | Evidence::NotRenderable,
-            ) => return Evidence::Unknown,
-        });
+        match evidence {
+            Evidence::NotRenderable => any = true,
+            Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown => return Evidence::Unknown,
+        }
     }
-    combined.unwrap_or(Evidence::Unknown)
+    if any { Evidence::NotRenderable } else { Evidence::Unknown }
 }
 
-/// What a call's declared result says about whether it is a component and whether React renders it.
-#[derive(Clone, Copy)]
-enum Returns {
-    /// What React renders as a node and no component is: a string, number, bigint or boolean keyword, `void`, a
-    /// literal or template literal, a type predicate, an array of those, or a union with one of them and nothing that
-    /// may be a component.
-    Node,
-    /// Neither a component nor a node: the `object` and `symbol` keywords, an object type with no call or construct
-    /// signature, an array of those or of `unknown`/`any` (TypeScript does not take `unknown` for a node).
-    Neither,
-    /// `null` or `undefined`: what a component may return, and no evidence alone.
-    Empty,
-    /// Anything that may be a component or an element, or that the extractor does not read (a reference, `unknown`).
-    /// `never` is here: a function that never returns is assignable to every function type, so it proves nothing.
-    Maybe,
-}
-
-fn result_of(ty: &TSType<'_>) -> Returns {
+/// Whether a call's declared result is a type TypeScript cannot assign to `ReactNode`, `ComponentType` or
+/// `ReactElement` under any instantiation, read from the type's own syntax with nothing resolved. This closed list is
+/// the only evidence an assertion gives against a call ([`Evidence::NotRenderable`]): every other type, however it is
+/// spelled, may be a node, an element or a component. One exhaustive match with no catch-all arm, so a new type node
+/// kind in an OXC release does not compile until it is placed. Syntax cannot see a project that augments React's
+/// `DO_NOT_USE_OR_YOU_WILL_BE_FIRED_EXPERIMENTAL_REACT_NODES` with one of these types.
+fn never_renders(ty: &TSType<'_>) -> bool {
     match ty {
-        TSType::TSBigIntKeyword(_)
-        | TSType::TSBooleanKeyword(_)
+        // A non-primitive with no members: no member of `ReactNode` (`ReactElement | string | number | bigint |
+        // Iterable<ReactNode> | ReactPortal | boolean | null | undefined`), not callable, and not an element.
+        TSType::TSObjectKeyword(_) => true,
+        // No member of `ReactNode`, not callable, not an object.
+        TSType::TSSymbolKeyword(_) => true,
+        // Assignable only to `void`, `any` and `unknown`, not even to `undefined`.
+        TSType::TSVoidKeyword(_) => true,
+        // Syntax only: `(object)` is `object`.
+        TSType::TSParenthesizedType(inner) => never_renders(&inner.type_annotation),
+        // A member of `ReactNode` since @types/react 18.3.
+        TSType::TSBigIntKeyword(_) => false,
+        // Members of `ReactNode`, which a component may return.
+        TSType::TSStringKeyword(_)
         | TSType::TSNumberKeyword(_)
-        | TSType::TSStringKeyword(_)
-        | TSType::TSVoidKeyword(_)
+        | TSType::TSBooleanKeyword(_)
+        | TSType::TSNullKeyword(_)
+        | TSType::TSUndefinedKeyword(_)
         | TSType::TSLiteralType(_)
-        | TSType::TSTemplateLiteralType(_)
-        | TSType::TSTypePredicate(_) => Returns::Node,
-        TSType::TSObjectKeyword(_) | TSType::TSSymbolKeyword(_) => Returns::Neither,
-        TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_) => Returns::Empty,
-        TSType::TSParenthesizedType(inner) => result_of(&inner.type_annotation),
-        TSType::TSTypeLiteral(literal) => {
-            let callable = literal.members.iter().any(|signature| match signature {
-                TSSignature::TSCallSignatureDeclaration(_) | TSSignature::TSConstructSignatureDeclaration(_) => true,
-                TSSignature::TSPropertySignature(_)
-                | TSSignature::TSMethodSignature(_)
-                | TSSignature::TSIndexSignature(_) => false,
-            });
-            if callable { Returns::Maybe } else { Returns::Neither }
-        }
-        // `ReactNode[]` and `string[]` render; `unknown[]` does not.
-        TSType::TSArrayType(array) => match (&array.element_type, result_of(&array.element_type)) {
-            (TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_), _) => Returns::Neither,
-            (_, Returns::Maybe) => Returns::Maybe,
-            (_, Returns::Node | Returns::Empty) => Returns::Node,
-            (_, Returns::Neither) => Returns::Neither,
-        },
-        // The value is one of the members: it may render when one does, and is a candidate when one may be. `never`
-        // adds no value to a union (`string | never` is `string`).
-        TSType::TSUnionType(union) => {
-            let mut result = Returns::Empty;
-            for member in union.types.iter().filter(|member| !matches!(member, TSType::TSNeverKeyword(_))) {
-                result = match (result, result_of(member)) {
-                    (Returns::Maybe, _) | (_, Returns::Maybe) => return Returns::Maybe,
-                    (Returns::Node, _) | (_, Returns::Node) => Returns::Node,
-                    (Returns::Neither, _) | (_, Returns::Neither) => Returns::Neither,
-                    (Returns::Empty, Returns::Empty) => Returns::Empty,
-                };
-            }
-            result
-        }
-        TSType::TSAnyKeyword(_)
-        | TSType::TSUnknownKeyword(_)
-        | TSType::TSNeverKeyword(_)
-        | TSType::TSIntrinsicKeyword(_)
-        | TSType::TSThisType(_)
-        | TSType::TSConditionalType(_)
-        | TSType::TSConstructorType(_)
-        | TSType::TSFunctionType(_)
+        | TSType::TSTemplateLiteralType(_) => false,
+        // A type predicate's result is a `boolean`.
+        TSType::TSTypePredicate(_) => false,
+        // `any` and `never` are assignable to every type, and `unknown` only says nothing is known.
+        TSType::TSAnyKeyword(_) | TSType::TSUnknownKeyword(_) | TSType::TSNeverKeyword(_) => false,
+        // `Iterable<ReactNode>` takes an array or tuple of nodes, and an `any[]` is one.
+        TSType::TSArrayType(_) | TSType::TSTupleType(_) | TSType::TSNamedTupleMember(_) => false,
+        // `ReactElement` is an object type (`{ type; props; key }`), and a callable one may be a component.
+        TSType::TSTypeLiteral(_) => false,
+        // A component type.
+        TSType::TSFunctionType(_) | TSType::TSConstructorType(_) => false,
+        // Not read member by member: a member outside this list may render, and an intersection may narrow `object` to
+        // an element (`object & ReactElement`).
+        TSType::TSUnionType(_) | TSType::TSIntersectionType(_) => false,
+        // A type only resolution can see, which may be any of the above.
+        TSType::TSTypeReference(_)
+        | TSType::TSTypeQuery(_)
         | TSType::TSImportType(_)
         | TSType::TSIndexedAccessType(_)
-        | TSType::TSInferType(_)
-        | TSType::TSIntersectionType(_)
+        | TSType::TSConditionalType(_)
         | TSType::TSMappedType(_)
-        | TSType::TSNamedTupleMember(_)
-        | TSType::TSTupleType(_)
+        | TSType::TSInferType(_)
+        | TSType::TSThisType(_)
         | TSType::TSTypeOperatorType(_)
-        | TSType::TSTypeQuery(_)
-        | TSType::TSTypeReference(_)
-        | TSType::JSDocNullableType(_)
-        | TSType::JSDocNonNullableType(_)
-        | TSType::JSDocUnknownType(_) => Returns::Maybe,
+        | TSType::TSIntrinsicKeyword(_) => false,
+        // JSDoc types, which TypeScript reads as `any` or as the type they wrap.
+        TSType::JSDocNullableType(_) | TSType::JSDocNonNullableType(_) | TSType::JSDocUnknownType(_) => false,
     }
 }
 
@@ -816,13 +768,6 @@ pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expr
     peel(&call.callee).named()
 }
 
-/// What a call whose result is rendered invokes, when its name still describes the call: `return (Greeting as (p: P)
-/// => string)(props)` calls `Greeting`, as a component may return a string; `(Object as (v: object) => object)(…)`
-/// calls nothing by a name. See [`Peeled::renderable`].
-pub(super) fn rendered_callee<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
-    peel(&call.callee).renderable()
-}
-
 /// The type arguments a call is made with: its own, or those of the instantiation it calls (`(forwardRef<R, P>)(…)`).
 pub(super) fn call_type_arguments<'a, 'b>(
     call: &'b CallExpression<'a>,
@@ -1017,7 +962,7 @@ impl<'src> SourceDataCollector<'src> {
                     && alias
                         .is_some_and(|alias| alias.means_at(reference.span) && chain_names(&alias.chain, peeled.expr))
             }
-            Evidence::NoComponent | Evidence::NotRenderable | Evidence::Unknown => false,
+            Evidence::NotRenderable | Evidence::Unknown => false,
         }
     }
 

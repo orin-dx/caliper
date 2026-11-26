@@ -35,7 +35,7 @@ pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Sco
     match callee {
         Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), None, scope),
         Expression::StaticMemberExpression(m) => {
-            let receiver = match super::component::peel(&m.object).renderable() {
+            let receiver = match super::component::peel(&m.object).named() {
                 Some(Expression::Identifier(object)) => Some(object.name.as_str()),
                 _ => Some(""),
             };
@@ -150,7 +150,7 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
             || matches!(callee, Some(Expression::StaticMemberExpression(member))
                 if matches!(
-                    super::component::peel(&member.object).renderable(),
+                    super::component::peel(&member.object).named(),
                     Some(Expression::Identifier(id)) if id.name == "Promise"
                 ) && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
@@ -179,7 +179,7 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         // A component invoked directly: `return JoinList({ ... })`. Its result is this function's, which may be a
         // string or a number, so only a cast to a result React cannot render declines it.
         Expression::CallExpression(call)
-            if super::component::rendered_callee(call).and_then(callee_name).is_some_and(super::is_pascal_case) =>
+            if super::component::callee_of(call).and_then(callee_name).is_some_and(super::is_pascal_case) =>
         {
             true
         }

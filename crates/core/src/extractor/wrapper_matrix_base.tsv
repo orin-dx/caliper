@@ -1,0 +1,1586 @@
+memo | plain	Button:Props
+memo | parentheses	Button:Props
+memo | typeof itself	Button:Props
+memo | typeof another	Button:Props
+memo | alias of typeof itself	Button:Props
+memo | unresolved reference	Button:Props
+memo | any	Button:Props
+memo | unknown	Button:Props
+memo | object	Button:Props
+memo | callable literal, FC	Button:Props
+memo | callable literal, object	Button:Props
+memo | callable literal, no result	Button:Props
+memo | function, FC	Button:Props
+memo | function, ReactElement	Button:Props
+memo | function, ReactNode	Button:Props
+memo | function, ReactElement | null	Button:Props
+memo | function, string	Button:Props
+memo | function, string | null	Button:Props
+memo | function, object	Button:Props
+memo | function, object literal	Button:Props
+memo | function, void	Button:Props
+memo | function, unknown	Button:Props
+memo | function, unknown[]	Button:Props
+memo | function, literal	Button:Props
+memo | generic function, FC	Button:Props
+memo | object, then typeof itself	Button:Props
+memo | typeof itself, then object	Button:Props
+memo | unknown, then function object	Button:Props
+memo | function object, then unknown	Button:Props
+memo | satisfies	Button:Props
+memo | non-null	Button:Props
+memo | returns any, function	Button:Props
+memo | returns any, callable literal	Button:Props
+memo | returns any, union	Button:Props
+memo | returns any, intersection	Button:Props
+memo | returns any[], function	Button:Props
+memo | returns any[], callable literal	Button:Props
+memo | returns any[], union	Button:Props
+memo | returns any[], intersection	Button:Props
+memo | returns unknown, function	Button:Props
+memo | returns unknown, callable literal	Button:Props
+memo | returns unknown, union	Button:Props
+memo | returns unknown, intersection	Button:Props
+memo | returns unknown[], function	Button:Props
+memo | returns unknown[], callable literal	Button:Props
+memo | returns unknown[], union	Button:Props
+memo | returns unknown[], intersection	Button:Props
+memo | returns object, function	Button:Props
+memo | returns object, callable literal	Button:Props
+memo | returns object, union	Button:Props
+memo | returns object, intersection	Button:Props
+memo | returns symbol, function	Button:Props
+memo | returns symbol, callable literal	Button:Props
+memo | returns symbol, union	Button:Props
+memo | returns symbol, intersection	Button:Props
+memo | returns void, function	Button:Props
+memo | returns void, callable literal	Button:Props
+memo | returns void, union	Button:Props
+memo | returns void, intersection	Button:Props
+memo | returns never, function	Button:Props
+memo | returns never, callable literal	Button:Props
+memo | returns never, union	Button:Props
+memo | returns never, intersection	Button:Props
+memo | returns string, function	Button:Props
+memo | returns string, callable literal	Button:Props
+memo | returns string, union	Button:Props
+memo | returns string, intersection	Button:Props
+memo | returns number, function	Button:Props
+memo | returns number, callable literal	Button:Props
+memo | returns number, union	Button:Props
+memo | returns number, intersection	Button:Props
+memo | returns null, function	Button:Props
+memo | returns null, callable literal	Button:Props
+memo | returns null, union	Button:Props
+memo | returns null, intersection	Button:Props
+memo | returns boolean, function	Button:Props
+memo | returns boolean, callable literal	Button:Props
+memo | returns boolean, union	Button:Props
+memo | returns boolean, intersection	Button:Props
+memo | returns ReactNode, function	Button:Props
+memo | returns ReactNode, callable literal	Button:Props
+memo | returns ReactNode, union	Button:Props
+memo | returns ReactNode, intersection	Button:Props
+memo | returns ReactElement, function	Button:Props
+memo | returns ReactElement, callable literal	Button:Props
+memo | returns ReactElement, union	Button:Props
+memo | returns ReactElement, intersection	Button:Props
+memo | returns JSX.Element, function	Button:Props
+memo | returns JSX.Element, callable literal	Button:Props
+memo | returns JSX.Element, union	Button:Props
+memo | returns JSX.Element, intersection	Button:Props
+memo | returns FC<P>, function	Button:Props
+memo | returns FC<P>, callable literal	Button:Props
+memo | returns FC<P>, union	Button:Props
+memo | returns FC<P>, intersection	Button:Props
+memo | returns ComponentType<P>, function	Button:Props
+memo | returns ComponentType<P>, callable literal	Button:Props
+memo | returns ComponentType<P>, union	Button:Props
+memo | returns ComponentType<P>, intersection	Button:Props
+memo | returns element-shaped literal, function	Button:Props
+memo | returns element-shaped literal, callable literal	Button:Props
+memo | returns element-shaped literal, union	Button:Props
+memo | returns element-shaped literal, intersection	Button:Props
+memo | returns empty literal, function	Button:Props
+memo | returns empty literal, callable literal	Button:Props
+memo | returns empty literal, union	Button:Props
+memo | returns empty literal, intersection	Button:Props
+memo | returns generic T	Button:Props
+memo | returns indexed access	Button:Props
+memo | returns conditional	Button:Props
+React.memo | plain	Button:Props
+React.memo | parentheses	Button:Props
+React.memo | typeof itself	Button:Props
+React.memo | typeof another	Button:Props
+React.memo | alias of typeof itself	Button:Props
+React.memo | unresolved reference	Button:Props
+React.memo | any	Button:Props
+React.memo | unknown	Button:Props
+React.memo | object	Button:Props
+React.memo | callable literal, FC	Button:Props
+React.memo | callable literal, object	Button:Props
+React.memo | callable literal, no result	Button:Props
+React.memo | function, FC	Button:Props
+React.memo | function, ReactElement	Button:Props
+React.memo | function, ReactNode	Button:Props
+React.memo | function, ReactElement | null	Button:Props
+React.memo | function, string	Button:Props
+React.memo | function, string | null	Button:Props
+React.memo | function, object	Button:Props
+React.memo | function, object literal	Button:Props
+React.memo | function, void	Button:Props
+React.memo | function, unknown	Button:Props
+React.memo | function, unknown[]	Button:Props
+React.memo | function, literal	Button:Props
+React.memo | generic function, FC	Button:Props
+React.memo | object, then typeof itself	Button:Props
+React.memo | typeof itself, then object	Button:Props
+React.memo | unknown, then function object	Button:Props
+React.memo | function object, then unknown	Button:Props
+React.memo | satisfies	Button:Props
+React.memo | non-null	Button:Props
+React.memo | namespace any	Button:Props
+React.memo | namespace object	Button:Props
+React.memo | namespace typeof itself	Button:Props
+React.memo | namespace member typeof itself	Button:Props
+React.memo | namespace member function object	Button:Props
+React.memo | namespace method object	Button:Props
+React.memo | namespace method FC	Button:Props
+React.memo | returns any, function	Button:Props
+React.memo | returns any, callable literal	Button:Props
+React.memo | returns any, union	Button:Props
+React.memo | returns any, intersection	Button:Props
+React.memo | returns any, namespace method	Button:Props
+React.memo | returns any[], function	Button:Props
+React.memo | returns any[], callable literal	Button:Props
+React.memo | returns any[], union	Button:Props
+React.memo | returns any[], intersection	Button:Props
+React.memo | returns any[], namespace method	Button:Props
+React.memo | returns unknown, function	Button:Props
+React.memo | returns unknown, callable literal	Button:Props
+React.memo | returns unknown, union	Button:Props
+React.memo | returns unknown, intersection	Button:Props
+React.memo | returns unknown, namespace method	Button:Props
+React.memo | returns unknown[], function	Button:Props
+React.memo | returns unknown[], callable literal	Button:Props
+React.memo | returns unknown[], union	Button:Props
+React.memo | returns unknown[], intersection	Button:Props
+React.memo | returns unknown[], namespace method	Button:Props
+React.memo | returns object, function	Button:Props
+React.memo | returns object, callable literal	Button:Props
+React.memo | returns object, union	Button:Props
+React.memo | returns object, intersection	Button:Props
+React.memo | returns object, namespace method	Button:Props
+React.memo | returns symbol, function	Button:Props
+React.memo | returns symbol, callable literal	Button:Props
+React.memo | returns symbol, union	Button:Props
+React.memo | returns symbol, intersection	Button:Props
+React.memo | returns symbol, namespace method	Button:Props
+React.memo | returns void, function	Button:Props
+React.memo | returns void, callable literal	Button:Props
+React.memo | returns void, union	Button:Props
+React.memo | returns void, intersection	Button:Props
+React.memo | returns void, namespace method	Button:Props
+React.memo | returns never, function	Button:Props
+React.memo | returns never, callable literal	Button:Props
+React.memo | returns never, union	Button:Props
+React.memo | returns never, intersection	Button:Props
+React.memo | returns never, namespace method	Button:Props
+React.memo | returns string, function	Button:Props
+React.memo | returns string, callable literal	Button:Props
+React.memo | returns string, union	Button:Props
+React.memo | returns string, intersection	Button:Props
+React.memo | returns string, namespace method	Button:Props
+React.memo | returns number, function	Button:Props
+React.memo | returns number, callable literal	Button:Props
+React.memo | returns number, union	Button:Props
+React.memo | returns number, intersection	Button:Props
+React.memo | returns number, namespace method	Button:Props
+React.memo | returns null, function	Button:Props
+React.memo | returns null, callable literal	Button:Props
+React.memo | returns null, union	Button:Props
+React.memo | returns null, intersection	Button:Props
+React.memo | returns null, namespace method	Button:Props
+React.memo | returns boolean, function	Button:Props
+React.memo | returns boolean, callable literal	Button:Props
+React.memo | returns boolean, union	Button:Props
+React.memo | returns boolean, intersection	Button:Props
+React.memo | returns boolean, namespace method	Button:Props
+React.memo | returns ReactNode, function	Button:Props
+React.memo | returns ReactNode, callable literal	Button:Props
+React.memo | returns ReactNode, union	Button:Props
+React.memo | returns ReactNode, intersection	Button:Props
+React.memo | returns ReactNode, namespace method	Button:Props
+React.memo | returns ReactElement, function	Button:Props
+React.memo | returns ReactElement, callable literal	Button:Props
+React.memo | returns ReactElement, union	Button:Props
+React.memo | returns ReactElement, intersection	Button:Props
+React.memo | returns ReactElement, namespace method	Button:Props
+React.memo | returns JSX.Element, function	Button:Props
+React.memo | returns JSX.Element, callable literal	Button:Props
+React.memo | returns JSX.Element, union	Button:Props
+React.memo | returns JSX.Element, intersection	Button:Props
+React.memo | returns JSX.Element, namespace method	Button:Props
+React.memo | returns FC<P>, function	Button:Props
+React.memo | returns FC<P>, callable literal	Button:Props
+React.memo | returns FC<P>, union	Button:Props
+React.memo | returns FC<P>, intersection	Button:Props
+React.memo | returns FC<P>, namespace method	Button:Props
+React.memo | returns ComponentType<P>, function	Button:Props
+React.memo | returns ComponentType<P>, callable literal	Button:Props
+React.memo | returns ComponentType<P>, union	Button:Props
+React.memo | returns ComponentType<P>, intersection	Button:Props
+React.memo | returns ComponentType<P>, namespace method	Button:Props
+React.memo | returns element-shaped literal, function	Button:Props
+React.memo | returns element-shaped literal, callable literal	Button:Props
+React.memo | returns element-shaped literal, union	Button:Props
+React.memo | returns element-shaped literal, intersection	Button:Props
+React.memo | returns element-shaped literal, namespace method	Button:Props
+React.memo | returns empty literal, function	Button:Props
+React.memo | returns empty literal, callable literal	Button:Props
+React.memo | returns empty literal, union	Button:Props
+React.memo | returns empty literal, intersection	Button:Props
+React.memo | returns empty literal, namespace method	Button:Props
+React.memo | returns generic T	Button:Props
+React.memo | returns indexed access	Button:Props
+React.memo | returns conditional	Button:Props
+forwardRef | plain	Button:Props
+forwardRef | parentheses	Button:Props
+forwardRef | typeof itself	Button:Props
+forwardRef | typeof another	Button:Props
+forwardRef | alias of typeof itself	Button:Props
+forwardRef | unresolved reference	Button:Props
+forwardRef | any	Button:Props
+forwardRef | unknown	Button:Props
+forwardRef | object	Button:Props
+forwardRef | callable literal, FC	Button:Props
+forwardRef | callable literal, object	Button:Props
+forwardRef | callable literal, no result	Button:Props
+forwardRef | function, FC	Button:Props
+forwardRef | function, ReactElement	Button:Props
+forwardRef | function, ReactNode	Button:Props
+forwardRef | function, ReactElement | null	Button:Props
+forwardRef | function, string	Button:Props
+forwardRef | function, string | null	Button:Props
+forwardRef | function, object	Button:Props
+forwardRef | function, object literal	Button:Props
+forwardRef | function, void	Button:Props
+forwardRef | function, unknown	Button:Props
+forwardRef | function, unknown[]	Button:Props
+forwardRef | function, literal	Button:Props
+forwardRef | generic function, FC	Button:Props
+forwardRef | object, then typeof itself	Button:Props
+forwardRef | typeof itself, then object	Button:Props
+forwardRef | unknown, then function object	Button:Props
+forwardRef | function object, then unknown	Button:Props
+forwardRef | satisfies	Button:Props
+forwardRef | non-null	Button:Props
+forwardRef | returns any, function	Button:Props
+forwardRef | returns any, callable literal	Button:Props
+forwardRef | returns any, union	Button:Props
+forwardRef | returns any, intersection	Button:Props
+forwardRef | returns any[], function	Button:Props
+forwardRef | returns any[], callable literal	Button:Props
+forwardRef | returns any[], union	Button:Props
+forwardRef | returns any[], intersection	Button:Props
+forwardRef | returns unknown, function	Button:Props
+forwardRef | returns unknown, callable literal	Button:Props
+forwardRef | returns unknown, union	Button:Props
+forwardRef | returns unknown, intersection	Button:Props
+forwardRef | returns unknown[], function	Button:Props
+forwardRef | returns unknown[], callable literal	Button:Props
+forwardRef | returns unknown[], union	Button:Props
+forwardRef | returns unknown[], intersection	Button:Props
+forwardRef | returns object, function	Button:Props
+forwardRef | returns object, callable literal	Button:Props
+forwardRef | returns object, union	Button:Props
+forwardRef | returns object, intersection	Button:Props
+forwardRef | returns symbol, function	Button:Props
+forwardRef | returns symbol, callable literal	Button:Props
+forwardRef | returns symbol, union	Button:Props
+forwardRef | returns symbol, intersection	Button:Props
+forwardRef | returns void, function	Button:Props
+forwardRef | returns void, callable literal	Button:Props
+forwardRef | returns void, union	Button:Props
+forwardRef | returns void, intersection	Button:Props
+forwardRef | returns never, function	Button:Props
+forwardRef | returns never, callable literal	Button:Props
+forwardRef | returns never, union	Button:Props
+forwardRef | returns never, intersection	Button:Props
+forwardRef | returns string, function	Button:Props
+forwardRef | returns string, callable literal	Button:Props
+forwardRef | returns string, union	Button:Props
+forwardRef | returns string, intersection	Button:Props
+forwardRef | returns number, function	Button:Props
+forwardRef | returns number, callable literal	Button:Props
+forwardRef | returns number, union	Button:Props
+forwardRef | returns number, intersection	Button:Props
+forwardRef | returns null, function	Button:Props
+forwardRef | returns null, callable literal	Button:Props
+forwardRef | returns null, union	Button:Props
+forwardRef | returns null, intersection	Button:Props
+forwardRef | returns boolean, function	Button:Props
+forwardRef | returns boolean, callable literal	Button:Props
+forwardRef | returns boolean, union	Button:Props
+forwardRef | returns boolean, intersection	Button:Props
+forwardRef | returns ReactNode, function	Button:Props
+forwardRef | returns ReactNode, callable literal	Button:Props
+forwardRef | returns ReactNode, union	Button:Props
+forwardRef | returns ReactNode, intersection	Button:Props
+forwardRef | returns ReactElement, function	Button:Props
+forwardRef | returns ReactElement, callable literal	Button:Props
+forwardRef | returns ReactElement, union	Button:Props
+forwardRef | returns ReactElement, intersection	Button:Props
+forwardRef | returns JSX.Element, function	Button:Props
+forwardRef | returns JSX.Element, callable literal	Button:Props
+forwardRef | returns JSX.Element, union	Button:Props
+forwardRef | returns JSX.Element, intersection	Button:Props
+forwardRef | returns FC<P>, function	Button:Props
+forwardRef | returns FC<P>, callable literal	Button:Props
+forwardRef | returns FC<P>, union	Button:Props
+forwardRef | returns FC<P>, intersection	Button:Props
+forwardRef | returns ComponentType<P>, function	Button:Props
+forwardRef | returns ComponentType<P>, callable literal	Button:Props
+forwardRef | returns ComponentType<P>, union	Button:Props
+forwardRef | returns ComponentType<P>, intersection	Button:Props
+forwardRef | returns element-shaped literal, function	Button:Props
+forwardRef | returns element-shaped literal, callable literal	Button:Props
+forwardRef | returns element-shaped literal, union	Button:Props
+forwardRef | returns element-shaped literal, intersection	Button:Props
+forwardRef | returns empty literal, function	Button:Props
+forwardRef | returns empty literal, callable literal	Button:Props
+forwardRef | returns empty literal, union	Button:Props
+forwardRef | returns empty literal, intersection	Button:Props
+forwardRef | returns generic T	Button:Props
+forwardRef | returns indexed access	Button:Props
+forwardRef | returns conditional	Button:Props
+React.forwardRef, typed render | plain	Button:Props
+React.forwardRef, typed render | parentheses	Button:Props
+React.forwardRef, typed render | typeof itself	Button:Props
+React.forwardRef, typed render | typeof another	Button:Props
+React.forwardRef, typed render | alias of typeof itself	Button:Props
+React.forwardRef, typed render | unresolved reference	Button:Props
+React.forwardRef, typed render | any	Button:Props
+React.forwardRef, typed render | unknown	Button:Props
+React.forwardRef, typed render | object	Button:Props
+React.forwardRef, typed render | callable literal, FC	Button:Props
+React.forwardRef, typed render | callable literal, object	Button:Props
+React.forwardRef, typed render | callable literal, no result	Button:Props
+React.forwardRef, typed render | function, FC	Button:Props
+React.forwardRef, typed render | function, ReactElement	Button:Props
+React.forwardRef, typed render | function, ReactNode	Button:Props
+React.forwardRef, typed render | function, ReactElement | null	Button:Props
+React.forwardRef, typed render | function, string	Button:Props
+React.forwardRef, typed render | function, string | null	Button:Props
+React.forwardRef, typed render | function, object	Button:Props
+React.forwardRef, typed render | function, object literal	Button:Props
+React.forwardRef, typed render | function, void	Button:Props
+React.forwardRef, typed render | function, unknown	Button:Props
+React.forwardRef, typed render | function, unknown[]	Button:Props
+React.forwardRef, typed render | function, literal	Button:Props
+React.forwardRef, typed render | generic function, FC	Button:Props
+React.forwardRef, typed render | object, then typeof itself	Button:Props
+React.forwardRef, typed render | typeof itself, then object	Button:Props
+React.forwardRef, typed render | unknown, then function object	Button:Props
+React.forwardRef, typed render | function object, then unknown	Button:Props
+React.forwardRef, typed render | satisfies	Button:Props
+React.forwardRef, typed render | non-null	Button:Props
+React.forwardRef, typed render | namespace any	Button:Props
+React.forwardRef, typed render | namespace object	Button:Props
+React.forwardRef, typed render | namespace typeof itself	Button:Props
+React.forwardRef, typed render | namespace member typeof itself	Button:Props
+React.forwardRef, typed render | namespace member function object	Button:Props
+React.forwardRef, typed render | namespace method object	Button:Props
+React.forwardRef, typed render | namespace method FC	Button:Props
+React.forwardRef, typed render | returns any, function	Button:Props
+React.forwardRef, typed render | returns any, callable literal	Button:Props
+React.forwardRef, typed render | returns any, union	Button:Props
+React.forwardRef, typed render | returns any, intersection	Button:Props
+React.forwardRef, typed render | returns any, namespace method	Button:Props
+React.forwardRef, typed render | returns any[], function	Button:Props
+React.forwardRef, typed render | returns any[], callable literal	Button:Props
+React.forwardRef, typed render | returns any[], union	Button:Props
+React.forwardRef, typed render | returns any[], intersection	Button:Props
+React.forwardRef, typed render | returns any[], namespace method	Button:Props
+React.forwardRef, typed render | returns unknown, function	Button:Props
+React.forwardRef, typed render | returns unknown, callable literal	Button:Props
+React.forwardRef, typed render | returns unknown, union	Button:Props
+React.forwardRef, typed render | returns unknown, intersection	Button:Props
+React.forwardRef, typed render | returns unknown, namespace method	Button:Props
+React.forwardRef, typed render | returns unknown[], function	Button:Props
+React.forwardRef, typed render | returns unknown[], callable literal	Button:Props
+React.forwardRef, typed render | returns unknown[], union	Button:Props
+React.forwardRef, typed render | returns unknown[], intersection	Button:Props
+React.forwardRef, typed render | returns unknown[], namespace method	Button:Props
+React.forwardRef, typed render | returns object, function	Button:Props
+React.forwardRef, typed render | returns object, callable literal	Button:Props
+React.forwardRef, typed render | returns object, union	Button:Props
+React.forwardRef, typed render | returns object, intersection	Button:Props
+React.forwardRef, typed render | returns object, namespace method	Button:Props
+React.forwardRef, typed render | returns symbol, function	Button:Props
+React.forwardRef, typed render | returns symbol, callable literal	Button:Props
+React.forwardRef, typed render | returns symbol, union	Button:Props
+React.forwardRef, typed render | returns symbol, intersection	Button:Props
+React.forwardRef, typed render | returns symbol, namespace method	Button:Props
+React.forwardRef, typed render | returns void, function	Button:Props
+React.forwardRef, typed render | returns void, callable literal	Button:Props
+React.forwardRef, typed render | returns void, union	Button:Props
+React.forwardRef, typed render | returns void, intersection	Button:Props
+React.forwardRef, typed render | returns void, namespace method	Button:Props
+React.forwardRef, typed render | returns never, function	Button:Props
+React.forwardRef, typed render | returns never, callable literal	Button:Props
+React.forwardRef, typed render | returns never, union	Button:Props
+React.forwardRef, typed render | returns never, intersection	Button:Props
+React.forwardRef, typed render | returns never, namespace method	Button:Props
+React.forwardRef, typed render | returns string, function	Button:Props
+React.forwardRef, typed render | returns string, callable literal	Button:Props
+React.forwardRef, typed render | returns string, union	Button:Props
+React.forwardRef, typed render | returns string, intersection	Button:Props
+React.forwardRef, typed render | returns string, namespace method	Button:Props
+React.forwardRef, typed render | returns number, function	Button:Props
+React.forwardRef, typed render | returns number, callable literal	Button:Props
+React.forwardRef, typed render | returns number, union	Button:Props
+React.forwardRef, typed render | returns number, intersection	Button:Props
+React.forwardRef, typed render | returns number, namespace method	Button:Props
+React.forwardRef, typed render | returns null, function	Button:Props
+React.forwardRef, typed render | returns null, callable literal	Button:Props
+React.forwardRef, typed render | returns null, union	Button:Props
+React.forwardRef, typed render | returns null, intersection	Button:Props
+React.forwardRef, typed render | returns null, namespace method	Button:Props
+React.forwardRef, typed render | returns boolean, function	Button:Props
+React.forwardRef, typed render | returns boolean, callable literal	Button:Props
+React.forwardRef, typed render | returns boolean, union	Button:Props
+React.forwardRef, typed render | returns boolean, intersection	Button:Props
+React.forwardRef, typed render | returns boolean, namespace method	Button:Props
+React.forwardRef, typed render | returns ReactNode, function	Button:Props
+React.forwardRef, typed render | returns ReactNode, callable literal	Button:Props
+React.forwardRef, typed render | returns ReactNode, union	Button:Props
+React.forwardRef, typed render | returns ReactNode, intersection	Button:Props
+React.forwardRef, typed render | returns ReactNode, namespace method	Button:Props
+React.forwardRef, typed render | returns ReactElement, function	Button:Props
+React.forwardRef, typed render | returns ReactElement, callable literal	Button:Props
+React.forwardRef, typed render | returns ReactElement, union	Button:Props
+React.forwardRef, typed render | returns ReactElement, intersection	Button:Props
+React.forwardRef, typed render | returns ReactElement, namespace method	Button:Props
+React.forwardRef, typed render | returns JSX.Element, function	Button:Props
+React.forwardRef, typed render | returns JSX.Element, callable literal	Button:Props
+React.forwardRef, typed render | returns JSX.Element, union	Button:Props
+React.forwardRef, typed render | returns JSX.Element, intersection	Button:Props
+React.forwardRef, typed render | returns JSX.Element, namespace method	Button:Props
+React.forwardRef, typed render | returns FC<P>, function	Button:Props
+React.forwardRef, typed render | returns FC<P>, callable literal	Button:Props
+React.forwardRef, typed render | returns FC<P>, union	Button:Props
+React.forwardRef, typed render | returns FC<P>, intersection	Button:Props
+React.forwardRef, typed render | returns FC<P>, namespace method	Button:Props
+React.forwardRef, typed render | returns ComponentType<P>, function	Button:Props
+React.forwardRef, typed render | returns ComponentType<P>, callable literal	Button:Props
+React.forwardRef, typed render | returns ComponentType<P>, union	Button:Props
+React.forwardRef, typed render | returns ComponentType<P>, intersection	Button:Props
+React.forwardRef, typed render | returns ComponentType<P>, namespace method	Button:Props
+React.forwardRef, typed render | returns element-shaped literal, function	Button:Props
+React.forwardRef, typed render | returns element-shaped literal, callable literal	Button:Props
+React.forwardRef, typed render | returns element-shaped literal, union	Button:Props
+React.forwardRef, typed render | returns element-shaped literal, intersection	Button:Props
+React.forwardRef, typed render | returns element-shaped literal, namespace method	Button:Props
+React.forwardRef, typed render | returns empty literal, function	Button:Props
+React.forwardRef, typed render | returns empty literal, callable literal	Button:Props
+React.forwardRef, typed render | returns empty literal, union	Button:Props
+React.forwardRef, typed render | returns empty literal, intersection	Button:Props
+React.forwardRef, typed render | returns empty literal, namespace method	Button:Props
+React.forwardRef, typed render | returns generic T	Button:Props
+React.forwardRef, typed render | returns indexed access	Button:Props
+React.forwardRef, typed render | returns conditional	Button:Props
+wrapper call | plain	Button:Props
+wrapper call | parentheses	Button:Props
+wrapper call | typeof itself	Button:Props
+wrapper call | typeof another	Button:Props
+wrapper call | alias of typeof itself	Button:Props
+wrapper call | unresolved reference	Button:Props
+wrapper call | any	Button:Props
+wrapper call | unknown	Button:Props
+wrapper call | object	Button:Props
+wrapper call | callable literal, FC	Button:Props
+wrapper call | callable literal, object	Button:Props
+wrapper call | callable literal, no result	Button:Props
+wrapper call | function, FC	Button:Props
+wrapper call | function, ReactElement	Button:Props
+wrapper call | function, ReactNode	Button:Props
+wrapper call | function, ReactElement | null	Button:Props
+wrapper call | function, string	Button:Props
+wrapper call | function, string | null	Button:Props
+wrapper call | function, object	Button:Props
+wrapper call | function, object literal	Button:Props
+wrapper call | function, void	Button:Props
+wrapper call | function, unknown	Button:Props
+wrapper call | function, unknown[]	Button:Props
+wrapper call | function, literal	Button:Props
+wrapper call | generic function, FC	Button:Props
+wrapper call | object, then typeof itself	Button:Props
+wrapper call | typeof itself, then object	Button:Props
+wrapper call | unknown, then function object	Button:Props
+wrapper call | function object, then unknown	Button:Props
+wrapper call | satisfies	Button:Props
+wrapper call | non-null	Button:Props
+wrapper call | returns any, function	Button:Props
+wrapper call | returns any, callable literal	Button:Props
+wrapper call | returns any, union	Button:Props
+wrapper call | returns any, intersection	Button:Props
+wrapper call | returns any[], function	Button:Props
+wrapper call | returns any[], callable literal	Button:Props
+wrapper call | returns any[], union	Button:Props
+wrapper call | returns any[], intersection	Button:Props
+wrapper call | returns unknown, function	Button:Props
+wrapper call | returns unknown, callable literal	Button:Props
+wrapper call | returns unknown, union	Button:Props
+wrapper call | returns unknown, intersection	Button:Props
+wrapper call | returns unknown[], function	Button:Props
+wrapper call | returns unknown[], callable literal	Button:Props
+wrapper call | returns unknown[], union	Button:Props
+wrapper call | returns unknown[], intersection	Button:Props
+wrapper call | returns object, function	Button:Props
+wrapper call | returns object, callable literal	Button:Props
+wrapper call | returns object, union	Button:Props
+wrapper call | returns object, intersection	Button:Props
+wrapper call | returns symbol, function	Button:Props
+wrapper call | returns symbol, callable literal	Button:Props
+wrapper call | returns symbol, union	Button:Props
+wrapper call | returns symbol, intersection	Button:Props
+wrapper call | returns void, function	Button:Props
+wrapper call | returns void, callable literal	Button:Props
+wrapper call | returns void, union	Button:Props
+wrapper call | returns void, intersection	Button:Props
+wrapper call | returns never, function	Button:Props
+wrapper call | returns never, callable literal	Button:Props
+wrapper call | returns never, union	Button:Props
+wrapper call | returns never, intersection	Button:Props
+wrapper call | returns string, function	Button:Props
+wrapper call | returns string, callable literal	Button:Props
+wrapper call | returns string, union	Button:Props
+wrapper call | returns string, intersection	Button:Props
+wrapper call | returns number, function	Button:Props
+wrapper call | returns number, callable literal	Button:Props
+wrapper call | returns number, union	Button:Props
+wrapper call | returns number, intersection	Button:Props
+wrapper call | returns null, function	Button:Props
+wrapper call | returns null, callable literal	Button:Props
+wrapper call | returns null, union	Button:Props
+wrapper call | returns null, intersection	Button:Props
+wrapper call | returns boolean, function	Button:Props
+wrapper call | returns boolean, callable literal	Button:Props
+wrapper call | returns boolean, union	Button:Props
+wrapper call | returns boolean, intersection	Button:Props
+wrapper call | returns ReactNode, function	Button:Props
+wrapper call | returns ReactNode, callable literal	Button:Props
+wrapper call | returns ReactNode, union	Button:Props
+wrapper call | returns ReactNode, intersection	Button:Props
+wrapper call | returns ReactElement, function	Button:Props
+wrapper call | returns ReactElement, callable literal	Button:Props
+wrapper call | returns ReactElement, union	Button:Props
+wrapper call | returns ReactElement, intersection	Button:Props
+wrapper call | returns JSX.Element, function	Button:Props
+wrapper call | returns JSX.Element, callable literal	Button:Props
+wrapper call | returns JSX.Element, union	Button:Props
+wrapper call | returns JSX.Element, intersection	Button:Props
+wrapper call | returns FC<P>, function	Button:Props
+wrapper call | returns FC<P>, callable literal	Button:Props
+wrapper call | returns FC<P>, union	Button:Props
+wrapper call | returns FC<P>, intersection	Button:Props
+wrapper call | returns ComponentType<P>, function	Button:Props
+wrapper call | returns ComponentType<P>, callable literal	Button:Props
+wrapper call | returns ComponentType<P>, union	Button:Props
+wrapper call | returns ComponentType<P>, intersection	Button:Props
+wrapper call | returns element-shaped literal, function	Button:Props
+wrapper call | returns element-shaped literal, callable literal	Button:Props
+wrapper call | returns element-shaped literal, union	Button:Props
+wrapper call | returns element-shaped literal, intersection	Button:Props
+wrapper call | returns empty literal, function	Button:Props
+wrapper call | returns empty literal, callable literal	Button:Props
+wrapper call | returns empty literal, union	Button:Props
+wrapper call | returns empty literal, intersection	Button:Props
+wrapper call | returns generic T	Button:Props
+wrapper call | returns indexed access	Button:Props
+wrapper call | returns conditional	Button:Props
+Object.assign | plain	Item:ItemProps Root:Props
+Object.assign | parentheses	Item:ItemProps Root:Props
+Object.assign | typeof itself	Impl:Props
+Object.assign | typeof another	Impl:Props
+Object.assign | alias of typeof itself	Impl:Props
+Object.assign | unresolved reference	Impl:Props
+Object.assign | any	Impl:Props
+Object.assign | unknown	Impl:Props
+Object.assign | object	Impl:Props
+Object.assign | callable literal, FC	Impl:Props
+Object.assign | callable literal, object	Impl:Props
+Object.assign | callable literal, no result	Impl:Props
+Object.assign | function, FC	Impl:Props
+Object.assign | function, ReactElement	Impl:Props
+Object.assign | function, ReactNode	Impl:Props
+Object.assign | function, ReactElement | null	Impl:Props
+Object.assign | function, string	Impl:Props
+Object.assign | function, string | null	Impl:Props
+Object.assign | function, object	Impl:Props
+Object.assign | function, object literal	Impl:Props
+Object.assign | function, void	Impl:Props
+Object.assign | function, unknown	Impl:Props
+Object.assign | function, unknown[]	Impl:Props
+Object.assign | function, literal	Impl:Props
+Object.assign | generic function, FC	Impl:Props
+Object.assign | object, then typeof itself	Impl:Props
+Object.assign | typeof itself, then object	Impl:Props
+Object.assign | unknown, then function object	Impl:Props
+Object.assign | function object, then unknown	Impl:Props
+Object.assign | satisfies	Impl:Props
+Object.assign | non-null	Impl:Props
+Object.assign | namespace any	Impl:Props
+Object.assign | namespace object	Impl:Props
+Object.assign | namespace typeof itself	Impl:Props
+Object.assign | namespace member typeof itself	Impl:Props
+Object.assign | namespace member function object	Impl:Props
+Object.assign | namespace method object	Impl:Props
+Object.assign | namespace method FC	Impl:Props
+Object.assign | returns any, function	Impl:Props
+Object.assign | returns any, callable literal	Impl:Props
+Object.assign | returns any, union	Impl:Props
+Object.assign | returns any, intersection	Impl:Props
+Object.assign | returns any, namespace method	Impl:Props
+Object.assign | returns any[], function	Impl:Props
+Object.assign | returns any[], callable literal	Impl:Props
+Object.assign | returns any[], union	Impl:Props
+Object.assign | returns any[], intersection	Impl:Props
+Object.assign | returns any[], namespace method	Impl:Props
+Object.assign | returns unknown, function	Impl:Props
+Object.assign | returns unknown, callable literal	Impl:Props
+Object.assign | returns unknown, union	Impl:Props
+Object.assign | returns unknown, intersection	Impl:Props
+Object.assign | returns unknown, namespace method	Impl:Props
+Object.assign | returns unknown[], function	Impl:Props
+Object.assign | returns unknown[], callable literal	Impl:Props
+Object.assign | returns unknown[], union	Impl:Props
+Object.assign | returns unknown[], intersection	Impl:Props
+Object.assign | returns unknown[], namespace method	Impl:Props
+Object.assign | returns object, function	Impl:Props
+Object.assign | returns object, callable literal	Impl:Props
+Object.assign | returns object, union	Impl:Props
+Object.assign | returns object, intersection	Impl:Props
+Object.assign | returns object, namespace method	Impl:Props
+Object.assign | returns symbol, function	Impl:Props
+Object.assign | returns symbol, callable literal	Impl:Props
+Object.assign | returns symbol, union	Impl:Props
+Object.assign | returns symbol, intersection	Impl:Props
+Object.assign | returns symbol, namespace method	Impl:Props
+Object.assign | returns void, function	Impl:Props
+Object.assign | returns void, callable literal	Impl:Props
+Object.assign | returns void, union	Impl:Props
+Object.assign | returns void, intersection	Impl:Props
+Object.assign | returns void, namespace method	Impl:Props
+Object.assign | returns never, function	Impl:Props
+Object.assign | returns never, callable literal	Impl:Props
+Object.assign | returns never, union	Impl:Props
+Object.assign | returns never, intersection	Impl:Props
+Object.assign | returns never, namespace method	Impl:Props
+Object.assign | returns string, function	Impl:Props
+Object.assign | returns string, callable literal	Impl:Props
+Object.assign | returns string, union	Impl:Props
+Object.assign | returns string, intersection	Impl:Props
+Object.assign | returns string, namespace method	Impl:Props
+Object.assign | returns number, function	Impl:Props
+Object.assign | returns number, callable literal	Impl:Props
+Object.assign | returns number, union	Impl:Props
+Object.assign | returns number, intersection	Impl:Props
+Object.assign | returns number, namespace method	Impl:Props
+Object.assign | returns null, function	Impl:Props
+Object.assign | returns null, callable literal	Impl:Props
+Object.assign | returns null, union	Impl:Props
+Object.assign | returns null, intersection	Impl:Props
+Object.assign | returns null, namespace method	Impl:Props
+Object.assign | returns boolean, function	Impl:Props
+Object.assign | returns boolean, callable literal	Impl:Props
+Object.assign | returns boolean, union	Impl:Props
+Object.assign | returns boolean, intersection	Impl:Props
+Object.assign | returns boolean, namespace method	Impl:Props
+Object.assign | returns ReactNode, function	Impl:Props
+Object.assign | returns ReactNode, callable literal	Impl:Props
+Object.assign | returns ReactNode, union	Impl:Props
+Object.assign | returns ReactNode, intersection	Impl:Props
+Object.assign | returns ReactNode, namespace method	Impl:Props
+Object.assign | returns ReactElement, function	Impl:Props
+Object.assign | returns ReactElement, callable literal	Impl:Props
+Object.assign | returns ReactElement, union	Impl:Props
+Object.assign | returns ReactElement, intersection	Impl:Props
+Object.assign | returns ReactElement, namespace method	Impl:Props
+Object.assign | returns JSX.Element, function	Impl:Props
+Object.assign | returns JSX.Element, callable literal	Impl:Props
+Object.assign | returns JSX.Element, union	Impl:Props
+Object.assign | returns JSX.Element, intersection	Impl:Props
+Object.assign | returns JSX.Element, namespace method	Impl:Props
+Object.assign | returns FC<P>, function	Impl:Props
+Object.assign | returns FC<P>, callable literal	Impl:Props
+Object.assign | returns FC<P>, union	Impl:Props
+Object.assign | returns FC<P>, intersection	Impl:Props
+Object.assign | returns FC<P>, namespace method	Impl:Props
+Object.assign | returns ComponentType<P>, function	Impl:Props
+Object.assign | returns ComponentType<P>, callable literal	Impl:Props
+Object.assign | returns ComponentType<P>, union	Impl:Props
+Object.assign | returns ComponentType<P>, intersection	Impl:Props
+Object.assign | returns ComponentType<P>, namespace method	Impl:Props
+Object.assign | returns element-shaped literal, function	Impl:Props
+Object.assign | returns element-shaped literal, callable literal	Impl:Props
+Object.assign | returns element-shaped literal, union	Impl:Props
+Object.assign | returns element-shaped literal, intersection	Impl:Props
+Object.assign | returns element-shaped literal, namespace method	Impl:Props
+Object.assign | returns empty literal, function	Impl:Props
+Object.assign | returns empty literal, callable literal	Impl:Props
+Object.assign | returns empty literal, union	Impl:Props
+Object.assign | returns empty literal, intersection	Impl:Props
+Object.assign | returns empty literal, namespace method	Impl:Props
+Object.assign | returns generic T	Impl:Props
+Object.assign | returns indexed access	Impl:Props
+Object.assign | returns conditional	Impl:Props
+PascalCase call returned | plain	Normalize:Props
+PascalCase call returned | parentheses	Normalize:Props
+PascalCase call returned | typeof itself	-
+PascalCase call returned | typeof another	-
+PascalCase call returned | alias of typeof itself	-
+PascalCase call returned | unresolved reference	-
+PascalCase call returned | any	-
+PascalCase call returned | unknown	-
+PascalCase call returned | object	-
+PascalCase call returned | callable literal, FC	-
+PascalCase call returned | callable literal, object	-
+PascalCase call returned | callable literal, no result	-
+PascalCase call returned | function, FC	-
+PascalCase call returned | function, ReactElement	-
+PascalCase call returned | function, ReactNode	-
+PascalCase call returned | function, ReactElement | null	-
+PascalCase call returned | function, string	-
+PascalCase call returned | function, string | null	-
+PascalCase call returned | function, object	-
+PascalCase call returned | function, object literal	-
+PascalCase call returned | function, void	-
+PascalCase call returned | function, unknown	-
+PascalCase call returned | function, unknown[]	-
+PascalCase call returned | function, literal	-
+PascalCase call returned | generic function, FC	-
+PascalCase call returned | object, then typeof itself	-
+PascalCase call returned | typeof itself, then object	-
+PascalCase call returned | unknown, then function object	-
+PascalCase call returned | function object, then unknown	-
+PascalCase call returned | satisfies	-
+PascalCase call returned | non-null	-
+PascalCase call returned | returns any, function	-
+PascalCase call returned | returns any, callable literal	-
+PascalCase call returned | returns any, union	-
+PascalCase call returned | returns any, intersection	-
+PascalCase call returned | returns any[], function	-
+PascalCase call returned | returns any[], callable literal	-
+PascalCase call returned | returns any[], union	-
+PascalCase call returned | returns any[], intersection	-
+PascalCase call returned | returns unknown, function	-
+PascalCase call returned | returns unknown, callable literal	-
+PascalCase call returned | returns unknown, union	-
+PascalCase call returned | returns unknown, intersection	-
+PascalCase call returned | returns unknown[], function	-
+PascalCase call returned | returns unknown[], callable literal	-
+PascalCase call returned | returns unknown[], union	-
+PascalCase call returned | returns unknown[], intersection	-
+PascalCase call returned | returns object, function	-
+PascalCase call returned | returns object, callable literal	-
+PascalCase call returned | returns object, union	-
+PascalCase call returned | returns object, intersection	-
+PascalCase call returned | returns symbol, function	-
+PascalCase call returned | returns symbol, callable literal	-
+PascalCase call returned | returns symbol, union	-
+PascalCase call returned | returns symbol, intersection	-
+PascalCase call returned | returns void, function	-
+PascalCase call returned | returns void, callable literal	-
+PascalCase call returned | returns void, union	-
+PascalCase call returned | returns void, intersection	-
+PascalCase call returned | returns never, function	-
+PascalCase call returned | returns never, callable literal	-
+PascalCase call returned | returns never, union	-
+PascalCase call returned | returns never, intersection	-
+PascalCase call returned | returns string, function	-
+PascalCase call returned | returns string, callable literal	-
+PascalCase call returned | returns string, union	-
+PascalCase call returned | returns string, intersection	-
+PascalCase call returned | returns number, function	-
+PascalCase call returned | returns number, callable literal	-
+PascalCase call returned | returns number, union	-
+PascalCase call returned | returns number, intersection	-
+PascalCase call returned | returns null, function	-
+PascalCase call returned | returns null, callable literal	-
+PascalCase call returned | returns null, union	-
+PascalCase call returned | returns null, intersection	-
+PascalCase call returned | returns boolean, function	-
+PascalCase call returned | returns boolean, callable literal	-
+PascalCase call returned | returns boolean, union	-
+PascalCase call returned | returns boolean, intersection	-
+PascalCase call returned | returns ReactNode, function	-
+PascalCase call returned | returns ReactNode, callable literal	-
+PascalCase call returned | returns ReactNode, union	-
+PascalCase call returned | returns ReactNode, intersection	-
+PascalCase call returned | returns ReactElement, function	-
+PascalCase call returned | returns ReactElement, callable literal	-
+PascalCase call returned | returns ReactElement, union	-
+PascalCase call returned | returns ReactElement, intersection	-
+PascalCase call returned | returns JSX.Element, function	-
+PascalCase call returned | returns JSX.Element, callable literal	-
+PascalCase call returned | returns JSX.Element, union	-
+PascalCase call returned | returns JSX.Element, intersection	-
+PascalCase call returned | returns FC<P>, function	-
+PascalCase call returned | returns FC<P>, callable literal	-
+PascalCase call returned | returns FC<P>, union	-
+PascalCase call returned | returns FC<P>, intersection	-
+PascalCase call returned | returns ComponentType<P>, function	-
+PascalCase call returned | returns ComponentType<P>, callable literal	-
+PascalCase call returned | returns ComponentType<P>, union	-
+PascalCase call returned | returns ComponentType<P>, intersection	-
+PascalCase call returned | returns element-shaped literal, function	-
+PascalCase call returned | returns element-shaped literal, callable literal	-
+PascalCase call returned | returns element-shaped literal, union	-
+PascalCase call returned | returns element-shaped literal, intersection	-
+PascalCase call returned | returns empty literal, function	-
+PascalCase call returned | returns empty literal, callable literal	-
+PascalCase call returned | returns empty literal, union	-
+PascalCase call returned | returns empty literal, intersection	-
+PascalCase call returned | returns generic T	-
+PascalCase call returned | returns indexed access	-
+PascalCase call returned | returns conditional	-
+element factory | plain	Button:Props
+element factory | parentheses	Button:Props
+element factory | typeof itself	-
+element factory | typeof another	-
+element factory | alias of typeof itself	-
+element factory | unresolved reference	-
+element factory | any	-
+element factory | unknown	-
+element factory | object	-
+element factory | callable literal, FC	-
+element factory | callable literal, object	-
+element factory | callable literal, no result	-
+element factory | function, FC	-
+element factory | function, ReactElement	-
+element factory | function, ReactNode	-
+element factory | function, ReactElement | null	-
+element factory | function, string	-
+element factory | function, string | null	-
+element factory | function, object	-
+element factory | function, object literal	-
+element factory | function, void	-
+element factory | function, unknown	-
+element factory | function, unknown[]	-
+element factory | function, literal	-
+element factory | generic function, FC	-
+element factory | object, then typeof itself	-
+element factory | typeof itself, then object	-
+element factory | unknown, then function object	-
+element factory | function object, then unknown	-
+element factory | satisfies	-
+element factory | non-null	-
+element factory | namespace any	Button:Props
+element factory | namespace object	Button:Props
+element factory | namespace typeof itself	Button:Props
+element factory | namespace member typeof itself	Button:Props
+element factory | namespace member function object	Button:Props
+element factory | namespace method object	Button:Props
+element factory | namespace method FC	Button:Props
+element factory | returns any, function	-
+element factory | returns any, callable literal	-
+element factory | returns any, union	-
+element factory | returns any, intersection	-
+element factory | returns any, namespace method	Button:Props
+element factory | returns any[], function	-
+element factory | returns any[], callable literal	-
+element factory | returns any[], union	-
+element factory | returns any[], intersection	-
+element factory | returns any[], namespace method	Button:Props
+element factory | returns unknown, function	-
+element factory | returns unknown, callable literal	-
+element factory | returns unknown, union	-
+element factory | returns unknown, intersection	-
+element factory | returns unknown, namespace method	Button:Props
+element factory | returns unknown[], function	-
+element factory | returns unknown[], callable literal	-
+element factory | returns unknown[], union	-
+element factory | returns unknown[], intersection	-
+element factory | returns unknown[], namespace method	Button:Props
+element factory | returns object, function	-
+element factory | returns object, callable literal	-
+element factory | returns object, union	-
+element factory | returns object, intersection	-
+element factory | returns object, namespace method	Button:Props
+element factory | returns symbol, function	-
+element factory | returns symbol, callable literal	-
+element factory | returns symbol, union	-
+element factory | returns symbol, intersection	-
+element factory | returns symbol, namespace method	Button:Props
+element factory | returns void, function	-
+element factory | returns void, callable literal	-
+element factory | returns void, union	-
+element factory | returns void, intersection	-
+element factory | returns void, namespace method	Button:Props
+element factory | returns never, function	-
+element factory | returns never, callable literal	-
+element factory | returns never, union	-
+element factory | returns never, intersection	-
+element factory | returns never, namespace method	Button:Props
+element factory | returns string, function	-
+element factory | returns string, callable literal	-
+element factory | returns string, union	-
+element factory | returns string, intersection	-
+element factory | returns string, namespace method	Button:Props
+element factory | returns number, function	-
+element factory | returns number, callable literal	-
+element factory | returns number, union	-
+element factory | returns number, intersection	-
+element factory | returns number, namespace method	Button:Props
+element factory | returns null, function	-
+element factory | returns null, callable literal	-
+element factory | returns null, union	-
+element factory | returns null, intersection	-
+element factory | returns null, namespace method	Button:Props
+element factory | returns boolean, function	-
+element factory | returns boolean, callable literal	-
+element factory | returns boolean, union	-
+element factory | returns boolean, intersection	-
+element factory | returns boolean, namespace method	Button:Props
+element factory | returns ReactNode, function	-
+element factory | returns ReactNode, callable literal	-
+element factory | returns ReactNode, union	-
+element factory | returns ReactNode, intersection	-
+element factory | returns ReactNode, namespace method	Button:Props
+element factory | returns ReactElement, function	-
+element factory | returns ReactElement, callable literal	-
+element factory | returns ReactElement, union	-
+element factory | returns ReactElement, intersection	-
+element factory | returns ReactElement, namespace method	Button:Props
+element factory | returns JSX.Element, function	-
+element factory | returns JSX.Element, callable literal	-
+element factory | returns JSX.Element, union	-
+element factory | returns JSX.Element, intersection	-
+element factory | returns JSX.Element, namespace method	Button:Props
+element factory | returns FC<P>, function	-
+element factory | returns FC<P>, callable literal	-
+element factory | returns FC<P>, union	-
+element factory | returns FC<P>, intersection	-
+element factory | returns FC<P>, namespace method	Button:Props
+element factory | returns ComponentType<P>, function	-
+element factory | returns ComponentType<P>, callable literal	-
+element factory | returns ComponentType<P>, union	-
+element factory | returns ComponentType<P>, intersection	-
+element factory | returns ComponentType<P>, namespace method	Button:Props
+element factory | returns element-shaped literal, function	-
+element factory | returns element-shaped literal, callable literal	-
+element factory | returns element-shaped literal, union	-
+element factory | returns element-shaped literal, intersection	-
+element factory | returns element-shaped literal, namespace method	Button:Props
+element factory | returns empty literal, function	-
+element factory | returns empty literal, callable literal	-
+element factory | returns empty literal, union	-
+element factory | returns empty literal, intersection	-
+element factory | returns empty literal, namespace method	Button:Props
+element factory | returns generic T	-
+element factory | returns indexed access	-
+element factory | returns conditional	-
+factory | plain	Button:createButton
+factory | parentheses	Button:createButton
+factory | typeof itself	Button:createButton
+factory | typeof another	Button:createButton
+factory | alias of typeof itself	Button:createButton
+factory | unresolved reference	Button:createButton
+factory | any	Button:createButton
+factory | unknown	Button:createButton
+factory | object	Button:createButton
+factory | callable literal, FC	Button:createButton
+factory | callable literal, object	Button:createButton
+factory | callable literal, no result	Button:createButton
+factory | function, FC	Button:createButton
+factory | function, ReactElement	Button:createButton
+factory | function, ReactNode	Button:createButton
+factory | function, ReactElement | null	Button:createButton
+factory | function, string	Button:createButton
+factory | function, string | null	Button:createButton
+factory | function, object	Button:createButton
+factory | function, object literal	Button:createButton
+factory | function, void	Button:createButton
+factory | function, unknown	Button:createButton
+factory | function, unknown[]	Button:createButton
+factory | function, literal	Button:createButton
+factory | generic function, FC	Button:createButton
+factory | object, then typeof itself	Button:createButton
+factory | typeof itself, then object	Button:createButton
+factory | unknown, then function object	Button:createButton
+factory | function object, then unknown	Button:createButton
+factory | satisfies	Button:createButton
+factory | non-null	Button:createButton
+factory | returns any, function	Button:createButton
+factory | returns any, callable literal	Button:createButton
+factory | returns any, union	Button:createButton
+factory | returns any, intersection	Button:createButton
+factory | returns any[], function	Button:createButton
+factory | returns any[], callable literal	Button:createButton
+factory | returns any[], union	Button:createButton
+factory | returns any[], intersection	Button:createButton
+factory | returns unknown, function	Button:createButton
+factory | returns unknown, callable literal	Button:createButton
+factory | returns unknown, union	Button:createButton
+factory | returns unknown, intersection	Button:createButton
+factory | returns unknown[], function	Button:createButton
+factory | returns unknown[], callable literal	Button:createButton
+factory | returns unknown[], union	Button:createButton
+factory | returns unknown[], intersection	Button:createButton
+factory | returns object, function	Button:createButton
+factory | returns object, callable literal	Button:createButton
+factory | returns object, union	Button:createButton
+factory | returns object, intersection	Button:createButton
+factory | returns symbol, function	Button:createButton
+factory | returns symbol, callable literal	Button:createButton
+factory | returns symbol, union	Button:createButton
+factory | returns symbol, intersection	Button:createButton
+factory | returns void, function	Button:createButton
+factory | returns void, callable literal	Button:createButton
+factory | returns void, union	Button:createButton
+factory | returns void, intersection	Button:createButton
+factory | returns never, function	Button:createButton
+factory | returns never, callable literal	Button:createButton
+factory | returns never, union	Button:createButton
+factory | returns never, intersection	Button:createButton
+factory | returns string, function	Button:createButton
+factory | returns string, callable literal	Button:createButton
+factory | returns string, union	Button:createButton
+factory | returns string, intersection	Button:createButton
+factory | returns number, function	Button:createButton
+factory | returns number, callable literal	Button:createButton
+factory | returns number, union	Button:createButton
+factory | returns number, intersection	Button:createButton
+factory | returns null, function	Button:createButton
+factory | returns null, callable literal	Button:createButton
+factory | returns null, union	Button:createButton
+factory | returns null, intersection	Button:createButton
+factory | returns boolean, function	Button:createButton
+factory | returns boolean, callable literal	Button:createButton
+factory | returns boolean, union	Button:createButton
+factory | returns boolean, intersection	Button:createButton
+factory | returns ReactNode, function	Button:createButton
+factory | returns ReactNode, callable literal	Button:createButton
+factory | returns ReactNode, union	Button:createButton
+factory | returns ReactNode, intersection	Button:createButton
+factory | returns ReactElement, function	Button:createButton
+factory | returns ReactElement, callable literal	Button:createButton
+factory | returns ReactElement, union	Button:createButton
+factory | returns ReactElement, intersection	Button:createButton
+factory | returns JSX.Element, function	Button:createButton
+factory | returns JSX.Element, callable literal	Button:createButton
+factory | returns JSX.Element, union	Button:createButton
+factory | returns JSX.Element, intersection	Button:createButton
+factory | returns FC<P>, function	Button:createButton
+factory | returns FC<P>, callable literal	Button:createButton
+factory | returns FC<P>, union	Button:createButton
+factory | returns FC<P>, intersection	Button:createButton
+factory | returns ComponentType<P>, function	Button:createButton
+factory | returns ComponentType<P>, callable literal	Button:createButton
+factory | returns ComponentType<P>, union	Button:createButton
+factory | returns ComponentType<P>, intersection	Button:createButton
+factory | returns element-shaped literal, function	Button:createButton
+factory | returns element-shaped literal, callable literal	Button:createButton
+factory | returns element-shaped literal, union	Button:createButton
+factory | returns element-shaped literal, intersection	Button:createButton
+factory | returns empty literal, function	Button:createButton
+factory | returns empty literal, callable literal	Button:createButton
+factory | returns empty literal, union	Button:createButton
+factory | returns empty literal, intersection	Button:createButton
+factory | returns generic T	Button:createButton
+factory | returns indexed access	Button:createButton
+factory | returns conditional	Button:createButton
+generic wrapper | plain	Wrapped:Props
+generic wrapper | parentheses	Wrapped:Props
+generic wrapper | typeof itself	Wrapped:Props
+generic wrapper | typeof another	Wrapped:Props
+generic wrapper | alias of typeof itself	Wrapped:Props
+generic wrapper | unresolved reference	Wrapped:Props
+generic wrapper | any	Wrapped:Props
+generic wrapper | unknown	Wrapped:Props
+generic wrapper | object	Wrapped:Props
+generic wrapper | callable literal, FC	Wrapped:Props
+generic wrapper | callable literal, object	Wrapped:Props
+generic wrapper | callable literal, no result	Wrapped:Props
+generic wrapper | function, FC	Wrapped:Props
+generic wrapper | function, ReactElement	Wrapped:Props
+generic wrapper | function, ReactNode	Wrapped:Props
+generic wrapper | function, ReactElement | null	Wrapped:Props
+generic wrapper | function, string	Wrapped:Props
+generic wrapper | function, string | null	Wrapped:Props
+generic wrapper | function, object	Wrapped:Props
+generic wrapper | function, object literal	Wrapped:Props
+generic wrapper | function, void	Wrapped:Props
+generic wrapper | function, unknown	Wrapped:Props
+generic wrapper | function, unknown[]	Wrapped:Props
+generic wrapper | function, literal	Wrapped:Props
+generic wrapper | generic function, FC	Wrapped:Props
+generic wrapper | object, then typeof itself	Wrapped:Props
+generic wrapper | typeof itself, then object	Wrapped:Props
+generic wrapper | unknown, then function object	Wrapped:Props
+generic wrapper | function object, then unknown	Wrapped:Props
+generic wrapper | satisfies	Wrapped:Props
+generic wrapper | non-null	Wrapped:Props
+generic wrapper | returns any, function	Wrapped:Props
+generic wrapper | returns any, callable literal	Wrapped:Props
+generic wrapper | returns any, union	Wrapped:Props
+generic wrapper | returns any, intersection	Wrapped:Props
+generic wrapper | returns any[], function	Wrapped:Props
+generic wrapper | returns any[], callable literal	Wrapped:Props
+generic wrapper | returns any[], union	Wrapped:Props
+generic wrapper | returns any[], intersection	Wrapped:Props
+generic wrapper | returns unknown, function	Wrapped:Props
+generic wrapper | returns unknown, callable literal	Wrapped:Props
+generic wrapper | returns unknown, union	Wrapped:Props
+generic wrapper | returns unknown, intersection	Wrapped:Props
+generic wrapper | returns unknown[], function	Wrapped:Props
+generic wrapper | returns unknown[], callable literal	Wrapped:Props
+generic wrapper | returns unknown[], union	Wrapped:Props
+generic wrapper | returns unknown[], intersection	Wrapped:Props
+generic wrapper | returns object, function	Wrapped:Props
+generic wrapper | returns object, callable literal	Wrapped:Props
+generic wrapper | returns object, union	Wrapped:Props
+generic wrapper | returns object, intersection	Wrapped:Props
+generic wrapper | returns symbol, function	Wrapped:Props
+generic wrapper | returns symbol, callable literal	Wrapped:Props
+generic wrapper | returns symbol, union	Wrapped:Props
+generic wrapper | returns symbol, intersection	Wrapped:Props
+generic wrapper | returns void, function	Wrapped:Props
+generic wrapper | returns void, callable literal	Wrapped:Props
+generic wrapper | returns void, union	Wrapped:Props
+generic wrapper | returns void, intersection	Wrapped:Props
+generic wrapper | returns never, function	Wrapped:Props
+generic wrapper | returns never, callable literal	Wrapped:Props
+generic wrapper | returns never, union	Wrapped:Props
+generic wrapper | returns never, intersection	Wrapped:Props
+generic wrapper | returns string, function	Wrapped:Props
+generic wrapper | returns string, callable literal	Wrapped:Props
+generic wrapper | returns string, union	Wrapped:Props
+generic wrapper | returns string, intersection	Wrapped:Props
+generic wrapper | returns number, function	Wrapped:Props
+generic wrapper | returns number, callable literal	Wrapped:Props
+generic wrapper | returns number, union	Wrapped:Props
+generic wrapper | returns number, intersection	Wrapped:Props
+generic wrapper | returns null, function	Wrapped:Props
+generic wrapper | returns null, callable literal	Wrapped:Props
+generic wrapper | returns null, union	Wrapped:Props
+generic wrapper | returns null, intersection	Wrapped:Props
+generic wrapper | returns boolean, function	Wrapped:Props
+generic wrapper | returns boolean, callable literal	Wrapped:Props
+generic wrapper | returns boolean, union	Wrapped:Props
+generic wrapper | returns boolean, intersection	Wrapped:Props
+generic wrapper | returns ReactNode, function	Wrapped:Props
+generic wrapper | returns ReactNode, callable literal	Wrapped:Props
+generic wrapper | returns ReactNode, union	Wrapped:Props
+generic wrapper | returns ReactNode, intersection	Wrapped:Props
+generic wrapper | returns ReactElement, function	Wrapped:Props
+generic wrapper | returns ReactElement, callable literal	Wrapped:Props
+generic wrapper | returns ReactElement, union	Wrapped:Props
+generic wrapper | returns ReactElement, intersection	Wrapped:Props
+generic wrapper | returns JSX.Element, function	Wrapped:Props
+generic wrapper | returns JSX.Element, callable literal	Wrapped:Props
+generic wrapper | returns JSX.Element, union	Wrapped:Props
+generic wrapper | returns JSX.Element, intersection	Wrapped:Props
+generic wrapper | returns FC<P>, function	Wrapped:Props
+generic wrapper | returns FC<P>, callable literal	Wrapped:Props
+generic wrapper | returns FC<P>, union	Wrapped:Props
+generic wrapper | returns FC<P>, intersection	Wrapped:Props
+generic wrapper | returns ComponentType<P>, function	Wrapped:Props
+generic wrapper | returns ComponentType<P>, callable literal	Wrapped:Props
+generic wrapper | returns ComponentType<P>, union	Wrapped:Props
+generic wrapper | returns ComponentType<P>, intersection	Wrapped:Props
+generic wrapper | returns element-shaped literal, function	Wrapped:Props
+generic wrapper | returns element-shaped literal, callable literal	Wrapped:Props
+generic wrapper | returns element-shaped literal, union	Wrapped:Props
+generic wrapper | returns element-shaped literal, intersection	Wrapped:Props
+generic wrapper | returns empty literal, function	Wrapped:Props
+generic wrapper | returns empty literal, callable literal	Wrapped:Props
+generic wrapper | returns empty literal, union	Wrapped:Props
+generic wrapper | returns empty literal, intersection	Wrapped:Props
+generic wrapper | returns generic T	Wrapped:Props
+generic wrapper | returns indexed access	Wrapped:Props
+generic wrapper | returns conditional	Wrapped:Props
+wrapper naming the props | plain	Base:ItemProps Button:Props
+wrapper naming the props | parentheses	Base:ItemProps Button:Props
+wrapper naming the props | typeof itself	Base:ItemProps
+wrapper naming the props | typeof another	Base:ItemProps
+wrapper naming the props | alias of typeof itself	Base:ItemProps
+wrapper naming the props | unresolved reference	Base:ItemProps
+wrapper naming the props | any	Base:ItemProps
+wrapper naming the props | unknown	Base:ItemProps
+wrapper naming the props | object	Base:ItemProps
+wrapper naming the props | callable literal, FC	Base:ItemProps
+wrapper naming the props | callable literal, object	Base:ItemProps
+wrapper naming the props | callable literal, no result	Base:ItemProps
+wrapper naming the props | function, FC	Base:ItemProps
+wrapper naming the props | function, ReactElement	Base:ItemProps
+wrapper naming the props | function, ReactNode	Base:ItemProps
+wrapper naming the props | function, ReactElement | null	Base:ItemProps
+wrapper naming the props | function, string	Base:ItemProps
+wrapper naming the props | function, string | null	Base:ItemProps
+wrapper naming the props | function, object	Base:ItemProps
+wrapper naming the props | function, object literal	Base:ItemProps
+wrapper naming the props | function, void	Base:ItemProps
+wrapper naming the props | function, unknown	Base:ItemProps
+wrapper naming the props | function, unknown[]	Base:ItemProps
+wrapper naming the props | function, literal	Base:ItemProps
+wrapper naming the props | generic function, FC	Base:ItemProps
+wrapper naming the props | object, then typeof itself	Base:ItemProps
+wrapper naming the props | typeof itself, then object	Base:ItemProps
+wrapper naming the props | unknown, then function object	Base:ItemProps
+wrapper naming the props | function object, then unknown	Base:ItemProps
+wrapper naming the props | satisfies	Base:ItemProps
+wrapper naming the props | non-null	Base:ItemProps
+wrapper naming the props | namespace any	Base:ItemProps Button:Props
+wrapper naming the props | namespace object	Base:ItemProps Button:Props
+wrapper naming the props | namespace typeof itself	Base:ItemProps Button:Props
+wrapper naming the props | namespace member typeof itself	Base:ItemProps Button:Props
+wrapper naming the props | namespace member function object	Base:ItemProps Button:Props
+wrapper naming the props | namespace method object	Base:ItemProps Button:Props
+wrapper naming the props | namespace method FC	Base:ItemProps Button:Props
+wrapper naming the props | returns any, function	Base:ItemProps
+wrapper naming the props | returns any, callable literal	Base:ItemProps
+wrapper naming the props | returns any, union	Base:ItemProps
+wrapper naming the props | returns any, intersection	Base:ItemProps
+wrapper naming the props | returns any, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns any[], function	Base:ItemProps
+wrapper naming the props | returns any[], callable literal	Base:ItemProps
+wrapper naming the props | returns any[], union	Base:ItemProps
+wrapper naming the props | returns any[], intersection	Base:ItemProps
+wrapper naming the props | returns any[], namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns unknown, function	Base:ItemProps
+wrapper naming the props | returns unknown, callable literal	Base:ItemProps
+wrapper naming the props | returns unknown, union	Base:ItemProps
+wrapper naming the props | returns unknown, intersection	Base:ItemProps
+wrapper naming the props | returns unknown, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns unknown[], function	Base:ItemProps
+wrapper naming the props | returns unknown[], callable literal	Base:ItemProps
+wrapper naming the props | returns unknown[], union	Base:ItemProps
+wrapper naming the props | returns unknown[], intersection	Base:ItemProps
+wrapper naming the props | returns unknown[], namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns object, function	Base:ItemProps
+wrapper naming the props | returns object, callable literal	Base:ItemProps
+wrapper naming the props | returns object, union	Base:ItemProps
+wrapper naming the props | returns object, intersection	Base:ItemProps
+wrapper naming the props | returns object, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns symbol, function	Base:ItemProps
+wrapper naming the props | returns symbol, callable literal	Base:ItemProps
+wrapper naming the props | returns symbol, union	Base:ItemProps
+wrapper naming the props | returns symbol, intersection	Base:ItemProps
+wrapper naming the props | returns symbol, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns void, function	Base:ItemProps
+wrapper naming the props | returns void, callable literal	Base:ItemProps
+wrapper naming the props | returns void, union	Base:ItemProps
+wrapper naming the props | returns void, intersection	Base:ItemProps
+wrapper naming the props | returns void, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns never, function	Base:ItemProps
+wrapper naming the props | returns never, callable literal	Base:ItemProps
+wrapper naming the props | returns never, union	Base:ItemProps
+wrapper naming the props | returns never, intersection	Base:ItemProps
+wrapper naming the props | returns never, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns string, function	Base:ItemProps
+wrapper naming the props | returns string, callable literal	Base:ItemProps
+wrapper naming the props | returns string, union	Base:ItemProps
+wrapper naming the props | returns string, intersection	Base:ItemProps
+wrapper naming the props | returns string, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns number, function	Base:ItemProps
+wrapper naming the props | returns number, callable literal	Base:ItemProps
+wrapper naming the props | returns number, union	Base:ItemProps
+wrapper naming the props | returns number, intersection	Base:ItemProps
+wrapper naming the props | returns number, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns null, function	Base:ItemProps
+wrapper naming the props | returns null, callable literal	Base:ItemProps
+wrapper naming the props | returns null, union	Base:ItemProps
+wrapper naming the props | returns null, intersection	Base:ItemProps
+wrapper naming the props | returns null, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns boolean, function	Base:ItemProps
+wrapper naming the props | returns boolean, callable literal	Base:ItemProps
+wrapper naming the props | returns boolean, union	Base:ItemProps
+wrapper naming the props | returns boolean, intersection	Base:ItemProps
+wrapper naming the props | returns boolean, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns ReactNode, function	Base:ItemProps
+wrapper naming the props | returns ReactNode, callable literal	Base:ItemProps
+wrapper naming the props | returns ReactNode, union	Base:ItemProps
+wrapper naming the props | returns ReactNode, intersection	Base:ItemProps
+wrapper naming the props | returns ReactNode, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns ReactElement, function	Base:ItemProps
+wrapper naming the props | returns ReactElement, callable literal	Base:ItemProps
+wrapper naming the props | returns ReactElement, union	Base:ItemProps
+wrapper naming the props | returns ReactElement, intersection	Base:ItemProps
+wrapper naming the props | returns ReactElement, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns JSX.Element, function	Base:ItemProps
+wrapper naming the props | returns JSX.Element, callable literal	Base:ItemProps
+wrapper naming the props | returns JSX.Element, union	Base:ItemProps
+wrapper naming the props | returns JSX.Element, intersection	Base:ItemProps
+wrapper naming the props | returns JSX.Element, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns FC<P>, function	Base:ItemProps
+wrapper naming the props | returns FC<P>, callable literal	Base:ItemProps
+wrapper naming the props | returns FC<P>, union	Base:ItemProps
+wrapper naming the props | returns FC<P>, intersection	Base:ItemProps
+wrapper naming the props | returns FC<P>, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns ComponentType<P>, function	Base:ItemProps
+wrapper naming the props | returns ComponentType<P>, callable literal	Base:ItemProps
+wrapper naming the props | returns ComponentType<P>, union	Base:ItemProps
+wrapper naming the props | returns ComponentType<P>, intersection	Base:ItemProps
+wrapper naming the props | returns ComponentType<P>, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns element-shaped literal, function	Base:ItemProps
+wrapper naming the props | returns element-shaped literal, callable literal	Base:ItemProps
+wrapper naming the props | returns element-shaped literal, union	Base:ItemProps
+wrapper naming the props | returns element-shaped literal, intersection	Base:ItemProps
+wrapper naming the props | returns element-shaped literal, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns empty literal, function	Base:ItemProps
+wrapper naming the props | returns empty literal, callable literal	Base:ItemProps
+wrapper naming the props | returns empty literal, union	Base:ItemProps
+wrapper naming the props | returns empty literal, intersection	Base:ItemProps
+wrapper naming the props | returns empty literal, namespace method	Base:ItemProps Button:Props
+wrapper naming the props | returns generic T	Base:ItemProps
+wrapper naming the props | returns indexed access	Base:ItemProps
+wrapper naming the props | returns conditional	Base:ItemProps
+class | plain	Button:Props
+class | parentheses	Button:Props
+class | typeof itself	-
+class | typeof another	-
+class | alias of typeof itself	-
+class | unresolved reference	-
+class | any	-
+class | unknown	-
+class | object	-
+class | callable literal, FC	-
+class | callable literal, object	-
+class | callable literal, no result	-
+class | function, FC	-
+class | function, ReactElement	-
+class | function, ReactNode	-
+class | function, ReactElement | null	-
+class | function, string	-
+class | function, string | null	-
+class | function, object	-
+class | function, object literal	-
+class | function, void	-
+class | function, unknown	-
+class | function, unknown[]	-
+class | function, literal	-
+class | generic function, FC	-
+class | object, then typeof itself	-
+class | typeof itself, then object	-
+class | unknown, then function object	-
+class | function object, then unknown	-
+class | satisfies	-
+class | non-null	-
+class | namespace any	-
+class | namespace object	-
+class | namespace typeof itself	-
+class | namespace member typeof itself	-
+class | namespace member function object	-
+class | namespace method object	-
+class | namespace method FC	-
+class | returns any, function	-
+class | returns any, callable literal	-
+class | returns any, union	-
+class | returns any, intersection	-
+class | returns any, namespace method	-
+class | returns any[], function	-
+class | returns any[], callable literal	-
+class | returns any[], union	-
+class | returns any[], intersection	-
+class | returns any[], namespace method	-
+class | returns unknown, function	-
+class | returns unknown, callable literal	-
+class | returns unknown, union	-
+class | returns unknown, intersection	-
+class | returns unknown, namespace method	-
+class | returns unknown[], function	-
+class | returns unknown[], callable literal	-
+class | returns unknown[], union	-
+class | returns unknown[], intersection	-
+class | returns unknown[], namespace method	-
+class | returns object, function	-
+class | returns object, callable literal	-
+class | returns object, union	-
+class | returns object, intersection	-
+class | returns object, namespace method	-
+class | returns symbol, function	-
+class | returns symbol, callable literal	-
+class | returns symbol, union	-
+class | returns symbol, intersection	-
+class | returns symbol, namespace method	-
+class | returns void, function	-
+class | returns void, callable literal	-
+class | returns void, union	-
+class | returns void, intersection	-
+class | returns void, namespace method	-
+class | returns never, function	-
+class | returns never, callable literal	-
+class | returns never, union	-
+class | returns never, intersection	-
+class | returns never, namespace method	-
+class | returns string, function	-
+class | returns string, callable literal	-
+class | returns string, union	-
+class | returns string, intersection	-
+class | returns string, namespace method	-
+class | returns number, function	-
+class | returns number, callable literal	-
+class | returns number, union	-
+class | returns number, intersection	-
+class | returns number, namespace method	-
+class | returns null, function	-
+class | returns null, callable literal	-
+class | returns null, union	-
+class | returns null, intersection	-
+class | returns null, namespace method	-
+class | returns boolean, function	-
+class | returns boolean, callable literal	-
+class | returns boolean, union	-
+class | returns boolean, intersection	-
+class | returns boolean, namespace method	-
+class | returns ReactNode, function	-
+class | returns ReactNode, callable literal	-
+class | returns ReactNode, union	-
+class | returns ReactNode, intersection	-
+class | returns ReactNode, namespace method	-
+class | returns ReactElement, function	-
+class | returns ReactElement, callable literal	-
+class | returns ReactElement, union	-
+class | returns ReactElement, intersection	-
+class | returns ReactElement, namespace method	-
+class | returns JSX.Element, function	-
+class | returns JSX.Element, callable literal	-
+class | returns JSX.Element, union	-
+class | returns JSX.Element, intersection	-
+class | returns JSX.Element, namespace method	-
+class | returns FC<P>, function	-
+class | returns FC<P>, callable literal	-
+class | returns FC<P>, union	-
+class | returns FC<P>, intersection	-
+class | returns FC<P>, namespace method	-
+class | returns ComponentType<P>, function	-
+class | returns ComponentType<P>, callable literal	-
+class | returns ComponentType<P>, union	-
+class | returns ComponentType<P>, intersection	-
+class | returns ComponentType<P>, namespace method	-
+class | returns element-shaped literal, function	-
+class | returns element-shaped literal, callable literal	-
+class | returns element-shaped literal, union	-
+class | returns element-shaped literal, intersection	-
+class | returns element-shaped literal, namespace method	-
+class | returns empty literal, function	-
+class | returns empty literal, callable literal	-
+class | returns empty literal, union	-
+class | returns empty literal, intersection	-
+class | returns empty literal, namespace method	-
+class | returns generic T	-
+class | returns indexed access	-
+class | returns conditional	-
+call-only helper | plain	Button:Props
+call-only helper | parentheses	Button:Props
+call-only helper | typeof itself	Button:Props Helper:Props
+call-only helper | typeof another	Button:Props
+call-only helper | alias of typeof itself	Button:Props
+call-only helper | unresolved reference	Button:Props
+call-only helper | any	Button:Props
+call-only helper | unknown	Button:Props
+call-only helper | object	Button:Props
+call-only helper | callable literal, FC	Button:Props
+call-only helper | callable literal, object	Button:Props
+call-only helper | callable literal, no result	Button:Props
+call-only helper | function, FC	Button:Props
+call-only helper | function, ReactElement	Button:Props
+call-only helper | function, ReactNode	Button:Props
+call-only helper | function, ReactElement | null	Button:Props
+call-only helper | function, string	Button:Props
+call-only helper | function, string | null	Button:Props
+call-only helper | function, object	Button:Props
+call-only helper | function, object literal	Button:Props
+call-only helper | function, void	Button:Props
+call-only helper | function, unknown	Button:Props
+call-only helper | function, unknown[]	Button:Props
+call-only helper | function, literal	Button:Props
+call-only helper | generic function, FC	Button:Props
+call-only helper | object, then typeof itself	Button:Props Helper:Props
+call-only helper | typeof itself, then object	Button:Props Helper:Props
+call-only helper | unknown, then function object	Button:Props
+call-only helper | function object, then unknown	Button:Props
+call-only helper | satisfies	Button:Props Helper:Props
+call-only helper | non-null	Button:Props
+call-only helper | returns any, function	Button:Props
+call-only helper | returns any, callable literal	Button:Props
+call-only helper | returns any, union	Button:Props
+call-only helper | returns any, intersection	Button:Props
+call-only helper | returns any[], function	Button:Props
+call-only helper | returns any[], callable literal	Button:Props
+call-only helper | returns any[], union	Button:Props
+call-only helper | returns any[], intersection	Button:Props
+call-only helper | returns unknown, function	Button:Props
+call-only helper | returns unknown, callable literal	Button:Props
+call-only helper | returns unknown, union	Button:Props
+call-only helper | returns unknown, intersection	Button:Props
+call-only helper | returns unknown[], function	Button:Props
+call-only helper | returns unknown[], callable literal	Button:Props
+call-only helper | returns unknown[], union	Button:Props
+call-only helper | returns unknown[], intersection	Button:Props
+call-only helper | returns object, function	Button:Props
+call-only helper | returns object, callable literal	Button:Props
+call-only helper | returns object, union	Button:Props
+call-only helper | returns object, intersection	Button:Props
+call-only helper | returns symbol, function	Button:Props
+call-only helper | returns symbol, callable literal	Button:Props
+call-only helper | returns symbol, union	Button:Props
+call-only helper | returns symbol, intersection	Button:Props
+call-only helper | returns void, function	Button:Props
+call-only helper | returns void, callable literal	Button:Props
+call-only helper | returns void, union	Button:Props
+call-only helper | returns void, intersection	Button:Props
+call-only helper | returns never, function	Button:Props
+call-only helper | returns never, callable literal	Button:Props
+call-only helper | returns never, union	Button:Props
+call-only helper | returns never, intersection	Button:Props
+call-only helper | returns string, function	Button:Props
+call-only helper | returns string, callable literal	Button:Props
+call-only helper | returns string, union	Button:Props
+call-only helper | returns string, intersection	Button:Props
+call-only helper | returns number, function	Button:Props
+call-only helper | returns number, callable literal	Button:Props
+call-only helper | returns number, union	Button:Props
+call-only helper | returns number, intersection	Button:Props
+call-only helper | returns null, function	Button:Props
+call-only helper | returns null, callable literal	Button:Props
+call-only helper | returns null, union	Button:Props
+call-only helper | returns null, intersection	Button:Props
+call-only helper | returns boolean, function	Button:Props
+call-only helper | returns boolean, callable literal	Button:Props
+call-only helper | returns boolean, union	Button:Props
+call-only helper | returns boolean, intersection	Button:Props
+call-only helper | returns ReactNode, function	Button:Props
+call-only helper | returns ReactNode, callable literal	Button:Props
+call-only helper | returns ReactNode, union	Button:Props
+call-only helper | returns ReactNode, intersection	Button:Props
+call-only helper | returns ReactElement, function	Button:Props
+call-only helper | returns ReactElement, callable literal	Button:Props
+call-only helper | returns ReactElement, union	Button:Props
+call-only helper | returns ReactElement, intersection	Button:Props
+call-only helper | returns JSX.Element, function	Button:Props
+call-only helper | returns JSX.Element, callable literal	Button:Props
+call-only helper | returns JSX.Element, union	Button:Props
+call-only helper | returns JSX.Element, intersection	Button:Props
+call-only helper | returns FC<P>, function	Button:Props
+call-only helper | returns FC<P>, callable literal	Button:Props
+call-only helper | returns FC<P>, union	Button:Props
+call-only helper | returns FC<P>, intersection	Button:Props
+call-only helper | returns ComponentType<P>, function	Button:Props
+call-only helper | returns ComponentType<P>, callable literal	Button:Props
+call-only helper | returns ComponentType<P>, union	Button:Props
+call-only helper | returns ComponentType<P>, intersection	Button:Props
+call-only helper | returns element-shaped literal, function	Button:Props
+call-only helper | returns element-shaped literal, callable literal	Button:Props
+call-only helper | returns element-shaped literal, union	Button:Props
+call-only helper | returns element-shaped literal, intersection	Button:Props
+call-only helper | returns empty literal, function	Button:Props
+call-only helper | returns empty literal, callable literal	Button:Props
+call-only helper | returns empty literal, union	Button:Props
+call-only helper | returns empty literal, intersection	Button:Props
+call-only helper | returns generic T	Button:Props
+call-only helper | returns indexed access	Button:Props
+call-only helper | returns conditional	Button:Props

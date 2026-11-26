@@ -156,14 +156,16 @@ impl<'src> SourceDataCollector<'src> {
             .iter()
             .map(|ty| WrapperTypeArg { reference: self.extract_type_name_from_type(ty) })
             .collect();
-        let Some(callee) = self.wrapper_callee(call) else { return false };
+        // A callee asserted to another signature has no declaration to add props from, but its type arguments still
+        // name the props: the candidate stays, without the callee.
+        let callee = self.wrapper_callee(call);
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
         self.pending_wrappers.push(PendingWrapper {
             name: name.to_owned(),
             needs_payload,
             tag: None,
             type_args,
-            callee: Some(callee),
+            callee,
             rule: DetectionRule::WrapperTypeArgument,
             description,
             tags,

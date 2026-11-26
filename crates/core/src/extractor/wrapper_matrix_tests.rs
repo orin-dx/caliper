@@ -501,9 +501,12 @@ fn an_asserted_callee_renders_only_when_the_assertion_leaves_a_named_result() {
         ("(Object as (value: object) => object)", false),
         ("(Object as { (value: object): object })", false),
         ("(Object as (value: object) => symbol)", false),
-        ("(Object as (value: object) => { id: string })", false),
-        ("(Object as (value: object) => unknown[])", false),
-        ("(Object as (value: object) => object | null)", false),
+        ("(Object as (value: object) => void)", false),
+        ("(Object as (value: object) => (object))", false),
+        ("(Object as (value: object) => { id: string })", true),
+        ("(Object as (value: object) => unknown[])", true),
+        ("(Object as (value: object) => object | null)", true),
+        ("(Object as (value: object) => object & React.ReactElement)", true),
         ("(Object as unknown as (value: object) => string)", true),
         ("(Object as (value: object) => number)", true),
         ("(Object as (value: object) => boolean)", true),
@@ -583,11 +586,13 @@ fn a_namespace_assertion_gives_the_member_its_declared_type() {
         "(React as { forwardRef: any })",
         "(React as typeof React)",
         "((React as object) as any)",
+        // A string is a node: off the closed list, so no evidence.
+        "(React as { forwardRef(...args: any[]): string })",
     ] {
         assert_eq!(tsx(&format!("export const Button = {receiver}.forwardRef{render}")), plain, "{receiver}");
     }
     for receiver in
-        ["(React as { forwardRef: (...args: any[]) => object })", "(React as { forwardRef(...args: any[]): string })"]
+        ["(React as { forwardRef: (...args: any[]) => object })", "(React as { forwardRef(...args: any[]): void })"]
     {
         let source = format!("export const Button = {receiver}.forwardRef{render}");
         assert_eq!(tsx(&source), Vec::<serde_json::Value>::new(), "{receiver}");
@@ -668,10 +673,11 @@ fn a_callable_type_literal_is_read_for_its_call_signatures() {
         "{ (render: React.FC<Props>): React.FC<Props>; (render: unknown): string }",
         "{ (render: React.FC<Props>) }",
         "{ new (render: React.FC<Props>): object }",
+        "{ (a: unknown): string; (b: unknown): void }",
     ] {
         assert_eq!(tsx(&format!("export const Button = (memo as {ty})((props: Props) => <div />);")), plain, "{ty}");
     }
-    for ty in ["{ (render: React.FC<Props>): object }", "{ (a: unknown): string; (b: unknown): void }"] {
+    for ty in ["{ (render: React.FC<Props>): object }", "{ (a: unknown): symbol; (b: unknown): void }"] {
         let source = format!("export const Button = (memo as {ty})((props: Props) => <div />);");
         assert_eq!(tsx(&source), Vec::<serde_json::Value>::new(), "{ty}");
     }
@@ -761,12 +767,14 @@ fn a_namespace_member_declared_several_times_declines_only_when_every_declaratio
         "{ forwardRef(...a: any[]): string; forwardRef: typeof React.forwardRef }",
         "{ forwardRef: (...a: any[]) => object; forwardRef: any }",
         "{ get forwardRef(): typeof React.forwardRef }",
+        "{ forwardRef: (...a: any[]) => string; forwardRef(...a: any[]): object }",
+        "{ forwardRef(...a: any[]): object; forwardRef: (...a: any[]) => string }",
     ] {
         assert_eq!(with(literal), plain, "{literal}");
     }
     for literal in [
-        "{ forwardRef: (...a: any[]) => string; forwardRef(...a: any[]): object }",
-        "{ forwardRef(...a: any[]): object; forwardRef: (...a: any[]) => string }",
+        "{ forwardRef: (...a: any[]) => void; forwardRef(...a: any[]): object }",
+        "{ forwardRef(...a: any[]): object; forwardRef: (...a: any[]) => symbol }",
         "{ get forwardRef(): (...a: any[]) => object }",
     ] {
         assert_eq!(with(literal), Vec::<serde_json::Value>::new(), "{literal}");
@@ -816,6 +824,13 @@ const DIFFERENTIAL_FORMS: &[(&str, &str, &str)] = &[
         "function wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\n\
          export const Wrapped = {C}<Props>((props: Props) => <div />);",
     ),
+    (
+        "wrapper naming the props",
+        "ui.withContext",
+        "declare const ui: { withContext<P>(View: React.ComponentType<P>): React.FC<P> };\n\
+         function Base(props: ItemProps) { return <div />; }\n\
+         export const Button = {C}<Props>(Base);",
+    ),
     ("class", "React.Component", "export class Button extends {C}<Props> { render() { return <div />; } }"),
     (
         "call-only helper",
@@ -825,54 +840,125 @@ const DIFFERENTIAL_FORMS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// An assertion: its name, a line it needs declared first, and the wrapped callee, with `{b}` for the callee and
-/// `{o}`/`{m}` for the namespace and member of a member callee (a row with them is only made for one).
-const DIFFERENTIAL_ASSERTIONS: &[(&str, &str, &str)] = &[
-    ("plain", "", "{b}"),
-    ("parentheses", "", "({b})"),
-    ("typeof itself", "", "({b} as typeof {b})"),
-    ("typeof another", "declare const other: unknown;", "({b} as typeof other)"),
-    ("alias of typeof itself", "type Alias = typeof {b};", "({b} as Alias)"),
-    ("unresolved reference", "", "({b} as F)"),
-    ("any", "", "({b} as any)"),
-    ("unknown", "", "({b} as unknown)"),
-    ("object", "", "({b} as object)"),
-    ("callable literal, FC", "", "({b} as { (...args: any[]): React.FC<Props> })"),
-    ("callable literal, object", "", "({b} as { (...args: any[]): object })"),
-    ("callable literal, no result", "", "({b} as { (...args: any[]) })"),
-    ("function, FC", "", "({b} as (...args: any[]) => React.FC<Props>)"),
-    ("function, ReactElement", "", "({b} as (...args: any[]) => React.ReactElement)"),
-    ("function, ReactNode", "", "({b} as (...args: any[]) => React.ReactNode)"),
-    ("function, ReactElement | null", "", "({b} as (...args: any[]) => React.ReactElement | null)"),
-    ("function, string", "", "({b} as (...args: any[]) => string)"),
-    ("function, string | null", "", "({b} as (...args: any[]) => string | null)"),
-    ("function, object", "", "({b} as (...args: any[]) => object)"),
-    ("function, object literal", "", "({b} as (...args: any[]) => { id: string })"),
-    ("function, void", "", "({b} as (...args: any[]) => void)"),
-    ("function, unknown", "", "({b} as (...args: any[]) => unknown)"),
-    ("function, unknown[]", "", "({b} as (...args: any[]) => unknown[])"),
-    ("function, literal", "", "({b} as (...args: any[]) => 'x')"),
-    ("generic function, FC", "", "({b} as <T>(...args: any[]) => React.FC<T>)"),
-    ("object, then typeof itself", "", "({b} as object as typeof {b})"),
-    ("typeof itself, then object", "", "({b} as typeof {b} as object)"),
-    ("unknown, then function object", "", "({b} as unknown as (...args: any[]) => object)"),
-    ("function object, then unknown", "", "({b} as (...args: any[]) => object as unknown)"),
-    ("satisfies", "", "({b} satisfies typeof {b})"),
-    ("non-null", "", "{b}!"),
-    ("namespace any", "", "({o} as any).{m}"),
-    ("namespace object", "", "({o} as object).{m}"),
-    ("namespace typeof itself", "", "({o} as typeof {o}).{m}"),
-    ("namespace member typeof itself", "", "({o} as { {m}: typeof {b} }).{m}"),
-    ("namespace member function object", "", "({o} as { {m}: (...args: any[]) => object }).{m}"),
-    ("namespace method object", "", "({o} as { {m}(...args: any[]): object }).{m}"),
-    ("namespace method FC", "", "({o} as { {m}(...args: any[]): React.FC<Props> }).{m}"),
+/// An assertion: its name, a line it needs declared first, the wrapped callee, with `{b}` for the callee and `{o}`/`{m}`
+/// for the namespace and member of a member callee (a row with them is only made for one), whether it keeps the
+/// callee's own type, and the entry of [`CLOSED_LIST`] the call's whole result is, if any. The last two are the oracle,
+/// written from TypeScript's assignability, not read from the extractor.
+const DIFFERENTIAL_ASSERTIONS: &[(&str, &str, &str, bool, Option<&str>)] = &[
+    ("plain", "", "{b}", true, None),
+    ("parentheses", "", "({b})", true, None),
+    ("typeof itself", "", "({b} as typeof {b})", true, None),
+    ("typeof another", "declare const other: unknown;", "({b} as typeof other)", false, None),
+    ("alias of typeof itself", "type Alias = typeof {b};", "({b} as Alias)", true, None),
+    ("unresolved reference", "", "({b} as F)", false, None),
+    ("any", "", "({b} as any)", true, None),
+    ("unknown", "", "({b} as unknown)", true, None),
+    // Not callable at all: no call result to read.
+    ("object", "", "({b} as object)", false, None),
+    ("callable literal, FC", "", "({b} as { (...args: any[]): React.FC<Props> })", false, None),
+    ("callable literal, object", "", "({b} as { (...args: any[]): object })", false, Some("object")),
+    ("callable literal, no result", "", "({b} as { (...args: any[]) })", false, None),
+    ("function, FC", "", "({b} as (...args: any[]) => React.FC<Props>)", false, None),
+    ("function, ReactElement", "", "({b} as (...args: any[]) => React.ReactElement)", false, None),
+    ("function, ReactNode", "", "({b} as (...args: any[]) => React.ReactNode)", false, None),
+    ("function, ReactElement | null", "", "({b} as (...args: any[]) => React.ReactElement | null)", false, None),
+    ("function, string", "", "({b} as (...args: any[]) => string)", false, None),
+    ("function, string | null", "", "({b} as (...args: any[]) => string | null)", false, None),
+    ("function, object", "", "({b} as (...args: any[]) => object)", false, Some("object")),
+    ("function, object literal", "", "({b} as (...args: any[]) => { id: string })", false, None),
+    ("function, void", "", "({b} as (...args: any[]) => void)", false, Some("void")),
+    ("function, unknown", "", "({b} as (...args: any[]) => unknown)", false, None),
+    ("function, unknown[]", "", "({b} as (...args: any[]) => unknown[])", false, None),
+    ("function, literal", "", "({b} as (...args: any[]) => 'x')", false, None),
+    ("generic function, FC", "", "({b} as <T>(...args: any[]) => React.FC<T>)", false, None),
+    ("object, then typeof itself", "", "({b} as object as typeof {b})", true, None),
+    ("typeof itself, then object", "", "({b} as typeof {b} as object)", false, None),
+    ("unknown, then function object", "", "({b} as unknown as (...args: any[]) => object)", false, Some("object")),
+    ("function object, then unknown", "", "({b} as (...args: any[]) => object as unknown)", true, None),
+    ("satisfies", "", "({b} satisfies typeof {b})", true, None),
+    ("non-null", "", "{b}!", true, None),
+    ("namespace any", "", "({o} as any).{m}", true, None),
+    ("namespace object", "", "({o} as object).{m}", false, None),
+    ("namespace typeof itself", "", "({o} as typeof {o}).{m}", true, None),
+    ("namespace member typeof itself", "", "({o} as { {m}: typeof {b} }).{m}", true, None),
+    ("namespace member function object", "", "({o} as { {m}: (...args: any[]) => object }).{m}", false, Some("object")),
+    ("namespace method object", "", "({o} as { {m}(...args: any[]): object }).{m}", false, Some("object")),
+    ("namespace method FC", "", "({o} as { {m}(...args: any[]): React.FC<Props> }).{m}", false, None),
 ];
 
-/// Every (form, assertion) row: its id `form | assertion` and its source.
-fn differential_cases() -> Vec<(String, String)> {
+/// The closed list as the oracle states it: the call results TypeScript cannot assign to `ReactNode | ComponentType |
+/// ReactElement` under any instantiation. `bigint` is a member of `ReactNode` since @types/react 18.3.
+const CLOSED_LIST: &[&str] = &["object", "symbol", "void"];
+
+/// The return-type axis: each call result asserted on each form's callee, by name and as written.
+const RESULT_TYPES: &[(&str, &str)] = &[
+    ("any", "any"),
+    ("any[]", "any[]"),
+    ("unknown", "unknown"),
+    ("unknown[]", "unknown[]"),
+    ("object", "object"),
+    ("symbol", "symbol"),
+    ("void", "void"),
+    ("never", "never"),
+    ("string", "string"),
+    ("number", "number"),
+    ("null", "null"),
+    ("boolean", "boolean"),
+    ("ReactNode", "React.ReactNode"),
+    ("ReactElement", "React.ReactElement"),
+    ("JSX.Element", "JSX.Element"),
+    ("FC<P>", "React.FC<Props>"),
+    ("ComponentType<P>", "React.ComponentType<Props>"),
+    ("element-shaped literal", "{ type: string; props: {}; key: string | null }"),
+    ("empty literal", "{}"),
+];
+
+/// How the return-type axis asserts a result `{R}`: the shape's name, the wrapped callee, and whether `{R}` is the
+/// call's whole result (a union or an intersection with it is another type).
+const RESULT_SHAPES: &[(&str, &str, bool)] = &[
+    ("function", "({b} as (...args: any[]) => {R})", true),
+    ("callable literal", "({b} as { (...args: any[]): {R} })", true),
+    ("union", "({b} as (...args: any[]) => {R} | null)", false),
+    ("intersection", "({b} as (...args: any[]) => {R} & { id?: string })", false),
+    ("namespace method", "({o} as { {m}(...args: any[]): {R} }).{m}", true),
+];
+
+/// Results the axis does not build from a `RESULT_TYPES` entry: a type parameter, an indexed access, a conditional.
+const RESULT_EXTRAS: &[(&str, &str)] = &[
+    ("returns generic T", "({b} as <T>(...args: any[]) => T)"),
+    ("returns indexed access", "({b} as (...args: any[]) => Props['label'])"),
+    ("returns conditional", "({b} as (...args: any[]) => Props extends object ? object : symbol)"),
+];
+
+/// One (form, assertion) row of the differential.
+struct Case {
+    /// `form | assertion`.
+    id: String,
+    source: String,
+    /// The assertion keeps the callee's own type.
+    keeps: bool,
+    /// The entry of [`CLOSED_LIST`] the call's whole result is.
+    closed: Option<&'static str>,
+}
+
+/// Every (form, assertion) row, the return-type axis included.
+fn differential_cases() -> Vec<Case> {
+    let mut assertions: Vec<(String, &str, String, bool, Option<&'static str>)> = DIFFERENTIAL_ASSERTIONS
+        .iter()
+        .map(|&(name, prelude, wrapped, keeps, closed)| (name.to_owned(), prelude, wrapped.to_owned(), keeps, closed))
+        .collect();
+    for &(result, ty) in RESULT_TYPES {
+        for &(shape, template, whole) in RESULT_SHAPES {
+            let closed = CLOSED_LIST.iter().copied().find(|&entry| whole && entry == result);
+            assertions.push((format!("returns {result}, {shape}"), "", template.replace("{R}", ty), false, closed));
+        }
+    }
+    for &(name, wrapped) in RESULT_EXTRAS {
+        assertions.push((name.to_owned(), "", wrapped.to_owned(), false, None));
+    }
     let mut cases = Vec::new();
     for (form, callee, template) in DIFFERENTIAL_FORMS {
-        for (assertion, prelude, wrapped) in DIFFERENTIAL_ASSERTIONS {
+        for (assertion, prelude, wrapped, keeps, closed) in &assertions {
             let member = callee.split_once('.');
             if member.is_none() && (wrapped.contains("{o}") || wrapped.contains("{m}")) {
                 continue;
@@ -880,13 +966,13 @@ fn differential_cases() -> Vec<(String, String)> {
             let (object, property) = member.unwrap_or((callee, callee));
             let fill = |text: &str| text.replace("{b}", callee).replace("{o}", object).replace("{m}", property);
             let source = format!("{DIFFERENTIAL_HEADER}{}\n{}", fill(prelude), template.replace("{C}", &fill(wrapped)));
-            cases.push((format!("{form} | {assertion}"), source));
+            cases.push(Case { id: format!("{form} | {assertion}"), source, keeps: *keeps, closed: *closed });
         }
     }
     cases
 }
 
-/// What a row extracts, as `name:props` pairs in order, or `parse error`.
+/// What a row extracts, as `name:props` pairs in order, `-` for none, or `parse error`.
 fn differential_detections(source: &str) -> String {
     let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), source);
     if data.diagnostics.iter().any(|d| d.code == DiagnosticCode::ParseError) {
@@ -895,502 +981,130 @@ fn differential_detections(source: &str) -> String {
     let mut found: Vec<String> =
         data.component_mappings.iter().map(|m| format!("{}:{}", m.component_name, m.props_type_name)).collect();
     found.sort();
-    found.join(" ")
+    if found.is_empty() { "-".to_owned() } else { found.join(" ") }
 }
 
 // END DIFFERENTIAL CASES.
 
-/// What the outermost assertion of a row is, as `component::Evidence` reads it: the rows whose expectation differs
-/// from the base. `NotRenderable` declines the form's candidate; `NoComponent` declines it unless the call's result is
-/// rendered rather than expected to be a component; `Unknown` keeps it but withholds the callee's declaration, which a
-/// factory needs for any props.
-fn differential_class(assertion: &str) -> &'static str {
-    match assertion {
-        "function, string" | "function, string | null" | "function, void" | "function, literal" => "NoComponent",
-        "callable literal, object"
-        | "function, object"
-        | "function, object literal"
-        | "function, unknown[]"
-        | "unknown, then function object"
-        | "namespace member function object"
-        | "namespace method object" => "NotRenderable",
-        "typeof another"
-        | "unresolved reference"
-        | "object"
-        | "callable literal, FC"
-        | "callable literal, no result"
-        | "function, FC"
-        | "function, ReactElement"
-        | "function, ReactNode"
-        | "function, ReactElement | null"
-        | "function, unknown"
-        | "generic function, FC"
-        | "typeof itself, then object"
-        | "namespace object"
-        | "namespace method FC" => "Unknown",
-        _ => "Identity",
+/// The component a form's candidate publishes, as a `name:` prefix: empty for `call-only helper`, where `Helper` is
+/// dropped as a helper and `Button` renders JSX of its own whatever the assertion says.
+fn differential_subject(form: &str) -> &'static str {
+    match form {
+        "Object.assign" => "Root:",
+        "PascalCase call returned" => "Normalize:",
+        "generic wrapper" => "Wrapped:",
+        "call-only helper" => "",
+        _ => "Button:",
     }
 }
 
-/// No recall regression: every row the base (origin/main, oxc 0.158) detected is detected the same, unless its
-/// outermost assertion is affirmative evidence that the call is no component (`NotRenderable`, which drops the
-/// form's own candidate), or a factory's callee lost the declaration its props come from (`Unknown`).
+/// Whether a row declines its form's candidate, and why: its call's whole result is on the closed list, or the form
+/// is a factory, whose props come only from the callee's declaration, which an assertion that replaces the callee's
+/// type withholds.
+fn differential_declines(case: &Case) -> Option<&'static str> {
+    let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
+    if differential_subject(form).is_empty() {
+        return None;
+    }
+    case.closed.or_else(|| (form == "factory" && !case.keeps).then_some("factory callee withheld"))
+}
+
+/// What origin/main (f4a88f93, oxc 0.158) extracts from each of `differential_cases()`, one `id<TAB>detections` line
+/// each, as `differential_detections` prints it. Produced by copying the block between `BEGIN DIFFERENTIAL CASES` and
+/// `END DIFFERENTIAL CASES` into a scratch test module on origin/main that prints each line; regenerate it the same way
+/// when a case changes, never by hand.
+fn base_detections() -> FxHashMap<&'static str, &'static str> {
+    include_str!("wrapper_matrix_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect()
+}
+
+/// No recall regression: every row the base (origin/main, oxc 0.158) detected is detected the same, unless its call's
+/// whole result is on the closed list or a factory's callee lost the declaration its props come from
+/// (`differential_declines`); and every row that declines finds no candidate.
 #[test]
-fn every_form_the_base_detected_is_still_detected_unless_the_assertion_says_it_is_no_component() {
-    let base: FxHashMap<&str, &str> = BASE_DETECTIONS.iter().copied().collect();
+fn every_form_the_base_detected_is_still_detected_unless_its_result_is_on_the_closed_list() {
+    let base = base_detections();
     let cases = differential_cases();
-    assert_eq!(cases.len(), BASE_DETECTIONS.len(), "the base table and the cases are out of step");
+    assert_eq!(cases.len(), base.len(), "the base table and the cases are out of step");
     let mut failures = Vec::new();
-    for (id, source) in &cases {
-        let Some(&expected) = base.get(id.as_str()) else { panic!("{id} is not in BASE_DETECTIONS") };
-        let (form, assertion) = id.split_once(" | ").unwrap();
-        let subject = match form {
-            "Object.assign" => "Root:",
-            "PascalCase call returned" => "Normalize:",
-            "generic wrapper" => "Wrapped:",
-            // `Helper` is dropped as a helper and `Button` renders JSX of its own whatever the assertion says.
-            "call-only helper" => "",
-            _ => "Button:",
-        };
-        let actual = differential_detections(source);
+    for case in &cases {
+        let Some(&expected) = base.get(case.id.as_str()) else { panic!("{} is not in the base table", case.id) };
+        let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
+        let subject = differential_subject(form);
+        let actual = differential_detections(&case.source);
         let found: Vec<&str> = actual.split(' ').collect();
-        // A component invoked directly may give a string or a number: only a result React cannot render declines it.
-        // An element factory asserted to give a string gives no element.
-        let rendered = form == "PascalCase call returned";
-        let declined = match differential_class(assertion) {
-            "NotRenderable" => !subject.is_empty(),
-            "NoComponent" => !subject.is_empty() && !rendered,
-            "Unknown" => form == "factory",
-            _ => false,
-        };
+        let declined = differential_declines(case);
         // Through a cast the base did not read `Object.assign` at all and published `Impl` under its own name; read
         // now, `Root` aliases it.
         let kept = |detection: &str| {
-            found.contains(&detection) || (detection == "Impl:Props" && !declined && found.contains(&"Root:Props"))
+            found.contains(&detection)
+                || (detection == "Impl:Props" && declined.is_none() && found.contains(&"Root:Props"))
         };
         let holds = actual != "parse error"
-            && expected.split(' ').filter(|d| !d.is_empty() && !(declined && d.starts_with(subject))).all(kept)
-            && !(declined && found.iter().any(|d| d.starts_with(subject)));
+            && expected.split(' ').filter(|d| *d != "-" && !(declined.is_some() && d.starts_with(subject))).all(kept)
+            && !(declined.is_some() && found.iter().any(|d| d.starts_with(subject)));
         if !holds {
-            failures.push(format!("{id} (declined: {declined}): base `{expected}`, now `{actual}`\n{source}"));
+            failures.push(format!(
+                "{} (declined: {declined:?}): base `{expected}`, now `{actual}`\n{}",
+                case.id, case.source
+            ));
         }
     }
     assert!(failures.is_empty(), "{} rows:\n\n{}", failures.len(), failures.join("\n\n"));
 }
 
-/// What origin/main (f4a88f93, oxc 0.158) extracts from each of `differential_cases()`, as `differential_detections`
-/// prints it. Produced by copying the block between `BEGIN DIFFERENTIAL CASES` and `END DIFFERENTIAL CASES` into a
-/// scratch test module on origin/main that prints each `(id, differential_detections(source))`; regenerate it the same
-/// way when a case changes, never by hand.
-const BASE_DETECTIONS: &[(&str, &str)] = &[
-    ("memo | plain", "Button:Props"),
-    ("memo | parentheses", "Button:Props"),
-    ("memo | typeof itself", "Button:Props"),
-    ("memo | typeof another", "Button:Props"),
-    ("memo | alias of typeof itself", "Button:Props"),
-    ("memo | unresolved reference", "Button:Props"),
-    ("memo | any", "Button:Props"),
-    ("memo | unknown", "Button:Props"),
-    ("memo | object", "Button:Props"),
-    ("memo | callable literal, FC", "Button:Props"),
-    ("memo | callable literal, object", "Button:Props"),
-    ("memo | callable literal, no result", "Button:Props"),
-    ("memo | function, FC", "Button:Props"),
-    ("memo | function, ReactElement", "Button:Props"),
-    ("memo | function, ReactNode", "Button:Props"),
-    ("memo | function, ReactElement | null", "Button:Props"),
-    ("memo | function, string", "Button:Props"),
-    ("memo | function, string | null", "Button:Props"),
-    ("memo | function, object", "Button:Props"),
-    ("memo | function, object literal", "Button:Props"),
-    ("memo | function, void", "Button:Props"),
-    ("memo | function, unknown", "Button:Props"),
-    ("memo | function, unknown[]", "Button:Props"),
-    ("memo | function, literal", "Button:Props"),
-    ("memo | generic function, FC", "Button:Props"),
-    ("memo | object, then typeof itself", "Button:Props"),
-    ("memo | typeof itself, then object", "Button:Props"),
-    ("memo | unknown, then function object", "Button:Props"),
-    ("memo | function object, then unknown", "Button:Props"),
-    ("memo | satisfies", "Button:Props"),
-    ("memo | non-null", "Button:Props"),
-    ("React.memo | plain", "Button:Props"),
-    ("React.memo | parentheses", "Button:Props"),
-    ("React.memo | typeof itself", "Button:Props"),
-    ("React.memo | typeof another", "Button:Props"),
-    ("React.memo | alias of typeof itself", "Button:Props"),
-    ("React.memo | unresolved reference", "Button:Props"),
-    ("React.memo | any", "Button:Props"),
-    ("React.memo | unknown", "Button:Props"),
-    ("React.memo | object", "Button:Props"),
-    ("React.memo | callable literal, FC", "Button:Props"),
-    ("React.memo | callable literal, object", "Button:Props"),
-    ("React.memo | callable literal, no result", "Button:Props"),
-    ("React.memo | function, FC", "Button:Props"),
-    ("React.memo | function, ReactElement", "Button:Props"),
-    ("React.memo | function, ReactNode", "Button:Props"),
-    ("React.memo | function, ReactElement | null", "Button:Props"),
-    ("React.memo | function, string", "Button:Props"),
-    ("React.memo | function, string | null", "Button:Props"),
-    ("React.memo | function, object", "Button:Props"),
-    ("React.memo | function, object literal", "Button:Props"),
-    ("React.memo | function, void", "Button:Props"),
-    ("React.memo | function, unknown", "Button:Props"),
-    ("React.memo | function, unknown[]", "Button:Props"),
-    ("React.memo | function, literal", "Button:Props"),
-    ("React.memo | generic function, FC", "Button:Props"),
-    ("React.memo | object, then typeof itself", "Button:Props"),
-    ("React.memo | typeof itself, then object", "Button:Props"),
-    ("React.memo | unknown, then function object", "Button:Props"),
-    ("React.memo | function object, then unknown", "Button:Props"),
-    ("React.memo | satisfies", "Button:Props"),
-    ("React.memo | non-null", "Button:Props"),
-    ("React.memo | namespace any", "Button:Props"),
-    ("React.memo | namespace object", "Button:Props"),
-    ("React.memo | namespace typeof itself", "Button:Props"),
-    ("React.memo | namespace member typeof itself", "Button:Props"),
-    ("React.memo | namespace member function object", "Button:Props"),
-    ("React.memo | namespace method object", "Button:Props"),
-    ("React.memo | namespace method FC", "Button:Props"),
-    ("forwardRef | plain", "Button:Props"),
-    ("forwardRef | parentheses", "Button:Props"),
-    ("forwardRef | typeof itself", "Button:Props"),
-    ("forwardRef | typeof another", "Button:Props"),
-    ("forwardRef | alias of typeof itself", "Button:Props"),
-    ("forwardRef | unresolved reference", "Button:Props"),
-    ("forwardRef | any", "Button:Props"),
-    ("forwardRef | unknown", "Button:Props"),
-    ("forwardRef | object", "Button:Props"),
-    ("forwardRef | callable literal, FC", "Button:Props"),
-    ("forwardRef | callable literal, object", "Button:Props"),
-    ("forwardRef | callable literal, no result", "Button:Props"),
-    ("forwardRef | function, FC", "Button:Props"),
-    ("forwardRef | function, ReactElement", "Button:Props"),
-    ("forwardRef | function, ReactNode", "Button:Props"),
-    ("forwardRef | function, ReactElement | null", "Button:Props"),
-    ("forwardRef | function, string", "Button:Props"),
-    ("forwardRef | function, string | null", "Button:Props"),
-    ("forwardRef | function, object", "Button:Props"),
-    ("forwardRef | function, object literal", "Button:Props"),
-    ("forwardRef | function, void", "Button:Props"),
-    ("forwardRef | function, unknown", "Button:Props"),
-    ("forwardRef | function, unknown[]", "Button:Props"),
-    ("forwardRef | function, literal", "Button:Props"),
-    ("forwardRef | generic function, FC", "Button:Props"),
-    ("forwardRef | object, then typeof itself", "Button:Props"),
-    ("forwardRef | typeof itself, then object", "Button:Props"),
-    ("forwardRef | unknown, then function object", "Button:Props"),
-    ("forwardRef | function object, then unknown", "Button:Props"),
-    ("forwardRef | satisfies", "Button:Props"),
-    ("forwardRef | non-null", "Button:Props"),
-    ("React.forwardRef, typed render | plain", "Button:Props"),
-    ("React.forwardRef, typed render | parentheses", "Button:Props"),
-    ("React.forwardRef, typed render | typeof itself", "Button:Props"),
-    ("React.forwardRef, typed render | typeof another", "Button:Props"),
-    ("React.forwardRef, typed render | alias of typeof itself", "Button:Props"),
-    ("React.forwardRef, typed render | unresolved reference", "Button:Props"),
-    ("React.forwardRef, typed render | any", "Button:Props"),
-    ("React.forwardRef, typed render | unknown", "Button:Props"),
-    ("React.forwardRef, typed render | object", "Button:Props"),
-    ("React.forwardRef, typed render | callable literal, FC", "Button:Props"),
-    ("React.forwardRef, typed render | callable literal, object", "Button:Props"),
-    ("React.forwardRef, typed render | callable literal, no result", "Button:Props"),
-    ("React.forwardRef, typed render | function, FC", "Button:Props"),
-    ("React.forwardRef, typed render | function, ReactElement", "Button:Props"),
-    ("React.forwardRef, typed render | function, ReactNode", "Button:Props"),
-    ("React.forwardRef, typed render | function, ReactElement | null", "Button:Props"),
-    ("React.forwardRef, typed render | function, string", "Button:Props"),
-    ("React.forwardRef, typed render | function, string | null", "Button:Props"),
-    ("React.forwardRef, typed render | function, object", "Button:Props"),
-    ("React.forwardRef, typed render | function, object literal", "Button:Props"),
-    ("React.forwardRef, typed render | function, void", "Button:Props"),
-    ("React.forwardRef, typed render | function, unknown", "Button:Props"),
-    ("React.forwardRef, typed render | function, unknown[]", "Button:Props"),
-    ("React.forwardRef, typed render | function, literal", "Button:Props"),
-    ("React.forwardRef, typed render | generic function, FC", "Button:Props"),
-    ("React.forwardRef, typed render | object, then typeof itself", "Button:Props"),
-    ("React.forwardRef, typed render | typeof itself, then object", "Button:Props"),
-    ("React.forwardRef, typed render | unknown, then function object", "Button:Props"),
-    ("React.forwardRef, typed render | function object, then unknown", "Button:Props"),
-    ("React.forwardRef, typed render | satisfies", "Button:Props"),
-    ("React.forwardRef, typed render | non-null", "Button:Props"),
-    ("React.forwardRef, typed render | namespace any", "Button:Props"),
-    ("React.forwardRef, typed render | namespace object", "Button:Props"),
-    ("React.forwardRef, typed render | namespace typeof itself", "Button:Props"),
-    ("React.forwardRef, typed render | namespace member typeof itself", "Button:Props"),
-    ("React.forwardRef, typed render | namespace member function object", "Button:Props"),
-    ("React.forwardRef, typed render | namespace method object", "Button:Props"),
-    ("React.forwardRef, typed render | namespace method FC", "Button:Props"),
-    ("wrapper call | plain", "Button:Props"),
-    ("wrapper call | parentheses", "Button:Props"),
-    ("wrapper call | typeof itself", "Button:Props"),
-    ("wrapper call | typeof another", "Button:Props"),
-    ("wrapper call | alias of typeof itself", "Button:Props"),
-    ("wrapper call | unresolved reference", "Button:Props"),
-    ("wrapper call | any", "Button:Props"),
-    ("wrapper call | unknown", "Button:Props"),
-    ("wrapper call | object", "Button:Props"),
-    ("wrapper call | callable literal, FC", "Button:Props"),
-    ("wrapper call | callable literal, object", "Button:Props"),
-    ("wrapper call | callable literal, no result", "Button:Props"),
-    ("wrapper call | function, FC", "Button:Props"),
-    ("wrapper call | function, ReactElement", "Button:Props"),
-    ("wrapper call | function, ReactNode", "Button:Props"),
-    ("wrapper call | function, ReactElement | null", "Button:Props"),
-    ("wrapper call | function, string", "Button:Props"),
-    ("wrapper call | function, string | null", "Button:Props"),
-    ("wrapper call | function, object", "Button:Props"),
-    ("wrapper call | function, object literal", "Button:Props"),
-    ("wrapper call | function, void", "Button:Props"),
-    ("wrapper call | function, unknown", "Button:Props"),
-    ("wrapper call | function, unknown[]", "Button:Props"),
-    ("wrapper call | function, literal", "Button:Props"),
-    ("wrapper call | generic function, FC", "Button:Props"),
-    ("wrapper call | object, then typeof itself", "Button:Props"),
-    ("wrapper call | typeof itself, then object", "Button:Props"),
-    ("wrapper call | unknown, then function object", "Button:Props"),
-    ("wrapper call | function object, then unknown", "Button:Props"),
-    ("wrapper call | satisfies", "Button:Props"),
-    ("wrapper call | non-null", "Button:Props"),
-    ("Object.assign | plain", "Item:ItemProps Root:Props"),
-    ("Object.assign | parentheses", "Item:ItemProps Root:Props"),
-    ("Object.assign | typeof itself", "Impl:Props"),
-    ("Object.assign | typeof another", "Impl:Props"),
-    ("Object.assign | alias of typeof itself", "Impl:Props"),
-    ("Object.assign | unresolved reference", "Impl:Props"),
-    ("Object.assign | any", "Impl:Props"),
-    ("Object.assign | unknown", "Impl:Props"),
-    ("Object.assign | object", "Impl:Props"),
-    ("Object.assign | callable literal, FC", "Impl:Props"),
-    ("Object.assign | callable literal, object", "Impl:Props"),
-    ("Object.assign | callable literal, no result", "Impl:Props"),
-    ("Object.assign | function, FC", "Impl:Props"),
-    ("Object.assign | function, ReactElement", "Impl:Props"),
-    ("Object.assign | function, ReactNode", "Impl:Props"),
-    ("Object.assign | function, ReactElement | null", "Impl:Props"),
-    ("Object.assign | function, string", "Impl:Props"),
-    ("Object.assign | function, string | null", "Impl:Props"),
-    ("Object.assign | function, object", "Impl:Props"),
-    ("Object.assign | function, object literal", "Impl:Props"),
-    ("Object.assign | function, void", "Impl:Props"),
-    ("Object.assign | function, unknown", "Impl:Props"),
-    ("Object.assign | function, unknown[]", "Impl:Props"),
-    ("Object.assign | function, literal", "Impl:Props"),
-    ("Object.assign | generic function, FC", "Impl:Props"),
-    ("Object.assign | object, then typeof itself", "Impl:Props"),
-    ("Object.assign | typeof itself, then object", "Impl:Props"),
-    ("Object.assign | unknown, then function object", "Impl:Props"),
-    ("Object.assign | function object, then unknown", "Impl:Props"),
-    ("Object.assign | satisfies", "Impl:Props"),
-    ("Object.assign | non-null", "Impl:Props"),
-    ("Object.assign | namespace any", "Impl:Props"),
-    ("Object.assign | namespace object", "Impl:Props"),
-    ("Object.assign | namespace typeof itself", "Impl:Props"),
-    ("Object.assign | namespace member typeof itself", "Impl:Props"),
-    ("Object.assign | namespace member function object", "Impl:Props"),
-    ("Object.assign | namespace method object", "Impl:Props"),
-    ("Object.assign | namespace method FC", "Impl:Props"),
-    ("PascalCase call returned | plain", "Normalize:Props"),
-    ("PascalCase call returned | parentheses", "Normalize:Props"),
-    ("PascalCase call returned | typeof itself", ""),
-    ("PascalCase call returned | typeof another", ""),
-    ("PascalCase call returned | alias of typeof itself", ""),
-    ("PascalCase call returned | unresolved reference", ""),
-    ("PascalCase call returned | any", ""),
-    ("PascalCase call returned | unknown", ""),
-    ("PascalCase call returned | object", ""),
-    ("PascalCase call returned | callable literal, FC", ""),
-    ("PascalCase call returned | callable literal, object", ""),
-    ("PascalCase call returned | callable literal, no result", ""),
-    ("PascalCase call returned | function, FC", ""),
-    ("PascalCase call returned | function, ReactElement", ""),
-    ("PascalCase call returned | function, ReactNode", ""),
-    ("PascalCase call returned | function, ReactElement | null", ""),
-    ("PascalCase call returned | function, string", ""),
-    ("PascalCase call returned | function, string | null", ""),
-    ("PascalCase call returned | function, object", ""),
-    ("PascalCase call returned | function, object literal", ""),
-    ("PascalCase call returned | function, void", ""),
-    ("PascalCase call returned | function, unknown", ""),
-    ("PascalCase call returned | function, unknown[]", ""),
-    ("PascalCase call returned | function, literal", ""),
-    ("PascalCase call returned | generic function, FC", ""),
-    ("PascalCase call returned | object, then typeof itself", ""),
-    ("PascalCase call returned | typeof itself, then object", ""),
-    ("PascalCase call returned | unknown, then function object", ""),
-    ("PascalCase call returned | function object, then unknown", ""),
-    ("PascalCase call returned | satisfies", ""),
-    ("PascalCase call returned | non-null", ""),
-    ("element factory | plain", "Button:Props"),
-    ("element factory | parentheses", "Button:Props"),
-    ("element factory | typeof itself", ""),
-    ("element factory | typeof another", ""),
-    ("element factory | alias of typeof itself", ""),
-    ("element factory | unresolved reference", ""),
-    ("element factory | any", ""),
-    ("element factory | unknown", ""),
-    ("element factory | object", ""),
-    ("element factory | callable literal, FC", ""),
-    ("element factory | callable literal, object", ""),
-    ("element factory | callable literal, no result", ""),
-    ("element factory | function, FC", ""),
-    ("element factory | function, ReactElement", ""),
-    ("element factory | function, ReactNode", ""),
-    ("element factory | function, ReactElement | null", ""),
-    ("element factory | function, string", ""),
-    ("element factory | function, string | null", ""),
-    ("element factory | function, object", ""),
-    ("element factory | function, object literal", ""),
-    ("element factory | function, void", ""),
-    ("element factory | function, unknown", ""),
-    ("element factory | function, unknown[]", ""),
-    ("element factory | function, literal", ""),
-    ("element factory | generic function, FC", ""),
-    ("element factory | object, then typeof itself", ""),
-    ("element factory | typeof itself, then object", ""),
-    ("element factory | unknown, then function object", ""),
-    ("element factory | function object, then unknown", ""),
-    ("element factory | satisfies", ""),
-    ("element factory | non-null", ""),
-    ("element factory | namespace any", "Button:Props"),
-    ("element factory | namespace object", "Button:Props"),
-    ("element factory | namespace typeof itself", "Button:Props"),
-    ("element factory | namespace member typeof itself", "Button:Props"),
-    ("element factory | namespace member function object", "Button:Props"),
-    ("element factory | namespace method object", "Button:Props"),
-    ("element factory | namespace method FC", "Button:Props"),
-    ("factory | plain", "Button:createButton"),
-    ("factory | parentheses", "Button:createButton"),
-    ("factory | typeof itself", "Button:createButton"),
-    ("factory | typeof another", "Button:createButton"),
-    ("factory | alias of typeof itself", "Button:createButton"),
-    ("factory | unresolved reference", "Button:createButton"),
-    ("factory | any", "Button:createButton"),
-    ("factory | unknown", "Button:createButton"),
-    ("factory | object", "Button:createButton"),
-    ("factory | callable literal, FC", "Button:createButton"),
-    ("factory | callable literal, object", "Button:createButton"),
-    ("factory | callable literal, no result", "Button:createButton"),
-    ("factory | function, FC", "Button:createButton"),
-    ("factory | function, ReactElement", "Button:createButton"),
-    ("factory | function, ReactNode", "Button:createButton"),
-    ("factory | function, ReactElement | null", "Button:createButton"),
-    ("factory | function, string", "Button:createButton"),
-    ("factory | function, string | null", "Button:createButton"),
-    ("factory | function, object", "Button:createButton"),
-    ("factory | function, object literal", "Button:createButton"),
-    ("factory | function, void", "Button:createButton"),
-    ("factory | function, unknown", "Button:createButton"),
-    ("factory | function, unknown[]", "Button:createButton"),
-    ("factory | function, literal", "Button:createButton"),
-    ("factory | generic function, FC", "Button:createButton"),
-    ("factory | object, then typeof itself", "Button:createButton"),
-    ("factory | typeof itself, then object", "Button:createButton"),
-    ("factory | unknown, then function object", "Button:createButton"),
-    ("factory | function object, then unknown", "Button:createButton"),
-    ("factory | satisfies", "Button:createButton"),
-    ("factory | non-null", "Button:createButton"),
-    ("generic wrapper | plain", "Wrapped:Props"),
-    ("generic wrapper | parentheses", "Wrapped:Props"),
-    ("generic wrapper | typeof itself", "Wrapped:Props"),
-    ("generic wrapper | typeof another", "Wrapped:Props"),
-    ("generic wrapper | alias of typeof itself", "Wrapped:Props"),
-    ("generic wrapper | unresolved reference", "Wrapped:Props"),
-    ("generic wrapper | any", "Wrapped:Props"),
-    ("generic wrapper | unknown", "Wrapped:Props"),
-    ("generic wrapper | object", "Wrapped:Props"),
-    ("generic wrapper | callable literal, FC", "Wrapped:Props"),
-    ("generic wrapper | callable literal, object", "Wrapped:Props"),
-    ("generic wrapper | callable literal, no result", "Wrapped:Props"),
-    ("generic wrapper | function, FC", "Wrapped:Props"),
-    ("generic wrapper | function, ReactElement", "Wrapped:Props"),
-    ("generic wrapper | function, ReactNode", "Wrapped:Props"),
-    ("generic wrapper | function, ReactElement | null", "Wrapped:Props"),
-    ("generic wrapper | function, string", "Wrapped:Props"),
-    ("generic wrapper | function, string | null", "Wrapped:Props"),
-    ("generic wrapper | function, object", "Wrapped:Props"),
-    ("generic wrapper | function, object literal", "Wrapped:Props"),
-    ("generic wrapper | function, void", "Wrapped:Props"),
-    ("generic wrapper | function, unknown", "Wrapped:Props"),
-    ("generic wrapper | function, unknown[]", "Wrapped:Props"),
-    ("generic wrapper | function, literal", "Wrapped:Props"),
-    ("generic wrapper | generic function, FC", "Wrapped:Props"),
-    ("generic wrapper | object, then typeof itself", "Wrapped:Props"),
-    ("generic wrapper | typeof itself, then object", "Wrapped:Props"),
-    ("generic wrapper | unknown, then function object", "Wrapped:Props"),
-    ("generic wrapper | function object, then unknown", "Wrapped:Props"),
-    ("generic wrapper | satisfies", "Wrapped:Props"),
-    ("generic wrapper | non-null", "Wrapped:Props"),
-    ("class | plain", "Button:Props"),
-    ("class | parentheses", "Button:Props"),
-    ("class | typeof itself", ""),
-    ("class | typeof another", ""),
-    ("class | alias of typeof itself", ""),
-    ("class | unresolved reference", ""),
-    ("class | any", ""),
-    ("class | unknown", ""),
-    ("class | object", ""),
-    ("class | callable literal, FC", ""),
-    ("class | callable literal, object", ""),
-    ("class | callable literal, no result", ""),
-    ("class | function, FC", ""),
-    ("class | function, ReactElement", ""),
-    ("class | function, ReactNode", ""),
-    ("class | function, ReactElement | null", ""),
-    ("class | function, string", ""),
-    ("class | function, string | null", ""),
-    ("class | function, object", ""),
-    ("class | function, object literal", ""),
-    ("class | function, void", ""),
-    ("class | function, unknown", ""),
-    ("class | function, unknown[]", ""),
-    ("class | function, literal", ""),
-    ("class | generic function, FC", ""),
-    ("class | object, then typeof itself", ""),
-    ("class | typeof itself, then object", ""),
-    ("class | unknown, then function object", ""),
-    ("class | function object, then unknown", ""),
-    ("class | satisfies", ""),
-    ("class | non-null", ""),
-    ("class | namespace any", ""),
-    ("class | namespace object", ""),
-    ("class | namespace typeof itself", ""),
-    ("class | namespace member typeof itself", ""),
-    ("class | namespace member function object", ""),
-    ("class | namespace method object", ""),
-    ("class | namespace method FC", ""),
-    ("call-only helper | plain", "Button:Props"),
-    ("call-only helper | parentheses", "Button:Props"),
-    ("call-only helper | typeof itself", "Button:Props Helper:Props"),
-    ("call-only helper | typeof another", "Button:Props"),
-    ("call-only helper | alias of typeof itself", "Button:Props"),
-    ("call-only helper | unresolved reference", "Button:Props"),
-    ("call-only helper | any", "Button:Props"),
-    ("call-only helper | unknown", "Button:Props"),
-    ("call-only helper | object", "Button:Props"),
-    ("call-only helper | callable literal, FC", "Button:Props"),
-    ("call-only helper | callable literal, object", "Button:Props"),
-    ("call-only helper | callable literal, no result", "Button:Props"),
-    ("call-only helper | function, FC", "Button:Props"),
-    ("call-only helper | function, ReactElement", "Button:Props"),
-    ("call-only helper | function, ReactNode", "Button:Props"),
-    ("call-only helper | function, ReactElement | null", "Button:Props"),
-    ("call-only helper | function, string", "Button:Props"),
-    ("call-only helper | function, string | null", "Button:Props"),
-    ("call-only helper | function, object", "Button:Props"),
-    ("call-only helper | function, object literal", "Button:Props"),
-    ("call-only helper | function, void", "Button:Props"),
-    ("call-only helper | function, unknown", "Button:Props"),
-    ("call-only helper | function, unknown[]", "Button:Props"),
-    ("call-only helper | function, literal", "Button:Props"),
-    ("call-only helper | generic function, FC", "Button:Props"),
-    ("call-only helper | object, then typeof itself", "Button:Props Helper:Props"),
-    ("call-only helper | typeof itself, then object", "Button:Props Helper:Props"),
-    ("call-only helper | unknown, then function object", "Button:Props"),
-    ("call-only helper | function object, then unknown", "Button:Props"),
-    ("call-only helper | satisfies", "Button:Props Helper:Props"),
-    ("call-only helper | non-null", "Button:Props"),
-];
+/// The reverse: each closed-list entry, as every form's whole call result in every shape, declines the form's
+/// candidate, and nothing else declines a form but a factory's withheld callee.
+#[test]
+fn each_closed_list_entry_declines_every_form() {
+    let cases = differential_cases();
+    for entry in CLOSED_LIST {
+        let rows: Vec<&Case> = cases.iter().filter(|case| case.closed == Some(*entry)).collect();
+        // A function and a callable literal for every form, and a namespace method for every member callee.
+        assert!(rows.len() > DIFFERENTIAL_FORMS.len() * 2, "{entry}: {} rows", rows.len());
+        for case in rows {
+            let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
+            let subject = differential_subject(form);
+            if subject.is_empty() {
+                continue;
+            }
+            let actual = differential_detections(&case.source);
+            assert!(!actual.split(' ').any(|d| d.starts_with(subject)), "{}: `{actual}`\n{}", case.id, case.source);
+        }
+    }
+    let base = base_detections();
+    let declined: Vec<String> = cases
+        .iter()
+        .filter_map(|case| {
+            let subject = differential_subject(case.id.split_once(" | ").map_or("", |(form, _)| form));
+            let detected = base.get(case.id.as_str()).is_some_and(|d| d.split(' ').any(|d| d.starts_with(subject)));
+            differential_declines(case).filter(|_| detected).map(|why| format!("{}: {why}", case.id))
+        })
+        .collect();
+    // Every base detection given up, by reason: pinned so a new decline is a reviewed change.
+    let count = |why: &str| declined.iter().filter(|row| row.ends_with(&format!(": {why}"))).count();
+    let by_reason = ["object", "symbol", "void", "factory callee withheld"].map(|why| (why, count(why)));
+    assert_eq!(by_reason.iter().map(|(_, n)| n).sum::<usize>(), declined.len(), "{}", declined.join("\n"));
+    assert_eq!(
+        by_reason,
+        [("object", 47), ("symbol", 18), ("void", 25), ("factory callee withheld", 90)],
+        "{}",
+        declined.join("\n")
+    );
+}
+
+/// The closed list is one exhaustive match over the type node enum: no catch-all arm, so a new OXC type node kind does
+/// not compile until it is placed, and exactly three entries decline.
+#[test]
+fn the_closed_list_is_one_match_without_a_catch_all_arm() {
+    let source = include_str!("component.rs");
+    let start = source.find("fn never_renders(").expect("never_renders is defined in component.rs");
+    let body = &source[start..start + source[start..].find("\n}\n").expect("never_renders ends")];
+    for line in body.lines().filter(|line| line.contains("=>")) {
+        let arm = line.trim_start().trim_start_matches("| ");
+        assert!(arm.starts_with("TSType::"), "an arm that is not a TSType variant: `{line}`");
+    }
+    assert_eq!(body.matches(") => true").count(), 3, "the closed list is object, symbol and void:\n{body}");
+}
 
 // Review round 6.
 
@@ -1546,8 +1260,7 @@ fn a_never_result_is_no_evidence_against_a_call() {
         ["(memo as (c: any) => never)", "(memo as { (c: any): never })", "(memo as (c: any) => string | never)"]
     {
         let source = format!("export const Button = {callee}((props: Props) => <div />);");
-        let expected = if callee.contains("string") { Vec::new() } else { plain.clone() };
-        assert_eq!(tsx(&source), expected, "{callee}");
+        assert_eq!(tsx(&source), plain, "{callee}");
     }
     let render = "<HTMLButtonElement, Props>((props, ref) => <div />);";
     let forward = tsx(&format!("export const Button = React.forwardRef{render}"));
@@ -1593,10 +1306,11 @@ fn a_setter_answers_nothing_and_an_untyped_declaration_stays_unknown() {
     }
 }
 
-/// Finding 6, as the output shows it: an element factory asserted to give a string renders nothing, so a ref-taking
-/// function passed only to it is a render callback, as when nothing renders it.
+/// Finding 6, as the output shows it: an element factory asserted to give a result on the closed list renders nothing,
+/// so a ref-taking function passed only to it is a render callback, as when nothing renders it. A string is a node, off
+/// the list, and no evidence.
 #[test]
-fn an_element_factory_asserted_to_a_string_renders_nothing() {
+fn an_element_factory_asserted_to_a_closed_list_result_renders_nothing() {
     let names = |call: &str| {
         tsx(&format!(
             "import {{ createElement }} from 'react';\n\
@@ -1610,14 +1324,16 @@ fn an_element_factory_asserted_to_a_string_renders_nothing() {
     assert_eq!(names("createElement"), ["Foo"]);
     assert_eq!(names("(createElement as typeof createElement)"), ["Foo"]);
     assert_eq!(names("(createElement as (t: any) => React.ReactElement)"), ["Foo"]);
-    assert_eq!(names("(createElement as (t: any) => string)"), Vec::<String>::new());
+    assert_eq!(names("(createElement as (t: any) => string)"), ["Foo"]);
+    assert_eq!(names("(createElement as (t: any) => void)"), Vec::<String>::new());
     assert_eq!(names("(createElement as (t: any) => object)"), Vec::<String>::new());
     assert_eq!(names("String"), Vec::<String>::new());
 }
 
-/// Finding 6's sibling: a function returning an element factory's result asserted to a string returns no element.
+/// Finding 6's sibling: a function returning an element factory's result asserted to a closed-list type returns no
+/// element.
 #[test]
-fn a_function_returning_a_factory_result_asserted_to_a_string_returns_no_element() {
+fn a_function_returning_a_factory_result_asserted_to_a_closed_list_type_returns_no_element() {
     let names = |call: &str| {
         tsx(&format!("import {{ createElement }} from 'react';\nexport const Button = (props: Props) => {call};"))
             .iter()
@@ -1626,8 +1342,10 @@ fn a_function_returning_a_factory_result_asserted_to_a_string_returns_no_element
     };
     assert_eq!(names("createElement('div')"), ["Button"]);
     assert_eq!(names("(createElement as (t: any) => React.ReactElement)('div')"), ["Button"]);
-    assert_eq!(names("(createElement as (t: any) => string)('div')"), Vec::<String>::new());
-    assert_eq!(names("([1].map as (f: unknown) => string)(() => <div />)"), Vec::<String>::new());
+    assert_eq!(names("(createElement as (t: any) => string)('div')"), ["Button"]);
+    assert_eq!(names("(createElement as (t: any) => symbol)('div')"), Vec::<String>::new());
+    assert_eq!(names("([1].map as (f: unknown) => string)(() => <div />)"), ["Button"]);
+    assert_eq!(names("([1].map as (f: unknown) => void)(() => <div />)"), Vec::<String>::new());
     assert_eq!(names("([1].map as (f: unknown) => unknown)(() => <div />)"), ["Button"]);
 }
 
@@ -1710,10 +1428,71 @@ fn an_element_factory_renders_its_argument_unless_asserted_to_give_no_element() 
     assert_eq!(rendered("(createElement as any)"), 1);
     assert_eq!(rendered("(createElement as CreateElement)"), 1);
     assert_eq!(rendered("(createElement as (t: any) => unknown)"), 1);
-    assert_eq!(rendered("(createElement as (t: any) => string)"), 0);
-    assert_eq!(rendered("(createElement as (t: any) => number | boolean)"), 0);
+    assert_eq!(rendered("(createElement as (t: any) => string)"), 1);
+    assert_eq!(rendered("(createElement as (t: any) => number | boolean)"), 1);
+    assert_eq!(rendered("(React as { createElement: (t: any) => string }).createElement"), 1);
     assert_eq!(rendered("(createElement as (t: any) => object)"), 0);
-    assert_eq!(rendered("(React as { createElement: (t: any) => string }).createElement"), 0);
+    assert_eq!(rendered("(createElement as (t: any) => void)"), 0);
+    assert_eq!(rendered("(React as { createElement: (t: any) => symbol }).createElement"), 0);
     // A component wrapper renders its argument by its name, whatever it returns.
     assert_eq!(rendered("memo"), 1);
+}
+
+/// The components a `.tsx` source after `HEADER` publishes, by name, in order.
+fn names(source: &str) -> Vec<String> {
+    tsx(source).iter().map(|m| m["component_name"].as_str().unwrap().to_owned()).collect()
+}
+
+/// Round 7, finding A: `any[]` is assignable to `ReactNode` (an iterable of `any`), so a namespace method asserted to
+/// return it is no evidence against `map`, and the callback's JSX is the function's result.
+#[test]
+fn a_map_asserted_to_return_any_array_still_renders_its_callback() {
+    let list = |map: &str| {
+        names(&format!(
+            "export const List = ({{ rows }}: {{ rows: string[] }}) => (rows as {{ map(render: (row: string) => \
+             React.ReactNode): {map} }}).map(row => <span>{{row}}</span>);"
+        ))
+    };
+    assert_eq!(list("any[]"), ["List"]);
+    assert_eq!(list("unknown[]"), ["List"]);
+    assert_eq!(list("object"), Vec::<String>::new());
+}
+
+/// Round 7, finding B: a wrapper whose callee is asserted to another signature has no declaration to read for the
+/// props its result adds, but the props type it is called with still names the component's props.
+#[test]
+fn an_asserted_wrapper_keeps_the_props_its_type_arguments_name() {
+    let mapping = |callee: &str| {
+        let source = format!(
+            "{HEADER}interface PublicProps {{ label?: string }}\n\
+             declare const ui: {{ withContext<P>(View: React.ComponentType<P>): React.FC<P> }};\n\
+             function Base(props: {{ inner?: string }}) {{ return <div />; }}\n\
+             export const Public = {callee}<PublicProps>(Base);"
+        );
+        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
+        data.component_mappings
+            .iter()
+            .find(|m| m.component_name == "Public")
+            .map(|m| (m.props_type_name.to_string(), m.wrapper_callee.as_ref().map(|c| c.name.to_string())))
+    };
+    assert_eq!(mapping("ui.withContext"), Some(("PublicProps".to_owned(), Some("ui.withContext".to_owned()))));
+    assert_eq!(
+        mapping("(ui as { withContext<P>(View: React.ComponentType<P>): React.FC<P> }).withContext"),
+        Some(("PublicProps".to_owned(), None))
+    );
+    assert_eq!(mapping("(ui as { withContext(View: unknown): object }).withContext"), None);
+}
+
+/// Round 7, finding C: an object type is no evidence that a call gives no element, as React's own element is one
+/// (`{ type; props; key }`): only the closed list is.
+#[test]
+fn a_factory_asserted_to_an_element_shaped_object_still_renders() {
+    let div = |result: &str| {
+        names(&format!(
+            "export const Div = (props: Props) => (React as {{ createElement(tag: 'div'): {result} }}).createElement('div');"
+        ))
+    };
+    assert_eq!(div("{ type: string; props: {}; key: string | null }"), ["Div"]);
+    assert_eq!(div("{}"), ["Div"]);
+    assert_eq!(div("object"), Vec::<String>::new());
 }
