@@ -556,16 +556,23 @@ fn tsx(source: &str) -> Vec<serde_json::Value> {
     mappings
 }
 
-/// Review round 4, finding 1: a local alias of `typeof` the callee is the callee's own type, so its declaration still
-/// gives the factory's result.
+/// Review round 4, finding 1: a local alias of `typeof` the callee is the callee's own type, so a generic wrapper called
+/// through it keeps the callee whose result adds props (`wrapper_callee`); any other alias is a cast that replaces it.
 #[test]
 fn a_factory_asserted_to_an_alias_of_its_own_type_is_read_through_its_declaration() {
-    let factory = "function createButton(): React.FC<Props> { return (props) => <div />; }\n";
-    let plain = tsx(&format!("{factory}export const Button = createButton();"));
+    let factory = "function createButton<T>(render: React.FC<T>): React.FC<T> { return render; }\n";
+    let plain = tsx(&format!("{factory}export const Button = createButton<Props>((props: Props) => <div />);"));
     assert_eq!(plain.len(), 1, "{plain:#?}");
     assert_eq!(plain[0]["component_name"], "Button");
+    // A cast that replaces the callee's type keeps the component without the callee whose result adds props.
+    let replaced = tsx(&format!(
+        "{factory}export const Button = (createButton as <T>(render: React.FC<T>) => React.FC<T>)<Props>((props: Props) => <div />);"
+    ));
+    assert_ne!(replaced, plain);
     for alias in ["type Factory = typeof createButton;", "export type Factory = (typeof createButton);"] {
-        let source = format!("{factory}{alias}\nexport const Button = (createButton as Factory)();");
+        let source = format!(
+            "{factory}{alias}\nexport const Button = (createButton as Factory)<Props>((props: Props) => <div />);"
+        );
         assert_eq!(tsx(&source), plain, "{source}");
     }
     // An alias of another value's type, a generic alias and one declared twice are not the identity.
@@ -574,8 +581,10 @@ fn a_factory_asserted_to_an_alias_of_its_own_type_is_read_through_its_declaratio
         "type Factory<T = unknown> = typeof createButton;",
         "type Factory = typeof createButton; namespace N {} type Factory = string;",
     ] {
-        let source = format!("{factory}{alias}\nexport const Button = (createButton as Factory)();");
-        assert_eq!(tsx(&source), Vec::<serde_json::Value>::new(), "{source}");
+        let source = format!(
+            "{factory}{alias}\nexport const Button = (createButton as Factory)<Props>((props: Props) => <div />);"
+        );
+        assert_eq!(tsx(&source), replaced, "{source}");
     }
 }
 
@@ -1047,7 +1056,7 @@ fn differential_declines(case: &Case) -> Option<&'static str> {
     if differential_subject(form).is_empty() || ARGUMENT_FORMS.contains(&form) {
         return None;
     }
-    case.closed.or_else(|| (form == "factory" && !case.keeps).then_some("factory callee withheld"))
+    case.closed
 }
 
 /// The forms calling React's `createElement`, `cloneElement` or `createRef` as a generic wrapper is called. Parity
@@ -1285,15 +1294,67 @@ fn each_closed_list_entry_declines_every_form() {
         .collect();
     // Every base detection given up, by reason: pinned so a new decline is a reviewed change.
     let count = |why: &str| declined.iter().filter(|row| row.ends_with(&format!(": {why}"))).count();
-    let by_reason = ["object", "symbol", "void", "factory callee withheld"].map(|why| (why, count(why)));
+    let by_reason = ["object", "symbol", "void"].map(|why| (why, count(why)));
     assert_eq!(by_reason.iter().map(|(_, n)| n).sum::<usize>(), declined.len(), "{}", declined.join("\n"));
+    assert_eq!(by_reason, [("object", 64), ("symbol", 24), ("void", 48)], "{}", declined.join("\n"));
+}
+
+/// Round 22, the other direction: every detection this head makes that origin/main did not is a cast that keeps the
+/// callee's type or a known React wrapper read through a cast, counted by reason and pinned. A cast that replaces a
+/// custom wrapper's or factory's type is read as main read it, so it adds nothing.
+#[test]
+fn every_detection_main_did_not_make_is_an_identity_cast_or_a_known_react_wrapper() {
+    let base = base_detections();
+    let mut by_reason: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut failures = Vec::new();
+    for case in differential_cases() {
+        let row = base.get(case.id.as_str()).copied().unwrap_or("-");
+        let actual = differential_detections(&case.source);
+        let main: Vec<&str> = row.split(' ').collect();
+        let added: Vec<&str> = actual.split(' ').filter(|d| *d != "-" && !main.contains(d)).collect();
+        if added.is_empty() {
+            continue;
+        }
+        let (form, _) = case.id.split_once(" | ").unwrap_or((case.id.as_str(), ""));
+        let plain = base.get(format!("{form} | plain").as_str()).copied().unwrap_or("-");
+        let reason = if case.keeps {
+            "identity cast"
+        } else if KNOWN_REACT_WRAPPER_FORMS.contains(&form) {
+            "known React wrapper or API"
+        } else if case.closed.is_some() {
+            "closed list declines the wrapper, so the component it wraps is listed"
+        } else if added.iter().all(|d| plain.split(' ').any(|p| p == *d)) {
+            "read as main's own plain call"
+        } else {
+            failures.push(format!("{}: main `{row}`, now `{actual}`", case.id));
+            continue;
+        };
+        *by_reason.entry(format!("{reason}: {form}")).or_default() += 1;
+    }
+    assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
+    let summary: Vec<String> = by_reason.iter().map(|(reason, n)| format!("{reason} = {n}")).collect();
     assert_eq!(
-        by_reason,
-        [("object", 64), ("symbol", 24), ("void", 48), ("factory callee withheld", 93)],
-        "{}",
-        declined.join("\n")
+        summary,
+        [
+            "closed list declines the wrapper, so the component it wraps is listed: Object.assign argument = 11",
+            "closed list declines the wrapper, so the component it wraps is listed: wrapper call = 11",
+            "identity cast: Object.assign = 12",
+            "identity cast: Object.assign argument = 8",
+            "identity cast: PascalCase call returned = 8",
+            "identity cast: class = 12",
+            "identity cast: element factory = 8",
+            "known React wrapper or API: class = 126",
+            "known React wrapper or API: element factory = 93",
+            "read as main's own plain call: Object.assign = 111",
+            "read as main's own plain call: Object.assign argument = 93",
+            "read as main's own plain call: PascalCase call returned = 93",
+        ]
     );
 }
+
+/// The forms built on React's own API, a class's `React.Component` base or `React.createElement` in a component's
+/// body, whose component is found through any cast but the closed list.
+const KNOWN_REACT_WRAPPER_FORMS: &[&str] = &["class", "element factory"];
 
 /// The closed list is one exhaustive match over the type node enum: no catch-all arm, so a new OXC type node kind does
 /// not compile until it is placed, and exactly three entries decline.
@@ -1578,10 +1639,11 @@ fn factory_parity_cases() -> Vec<(String, String)> {
              function make<T>(tag: T, config: object): React.FC<Props> { return (props) => <div />; }\n\
              export const Button = (make as typeof make)('button', {});",
         ),
-        // Round 20: a candidate derived from a cast main read no callee through shares no tag and takes no props type
-        // a candidate main saw would take (`a_candidate_main_saw_keeps_main_s_answer_beside_a_cast_built_one`).
+        // Round 22: a generic wrapper, tagged factory or factory called through a cast that replaces the callee's type
+        // extracts exactly what main extracts, the rows of rounds 20 and 21 included. These ids carry no cast suffix,
+        // so each row equals main's.
         (
-            "round 20: tagged",
+            "replacing cast: a tagged call beside a plain tagged factory",
             "interface RecipeProps extends React.ComponentProps<'button'> {}\n\
              declare function stringify(tag: string, config: object): string;\n\
              function chakra(tag: string, config: object): React.FC<Props> { return (props) => <div />; }\n\
@@ -1589,7 +1651,7 @@ fn factory_parity_cases() -> Vec<(String, String)> {
              export const Primary = chakra('button', {});",
         ),
         (
-            "round 20: wrapper, same props type",
+            "replacing cast: a generic wrapper beside a tagged factory, same props type",
             "interface GroupProps extends React.ComponentProps<'div'> {}\n\
              function chakra(tag: string, config: object): React.FC<Props> { return (props) => <div />; }\n\
              function withContext<T, P>(c: unknown): React.FC<P> { return (props) => <div />; }\n\
@@ -1597,70 +1659,87 @@ fn factory_parity_cases() -> Vec<(String, String)> {
              export const Group = (withContext as <T, P>(c: unknown) => React.FC<P>)<HTMLDivElement, GroupProps>(StyledGroup);",
         ),
         (
-            "round 20: wrapper, own props type",
+            "replacing cast: a generic wrapper beside a tagged factory, own props type",
             "interface StyledProps extends React.ComponentProps<'div'> {}\n\
              function chakra(tag: string, config: object): React.FC<Props> { return (props) => <div />; }\n\
              function withContext<T, P>(c: unknown): React.FC<P> { return (props) => <div />; }\n\
              const Styled = chakra('div', {});\n\
              export const Group = (withContext as <T, P>(c: unknown) => React.FC<P>)<HTMLDivElement, Props>(Styled);",
         ),
-        // Round 21: a tentative candidate claims nothing, so the rules after the wrapper rule still answer for the
-        // declaration: an anonymous default export keeps the component its call wraps.
         (
-            "round 21: default export, no props type | plain",
+            "plain call: default export, no props type",
             "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
              export default withTheme<unknown>(Base);",
         ),
         (
-            "round 21: default export, no props type | asserted signature",
+            "replacing cast: default export, no props type",
             "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
              export default (withTheme as <T>(c: typeof Base) => typeof Base)<unknown>(Base);",
         ),
         (
-            "round 21: default export, a props type | plain",
+            "plain call: default export, a props type",
             "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
              export default withTheme<Props>(Base);",
         ),
         (
-            "round 21: default export, a props type | asserted signature",
+            "replacing cast: default export, a props type",
             "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
              export default (withTheme as <T>(c: typeof Base) => typeof Base)<Props>(Base);",
         ),
         (
-            "round 21: named export, no props type | plain",
+            "plain call: named export, no props type",
             "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
              export const Themed = withTheme<unknown>(Base);",
         ),
         (
-            "round 21: named export, no props type | asserted signature",
+            "replacing cast: named export, no props type",
             "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
              export const Themed = (withTheme as <T>(c: typeof Base) => typeof Base)<unknown>(Base);",
         ),
         (
-            "round 21: named export, a props type | plain",
+            "plain call: named export, a props type",
             "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
              export const Themed = withTheme<Props>(Base);",
         ),
         (
-            "round 21: named export, a props type | asserted signature",
+            "replacing cast: named export, a props type",
             "function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
              export const Themed = (withTheme as <T>(c: typeof Base) => typeof Base)<Props>(Base);",
         ),
         (
-            "round 21: named export, a builder, no props type | plain",
+            "plain call: named export, a builder, no props type",
             "function makeX<T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
              export const Themed = makeX<unknown>('div');",
         ),
         (
-            "round 21: named export, a builder, no props type | asserted signature",
+            "replacing cast: named export, a builder, no props type",
             "function makeX<T>(tag: string): React.FC<Props> { return (props) => <div />; }\n\
              export const Themed = (makeX as <T>(tag: string) => React.FC<Props>)<unknown>('div');",
         ),
         (
-            "round 20: alias of a cast-built wrapper",
+            "replacing cast: an alias and a default export of a generic wrapper",
             "function withContext<T, P>(c: unknown): React.FC<P> { return (props) => <div />; }\n\
              const Group = (withContext as <T, P>(c: unknown) => React.FC<P>)<HTMLDivElement, Props>(Base);\n\
              export const Alias = Group;\nexport default Group;",
+        ),
+        (
+            "replacing cast: a member generic wrapper",
+            "interface PublicProps { label?: string }\ndeclare const ui: { withContext<P>(c: unknown): React.FC<P> };\n\
+             type SomeType = { withContext<P>(c: unknown): React.FC<P> };\n\
+             export const Card = (ui as SomeType).withContext<PublicProps>(Base);",
+        ),
+        (
+            "replacing cast: a generic wrapper to a named signature",
+            "interface Public { label?: string }\n\
+             function withTheme<T>(c: typeof Base): typeof Base { return c; }\n\
+             type Signature = <T>(c: unknown) => React.FC<T>;\n\
+             export const Card = (withTheme as Signature)<Public>(Base);",
+        ),
+        (
+            "replacing cast: a factory to a named type",
+            "function createButton(): React.FC<Props> { return (props) => <div />; }\n\
+             type SomeFactory = () => React.FC<{ tone?: string }>;\n\
+             export const Card = (createButton as SomeFactory)();",
         ),
         (
             "finding: a require's member",
@@ -1725,8 +1804,7 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     assert_eq!(base.len(), cases.len(), "the base table and the cases are out of step");
     let mut failures = Vec::new();
     let mut read_as_the_plain_call = 0;
-    // Rounds 20 and 21 are checked line by line in `a_candidate_main_saw_keeps_main_s_answer_beside_a_cast_built_one`.
-    for (id, source) in cases.iter().filter(|(id, _)| !id.starts_with("round 20: ") && !id.starts_with("round 21: ")) {
+    for (id, source) in &cases {
         let now = factory_parity_output(source);
         let main = base.get(id.as_str()).copied().unwrap_or("not in the base table");
         let cast = id.rsplit_once(" | ").filter(|(_, cast)| *cast != "plain");
@@ -1761,86 +1839,6 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     assert_eq!(read_as_the_plain_call, 44);
 }
 
-/// Round 20: a candidate derived from a cast main read no callee through (`Candidates::tentative`) counts toward no tag
-/// several candidates share and takes no props type before a candidate main saw, so every candidate main saw extracts
-/// exactly main's row. The cast-built candidate is the one-linear-peel answer, pinned beside main's.
-#[test]
-fn a_candidate_main_saw_keeps_main_s_answer_beside_a_cast_built_one() {
-    let base: FxHashMap<&str, &str> =
-        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
-    let line = |output: &str, name: &str| -> String {
-        output
-            .split(" | ")
-            .filter(|line| line.contains(&format!("'{name}'")) || line.starts_with(&format!("{name}:")))
-            .collect()
-    };
-    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
-    // (row, the candidates main saw, the cast-built candidate, its answer here). Main's answer for the cast-built one
-    // is the factory rule's, through the callee it did not read as cast: `Label:stringify"factoryResult"` (a call
-    // returning `string` listed as a component) and `Group:withContext"factoryResult"`.
-    let rows = [
-        (
-            "round 20: tagged",
-            ["Base", "Primary"],
-            "Label",
-            "Info SkippedCandidate: 'Label' is built by a call to 'stringify' through a type assertion that replaces its \
-             type, so the declaration that would give its props is not read and it is not listed",
-        ),
-        (
-            "round 20: wrapper, same props type",
-            ["Base", "StyledGroup"],
-            "Group",
-            "Group:GroupProps\"wrapperTypeArgument\" exported as Group",
-        ),
-        (
-            "round 20: wrapper, own props type",
-            ["Base", "Styled"],
-            "Group",
-            "Group:Props\"wrapperTypeArgument\" exported as Group",
-        ),
-        (
-            "round 20: alias of a cast-built wrapper",
-            ["Base", "Alias"],
-            "Group",
-            "Group:Props\"wrapperTypeArgument\" exported as default",
-        ),
-    ];
-    for (id, plain, cast_built, answer) in rows {
-        let now = factory_parity_output(&cases[id]);
-        let main = base[id];
-        for name in plain {
-            assert_eq!(line(&now, name), line(main, name), "{id}: {name}");
-        }
-        assert_eq!(line(&now, cast_built), answer, "{id}: {cast_built}");
-    }
-    assert_eq!(line(base["round 20: tagged"], "Primary"), "Primary:RecipeProps\"taggedFactory\" exported as Primary");
-    // Round 21: recording a tentative candidate claims nothing, so the rules after the wrapper rule still answer for the
-    // declaration. Every round 21 row equals main's, but one: through the cast, `withTheme<Props>(Base)` gives the
-    // props its type argument names, as main's plain call does, where main read `withTheme`'s declaration.
-    for (id, source) in cases.iter().filter(|(id, _)| id.starts_with("round 21: ")) {
-        let now = factory_parity_output(source);
-        let expected = match id.as_str() {
-            "round 21: named export, a props type | asserted signature" => {
-                base["round 21: named export, a props type | plain"]
-            }
-            // Main's factory rule reads `makeX` through the cast (`Themed:makeX`); here the factory rule withholds a
-            // callee cast to another type (round 8), and the candidate, selecting no props type, adds nothing.
-            "round 21: named export, a builder, no props type | asserted signature" => {
-                "Base:Props\"functionDeclaration\" | Info SkippedCandidate: 'Themed' is built by a call to 'makeX' \
-                 through a type assertion that replaces its \
-                 type, so the declaration that would give its props is not read and it is not listed"
-            }
-            _ => base[id.as_str()],
-        };
-        assert_eq!(now, expected, "{id}");
-    }
-    // The finding's form: the default export is the component the call wraps, as on main.
-    assert_eq!(
-        base["round 21: default export, no props type | asserted signature"],
-        "Base:Props\"functionDeclaration\" exported as default"
-    );
-}
-
 /// Finding 1 of round 9, and round 10's one walker: every `typeof` alias's declarations are counted and its shadowing
 /// scopes found in one walk of the module, however many aliases there are; a module with none is not walked.
 #[test]
@@ -1864,14 +1862,23 @@ fn every_typeof_alias_is_counted_in_one_walk_of_the_module() {
 }
 
 /// Finding 3: a name declared again in an inner scope shadows the module's `typeof` alias only there; the module's
-/// own second declaration of it makes it ambiguous everywhere.
+/// own second declaration of it makes it ambiguous everywhere, and a generic wrapper cast to it loses its callee.
 #[test]
 fn a_typeof_alias_is_shadowed_only_where_its_name_is_declared_again() {
-    let factory = "function createButton(): React.FC<Props> { return (props) => <div />; }\n\
+    let factory = "function createButton<T>(render: React.FC<T>): React.FC<T> { return render; }\n\
                    type Factory = typeof createButton;\n";
-    let plain = tsx(&format!("{factory}export const Button = createButton();"));
+    let plain = tsx(&format!("{factory}export const Button = createButton<Props>((props: Props) => <div />);"));
     assert_eq!(plain.len(), 1, "{plain:#?}");
-    let asserted = |other: &str| tsx(&format!("{factory}{other}\nexport const Button = (createButton as Factory)();"));
+    // A cast that replaces the callee's type keeps the component without the callee whose result adds props.
+    let replaced = tsx(&format!(
+        "{factory}export const Button = (createButton as <T>(render: React.FC<T>) => React.FC<T>)<Props>((props: Props) => <div />);"
+    ));
+    assert_ne!(replaced, plain);
+    let asserted = |other: &str| {
+        tsx(&format!(
+            "{factory}{other}\nexport const Button = (createButton as Factory)<Props>((props: Props) => <div />);"
+        ))
+    };
     for other in [
         "const Factory = 1;",
         "function g<Factory>(f: Factory) { return f; }",
@@ -1903,22 +1910,7 @@ fn a_typeof_alias_is_shadowed_only_where_its_name_is_declared_again() {
         "export default interface Factory { (): string }",
         "export default class Factory {}",
     ] {
-        assert_eq!(asserted(other), Vec::<serde_json::Value>::new(), "{other}");
-        // The declined factory call is the skip any unmatched PascalCase binding is, not silence.
-        let source = format!("{HEADER}{factory}{other}\nexport const Button = (createButton as Factory)();");
-        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
-        let skipped: Vec<&str> = data
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.starts_with("'Button'"))
-            .map(|d| d.message.as_str())
-            .collect();
-        assert_eq!(
-            skipped,
-            ["'Button' is built by a call to 'createButton' through a type assertion that replaces its type, so the \
-                 declaration that would give its props is not read and it is not listed"],
-            "{other}"
-        );
+        assert_eq!(asserted(other), replaced, "{other}");
     }
 }
 
@@ -2132,52 +2124,6 @@ fn an_element_factory_renders_its_argument_unless_asserted_to_give_no_element() 
     assert_eq!(rendered("(React as { createElement: (t: any) => symbol }).createElement"), 0);
     // A component wrapper renders its argument by its name, whatever it returns.
     assert_eq!(rendered("memo"), 1);
-}
-
-/// Round 8: a rendering factory called through an assertion that replaces its type is not listed, as its props come
-/// only from the declaration the assertion withholds; the skip says so, once. A result on the closed list says the
-/// call gives no component and keeps the generic skip; the plain call is listed with no skip.
-#[test]
-fn a_factory_called_through_an_assertion_says_why_it_is_not_listed() {
-    let outcome = |callee: &str| {
-        let source = format!(
-            "{HEADER}declare const other: unknown;\n\
-             function createButton() {{ return (props: Props) => <div />; }}\n\
-             export const Button = {callee}();"
-        );
-        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
-        let names: Vec<String> = data.component_mappings.iter().map(|m| m.component_name.clone()).collect();
-        let skips: Vec<String> = data
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
-            .map(|d| d.message.clone())
-            .collect();
-        (names, skips)
-    };
-    assert_eq!(outcome("createButton"), (vec!["Button".to_owned()], Vec::new()));
-    assert_eq!(outcome("(createButton as typeof createButton)"), (vec!["Button".to_owned()], Vec::new()));
-    let withheld = "'Button' is built by a call to 'createButton' through a type assertion that replaces its type, \
-                    so the declaration that would give its props is not read and it is not listed";
-    for callee in [
-        "(createButton as F)",
-        "(createButton as typeof other)",
-        "(createButton as object)",
-        "(createButton as () => React.FC<Props>)",
-        "(createButton as () => React.ComponentType<Props>)",
-        "(createButton as () => React.FC<Props> | null)",
-        "(createButton as { (): React.FC<Props> })",
-        "(createButton as () => string)",
-        "(createButton as () => React.ReactNode)",
-        "(createButton as () => unknown)",
-    ] {
-        assert_eq!(outcome(callee), (Vec::new(), vec![withheld.to_owned()]), "{callee}");
-    }
-    let generic = "'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, \
-                   HOC wrapper, or identifier alias)";
-    for callee in ["(createButton as () => object)", "(createButton as () => void)"] {
-        assert_eq!(outcome(callee), (Vec::new(), vec![generic.to_owned()]), "{callee}");
-    }
 }
 
 /// The components a `.tsx` source after `HEADER` publishes, by name, in order.

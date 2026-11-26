@@ -163,20 +163,23 @@ wrapper call before its component | rendered | typeof itself	Base:Props"function
 anonymous default wrapper call | rendered | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a factory payload, which a tag-name argument needs
 anonymous default wrapper call | rendered | typeof itself	Base:Props"functionDeclaration"
 tagged factory, a props type names the tag | rendered | typeof itself	Base:Props"functionDeclaration" | Button:make"factoryResult" exported as Button
-round 20: tagged	Base:Props"functionDeclaration" | Label:stringify"factoryResult" | Primary:RecipeProps"taggedFactory" exported as Primary
-round 20: wrapper, same props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as Group | StyledGroup:GroupProps"taggedFactory"
-round 20: wrapper, own props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as Group | Styled:StyledProps"taggedFactory"
-round 21: default export, no props type | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props
-round 21: default export, no props type | asserted signature	Base:Props"functionDeclaration" exported as default
-round 21: default export, a props type | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as default
-round 21: default export, a props type | asserted signature	Base:Props"functionDeclaration" exported as default
-round 21: named export, no props type | plain	Themed:Props"functionDeclaration" exported as Themed
-round 21: named export, no props type | asserted signature	Themed:Props"functionDeclaration" exported as Themed
-round 21: named export, a props type | plain	Base:Props"functionDeclaration" | Themed:Props"wrapperTypeArgument" exported as Themed
-round 21: named export, a props type | asserted signature	Base:Props"functionDeclaration" | Themed:withTheme"factoryResult" exported as Themed
-round 21: named export, a builder, no props type | plain	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Themed' looks like a component built by a wrapper call, but none of its type arguments names a factory payload, which a tag-name argument needs
-round 21: named export, a builder, no props type | asserted signature	Base:Props"functionDeclaration" | Themed:makeX"factoryResult" exported as Themed
-round 20: alias of a cast-built wrapper	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as default | Info SkippedCandidate: 'Alias' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+replacing cast: a tagged call beside a plain tagged factory	Base:Props"functionDeclaration" | Label:stringify"factoryResult" | Primary:RecipeProps"taggedFactory" exported as Primary
+replacing cast: a generic wrapper beside a tagged factory, same props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as Group | StyledGroup:GroupProps"taggedFactory"
+replacing cast: a generic wrapper beside a tagged factory, own props type	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as Group | Styled:StyledProps"taggedFactory"
+plain call: default export, no props type	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props
+replacing cast: default export, no props type	Base:Props"functionDeclaration" exported as default
+plain call: default export, a props type	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as default
+replacing cast: default export, a props type	Base:Props"functionDeclaration" exported as default
+plain call: named export, no props type	Themed:Props"functionDeclaration" exported as Themed
+replacing cast: named export, no props type	Themed:Props"functionDeclaration" exported as Themed
+plain call: named export, a props type	Base:Props"functionDeclaration" | Themed:Props"wrapperTypeArgument" exported as Themed
+replacing cast: named export, a props type	Base:Props"functionDeclaration" | Themed:withTheme"factoryResult" exported as Themed
+plain call: named export, a builder, no props type	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Themed' looks like a component built by a wrapper call, but none of its type arguments names a factory payload, which a tag-name argument needs
+replacing cast: named export, a builder, no props type	Base:Props"functionDeclaration" | Themed:makeX"factoryResult" exported as Themed
+replacing cast: an alias and a default export of a generic wrapper	Base:Props"functionDeclaration" | Group:withContext"factoryResult" exported as default | Info SkippedCandidate: 'Alias' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+replacing cast: a member generic wrapper	Base:Props"functionDeclaration" | Card:PublicProps"wrapperTypeArgument" exported as Card
+replacing cast: a generic wrapper to a named signature	Base:Props"functionDeclaration" | Card:withTheme"factoryResult" exported as Card
+replacing cast: a factory to a named type	Base:Props"functionDeclaration" | Card:createButton"factoryResult" exported as Card
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button
 an element built from forwardRef, plain	Button:Props"forwardRef" exported as Button

@@ -287,7 +287,7 @@ pub(super) struct SourceDataCollector<'src> {
     /// component; filtered out of the final `component_mappings` in `finish()`.
     pub(super) aliased_away: FxHashSet<CompactString>,
     /// Wrapper-call candidates, promoted to mappings in `finish()` once the whole file has been seen.
-    pub(super) pending_wrappers: wrapper::Candidates,
+    pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
     /// Aliases of a component declared further down the file, resolved in `finish()`.
     pub(super) pending_aliases: Vec<component::PendingAlias>,
     /// The alias shape `try_rename_identifier_wrapped_component` read for the current declarator when its component was
@@ -365,7 +365,7 @@ impl<'src> SourceDataCollector<'src> {
             module_children: 0,
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
-            pending_wrappers: wrapper::Candidates::default(),
+            pending_wrappers: Vec::new(),
             pending_aliases: Vec::new(),
             pending_factory_calls: Vec::new(),
             pending_factory_props: Vec::new(),
@@ -611,7 +611,6 @@ impl<'src> SourceDataCollector<'src> {
         self.promote_function_aliases();
         self.promote_wrapper_calls();
         self.promote_identifier_aliases();
-        self.promote_tentative_wrapper_calls();
         self.promote_factory_calls();
         self.attach_factory_props();
         self.promote_reexported_imports();
