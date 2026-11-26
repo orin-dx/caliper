@@ -448,7 +448,7 @@ fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Settled {
             diagnostic
         })
         .collect();
-    if unavailable.is_some() {
+    if unavailable.is_some_and(|unasked| unasked.covers(asked)) {
         return Settled::Degraded(diagnostics);
     }
     let component = components.into_iter().find(|found| found.key == asked).map(Arc::new);
@@ -669,7 +669,10 @@ mod tests {
         Rejected,
         /// A fallback that is the checker's verdict about the component.
         Verdict,
-        /// An outcome with no entry for the component and a warning: a run past its heap budget, a skipped target.
+        /// An outcome with no entry for the component and a warning, which marks it (and another) as not asked: a run
+        /// past its heap budget.
+        OverBudget,
+        /// An outcome with a warning and no entry or mark for the component: the checker's answer is the structural one.
         Absent,
     }
 
@@ -700,7 +703,16 @@ mod tests {
                 (false, Reply::Down) => SemanticOutcome::unavailable("no tsc in this test"),
                 (false, Reply::Rejected) => SemanticOutcome { fallbacks: vec![fallback(true)], ..Default::default() },
                 (false, Reply::Verdict) => SemanticOutcome { fallbacks: vec![fallback(false)], ..Default::default() },
-                (false, Reply::Absent) => SemanticOutcome { diagnostics: vec![warning], ..Default::default() },
+                (false, Reply::OverBudget) => {
+                    let mut outcome = SemanticOutcome { diagnostics: vec![warning], ..Default::default() };
+                    outcome.leave_unasked([key.clone(), "Other".to_owned()]);
+                    outcome
+                }
+                (false, Reply::Absent) => {
+                    let mut outcome = SemanticOutcome { diagnostics: vec![warning], ..Default::default() };
+                    outcome.leave_unasked(["Other".to_owned()]);
+                    outcome
+                }
             };
             delivery.deliver(Some(outcome));
         }
@@ -708,8 +720,9 @@ mod tests {
 
     /// A request the checker answered with nothing (down, or failed on the component) is refused again without asking
     /// it until `DEGRADED_RETRY` passes or a file changes, each answer still carrying what it said; then it is asked
-    /// again, and a recovered checker's answer replaces the structural one. A verdict, or an outcome with no entry for
-    /// the component, is the checker's answer and is kept, even past the retry. On the base the down checker was asked
+    /// again, and a recovered checker's answer replaces the structural one; a run that left the component unasked once
+    /// its heap passed the budget is refused the same way. A verdict, or an outcome with no entry and no mark for the
+    /// component, is the checker's answer and is kept, even past the retry. On the base the down checker was asked
     /// by every request, a rejected fallback was kept as the answer, and an absent entry was asked by every request.
     #[test]
     fn a_checker_that_answered_nothing_is_asked_again_only_after_the_retry_or_an_edit() {
@@ -723,9 +736,9 @@ mod tests {
         let answer = structural.component("Button").unwrap();
         let cx = CollapseContext::of(&options);
 
-        for reply in [Reply::Down, Reply::Rejected, Reply::Verdict, Reply::Absent] {
+        for reply in [Reply::Down, Reply::Rejected, Reply::OverBudget, Reply::Verdict, Reply::Absent] {
             let degraded = match reply {
-                Reply::Down | Reply::Rejected => true,
+                Reply::Down | Reply::Rejected | Reply::OverBudget => true,
                 Reply::Verdict | Reply::Absent => false,
             };
             let checker = Arc::new(Replies { reply, recovered: false.into(), asked: 0.into() });

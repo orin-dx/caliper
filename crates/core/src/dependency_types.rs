@@ -28,6 +28,9 @@ use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 mod ledger;
+#[cfg(test)]
+pub(crate) use ledger::READ_RETRY;
+pub(crate) use ledger::Retry;
 use ledger::{LedgerBuilder, Node, ReadLedger};
 
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
@@ -381,6 +384,9 @@ pub(crate) struct DependencyLayer {
     panics: Vec<Diagnostic>,
     /// The dependency files this layer's load could not read or read again, and what those reads left unfollowed.
     ledger: ReadLedger,
+    /// How many times this layer's load read a dependency file, for tests.
+    #[cfg(test)]
+    reads: usize,
 }
 
 impl DependencyLayer {
@@ -478,11 +484,16 @@ impl DependencyLayer {
     /// The demands of `demands` a load over this layer follows: those it has not followed, and those whose walk passed
     /// a file it could not read ([`DependencyLayer::unread`] gives the ones they lead to as well).
     pub(crate) fn missing(&self, demands: &[Demand]) -> Vec<Demand> {
+        self.missing_at(demands, Retry::Always)
+    }
+
+    /// [`Self::missing`], following again only the unread walks that are due under `retry`.
+    pub(crate) fn missing_at(&self, demands: &[Demand], retry: Retry) -> Vec<Demand> {
         demands
             .iter()
             .filter(|d| {
                 let key = d.key();
-                !self.has_demand(&key) || self.awaits_retry(&key)
+                !self.has_demand(&key) || self.awaits_retry(&key, retry)
             })
             .cloned()
             .collect()
@@ -1315,6 +1326,16 @@ pub(crate) fn load(
     options: &PipelineOptions,
     previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
+    load_at(demands, options, previous, Retry::Always)
+}
+
+/// [`load`], following again only the walks `retry` makes due, and recording its failed reads at its time.
+pub(crate) fn load_at(
+    demands: Vec<Demand>,
+    options: &PipelineOptions,
+    previous: Option<&Arc<DependencyLayer>>,
+    retry: Retry,
+) -> DependencyLayer {
     // Its own resolvers, never another consumer's: `oxc_resolver` keeps a config reached through another's
     // `references` without that config's own references, so a shared cache would make what this load resolves depend
     // on what was resolved first.
@@ -1324,6 +1345,7 @@ pub(crate) fn load(
     let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
     let flatten = previous.filter(|_| parent.is_none());
     let mut loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
+    loader.ledger.retry = retry;
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
     match (previous, flatten) {
@@ -1381,10 +1403,10 @@ pub(crate) fn load(
             loader.spawn_demand(scope, demand);
         }
     });
-    // Only a cold load writes the index, and not when a read failed: what it holds is not the whole answer.
+    // Only a cold load writes the index. A walk that passed a file it could not read put nothing in the maps it writes
+    // (an incomplete [`Partial`] is kept nowhere), so a failed read costs only its own walks' entries.
     if let (None, Some(path)) = (previous, &index_path)
         && loader.learned.load(Ordering::Relaxed)
-        && !loader.ledger.any_failed()
     {
         write_index(path, &loader);
     }
@@ -1463,6 +1485,8 @@ pub(crate) fn load(
         parsed: loader.parsed.into_iter().filter_map(|(key, cell)| Some((key, cell.get()?.clone().ok()?))).collect(),
         panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
         ledger: loader.ledger.finish(),
+        #[cfg(test)]
+        reads: loader.reads.iter().map(|entry| *entry.value()).sum(),
     }
 }
 

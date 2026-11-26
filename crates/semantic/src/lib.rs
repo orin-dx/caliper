@@ -621,10 +621,7 @@ async fn answer_lanes(
     lanes: &Lanes,
 ) -> Result<SemanticOutcome, CallError> {
     let (mut outcome, by_file, order) = group_by_file(request);
-    let mut answered = session(programs, request, files, &by_file, &order, lanes).await?;
-    outcome.diagnostics.append(&mut answered.diagnostics);
-    outcome.components.append(&mut answered.components);
-    outcome.fallbacks.append(&mut answered.fallbacks);
+    outcome.merge(session(programs, request, files, &by_file, &order, lanes).await?);
     Ok(outcome)
 }
 
@@ -675,8 +672,7 @@ async fn session(
     while let Some(joined) = tasks.join_next().await {
         match joined {
             Ok(Ok(mut answered)) => {
-                outcome.components.append(&mut answered.outcome.components);
-                outcome.fallbacks.append(&mut answered.outcome.fallbacks);
+                outcome.merge(std::mem::take(&mut answered.outcome));
                 generic.append(&mut answered.generic);
                 left.append(&mut answered.left);
             }
@@ -732,6 +728,9 @@ async fn session(
             Err(error) => return Err(error),
         }
     }
+    // Left because the heap passed its budget, not because of anything about them: marked, so nothing keeps the outcome
+    // as their answer.
+    outcome.leave_unasked(left.iter().cloned());
     outcome.diagnostics.extend(watch.diagnostic(left));
 
     if let (Some(path), Some(recording)) = (&request.record_to, rpc.recording())
@@ -769,8 +768,7 @@ struct Answered {
 
 impl Answered {
     fn append(&mut self, mut other: Answered) {
-        self.outcome.components.append(&mut other.outcome.components);
-        self.outcome.fallbacks.append(&mut other.outcome.fallbacks);
+        self.outcome.merge(std::mem::take(&mut other.outcome));
         self.generic.append(&mut other.generic);
         self.left.append(&mut other.left);
     }
@@ -812,11 +810,9 @@ async fn answer_file(
                 .extend(targets.iter().map(|target| fallback_of(target, "not part of the checker's program")));
             return Ok(answered);
         }
-        Err(CallError::Rejected(_)) => {
-            answered
-                .outcome
-                .fallbacks
-                .extend(targets.iter().map(|target| rejected_fallback_of(target, "not part of the checker's program")));
+        Err(CallError::Rejected(message)) => {
+            let reason = format!("the checker rejected a request: {message}");
+            answered.outcome.fallbacks.extend(targets.iter().map(|target| rejected_fallback_of(target, &reason)));
             return Ok(answered);
         }
         Err(CallError::OverBudget) => {
@@ -1161,7 +1157,13 @@ mod tests {
             assert!(unbounded.components.contains(component), "{} differs", component.key);
         }
         assert!(outcome.fallbacks.is_empty(), "{:?}", outcome.fallbacks);
+        assert!(outcome.is_degraded(), "a run that left components unasked is not kept");
         let [warning] = outcome.diagnostics.as_slice() else { panic!("{:?}", outcome.diagnostics) };
+        let unasked = outcome.unavailable.as_ref().unwrap();
+        for key in unbounded.components.iter().map(|component| &component.key) {
+            let left = warning.affects.contains(key);
+            assert_eq!(unasked.covers(key), left, "{key}: marked exactly when the warning names it");
+        }
         assert_eq!(warning.severity, caliper_docgen_core::types::DiagnosticSeverity::Warning);
         assert!(warning.message.starts_with(&format!("{} component(s) kept their structural result", 24 - answered)));
         assert!(warning.message.contains("depends on timing"), "{}", warning.message);
@@ -1431,5 +1433,54 @@ mod tests {
             let expected = if released_by_run { made } else { made[..3].to_vec() };
             assert_eq!(released, expected);
         }
+    }
+
+    /// The checker rejects the lookup of a component's module (its snapshot was released first): every component of
+    /// the file keeps its structural result for this request only, and the reason says what the checker rejected, as
+    /// every other rejection does. On the base the reason was the verdict "not part of the checker's program".
+    #[test]
+    fn a_rejected_module_lookup_says_what_the_checker_rejected_and_is_transient() {
+        let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generic");
+        let file = root.join("Poly.tsx");
+        let target = Target {
+            key: "Poly".to_string(),
+            file_path: file.clone(),
+            display_name: "Poly".to_string(),
+            exports: vec![caliper_docgen_core::types::ComponentExport::named("Poly")],
+            described: Default::default(),
+            react_wanted: None,
+            layering: None,
+        };
+        let timeout = std::time::Duration::from_secs(60);
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+
+        let (answered, snapshot) = runtime.block_on(async {
+            let checker = checker::Backend::start(&root, 1).unwrap();
+            let tsconfig = root.join("tsconfig.json");
+            let files = [file.to_string()];
+            let rpc = Rpc::open_programs(checker.client(), timeout, Some(tsconfig.as_str()), &files, false, 1)
+                .await
+                .unwrap()
+                .remove(0);
+            let snapshot = rpc.snapshot_id();
+            rpc.release().await;
+            let rpc = Arc::new(rpc);
+            let converter = Converter::new(rpc.clone(), false);
+            let watch = Watch::new(None);
+            let answered = answer_file(&rpc, &converter, &PropInterner::default(), &watch, vec![target]).await;
+            checker.shutdown().await;
+            (answered.unwrap_or_else(|_| panic!("a rejection is not fatal")), snapshot)
+        });
+
+        assert_eq!(answered.outcome.components, []);
+        assert_eq!(
+            answered.outcome.fallbacks,
+            [SemanticFallback {
+                key: "Poly".to_string(),
+                reason: format!("the checker rejected a request: api: client error: snapshot {snapshot} not found"),
+                transient: true,
+            }]
+        );
+        assert!(answered.outcome.is_degraded());
     }
 }

@@ -164,16 +164,24 @@ pub struct SemanticOutcome {
     pub fallbacks: Vec<SemanticFallback>,
     /// What the backend itself reports (it could not start, it timed out); merged into the output's diagnostics.
     pub diagnostics: Vec<Diagnostic>,
-    /// Set when the checker answered nothing (it was not running, could not start, timed out or crashed), by
-    /// [`SemanticOutcome::unavailable`] and nothing else. An outcome without it is the checker's answer even when it has
-    /// no entry for a target (one the pass skipped, a run past its heap budget): absence is not unavailability.
+    /// Set where the checker was not asked: about every target when it answered nothing (it was not running, could not
+    /// start, timed out or crashed: [`SemanticOutcome::unavailable`]), or about the keys a run left unasked once the
+    /// heap passed its budget ([`SemanticOutcome::leave_unasked`]), and by nothing else. A target with no entry and no
+    /// mark is the checker's answer: absence is not unavailability.
     pub unavailable: Option<Unavailable>,
 }
 
-/// The mark of an outcome the checker did not give ([`SemanticOutcome::unavailable`]): only that constructor makes one,
-/// so no other outcome can claim it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Unavailable(());
+/// The mark of the targets the checker was not asked about: every one, or the keys listed. Only
+/// [`SemanticOutcome::unavailable`] and [`SemanticOutcome::leave_unasked`] make one, so no other outcome can claim it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unavailable(Option<Box<[String]>>);
+
+impl Unavailable {
+    /// Whether the checker was not asked about `key`.
+    pub fn covers(&self, key: &str) -> bool {
+        self.0.as_ref().is_none_or(|keys| keys.iter().any(|unasked| unasked == key))
+    }
+}
 
 /// A component the checker may be asked about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,11 +392,42 @@ impl SemanticOutcome {
             format!("TypeScript checker backend unavailable: {}", reason.into()),
         )
         .with_help("The structural result is used instead.");
-        Self { diagnostics: vec![diagnostic], unavailable: Some(Unavailable(())), ..Self::default() }
+        Self { diagnostics: vec![diagnostic], unavailable: Some(Unavailable(None)), ..Self::default() }
     }
 
-    /// Whether this outcome answers only for this request: the checker was unavailable, or failed while it answered a
-    /// component ([`SemanticFallback::transient`]). Nothing keeps such an outcome (a session's answers, the kept answer
+    /// Mark `keys` as not asked: the run stopped asking once the heap passed its budget, which says nothing about them,
+    /// so the outcome is degraded for them ([`SemanticOutcome::is_degraded`]). An outcome the checker gave nothing
+    /// stays marked for every target.
+    pub fn leave_unasked(&mut self, keys: impl IntoIterator<Item = String>) {
+        let mut keys: Vec<String> = keys.into_iter().collect();
+        match &mut self.unavailable {
+            Some(Unavailable(None)) => return,
+            Some(Unavailable(Some(listed))) => keys.extend(listed.iter().cloned()),
+            None => {}
+        }
+        if keys.is_empty() {
+            return;
+        }
+        keys.sort();
+        keys.dedup();
+        self.unavailable = Some(Unavailable(Some(keys.into_boxed_slice())));
+    }
+
+    /// Add `other`'s answers, fallbacks, diagnostics and its mark of the targets not asked to this outcome's: the one way
+    /// two parts of a run are put together, so no part's mark is lost.
+    pub fn merge(&mut self, mut other: SemanticOutcome) {
+        self.components.append(&mut other.components);
+        self.fallbacks.append(&mut other.fallbacks);
+        self.diagnostics.append(&mut other.diagnostics);
+        match other.unavailable {
+            Some(Unavailable(None)) => self.unavailable = Some(Unavailable(None)),
+            Some(Unavailable(Some(keys))) => self.leave_unasked(keys.into_vec()),
+            None => {}
+        }
+    }
+
+    /// Whether this outcome answers only for this request: the checker was unavailable or not asked about a target
+    /// ([`Unavailable`]), or failed while it answered a component ([`SemanticFallback::transient`]). Nothing keeps such an outcome (a session's answers, the kept answer
     /// on disk); the next request asks the checker again.
     pub fn is_degraded(&self) -> bool {
         self.unavailable.is_some() || self.fallbacks.iter().any(|fallback| fallback.transient)

@@ -155,6 +155,37 @@ pub(super) struct Lazy {
     whole_demand_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// How many times the layer grew (and the context was rebuilt or kept), for tests and stats.
     growths: std::sync::atomic::AtomicUsize,
+    /// The session's clock for following again a walk that passed a file it could not read, shared by its revisions.
+    clock: Arc<RetryClock>,
+    /// How many edits the session has seen: one arriving makes every such walk due again.
+    edits: u64,
+    /// How many times a component was resolved, for tests.
+    #[cfg(test)]
+    resolutions: std::sync::atomic::AtomicUsize,
+}
+
+impl Lazy {
+    /// When this revision follows again a walk that passed a file it could not read: once it is due.
+    fn retry(&self) -> dependency_types::Retry {
+        dependency_types::Retry::Due { now: self.clock.now(), edits: self.edits }
+    }
+}
+
+/// A session's time for [`dependency_types::Retry`]; a test sets it.
+#[derive(Default)]
+pub(super) struct RetryClock {
+    #[cfg(test)]
+    set: Mutex<Option<Instant>>,
+}
+
+impl RetryClock {
+    fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(now) = *self.set.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+            return now;
+        }
+        Instant::now()
+    }
 }
 
 /// The components of `global` by name, each name's components in output order.
@@ -221,6 +252,10 @@ impl Revision {
             whole_demand_started: std::sync::atomic::AtomicBool::new(false),
             whole_demand_thread: Mutex::new(None),
             growths: std::sync::atomic::AtomicUsize::new(0),
+            clock: Arc::default(),
+            edits: 0,
+            #[cfg(test)]
+            resolutions: std::sync::atomic::AtomicUsize::new(0),
         };
         Revision {
             id,
@@ -358,6 +393,10 @@ impl Revision {
                 whole_demand_started: std::sync::atomic::AtomicBool::new(false),
                 whole_demand_thread: Mutex::new(None),
                 growths: std::sync::atomic::AtomicUsize::new(0),
+                clock: previous.clock.clone(),
+                edits: previous.edits + 1,
+                #[cfg(test)]
+                resolutions: std::sync::atomic::AtomicUsize::new(0),
             }),
         };
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -425,10 +464,12 @@ impl Revision {
         let mut asked_for: Vec<dependency_types::Demand> = Vec::new();
         loop {
             let engine = lazy.engine.load_full();
+            #[cfg(test)]
+            lazy.resolutions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let (entry, diagnostics, depends_on, evidence, attributes) =
                 resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
             // The names the resolution reached that the layer lacks, and the demands below them whose walk passed a
-            // file that could not be read (the layer's ledger): the next load follows both.
+            // file that could not be read (the layer's ledger): the next load follows both, the second once due.
             let (missing, unread) = match &engine.layer {
                 Some(layer) => {
                     let roots: Vec<Demand> = depends_on
@@ -437,9 +478,10 @@ impl Revision {
                         .filter_map(|file| lazy.demands.get(file))
                         .flat_map(|demands| demands.iter().cloned())
                         .collect();
+                    let retry = lazy.retry();
                     let unread = layer.unread(&roots);
-                    let mut missing = layer.missing(&roots);
-                    missing.extend(unread.iter().cloned());
+                    let mut missing = layer.missing_at(&roots, retry);
+                    missing.extend(layer.missing_at(&unread, retry));
                     missing.sort();
                     missing.dedup();
                     (missing, !unread.is_empty())
@@ -523,11 +565,12 @@ impl Revision {
         let _growing = lazy.growing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let engine = lazy.engine.load_full();
         let Some(layer) = &engine.layer else { return };
-        let missing = layer.missing(demands);
+        let retry = lazy.retry();
+        let missing = layer.missing_at(demands, retry);
         if missing.is_empty() {
             return;
         }
-        let extended = Arc::new(off_pool(|| dependency_types::load(missing, options, Some(layer))));
+        let extended = Arc::new(off_pool(|| dependency_types::load_at(missing, options, Some(layer), retry)));
         lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
         // context and its memos stay; only the record of what was asked for moves on.
@@ -541,15 +584,26 @@ impl Revision {
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
         let next = Engine { layer: Some(extended), ctx };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
-        // behind; the rest hold for the larger layer, so the next component does not rebuild them. While a walk of the
-        // old layer is unread (its ledger), any memo may hold a declaration read without what lay past the file it
-        // could not read, a package's own included, and none is kept.
-        let unread_below = layer.any_unread();
-        let covered = |file: &str| lazy.demands.get(file).is_none_or(|demands| layer.covers(demands));
+        // behind; the rest hold for the larger layer, so the next component does not rebuild them. So does one that
+        // read a file whose walk reached an unread one (the old layer's ledger): a project file whose demands did, or a
+        // package file whose declarations did, since what lay past the file that could not be read is missing from it.
+        let unread = layer.unread_walks();
+        let unread_project: FxHashSet<&str> = match unread.is_empty() {
+            true => FxHashSet::default(),
+            false => lazy
+                .demands
+                .iter()
+                .filter(|(_, demands)| unread.reached_by(demands))
+                .map(|(file, _)| std::borrow::Borrow::<str>::borrow(file))
+                .collect(),
+        };
+        let kept = |file: &str| {
+            lazy.demands.get(file).is_none_or(|demands| layer.covers(demands))
+                && !unread_project.contains(file)
+                && !unread.declared_in(file)
+        };
         next.ctx.inherit_memos(&engine.ctx, |deps, read_in| {
-            !unread_below
-                && covered(read_in)
-                && deps.files.iter().all(|file| covered(std::borrow::Borrow::<str>::borrow(file)))
+            kept(read_in) && deps.files.iter().all(|file| kept(std::borrow::Borrow::<str>::borrow(file)))
         });
         lazy.engine.store(Arc::new(next));
     }
@@ -690,5 +744,184 @@ impl Revision {
             diagnostics.extend(layer.panic_diagnostics(), None);
         }
         Some(ComponentAnswer { key: key.to_owned(), entry, diagnostics: diagnostics.finish() })
+    }
+}
+
+#[cfg(test)]
+mod read_retry_tests {
+    //! What a lazy session pays while a dependency file stays unreadable: a component behind it is followed again only
+    //! once that is due, and no other component loses its memos. Unreadable bytes are not UTF-8, the same length as
+    //! the text, so restoring the text and the modification time leaves the file's stamp as the failed read found it.
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use std::collections::BTreeSet;
+    use std::sync::atomic::Ordering::Relaxed;
+    use std::time::Duration;
+
+    use camino::Utf8PathBuf;
+
+    use super::*;
+    use crate::dependency_types::READ_RETRY;
+    use crate::pipeline::{CollapseInheritedProps, ComponentAnswer, PipelineOptions};
+
+    const BAD_PROPS: &str = "export interface BadProps { bad: string }\n";
+
+    fn project() -> (tempfile::TempDir, Utf8PathBuf) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let kit = |name: &str| format!(r#"{{ "name": "{name}", "version": "1.0.0", "types": "index.d.ts" }}"#);
+        let component = |name: &str, kit: &str, props: &str| {
+            format!(
+                "import type {{ {props} }} from '{kit}';\ninterface {name}Theme {{ tone: string }}\n\
+                 interface {name}Props extends {props} {{ own: {name}Theme['tone'] }}\n\
+                 export function {name}(props: {name}Props) {{ return null; }}\n"
+            )
+        };
+        let files = [
+            ("node_modules/bad-kit/package.json", kit("bad-kit")),
+            ("node_modules/bad-kit/index.d.ts", "export * from './props';\n".to_owned()),
+            ("node_modules/bad-kit/props.d.ts", BAD_PROPS.to_owned()),
+            ("node_modules/good-kit/package.json", kit("good-kit")),
+            ("node_modules/good-kit/index.d.ts", "export interface GoodProps { good: string }\n".to_owned()),
+            ("node_modules/other-kit/package.json", kit("other-kit")),
+            ("node_modules/other-kit/index.d.ts", "export interface OtherProps { other: string }\n".to_owned()),
+            ("src/a/A.tsx", component("A", "bad-kit", "BadProps")),
+            ("src/u1/U1.tsx", component("U1", "good-kit", "GoodProps")),
+            ("src/u2/U2.tsx", component("U2", "other-kit", "OtherProps")),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        (tmp, root)
+    }
+
+    fn options(root: &Utf8Path, use_cache: bool) -> PipelineOptions {
+        PipelineOptions {
+            src_dirs: vec![root.join("src")],
+            cache_dir: Some(root.join("cache")),
+            load_dependencies: true,
+            use_cache,
+            collapse_inherited_props: CollapseInheritedProps::None,
+            ..Default::default()
+        }
+    }
+
+    /// Writes `body` over `file` and gives it back the modification time it had, so its stamp is unchanged.
+    fn rewrite_keeping_stamp(file: &Utf8Path, body: &[u8]) {
+        let modified = std::fs::metadata(file).unwrap().modified().unwrap();
+        std::fs::write(file, body).unwrap();
+        std::fs::File::options().write(true).open(file).unwrap().set_modified(modified).unwrap();
+    }
+
+    /// The layer loads and component resolutions `request` cost.
+    fn cost(revision: &Revision, request: impl FnOnce()) -> (usize, usize) {
+        let lazy = revision.lazy.as_ref().unwrap();
+        let before = (lazy.growths.load(Relaxed), lazy.resolutions.load(Relaxed));
+        request();
+        (lazy.growths.load(Relaxed) - before.0, lazy.resolutions.load(Relaxed) - before.1)
+    }
+
+    /// The files the context's member and props memos were read in (each component reads a member of its own theme).
+    fn memo_files(revision: &Revision) -> BTreeSet<String> {
+        let ctx = revision.lazy.as_ref().unwrap().engine.load().ctx.clone();
+        let file = |file: &str| file.rsplit('/').next().unwrap_or_default().to_owned();
+        let mut files: BTreeSet<String> =
+            ctx.member_reads.iter().map(|entry| file(std::borrow::Borrow::borrow(&entry.key().0))).collect();
+        files.extend(ctx.props_reads.iter().map(|entry| file(std::borrow::Borrow::borrow(&entry.key().0))));
+        files
+    }
+
+    fn set_clock(revision: &Revision, now: Instant) {
+        *revision.lazy.as_ref().unwrap().clock.set.lock().unwrap() = Some(now);
+    }
+
+    fn props(answer: &ComponentAnswer) -> Vec<String> {
+        let mut names: Vec<String> = answer.entry.props.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    fn cold(root: &Utf8Path, key: &str) -> ComponentAnswer {
+        let options = options(root, false);
+        Revision::cold_lazy(&options, 0).lazy_component(&options, key).unwrap()
+    }
+
+    /// One file stays unreadable (its stamp unchanged, as for a permission error). The component behind it costs one
+    /// load and one resolution on its first request, then one resolution and no load per request until the retry is
+    /// due, then one load once. A component that never reaches the file costs what it would anyway, and the memos of
+    /// the components before it outlive the growths after the failure. Once the file reads and the retry is due, the
+    /// answer equals a cold run's, and it is kept. On the base each request behind the file cost two loads and two
+    /// resolutions, and every growth after the failure dropped every memo.
+    #[test]
+    fn a_file_that_stays_unreadable_is_followed_again_once_its_retry_is_due_and_costs_no_other_component_anything() {
+        let (_tmp, root) = project();
+        let options = options(&root, true);
+        let props_file = root.join("node_modules/bad-kit/props.d.ts");
+        rewrite_keeping_stamp(&props_file, &[0xff; BAD_PROPS.len()]);
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        let ask = |key: &str| revision.lazy_component(&options, key).unwrap();
+
+        assert_eq!(cost(&revision, || assert_eq!(props(&ask("U1")), ["good", "own"])), (1, 1));
+        assert_eq!(cost(&revision, || assert_eq!(props(&ask("A")), ["own"])), (1, 1), "the first request behind it");
+        for request in 0..5 {
+            assert_eq!(cost(&revision, || assert_eq!(props(&ask("A")), ["own"])), (0, 1), "request {request}");
+        }
+        let before = memo_files(&revision);
+        assert!(before.contains("U1.tsx") && before.contains("A.tsx"), "{before:?}");
+        assert_eq!(cost(&revision, || assert_eq!(props(&ask("U2")), ["other", "own"])), (1, 1));
+        let after = memo_files(&revision);
+        assert!(after.contains("U1.tsx"), "an unrelated component's memos are kept: {after:?}");
+        assert!(!after.contains("A.tsx"), "the memos read behind the unread walk are not: {after:?}");
+        assert_eq!(cost(&revision, || drop(ask("U1"))), (0, 0), "an unrelated component is memoized");
+
+        set_clock(&revision, start + READ_RETRY - Duration::from_millis(1));
+        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 1), "not due yet");
+        set_clock(&revision, start + READ_RETRY);
+        assert_eq!(cost(&revision, || drop(ask("A"))), (1, 1), "due: followed again, still unreadable");
+        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 1), "the failure just now starts the retry again");
+
+        rewrite_keeping_stamp(&props_file, BAD_PROPS.as_bytes());
+        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 1), "readable, but nothing says so before the retry");
+        set_clock(&revision, start + READ_RETRY * 2);
+        let mut recovered = None;
+        assert_eq!(cost(&revision, || recovered = Some(ask("A"))), (1, 1));
+        assert_eq!(recovered.unwrap(), cold(&root, "A"), "once it reads, the answer is a cold run's");
+        assert_eq!(cost(&revision, || drop(ask("A"))), (0, 0), "and it is kept");
+    }
+
+    /// While a file stays unreadable, a change to it (its modification time or size) or an edit to the project makes the
+    /// walk that could not read it due at once, without waiting for the retry; the next request answers as a cold run.
+    #[test]
+    fn a_change_to_the_file_or_an_edit_makes_the_walk_past_it_due_at_once() {
+        for edit in [false, true] {
+            let (_tmp, root) = project();
+            let options = options(&root, true);
+            let props_file = root.join("node_modules/bad-kit/props.d.ts");
+            rewrite_keeping_stamp(&props_file, &[0xff; BAD_PROPS.len()]);
+            let first = Revision::cold_lazy(&options, 0);
+            set_clock(&first, Instant::now());
+            assert_eq!(props(&first.lazy_component(&options, "A").unwrap()), ["own"]);
+            assert_eq!(cost(&first, || drop(first.lazy_component(&options, "A"))), (0, 1), "edit {edit}");
+
+            let revision = match edit {
+                false => {
+                    std::fs::write(&props_file, BAD_PROPS).unwrap();
+                    first
+                }
+                true => {
+                    rewrite_keeping_stamp(&props_file, BAD_PROPS.as_bytes());
+                    let u1 = root.join("src/u1/U1.tsx");
+                    std::fs::write(&u1, std::fs::read_to_string(&u1).unwrap() + "// edited\n").unwrap();
+                    first.next_lazy(&options, &u1).unwrap().0
+                }
+            };
+            let mut answer = None;
+            assert_eq!(cost(&revision, || answer = revision.lazy_component(&options, "A")), (1, 1), "edit {edit}");
+            assert_eq!(answer.unwrap(), cold(&root, "A"), "edit {edit}");
+        }
     }
 }

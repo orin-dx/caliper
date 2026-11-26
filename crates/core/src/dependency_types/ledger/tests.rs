@@ -67,6 +67,102 @@ fn a_file_that_stays_unreadable_is_reported_once_however_often_the_layer_grows()
     }
 }
 
+/// Within one load a read of a file that failed stands, even when another reader of the same file (a scan and a parse
+/// hold a cell each) then reads it: what the first reader's walk derived is incomplete, so the file stays failed and
+/// its warning stays until the next load reads it again. The layer below failed on it too, so the successful read is
+/// the one that would end that earlier failure.
+#[test]
+fn a_failed_read_stands_for_its_load_when_another_reader_then_reads_the_file() {
+    let (_tmp, root) = project(SOLO);
+    let props = root.join("node_modules/solo-kit/props.d.ts");
+    let text = std::fs::read_to_string(&props).unwrap();
+    std::fs::write(&props, UNREADABLE).unwrap();
+    let demands =
+        vec![Demand { from: root.join("src/Card.tsx"), specifier: "solo-kit".into(), name: "SoloProps".into() }];
+    let options = options(&root);
+    let below = Arc::new(load(demands, &options, None));
+    assert_eq!(reported(&below), [Some(props.to_string())]);
+
+    let resolvers = crate::resolver::ModuleResolvers::new(&options);
+    let loader = Loader::new(&resolvers, &[], Some(&below));
+    assert!(loader.read(&props).is_err());
+    std::fs::write(&props, &text).unwrap();
+    assert_eq!(loader.read(&props).ok().flatten().as_deref(), Some(text.as_str()), "the other reader reads it");
+    let ledger = loader.ledger.finish();
+    assert!(matches!(ledger.reads.get(props.as_str()), Some(Read::Failed(_))), "the failure stands for this load");
+}
+
+/// A cold load with one unreadable file writes the index for every walk that read all it needed, and leaves out only
+/// the one that could not: the next cold load answers the complete walks from it, reading neither re-export stub, and
+/// loads what a load without the index loads. On the base no index was written when any read failed, so the next load
+/// walked every stub again.
+#[test]
+fn a_cold_load_with_an_unreadable_file_indexes_every_walk_it_completed() {
+    let kit: &[(&str, &str)] = &[
+        ("node_modules/mix-kit/package.json", r#"{ "name": "mix-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/mix-kit/index.d.ts",
+            "export * from './a-stub';\nexport { BProps } from './b';\nexport * from './c-stub';\n",
+        ),
+        ("node_modules/mix-kit/a-stub.d.ts", "export * from './a';\n"),
+        ("node_modules/mix-kit/a.d.ts", "export interface AProps { a: string }\n"),
+        ("node_modules/mix-kit/b.d.ts", "export interface BProps { b: string }\n"),
+        ("node_modules/mix-kit/c-stub.d.ts", "export * from './c';\n"),
+        ("node_modules/mix-kit/c.d.ts", "export interface CProps { c: string }\n"),
+    ];
+    let (_tmp, root) = project(kit);
+    let demands: Vec<Demand> = ["AProps", "BProps", "CProps"]
+        .into_iter()
+        .map(|name| Demand { from: root.join("src/Card.tsx"), specifier: "mix-kit".into(), name: name.into() })
+        .collect();
+    let options = options(&root);
+    let index = || -> Vec<ExportRow> {
+        let bytes = std::fs::read(index_path(&options).0).unwrap();
+        let index: IndexFile = rmp_serde::from_slice(&bytes).unwrap();
+        let short = |path: &str| path.trim_start_matches(&format!("{root}/node_modules/mix-kit/")).to_owned();
+        let mut rows: Vec<_> = index
+            .packages
+            .into_iter()
+            .flat_map(|package| package.exports)
+            .map(|(module, name, found)| (short(&module), name, found.map(|(file, name)| (short(&file), name))))
+            .collect();
+        rows.sort();
+        rows
+    };
+    let files = |layer: &DependencyLayer| {
+        let mut files: Vec<String> =
+            layer.files.iter().map(|file| std::borrow::Borrow::<str>::borrow(file).to_owned()).collect();
+        files.sort();
+        files
+    };
+    let b = root.join("node_modules/mix-kit/b.d.ts");
+    let text = std::fs::read_to_string(&b).unwrap();
+
+    let readable = load(demands.clone(), &options, None);
+    let (unread, complete): (Vec<_>, Vec<_>) = index().into_iter().partition(|(_, name, _)| name == "BProps");
+    let found = |file: &str, name: &str| Some((file.to_owned(), name.to_owned()));
+    let row = |module: &str| (module.to_owned(), "BProps".to_owned(), found("b.d.ts", "BProps"));
+    assert_eq!(unread, [row("b.d.ts"), row("index.d.ts")]);
+    // Each walk keeps the answer of every module it passed: the barrel, the stub and the declaring file.
+    assert_eq!(complete.len(), 8, "{complete:?}");
+    std::fs::remove_file(index_path(&options).0).unwrap();
+
+    std::fs::write(&b, UNREADABLE).unwrap();
+    let first = load(demands.clone(), &options, None);
+    assert_eq!(reported(&first), [Some(b.to_string())]);
+    assert_eq!(index(), complete, "every complete walk is indexed, the unread one is not");
+    let second = load(demands.clone(), &options, None);
+    assert_eq!(first.reads - second.reads, 2, "the stubs are not read again");
+    let oracle = load(demands.clone(), &PipelineOptions { use_cache: false, ..options.clone() }, None);
+    assert_eq!(files(&second), files(&oracle));
+    assert_eq!(reported(&second), [Some(b.to_string())]);
+
+    std::fs::write(&b, text).unwrap();
+    let recovered = load(demands, &options, None);
+    assert_eq!(files(&recovered), files(&readable), "once it reads, the next load equals the cold one");
+    assert_eq!(reported(&recovered), Vec::<Option<String>>::new());
+}
+
 /// A re-export stub an augmentation search only scans (it names neither React nor `"react"`) and could not read is
 /// reported until a load reads it again, and not after: the scan's read clears it as a parse's does. On the base only a
 /// parse did, so the warning outlived the read.
@@ -191,6 +287,37 @@ fn a_prop_a_package_file_inherits_from_an_unreadable_file_appears_once_the_file_
     let fresh_card = fresh.component("Card");
     assert_eq!(names(&fresh_card), ["own", "title", "tone"]);
     assert_eq!(card, fresh_card, "the session answers as a fresh one once the file reads");
+}
+
+/// A later load claims another declaration that imports the same type from the same unreadable file: it meets the
+/// demand an earlier load left unread and, while that retry is not due, does not read the file again; it still leads
+/// to the unread walk, so what it answers is not kept. A load that retries every unread walk reads the file again.
+#[test]
+fn a_load_meets_an_unread_demand_that_is_not_due_without_reading_its_file_again() {
+    let (_tmp, root) = project(&[
+        ("node_modules/nest-kit/package.json", r#"{ "name": "nest-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/nest-kit/index.d.ts",
+            "import type { Base } from './base';\nexport interface NestProps extends Base { own: string }\n\
+             export interface OtherProps extends Base { other: string }\n",
+        ),
+        ("node_modules/nest-kit/base.d.ts", "export interface Base { tone: string }\n"),
+    ]);
+    std::fs::write(root.join("node_modules/nest-kit/base.d.ts"), UNREADABLE).unwrap();
+    let demand =
+        |name: &str| Demand { from: root.join("src/Card.tsx"), specifier: "nest-kit".into(), name: name.into() };
+    let base =
+        Demand { from: root.join("node_modules/nest-kit/index.d.ts"), specifier: "./base".into(), name: "Base".into() };
+    let options = options(&root);
+    let due = Retry::Due { now: std::time::Instant::now(), edits: 0 };
+    let first = Arc::new(load_at(vec![demand("NestProps")], &options, None, due));
+    assert_eq!(first.unread(&[demand("NestProps")]), std::slice::from_ref(&base));
+
+    let later = load_at(vec![demand("OtherProps")], &options, Some(&first), due);
+    assert_eq!(later.reads, 0, "the unread demand is met, not followed again");
+    assert_eq!(later.unread(&[demand("OtherProps")]), [base], "and it still leads to the unread walk");
+    let always = load_at(vec![demand("OtherProps")], &options, Some(&first), Retry::Always);
+    assert_eq!(always.reads, 1, "a load that retries every unread walk reads the file again");
 }
 
 /// A second component reaches the same package declaration in a later load, which finds it claimed by the first and
