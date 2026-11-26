@@ -1,6 +1,6 @@
 //! Fingerprints the code that makes the checker's answer, so an answer kept on disk (`src/kept.rs`) is discarded
-//! whenever it changes: this crate's sources and, in a workspace build, the locked dependency versions, which pin the
-//! built-in checker (`tsrs`). `caliper-docgen-core`'s stored outcome carries that crate's own fingerprint.
+//! whenever it changes: this crate's sources and the locked dependency versions (the workspace's lockfile, else the one
+//! a published crate ships), which pin the built-in checker (`tsrs`). `caliper-docgen-core`'s stored outcome carries that crate's own fingerprint.
 
 use std::path::{Path, PathBuf};
 
@@ -28,6 +28,12 @@ fn source_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// The one rule for where the locked versions are read from, shared with the tests through `CALIPER_SEMANTIC_LOCKFILE`:
+/// the workspace's lockfile, else the one the published crate ships (`cargo package` includes it), else none.
+fn lockfile() -> Option<PathBuf> {
+    ["../../Cargo.lock", "Cargo.lock"].into_iter().map(PathBuf::from).find(|lock| lock.is_file())
+}
+
 fn main() {
     let mut files = Vec::new();
     source_files(Path::new("src"), &mut files);
@@ -40,13 +46,16 @@ fn main() {
             hash.write(&bytes);
         }
     }
-    // Absent when built from the published crate, whose version then identifies the code and its pinned checker.
-    let lock = Path::new("../../Cargo.lock");
-    if let Ok(bytes) = std::fs::read(lock) {
+    let lock = lockfile();
+    if let Some(bytes) = lock.as_ref().and_then(|lock| std::fs::read(lock).ok()) {
         hash.write(&bytes);
     }
 
     println!("cargo:rerun-if-changed=src");
-    println!("cargo:rerun-if-changed={}", lock.display());
+    if let Some(lock) = &lock {
+        println!("cargo:rerun-if-changed={}", lock.display());
+        // Relative to the manifest directory, so the build machine's path is not compiled in.
+        println!("cargo:rustc-env=CALIPER_SEMANTIC_LOCKFILE={}", lock.display());
+    }
     println!("cargo:rustc-env=CALIPER_SEMANTIC_FINGERPRINT={:016x}", hash.0);
 }

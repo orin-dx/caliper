@@ -1305,8 +1305,29 @@ mod tests {
     /// on any tsrs but the one they were read from, until they are read again from its `tsrs_ast::Kind` and the
     /// version below updated. A real `defineProperty` declaration cannot stand in: tsrs 0.24 does not bind one.
     #[test]
+    #[allow(clippy::print_stderr)]
     fn the_declaration_kinds_are_read_from_the_pinned_tsrs() {
-        let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock")).unwrap();
+        // `build.rs` names the lockfile it found, relative to this crate: the workspace's, else a published crate's.
+        let lock = option_env!("CALIPER_SEMANTIC_LOCKFILE")
+            .map(|lock| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(lock)).unwrap());
+        match tsrs_ast_pin(lock.as_deref()) {
+            PinCheck::Checked => {}
+            PinCheck::Skipped(why) => eprintln!("SKIPPED the tsrs_ast version pin: {why}"),
+        }
+        for (name, kind) in ASSIGNMENT_DECLARATION {
+            assert!(!NO_ASSIGNMENT_DECLARATION.contains(&kind), "{name} ({kind}) is listed");
+        }
+    }
+
+    enum PinCheck {
+        Checked,
+        /// No lockfile to read: reported in the test output, never passed as if the pin had held.
+        Skipped(&'static str),
+    }
+
+    /// Fails unless the locked `tsrs_ast` is the version the kind numbers were read from.
+    fn tsrs_ast_pin(lock: Option<&str>) -> PinCheck {
+        let Some(lock) = lock else { return PinCheck::Skipped("no Cargo.lock in the workspace or this crate") };
         let versions: Vec<_> = lock
             .split("[[package]]")
             .filter(|package| package.contains("\nname = \"tsrs_ast\"\n"))
@@ -1317,9 +1338,17 @@ mod tests {
             ["\"0.24.0\""],
             "tsrs_ast moved: re-read NO_ASSIGNMENT_DECLARATION and ASSIGNMENT_DECLARATION from its Kind"
         );
-        for (name, kind) in ASSIGNMENT_DECLARATION {
-            assert!(!NO_ASSIGNMENT_DECLARATION.contains(&kind), "{name} ({kind}) is listed");
-        }
+        PinCheck::Checked
+    }
+
+    /// Without a lockfile the pin check says it did not run; with one it runs and fails on a moved version.
+    #[test]
+    fn the_pin_check_is_skipped_only_without_a_lockfile() {
+        assert!(matches!(tsrs_ast_pin(None), PinCheck::Skipped(why) if why.contains("no Cargo.lock")));
+        let lock = "[[package]]\nname = \"tsrs_ast\"\nversion = \"0.24.0\"\n";
+        assert!(matches!(tsrs_ast_pin(Some(lock)), PinCheck::Checked));
+        let moved = std::panic::catch_unwind(|| tsrs_ast_pin(Some(&lock.replace("0.24.0", "0.25.0"))));
+        assert!(moved.is_err());
     }
 
     /// The answer settles only what its fields decide; an answer without check flags settles nothing.
