@@ -1115,6 +1115,9 @@ impl ModelRun<'_> {
     }
 }
 
+/// A change the model's eager block makes to its project, by name: it returns the file it changed.
+type ModelChange = (&'static str, fn(&Utf8Path) -> Utf8PathBuf);
+
 /// A model-based test of what a lazy session holds while package files go unreadable and readable again: seeded
 /// sequences of files made unreadable (bytes that are not UTF-8) or readable, requests, project edits and config edits
 /// (the rebuild path), and every ordered pair of requests under each single unreadable file followed by a config edit
@@ -1260,7 +1263,7 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
     // walk a component's resolution consulted, through a barrel whose target it never read included, resolves it
     // again). The changes: an edit to `Plain`, which reaches no package; its deletion; and `A` or `All` dropping its
     // import of `AProps`, which the other still makes from the same directory (one demand, recorded under either).
-    let changes: [(&str, fn(&Utf8Path) -> Utf8PathBuf); 4] = [
+    let changes: [ModelChange; 4] = [
         ("edit Plain", |root| {
             let plain = root.join("src/plain/Plain.tsx");
             std::fs::write(&plain, format!("{MODEL_PLAIN}// edited\n")).unwrap();
