@@ -295,6 +295,25 @@ impl DependencyLayer {
         matches!(self.latest_read(file), Some(Read::Failed(_)))
     }
 
+    /// [`Self::read_warnings`], only for the files the unread walks `roots` lead to could not read: what a revision
+    /// whose live demands are `roots` reports.
+    pub(crate) fn read_warnings_reached(&self, roots: &[Demand]) -> Vec<Diagnostic> {
+        let warnings = self.read_warnings();
+        if warnings.is_empty() {
+            return warnings;
+        }
+        let mut reached: FxHashSet<&str> = FxHashSet::default();
+        for walk in self.unread(roots) {
+            if let Some(mark) = self.mark(&Node::Demand(walk.key())) {
+                reached.extend(mark.suspects.iter().map(std::borrow::Borrow::<str>::borrow));
+            }
+        }
+        warnings
+            .into_iter()
+            .filter(|warning| warning.file.as_deref().is_some_and(|file| reached.contains(file)))
+            .collect()
+    }
+
     /// One warning for each file whose latest read in the chain failed, sorted by message.
     pub(crate) fn read_warnings(&self) -> Vec<Diagnostic> {
         let mut seen: FxHashSet<&PathKey> = FxHashSet::default();
@@ -555,11 +574,6 @@ impl<'a> LedgerBuilder<'a> {
     }
 
     /// `demand`'s own walk could not read `files`.
-    /// `demand` is no longer made by any project file: its mark becomes clean, though this load does not follow it.
-    pub(super) fn forget(&self, demand: &Demand) {
-        self.retried.insert(demand.key());
-    }
-
     pub(super) fn unread_demand(&self, demand: &Demand, mut files: Vec<PathKey>) {
         files.sort();
         files.dedup();

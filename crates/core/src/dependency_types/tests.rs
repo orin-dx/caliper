@@ -2026,3 +2026,93 @@ fn readers_that_meet_read_a_file_once_and_share_its_result() {
         }
     }
 }
+
+/// The live-walk rule in an eager session: the retry set, the demand set and the reported warnings all follow the
+/// demands project files make now.
+mod live_walks {
+    use super::*;
+    use crate::pipeline::WatchSession;
+
+    const SOLO_KIT: [(&str, &str); 3] = [
+        ("node_modules/solo-kit/package.json", r#"{ "name": "solo-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/solo-kit/index.d.ts", "export * from './props';\n"),
+        ("node_modules/solo-kit/props.d.ts", "export interface SoloProps { tone: string }\n"),
+    ];
+    const CARD: &str = "import type { SoloProps } from 'solo-kit';\ninterface CardProps extends SoloProps { own: string }\n\
+                        export function Card(props: CardProps) { return null; }\n";
+    const DROPPED: &str = "export function Card(props: { own: string }) { return null; }\n";
+    const PLAIN: &str = "export function Plain(props: { title: string }) { return null; }\n";
+
+    fn session(root: &Utf8Path) -> WatchSession {
+        let session = WatchSession::new(options(root, true));
+        drop(session.initialize());
+        session
+    }
+
+    fn write(root: &Utf8Path, path: &str, body: &[u8]) -> Utf8PathBuf {
+        let path = root.join(path);
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn io_warnings(session: &WatchSession) -> Vec<String> {
+        let output = session.current_output().unwrap();
+        let io = |d: &&Diagnostic| d.code == DiagnosticCode::IoError;
+        output.diagnostics.iter().filter(io).filter_map(|d| d.file.clone()).collect()
+    }
+
+    /// React's own declarations follow their `csstype` import, which could not be read. It reads on disk and an
+    /// unrelated file is edited: the walk from React's file is followed again, and `Box`'s CSS props equal a fresh run.
+    #[test]
+    fn a_walk_from_react_declarations_is_followed_again() {
+        let box_source = "import * as React from 'react';\n\
+            export function Box(props: { z?: React.CSSProperties['zIndex'] }) { return null; }\n";
+        let mut files = REACT_WITH_CSSTYPE.to_vec();
+        files.extend([("src/box/Box.tsx", box_source), ("src/plain/Plain.tsx", PLAIN)]);
+        let (_tmp, root) = project(&files);
+        let csstype = root.join("node_modules/csstype/index.d.ts");
+        let text = std::fs::read_to_string(&csstype).unwrap();
+        std::fs::write(&csstype, [0xff; 8]).unwrap();
+        let session = session(&root);
+        std::fs::write(&csstype, text).unwrap();
+        let plain = write(&root, "src/plain/Plain.tsx", format!("{PLAIN}// edited\n").as_bytes());
+        drop(session.update_file(&plain));
+        assert_eq!(session.component("Box"), self::session(&root).component("Box"));
+    }
+
+    /// The only importer drops an import whose file could not be read, then restores it once the file reads: the
+    /// restored import starts a fresh walk, and `Card` equals a fresh run.
+    #[test]
+    fn a_dropped_then_restored_import_is_walked_again() {
+        let (_tmp, root) = project(&[&SOLO_KIT[..], &[("src/card/Card.tsx", CARD)]].concat());
+        let props = root.join("node_modules/solo-kit/props.d.ts");
+        let text = std::fs::read_to_string(&props).unwrap();
+        std::fs::write(&props, [0xff; 8]).unwrap();
+        let session = session(&root);
+        let card = write(&root, "src/card/Card.tsx", DROPPED.as_bytes());
+        drop(session.update_file(&card));
+        std::fs::write(&props, text).unwrap();
+        write(&root, "src/card/Card.tsx", CARD.as_bytes());
+        drop(session.update_file(&card));
+        assert_eq!(session.component("Card"), self::session(&root).component("Card"));
+    }
+
+    /// The only importer of a file that could not be read drops its import: no live walk reaches the file, so it is
+    /// not reported; with a second importer it still is.
+    #[test]
+    fn a_failed_read_no_live_walk_reaches_is_not_reported() {
+        let tag = CARD.replace("Card", "Tag");
+        for (second, reported) in [(None, false), (Some(tag.as_str()), true)] {
+            let mut files: Vec<(&str, &str)> = [&SOLO_KIT[..], &[("src/card/Card.tsx", CARD)]].concat();
+            files.extend(second.map(|tag| ("src/tag/Tag.tsx", tag)));
+            let (_tmp, root) = project(&files);
+            let props = root.join("node_modules/solo-kit/props.d.ts");
+            std::fs::write(&props, [0xff; 8]).unwrap();
+            let session = session(&root);
+            assert_eq!(io_warnings(&session), [props.to_string()]);
+            let card = write(&root, "src/card/Card.tsx", DROPPED.as_bytes());
+            drop(session.update_file(&card));
+            assert_eq!(!io_warnings(&session).is_empty(), reported, "second importer: {}", second.is_some());
+        }
+    }
+}

@@ -416,6 +416,15 @@ pub(crate) struct DependencyLayer {
 }
 
 impl DependencyLayer {
+    /// [`Self::panic_diagnostics`], with only the failed reads a walk from `roots` reaches: a file no live demand
+    /// leads to any more is not reported, though the ledger keeps its failure for a demand that returns.
+    pub(crate) fn panic_diagnostics_reached(&self, roots: &[Demand]) -> Vec<Diagnostic> {
+        let mut all: Vec<Diagnostic> = self.chain().flat_map(|layer| layer.panics.iter().cloned()).collect();
+        all.extend(self.read_warnings_reached(roots));
+        all.sort_by(|a, b| a.message.cmp(&b.message));
+        all
+    }
+
     /// The contained panics of this layer and the ones it extends, and a warning for each file whose latest read in
     /// the chain failed ([`DependencyLayer::read_warnings`]), in message order: a session whose next load read the file
     /// answers as a fresh one.
@@ -1422,17 +1431,6 @@ pub(crate) fn load(
     load_at(demands, options, previous, Retry::Always, Stamp::unsessioned())
 }
 
-/// [`load`], and the walks of `forget` end: demands no project file makes any more, whose unread walks a later load
-/// must not follow again. Their marks become clean, so no due set holds them.
-pub(crate) fn load_forgetting(
-    demands: Vec<Demand>,
-    forget: &[Demand],
-    options: &PipelineOptions,
-    previous: Option<&Arc<DependencyLayer>>,
-) -> DependencyLayer {
-    load_with(demands, options, previous, (Retry::Always, Stamp::unsessioned(), Arc::new(Instant::now)), forget)
-}
-
 /// [`load`], following again only the walks `retry` makes due, and recording its failed reads with `stamp`.
 pub(crate) fn load_at(
     demands: Vec<Demand>,
@@ -1454,7 +1452,7 @@ pub(crate) fn load_timed(
     stamp: Stamp,
     clock: Clock,
 ) -> DependencyLayer {
-    load_with(demands, options, previous, (retry, stamp, clock), &[])
+    load_with(demands, options, previous, (retry, stamp, clock))
 }
 
 /// The loader behind every `load` function: `timing` is when walks are followed again and how failed reads are
@@ -1464,7 +1462,6 @@ fn load_with(
     options: &PipelineOptions,
     previous: Option<&Arc<DependencyLayer>>,
     (retry, stamp, clock): (Retry, Stamp, Clock),
-    forget: &[Demand],
 ) -> DependencyLayer {
     // Its own resolvers, never another consumer's: `oxc_resolver` keeps a config reached through another's
     // `references` without that config's own references, so a shared cache would make what this load resolves depend
@@ -1478,9 +1475,6 @@ fn load_with(
     loader.ledger.retry = retry;
     loader.ledger.stamp = stamp;
     loader.ledger.clock = clock;
-    for demand in forget {
-        loader.ledger.forget(demand);
-    }
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
     match (previous, flatten) {

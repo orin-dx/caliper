@@ -1317,17 +1317,50 @@ fn a_session_over_files_that_go_unreadable_answers_as_a_fresh_one_over_what_it_c
             file
         }),
     ];
+    // Two-step changes: one made while the file cannot be read, then one after it reads. `Cyc`, the only importer of
+    // `mk/cyc`, drops its import and restores it (the restored demand starts a fresh walk); or drops it for good (its
+    // failed read is no longer reported, and nothing retries it) and an unrelated edit follows every due walk. `A` and
+    // `All` both drop `AProps`, whose file other walks still read.
+    let drop_cyc: fn(&Utf8Path) -> Utf8PathBuf = |root| {
+        let file = root.join("src/Cyc.tsx");
+        std::fs::write(&file, "export function Cyc(props: { own_cyc: string }) { return null; }\n").unwrap();
+        file
+    };
+    let restore_cyc: fn(&Utf8Path) -> Utf8PathBuf = |root| {
+        let file = root.join("src/Cyc.tsx");
+        let (_, body, _) = MODEL_COMPONENTS.iter().find(|(name, _, _)| *name == "Cyc").unwrap();
+        std::fs::write(&file, model_source(body, 0)).unwrap();
+        file
+    };
+    let two_steps: [(&str, Vec<ModelChange>, Vec<ModelChange>); 3] = [
+        ("Cyc drops, then restores its import", vec![("drop", drop_cyc)], vec![("restore", restore_cyc)]),
+        ("Cyc, the only importer, drops its import", vec![("drop", drop_cyc)], vec![changes[0]]),
+        ("A and All drop their import", vec![("drop A", changes[2].1), ("drop All", changes[3].1)], vec![changes[0]]),
+    ];
+    let one_step = changes.iter().map(|(name, apply)| (*name, Vec::new(), vec![(*name, *apply)]));
+    let all: Vec<(&str, Vec<ModelChange>, Vec<ModelChange>)> = one_step.chain(two_steps).collect();
     for file in &names {
-        for (change, apply) in &changes {
+        for (change, before, after) in &all {
             let (_tmp, root) = model_project();
             set_unreadable(&root, &[*file].into(), false);
             let session = WatchSession::new(options(&root));
             drop(session.initialize());
+            for (_, apply) in before {
+                drop(session.update_file(&apply(&root)));
+            }
             set_unreadable(&root, &std::collections::BTreeSet::new(), false);
-            let changed = apply(&root);
-            drop(session.update_file(&changed));
+            for (_, apply) in after {
+                drop(session.update_file(&apply(&root)));
+            }
             let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..options(&root) });
-            drop(fresh.initialize());
+            let fresh_output = fresh.initialize();
+            let io = |output: &crate::types::ExtractionOutput| -> Vec<Option<String>> {
+                let io = |d: &&crate::types::Diagnostic| d.code == DiagnosticCode::IoError;
+                output.diagnostics.iter().filter(io).map(|d| d.file.clone()).collect()
+            };
+            if io(&session.current_output().unwrap()) != io(&fresh_output) {
+                failures.push(format!("[eager warnings] {file}, {change}: a failed read is reported"));
+            }
             for (name, _, _) in MODEL_COMPONENTS {
                 let answer = session.component(name).unwrap();
                 let cold = comparable(&root, &fresh.component(name).unwrap());
