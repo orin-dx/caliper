@@ -1203,81 +1203,22 @@ fn the_typeof_alias_walk_grows_with_the_declarations_not_with_the_aliases() {
     assert_eq!(work(40) - 6, 2 * (work(20) - 6));
 }
 
-/// Review round 24: the blocks of one namespace merge. A member a block exports shadows the module's `typeof` alias in
-/// every block of the namespace; one it does not export only in its own block. Namespaces are told apart by qualified
-/// name; `declare module 'x'` and `declare global` merge the same way, every member exported.
+/// Review round 25, finding 1: N blocks of one namespace cost one lookup each, not N spans per alias.
 #[test]
-fn a_namespace_member_shadows_the_alias_in_every_block_of_its_namespace() {
-    let means_at_probe = |body: &str| {
-        let source = format!("declare function wrap(): unknown;\ntype Wrap = typeof wrap;\n{body}");
+fn many_blocks_of_one_namespace_cost_work_proportional_to_them() {
+    let work = |n: usize| {
+        let mut source = String::from("declare function wrap(): unknown;\ntype Wrap = typeof wrap;\n");
+        for _ in 0..n {
+            source.push_str("namespace N { export type Wrap = () => void; }\n");
+        }
         let allocator = oxc_allocator::Allocator::default();
         let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
-        let aliases = super::component::typeof_aliases(&parsed.program);
-        let at = u32::try_from(source.find("/*probe*/").expect("a probe")).expect("a short source");
-        aliases["Wrap"].means_at(oxc_span::Span::new(at, at + 9))
+        super::component::steps::take_examined();
+        assert_eq!(super::component::typeof_aliases(&parsed.program).len(), usize::from(n == 0), "{n}");
+        super::component::steps::take_examined()
     };
-    let rows = [
-        ("no namespace", "/*probe*/", true),
-        (
-            "exported in block 1, probe in block 2",
-            "namespace N { export type Wrap = () => void; }\nnamespace N { /*probe*/ }",
-            false,
-        ),
-        (
-            "exported in block 2, probe in block 1",
-            "namespace N { /*probe*/ }\nnamespace N { export type Wrap = () => void; }",
-            false,
-        ),
-        ("exported interface", "namespace N { export interface Wrap { (): void } }\nnamespace N { /*probe*/ }", false),
-        ("not exported, probe in block 2", "namespace N { type Wrap = () => void; }\nnamespace N { /*probe*/ }", true),
-        ("not exported, probe in its own block", "namespace N { type Wrap = () => void; /*probe*/ }", false),
-        ("another namespace", "namespace M { export type Wrap = () => void; }\nnamespace N { /*probe*/ }", true),
-        (
-            "dotted and nested",
-            "namespace A.B { export type Wrap = () => void; }\nnamespace A { namespace B { /*probe*/ } }",
-            false,
-        ),
-        (
-            "nested and dotted",
-            "namespace A { export namespace B { export type Wrap = () => void; } }\nnamespace A.B { /*probe*/ }",
-            false,
-        ),
-        ("the outer namespace", "namespace A.B { export type Wrap = () => void; }\nnamespace A { /*probe*/ }", true),
-        (
-            "same inner name, other outer",
-            "namespace A.B { export type Wrap = () => void; }\nnamespace C.B { /*probe*/ }",
-            true,
-        ),
-        (
-            "declare namespace",
-            "declare namespace N { type Wrap = () => void; }\ndeclare namespace N { /*probe*/ }",
-            false,
-        ),
-        ("declare module", "declare module 'x' { type Wrap = () => void; }\ndeclare module 'x' { /*probe*/ }", false),
-        ("another module", "declare module 'x' { type Wrap = () => void; }\ndeclare module 'y' { /*probe*/ }", true),
-        ("declare global", "declare global { type Wrap = () => void; }\ndeclare global { /*probe*/ }", false),
-        (
-            "a namespace named like the global",
-            "namespace global { type Wrap = () => void; }\ndeclare global { /*probe*/ }",
-            true,
-        ),
-    ];
-    for (id, body, means) in rows {
-        assert_eq!(means_at_probe(body), means, "{id}");
-    }
-    // The finding, end to end: block 2's cast names `N.Wrap`, so the wrapper's own declaration adds no props there.
-    let in_block_2 = |cast: &str| {
-        tsx(&format!(
-            "function wrap<T>(render: React.FC<T>): React.FC<T & {{ internal?: string }}> {{ return render as any; }}\n\
-             type Wrap = typeof wrap;\n\
-             namespace N {{ export type Wrap = <T>(render: React.FC<T>) => React.FC<T>; }}\n\
-             namespace N {{ export const Button = ({cast})<Props>((props: Props) => <div />); }}"
-        ))
-    };
-    let shadowed = in_block_2("wrap as Wrap");
-    assert_eq!(shadowed.len(), 1, "{shadowed:#?}");
-    assert_eq!(shadowed, in_block_2("wrap as <T>(render: React.FC<T>) => React.FC<T>"));
-    assert_ne!(shadowed, in_block_2("wrap as typeof wrap"));
+    assert_eq!(work(1000), 2 * work(500) - work(0));
+    assert_eq!(work(500) - work(0), 500 * (work(1) - work(0)));
 }
 
 /// Review round 23: a name the module gives N `typeof` aliases is ambiguous and dropped before the walk: it costs one
@@ -1965,59 +1906,43 @@ fn every_typeof_alias_is_counted_in_one_walk_of_the_module() {
     assert_eq!(cost(40), (40, 1));
 }
 
-/// Finding 3: a name declared again in an inner scope shadows the module's `typeof` alias only there; the module's
-/// own second declaration of it makes it ambiguous everywhere, and a generic wrapper cast to it loses its callee.
+/// Review round 25, the flat rule: a `typeof` alias is read as the callee's own type only when the file declares its
+/// name once in type space. Any second declaration, in any scope and of any kind, makes the cast `Unknown`: the
+/// component is kept and the wrapper's own declaration, whose result adds `internal`, is not read.
 #[test]
-fn a_typeof_alias_is_shadowed_only_where_its_name_is_declared_again() {
-    let factory = "function createButton<T>(render: React.FC<T>): React.FC<T> { return render; }\n\
-                   type Factory = typeof createButton;\n";
-    let plain = tsx(&format!("{factory}export const Button = createButton<Props>((props: Props) => <div />);"));
-    assert_eq!(plain.len(), 1, "{plain:#?}");
-    // A cast that replaces the callee's type keeps the component without the callee whose result adds props.
-    let replaced = tsx(&format!(
-        "{factory}export const Button = (createButton as <T>(render: React.FC<T>) => React.FC<T>)<Props>((props: Props) => <div />);"
-    ));
-    assert_ne!(replaced, plain);
-    let asserted = |other: &str| {
-        tsx(&format!(
-            "{factory}{other}\nexport const Button = (createButton as Factory)<Props>((props: Props) => <div />);"
-        ))
+fn a_typeof_alias_is_read_only_when_its_name_is_declared_once_in_the_file() {
+    let wrap = "function wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\n\
+                type Wrap = typeof wrap;\n";
+    let build = |other: &str, callee: &str| {
+        tsx(&format!("{wrap}{other}\nexport const Button = {callee}<Props>((props: Props) => <div />);"))
     };
-    for other in [
-        "const Factory = 1;",
-        "function g<Factory>(f: Factory) { return f; }",
-        "const h = <Factory,>(f: Factory) => f;",
-        "class K<Factory> { f?: Factory }",
-        "type Mapped = { [Factory in 'a']: Factory };",
-        "type G<Factory> = Factory;",
-        "type I<T> = T extends Array<infer Factory> ? Factory : never;",
-        "namespace N { export type Factory = () => string; }",
-        "namespace N.M { interface Factory { (): string } }",
-        "declare module 'm' { type Factory = () => string; }",
-        "function f() { type Factory = () => string; }",
-        "export as namespace Factory;",
-        "try {} catch (e) { type Factory = () => string; }",
+    let plain = build("", "wrap");
+    let replaced = build("", "(wrap as <T>(render: React.FC<T>) => React.FC<T>)");
+    assert_eq!(plain.len(), 1, "{plain:#?}");
+    assert_ne!(plain, replaced);
+    assert_eq!(build("", "(wrap as Wrap)"), plain, "declared once: the callee's own type");
+    for (kind, other) in [
+        ("a type parameter elsewhere", "function g<Wrap>(w: Wrap) { return w; }"),
+        ("a nested namespace's member", "namespace N { namespace M { export type Wrap = () => void; } }"),
+        ("merged namespace blocks", "namespace N { export type Wrap = () => void; }\nnamespace N { const x = 1; }"),
+        (
+            "round 25 finding: a private nested namespace in each of two blocks",
+            "namespace N { namespace M { export type Wrap = () => void; } }\n\
+             namespace N { namespace M { export const B = (wrap as Wrap)<Props>((props: Props) => <div />); } }",
+        ),
+        ("an import", "import type { Wrap } from './wrap';"),
+        ("an interface merged with it", "interface Wrap { (): void }"),
+        ("a mapped key", "type Keys = { [Wrap in 'a']: Wrap };"),
+        ("an infer", "type First<T> = T extends Array<infer Wrap> ? Wrap : never;"),
+        ("a class expression's name", "const K = class Wrap {};"),
+        ("a declare module member", "declare module 'x' { type Wrap = () => void; }"),
     ] {
-        assert_eq!(asserted(other), plain, "{other}");
-    }
-    for other in [
-        "import type { Factory } from './factory';",
-        "import { Factory as Factory } from './factory';",
-        "import * as Factory from './factory';",
-        "interface Factory { (): string }",
-        "class Factory {}",
-        "export enum Factory { A }",
-        "namespace Factory {}",
-        "export declare type Factory = () => string;",
-        "import Factory = require('./factory');",
-        "import type Factory = require('./factory');",
-        "export default interface Factory { (): string }",
-        "export default class Factory {}",
-    ] {
-        assert_eq!(asserted(other), replaced, "{other}");
+        let unknown = build(other, "(wrap as Wrap)");
+        let expected = build(other, "(wrap as <T>(render: React.FC<T>) => React.FC<T>)");
+        assert_eq!(unknown, expected, "{kind}");
+        assert_ne!(unknown, build(other, "(wrap as typeof wrap)"), "{kind}");
     }
 }
-
 /// Finding 4: a function that never returns is assignable to every function type, so a `never` result is no evidence:
 /// the named reader, the rendered reader and a namespace member all keep the call.
 #[test]
@@ -2145,62 +2070,6 @@ fn only_a_module_with_a_typeof_alias_is_walked_for_shadowing_names() {
                    export const Button = memo((props: Props) => <div />);";
     assert_eq!(walks(generic), 0);
     assert_eq!(walks(&format!("type Size = typeof size;\ndeclare const size: number;\n{generic}")), 1);
-}
-
-/// Finding 3: a type parameter or a declaration of the alias's name in a scope around the cast shadows the alias there,
-/// and only there.
-#[test]
-fn a_redeclaration_around_the_cast_shadows_the_alias() {
-    let means = |source: &str| {
-        let allocator = oxc_allocator::Allocator::default();
-        let parsed = oxc_parser::Parser::new(&allocator, source, oxc_span::SourceType::tsx()).parse();
-        let aliases = super::component::typeof_aliases(&parsed.program);
-        let at = u32::try_from(source.rfind("as Factory").unwrap() + 3).unwrap();
-        aliases.get("Factory").map(|alias| alias.means_at(oxc_span::Span::new(at, at + 7)))
-    };
-    let alias = "declare function make(): unknown;\ntype Factory = typeof make;\n";
-    for (scope, expected) in [
-        ("const v = (make as Factory)();", Some(true)),
-        ("function g<T>() { return (make as Factory)(); }", Some(true)),
-        ("function g<Factory>() { return (make as Factory)(); }", Some(false)),
-        ("function g<Factory>() {}\nconst v = (make as Factory)();", Some(true)),
-        ("const g = <Factory,>() => (make as Factory)();", Some(false)),
-        ("class K<Factory> { m() { return (make as Factory)(); } }", Some(false)),
-        ("class K { m<Factory>() { return (make as Factory)(); } }", Some(false)),
-        ("namespace N { type Factory = string; const v = (make as Factory)(); }", Some(false)),
-        ("namespace N { type Factory = string; }\nconst v = (make as Factory)();", Some(true)),
-        ("function f() { interface Factory {} return (make as Factory)(); }", Some(false)),
-        ("function f() { { class Factory {} } return (make as Factory)(); }", Some(true)),
-        ("const C = class Factory { m() { return (make as Factory)(); } };", Some(false)),
-        ("type M = { [Factory in 'a']: Factory };\nconst v = (make as Factory)();", Some(true)),
-        ("import type { Factory } from './f';\nconst v = (make as Factory)();", None),
-        // Round 13: a cast after a nested shadowing scope, inside the scope around it.
-        ("function g<Factory>() { function h<Factory>() {} return (make as Factory)(); }", Some(false)),
-        ("function g<Factory>() { function h<Factory>() {} }\nconst v = (make as Factory)();", Some(true)),
-        // Round 10: one walker for every kind.
-        ("enum E { A = (make as Factory)() }", Some(true)),
-        ("function g() { type Factory = string; enum E { A = (make as Factory)() } }", Some(false)),
-        ("enum E { A = (<Factory,>() => (make as Factory)())() }", Some(false)),
-        ("try {} catch (e) { type Factory = string; const v = (make as Factory)(); }", Some(false)),
-        ("try {} catch (e) { type Factory = string; }\nconst v = (make as Factory)();", Some(true)),
-        ("function g(v = (make as Factory)()) { type Factory = string; }", Some(true)),
-        ("const g = (v = (make as Factory)()) => { type Factory = string; };", Some(true)),
-        ("function g<Factory>(v = (make as Factory)()) {}", Some(false)),
-        ("class K { static { type Factory = string; (make as Factory)(); } }", Some(false)),
-        ("class K { static { type Factory = string; } m() { return (make as Factory)(); } }", Some(true)),
-        (
-            "declare module 'm' { import Factory from 'f'; export function h(): typeof Factory; }\n(make as Factory)();",
-            Some(true),
-        ),
-        ("export = make;\nconst v = (make as Factory)();", Some(true)),
-        ("export declare type Factory = string;\nconst v = (make as Factory)();", None),
-        ("import Factory = require('f');\nconst v = (make as Factory)();", None),
-        ("import type Factory = require('f');\nconst v = (make as Factory)();", None),
-        ("export default interface Factory {}\nconst v = (make as Factory)();", None),
-        ("export default class Factory {}\nconst v = (make as Factory)();", None),
-    ] {
-        assert_eq!(means(&format!("{alias}{scope}")), expected, "{scope}");
-    }
 }
 
 /// Finding 6: the exact render counts of the element factory reader, through each assertion.
@@ -2346,37 +2215,5 @@ fn a_typeof_alias_of_a_long_chain_is_named_in_linear_steps() {
     for segments in [2, 20, 200] {
         let (bytes, length) = written(segments);
         assert_eq!(bytes, length, "{segments} segments");
-    }
-}
-
-/// Round 13, finding 3: each cast looks its scope up among the shadowing scopes by binary search, so N scopes and N
-/// casts cost N log N probes, not N squared.
-#[test]
-fn a_cast_finds_its_shadowing_scope_by_binary_search() {
-    let probes = |n: usize| {
-        let mut source = String::from("declare function make(): unknown;\ntype Factory = typeof make;\n");
-        for i in 0..n {
-            source.push_str(&format!("function g{i}<Factory>() {{ return (make as Factory)(); }}\n"));
-            source.push_str(&format!("export const B{i} = (make as Factory)();\n"));
-        }
-        let allocator = oxc_allocator::Allocator::default();
-        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
-        let aliases = super::component::typeof_aliases(&parsed.program);
-        let alias = aliases.get("Factory").expect("the alias is kept");
-        super::component::steps::take_probed();
-        let mut shadowed = 0;
-        for (at, _) in source.match_indices("as Factory") {
-            let start = u32::try_from(at + 3).unwrap();
-            if !alias.means_at(oxc_span::Span::new(start, start + 7)) {
-                shadowed += 1;
-            }
-        }
-        assert_eq!(shadowed, n, "the cast inside each generic function is shadowed, the top-level one is not");
-        super::component::steps::take_probed()
-    };
-    for n in [64_usize, 128, 256] {
-        // `2n` casts, each probing at most one more than log2 of the `n` scopes.
-        let bound = 2 * n as u64 * (u64::from(usize::BITS - n.leading_zeros()) + 1);
-        assert!(probes(n) <= bound, "{n}: {} probes, bound {bound}", probes(n));
     }
 }
