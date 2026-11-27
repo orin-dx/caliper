@@ -8,7 +8,7 @@ use oxc_ast::ast::*;
 
 use crate::types::{CollectedObjectField, CollectedType, CollectedTypeAlias};
 
-use super::component::peel_expr;
+use super::peeled::read_value;
 use super::{SourceDataCollector, js_text};
 
 /// Objects with more keys than this are not a lookup table a prop's type is likely to name.
@@ -16,11 +16,11 @@ const MAX_KEYS: usize = 128;
 
 /// The literal type a literal expression has, as a `const` declares it.
 fn literal(expr: &Expression<'_>) -> Option<CollectedType> {
-    match peel_expr(expr) {
+    match read_value(expr) {
         Expression::StringLiteral(s) => Some(CollectedType::StringLiteral(js_text::lossy(s.value).into_owned().into())),
         Expression::NumericLiteral(n) => Some(CollectedType::NumberLiteral(n.value)),
         Expression::BooleanLiteral(b) => Some(CollectedType::BoolLiteral(b.value)),
-        Expression::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => match peel_expr(&u.argument) {
+        Expression::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => match read_value(&u.argument) {
             Expression::NumericLiteral(n) => Some(CollectedType::NumberLiteral(-n.value)),
             _ => None,
         },
@@ -69,7 +69,7 @@ impl SourceDataCollector<'_> {
         else {
             return;
         };
-        let target = match (literal(init), peel_expr(init)) {
+        let target = match (literal(init), read_value(init)) {
             (Some(literal), _) => literal,
             (None, Expression::ObjectExpression(object)) => match static_fields(object) {
                 Some(fields) => CollectedType::Object(fields),

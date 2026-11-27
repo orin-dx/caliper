@@ -357,7 +357,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 if self.function_depth == 0
                     && node.kind.is_const()
                     && let Some(Expression::Identifier(target)) =
-                        declarator.init.as_ref().map(super::component::peel_expr)
+                        declarator.init.as_ref().map(super::peeled::read_value)
                 {
                     self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
                 }
@@ -661,7 +661,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let local = match &node.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(func) => func.id.as_ref().map(|id| id.name.as_str()),
             ExportDefaultDeclarationKind::ClassDeclaration(class) => class.id.as_ref().map(|id| id.name.as_str()),
-            kind => match kind.as_expression().map(super::component::peel_expr) {
+            kind => match kind.as_expression().map(super::peeled::read_value) {
                 Some(Expression::Identifier(id)) => Some(id.name.as_str()),
                 _ => None,
             },

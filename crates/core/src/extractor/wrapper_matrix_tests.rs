@@ -2477,6 +2477,47 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "sealed: a factory on React's receiver | peeled",
             "import * as R from 'react';\nexport const Button = (props: Props) => (R.createElement as typeof R.createElement)('button');",
         ),
+        // Round 37: evidence predicates on a callee read through a cast.
+        (
+            "evidence: a bare local map (finding 1) | plain",
+            "function map(cb: unknown) { return new Response(); }\nexport const Button = (props: Props) => map(() => <div />);",
+        ),
+        (
+            "evidence: a bare local map (finding 1) | peeled",
+            "function map(cb: unknown) { return new Response(); }\nexport const Button = (props: Props) => (map as typeof map)(() => <div />);",
+        ),
+        (
+            "evidence: a map on a value of unknown type | plain",
+            "declare const items: number[];\nexport const Button = (props: Props) => items.map(() => <div />);",
+        ),
+        (
+            "evidence: a map on a value of unknown type | peeled",
+            "declare const items: number[];\nexport const Button = (props: Props) => (items.map as typeof items.map)(() => <div />);",
+        ),
+        (
+            "evidence: a map on an array literal | plain",
+            "export const Button = (props: Props) => [1].map(() => <div />);",
+        ),
+        (
+            "evidence: a map on an array literal | peeled",
+            "export const Button = (props: Props) => ([1].map as (f: unknown) => unknown)(() => <div />);",
+        ),
+        (
+            "evidence: a helper shadowed by a destructured prop (finding 2) | plain",
+            "function render(): React.ReactElement { return <div />; }\ninterface RenderProps { render: () => symbol }\nexport const Button = ({ render }: RenderProps) => render();",
+        ),
+        (
+            "evidence: a helper shadowed by a destructured prop (finding 2) | peeled",
+            "function render(): React.ReactElement { return <div />; }\ninterface RenderProps { render: () => symbol }\nexport const Button = ({ render }: RenderProps) => (render as typeof render)();",
+        ),
+        (
+            "evidence: a helper declared once | plain",
+            "function render(): React.ReactElement { return <div />; }\nexport const Button = (props: Props) => render();",
+        ),
+        (
+            "evidence: a helper declared once | peeled",
+            "function render(): React.ReactElement { return <div />; }\nexport const Button = (props: Props) => (render as typeof render)();",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -2783,7 +2824,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // it, so it is no factory (`a_sealed_peel_reads_a_name_only_as_main_read_it_or_once_it_resolves`).
     // Round 36 adds three back: a member assigned through `<T>x` declared once, a `memo` imported from React and a
     // factory on React's receiver behind a cast.
-    assert_eq!(read_as_the_plain_call, 41);
+    // Round 37 adds two: a `map` on an array literal and an element helper declared once, both behind a cast
+    // (`an_evidence_predicate_through_a_cast_needs_binding_evidence`).
+    assert_eq!(read_as_the_plain_call, 43);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2844,6 +2887,36 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 37: an evidence predicate on a callee written through a cast (origin/main read the callee as written) needs
+/// binding evidence: a collection method only on a value known to be a collection, an element helper only when its name
+/// means the helper's own declaration. Each plain form is origin/main's; each peeled form reads as the plain form where
+/// the evidence holds, and as origin/main read it otherwise. The destructuring of round 36's finding 4 stays as main
+/// gives it: no output, written plainly or through `<typeof Ui>`.
+#[test]
+fn an_evidence_predicate_through_a_cast_needs_binding_evidence() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, holds) in [
+        ("evidence: a bare local map (finding 1)", false),
+        ("evidence: a map on a value of unknown type", false),
+        ("evidence: a map on an array literal", true),
+        ("evidence: a helper shadowed by a destructured prop (finding 2)", false),
+        ("evidence: a helper declared once", true),
+    ] {
+        let plain = format!("{row} | plain");
+        let peeled = format!("{row} | peeled");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+    for form in ["plain", "peeled"] {
+        let id = format!("sealed: a destructured import shadowed by a namespace local (finding 4) | {form}");
+        assert_eq!(base[id.as_str()], "", "{id}: origin/main");
+        assert_eq!(factory_parity_output(&cases[&id]), "", "{id}");
     }
 }
 

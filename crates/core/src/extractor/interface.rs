@@ -400,7 +400,7 @@ impl<'src> SourceDataCollector<'src> {
     /// The same scan for `const Root = Object.assign(RootImpl, { Item: (props: P) => … })`, whose call is a
     /// declaration's initializer and not a statement.
     pub(super) fn try_scan_object_assign_declarator<'a>(&mut self, init: Option<&Expression<'a>>) {
-        if let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) {
+        if let Some(Expression::CallExpression(call)) = init.map(super::peeled::read_value) {
             self.scan_object_assign_call(call);
         }
     }
@@ -452,7 +452,7 @@ impl<'src> SourceDataCollector<'src> {
         if !is_pascal_case(parent.name.as_str()) || !is_pascal_case(key_name) {
             return;
         }
-        let (params, span_start, span_end) = match super::component::peel_expr(&assignment.right) {
+        let (params, span_start, span_end) = match super::peeled::read_value(&assignment.right) {
             Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
             Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
             Expression::CallExpression(call) => {

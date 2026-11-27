@@ -69,7 +69,7 @@ pub(crate) struct Attachment {
 /// and one object literal (through parentheses, `as const` or `satisfies`), every member a plain key written once.
 fn minimal_object_assign(call: &CallExpression<'_>) -> bool {
     let [_, source] = call.arguments.as_slice() else { return false };
-    let Some(Expression::ObjectExpression(object)) = source.as_expression().map(super::component::peel_expr) else {
+    let Some(Expression::ObjectExpression(object)) = source.as_expression().map(super::peeled::read_value) else {
         return false;
     };
     let mut keys = rustc_hash::FxHashSet::default();
@@ -114,7 +114,7 @@ impl<'src> SourceDataCollector<'src> {
     /// `Object.assign(Root, { Item })` give `Inner`, `Card` and `Root`. `None` for a call that is no component alias, or
     /// whose argument is no name.
     pub(super) fn component_wrapped_by(&self, expression: &Expression<'_>) -> Option<super::names::Named> {
-        let Expression::CallExpression(call) = super::component::peel_expr(expression) else { return None };
+        let Expression::CallExpression(call) = super::peeled::read_value(expression) else { return None };
         if !super::component::is_component_alias_call(self, call) {
             return None;
         }
@@ -125,21 +125,18 @@ impl<'src> SourceDataCollector<'src> {
                 return roles.aliases.contains(&target).then_some(target);
             }
         }
-        let first = super::component::aliased_component(call)?;
-        match first {
-            // Read as origin/main read it (`main_peel` reaches the call and its argument), the name is `Plain`; read
-            // only through a peel, the binding pass must vouch for it.
-            Expression::Identifier(id) => {
-                let plain = matches!(super::component::main_peel(expression), Expression::CallExpression(_))
-                    && matches!(
-                        call.arguments.first().and_then(Argument::as_expression).map(super::component::main_peel),
-                        Some(Expression::Identifier(_))
-                    );
-                let recognition =
-                    if plain { super::component::Recognition::Plain } else { super::component::Recognition::Peeled };
-                self.bindings.named(id.name.as_str(), recognition)
+        let first = call.arguments.first()?.as_expression()?;
+        // The argument's name as `value_name` vouches for it; a call written through a wrapper main did not read makes it
+        // a name only a peel shows.
+        match super::peeled::value_name(first, &self.bindings) {
+            Some(inner) if super::component::peeled_beyond_main(expression) => {
+                self.bindings.named(inner.as_str(), super::component::Recognition::Peeled)
             }
-            _ => self.component_wrapped_by(first),
+            Some(inner) => Some(inner),
+            None => match super::peeled::read_value(first) {
+                Expression::CallExpression(_) => self.component_wrapped_by(first),
+                _ => None,
+            },
         }
     }
 
@@ -203,7 +200,7 @@ impl<'src> SourceDataCollector<'src> {
             return None;
         }
         let recognition = super::component::Recognition::of_object_assign(call, inline);
-        let read = |argument: &'b Argument<'a>| argument.as_expression().map(super::component::peel_expr);
+        let read = |argument: &'b Argument<'a>| argument.as_expression().map(super::peeled::read_value);
         let peeled = recognition == super::component::Recognition::Peeled;
         // A call main never read is recognised only in the minimal shape: a target and one object literal, with no
         // spread, computed or repeated key, so no later source can overwrite a member.
@@ -258,7 +255,7 @@ impl<'src> SourceDataCollector<'src> {
         parent: &super::names::Named,
         init: Option<&Expression<'_>>,
     ) {
-        let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
+        let Some(Expression::CallExpression(call)) = init.map(super::peeled::read_value) else { return };
         let Some(roles) = self.assign_roles(call, false, Some(parent)) else { return };
         for alias in &roles.aliases {
             self.attached_to.push(Attachment {
@@ -271,7 +268,7 @@ impl<'src> SourceDataCollector<'src> {
             for property in &object.properties {
                 let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
                 let Some(key) = property.key.static_name() else { continue };
-                if let Expression::Identifier(sub) = super::component::peel_expr(&property.value)
+                if let Expression::Identifier(sub) = super::peeled::read_value(&property.value)
                     && let Some(sub) = self.trusted_member(roles.recognition, sub.name.as_str())
                 {
                     self.record_attached(Subject::local(sub.as_str()), parent, &super::js_text::property_name(&key));
@@ -284,19 +281,10 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn record_member_assignment(&mut self, statement: &ExpressionStatement<'_>) {
         let Expression::AssignmentExpression(assignment) = &statement.expression else { return };
         let AssignmentTarget::StaticMemberExpression(target) = &assignment.left else { return };
-        let (Expression::Identifier(parent), Expression::Identifier(sub)) =
-            (&target.object, super::component::peel_expr(&assignment.right))
-        else {
-            return;
-        };
+        let Expression::Identifier(parent) = &target.object else { return };
         // The assigned value, read only through a wrapper origin/main did not read (`<number>Item`), only as the one
-        // declaration its name can mean.
-        let recognition = if matches!(super::component::main_peel(&assignment.right), Expression::Identifier(_)) {
-            super::component::Recognition::Plain
-        } else {
-            super::component::Recognition::Peeled
-        };
-        let Some(sub) = self.bindings.named(sub.name.as_str(), recognition) else { return };
+        // declaration its name can mean (`value_name`).
+        let Some(sub) = super::peeled::value_name(&assignment.right, &self.bindings) else { return };
         let parent = super::names::Named::plain(parent.name.as_str());
         self.record_attached(Subject::local(sub.as_str()), &parent, target.property.name.as_str());
     }

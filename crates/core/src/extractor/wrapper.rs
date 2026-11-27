@@ -88,7 +88,7 @@ fn component_argument_evidence(
     if creates_context {
         return Err("creates a context");
     }
-    let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::component::peel_expr) else {
+    let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::peeled::read_value) else {
         return Err("has no argument that could be a component");
     };
     let element_type_arg =
@@ -138,7 +138,7 @@ impl<'src> SourceDataCollector<'src> {
     /// Record `const Name = callee<...>(first, ...)` as a candidate. Returns whether it was recorded.
     pub(super) fn try_record_wrapper_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
-        let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
+        let Expression::CallExpression(call) = super::peeled::read_value(init) else { return false };
         let Some(type_arguments) = super::component::call_type_arguments(call) else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
         let creates_context = self.react_api(call) == Some(super::ReactApi::CreateContext);
@@ -187,7 +187,7 @@ impl<'src> SourceDataCollector<'src> {
         name: &str,
     ) -> bool {
         let Some(init) = decl.init else { return false };
-        let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
+        let Expression::CallExpression(call) = super::peeled::read_value(init) else { return false };
         // Main's claim, as in `try_record_wrapper_call`: a callee written through an assertion, `satisfies` or `!` is
         // left to the later rules.
         if super::component::call_type_arguments(call).is_some() || super::component::wrapped_beyond_main(&call.callee)
@@ -195,7 +195,7 @@ impl<'src> SourceDataCollector<'src> {
             return false;
         }
         let [tag, config] = call.arguments.as_slice() else { return false };
-        let Some(Expression::StringLiteral(tag)) = tag.as_expression().map(super::component::peel_expr) else {
+        let Some(Expression::StringLiteral(tag)) = tag.as_expression().map(super::peeled::read_value) else {
             return false;
         };
         let tag_name = tag.value.as_str().map(str::to_owned);
@@ -204,7 +204,7 @@ impl<'src> SourceDataCollector<'src> {
                 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         });
         let has_config =
-            matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
+            matches!(config.as_expression().map(super::peeled::read_value), Some(Expression::ObjectExpression(_)));
         let Some(callee) = self.extract_callee_name(call) else { return false };
         let element_builder = match callee.rsplit_once('.') {
             Some((receiver, name)) => super::evidence::is_element_factory_name(name, Some(receiver), &*self),
@@ -509,7 +509,7 @@ impl<'src> SourceDataCollector<'src> {
     /// rules' business, and a constant name is never one.
     pub(super) fn try_record_factory_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
-        let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
+        let Expression::CallExpression(call) = super::peeled::read_value(init) else { return false };
         let peeled = super::component::called(call);
         // Through any wrapper, the assertion's evidence is read; the callee itself only where it resolves.
         if matches!(peeled.evidence(), super::component::Evidence::NotRenderable) {
@@ -680,8 +680,7 @@ fn returned_local_call<'a>(
             if name.name != returned.name {
                 continue;
             }
-            let Some(Expression::CallExpression(call)) = declarator.init.as_ref().map(super::component::peel_expr)
-            else {
+            let Some(Expression::CallExpression(call)) = declarator.init.as_ref().map(super::peeled::read_value) else {
                 return None;
             };
             return collector.wrapper_callee(call);

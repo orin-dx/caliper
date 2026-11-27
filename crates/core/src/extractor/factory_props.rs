@@ -13,8 +13,8 @@ use oxc_ast::ast::*;
 use crate::types::{CollectedObjectField, CollectedType, RawDefault, TypeName};
 
 use super::SourceDataCollector;
-use super::component::peel_expr;
 use super::evidence::{FunctionShape, renders};
+use super::peeled::read_value;
 
 /// The own props a factory call's arguments give, waiting for detection to decide whether the call is a component.
 pub(crate) struct PendingFactoryProps {
@@ -33,8 +33,8 @@ impl<'src> SourceDataCollector<'src> {
     /// its last argument (one that renders, read as for a function component; any other callback is ignored); (b) otherwise, the keys of an object literal `variants`
     /// inside an object literal argument, when that is a style recipe.
     pub(super) fn record_factory_props<'a>(&mut self, span_start: u32, init: &Expression<'a>) {
-        let Expression::CallExpression(call) = peel_expr(init) else { return };
-        let annotated = call.arguments.last().and_then(Argument::as_expression).map(peel_expr).and_then(|last| {
+        let Expression::CallExpression(call) = read_value(init) else { return };
+        let annotated = call.arguments.last().and_then(Argument::as_expression).map(read_value).and_then(|last| {
             let (params, type_parameters, shape, asynchronous) = match last {
                 Expression::ArrowFunctionExpression(f) => {
                     (&f.params, f.type_parameters.as_deref(), FunctionShape::of_arrow(f), f.r#async)
@@ -87,10 +87,10 @@ impl<'src> SourceDataCollector<'src> {
 /// `inline?: boolean` and `size?: "sm"`. A recipe's variant maps each option to a style object, so a `variants` whose
 /// members are not all objects of objects (an animation's `{ visible: { opacity: 1 } }`) is not one, and gives nothing.
 fn recipe_variants(argument: &Argument<'_>) -> Option<Vec<CollectedObjectField>> {
-    let Expression::ObjectExpression(config) = peel_expr(argument.as_expression()?) else { return None };
+    let Expression::ObjectExpression(config) = read_value(argument.as_expression()?) else { return None };
     let variants = config.properties.iter().find_map(|property| match property {
         ObjectPropertyKind::ObjectProperty(p) if static_key(&p.key).as_deref() == Some("variants") => {
-            match peel_expr(&p.value) {
+            match read_value(&p.value) {
                 Expression::ObjectExpression(variants) => Some(variants),
                 _ => None,
             }
@@ -104,12 +104,12 @@ fn recipe_variants(argument: &Argument<'_>) -> Option<Vec<CollectedObjectField>>
         // A computed key or a variant held elsewhere (`size: sizeVariants`) cannot be read here; the variants written
         // beside it still can.
         let Some(name) = static_key(&variant.key) else { continue };
-        let Expression::ObjectExpression(options) = peel_expr(&variant.value) else { continue };
+        let Expression::ObjectExpression(options) = read_value(&variant.value) else { continue };
         let mut members = Vec::new();
         let mut boolean = false;
         for option in &options.properties {
             let ObjectPropertyKind::ObjectProperty(option) = option else { continue };
-            if !matches!(peel_expr(&option.value), Expression::ObjectExpression(_)) {
+            if !matches!(read_value(&option.value), Expression::ObjectExpression(_)) {
                 return None;
             }
             match static_key(&option.key)?.as_str() {

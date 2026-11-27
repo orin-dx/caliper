@@ -28,6 +28,7 @@ npm/caliper-docgen: patch
     - A wrapper named by convention (`memo`, `withX`) behind a `<T>x` assertion must be an import.
     - `(codec.createElement as typeof codec.createElement)(…)` is no factory.
     - A `createElement` taken from a destructuring, a `require`, a local function or another module is no factory when called through a cast, as before.
+  - A call written through a cast is no evidence that a function renders unless the name is shown to mean what it says. A `map` through a cast counts only on an array literal (`([1].map as …)(…)`): a local function called `map`, or a `map` on a value of unknown type, does not count. A helper declared to return an element counts only when its name means that one declaration: a destructured prop of the same name breaks it.
   - A write to `Object` through a mutator itself written through a cast, such as `(Object.defineProperty as typeof Object.defineProperty)(Object, 'assign', …)`, counts as a write. So does `Object.setPrototypeOf(Object, …)`.
   - A receiver written through a wrapper, as in `(Ui as typeof Ui).Button`, is read only when the file declares `Ui` exactly once.
   - A well-known name read through a wrapper must resolve to the global or import it names. `(Preact as typeof Preact).h(…)` counts as Preact's `h` only when the import is the file's one `Preact`, so a parameter named `Preact` breaks it. `(Object.assign as typeof Object.assign)(…)` counts as the built-in only when the file neither declares `Object` nor assigns `Object.assign`.

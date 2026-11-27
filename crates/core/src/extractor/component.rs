@@ -10,6 +10,7 @@ use rustc_hash::FxHashMap;
 use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode};
 
 use super::evidence::{FunctionShape, Scope, renders};
+use super::peeled::read_value;
 use super::{ReactApi, SourceDataCollector, is_pascal_case};
 
 /// One layer of the wrappers TypeScript erases from a value.
@@ -93,22 +94,13 @@ fn wrapper<'a, 'b>(expr: &'b Expression<'a>) -> Option<Wrapper<'b, 'a>> {
 /// instantiation (`List<Row>`) is where the read stops, as on OXC 0.158, whose value positions kept it the same way:
 /// what its type arguments bind is not applied yet, so the instantiated value is no component here. Only a callee or an
 /// `extends` target reads through one ([`peel`]), as OXC 0.159 leaves it there where 0.158 moved it onto the call.
-pub(super) fn peel_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    loop {
-        expr = match wrapper(expr) {
-            Some(Wrapper::Transparent(inner) | Wrapper::Asserted(inner, _)) => inner,
-            Some(Wrapper::Instantiation(_)) | None => return expr,
-        };
-    }
-}
-
-/// Whether `expr` has a wrapper above it that origin/main's `peel_expr` did not read through (`main_peel`): a `<T>x`
+/// Whether `expr` has a wrapper above it that origin/main did not read through (`main_peel`): a `<T>x`
 /// assertion or an instantiation. A comparison, not a read of what is beneath.
 pub(super) fn peeled_beyond_main(expr: &Expression<'_>) -> bool {
     !std::ptr::eq(main_read(expr), beneath(expr))
 }
 
-/// What origin/main read beneath a callee's wrappers: `peel_expr`'s (`main_peel`), and an instantiation, whose type
+/// What origin/main read beneath a callee's wrappers: its value peel's (`main_peel`), and an instantiation, whose type
 /// arguments OXC 0.158 moved onto the call so that main saw the bare callee.
 pub(super) fn main_read<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
     let mut expr = main_peel(expr);
@@ -524,7 +516,7 @@ fn type_name_names(left: &TSTypeName<'_>, right: &IdentifierName<'_>, expr: &Exp
     if member.property.name != right.name {
         return false;
     }
-    let object = peel_expr(&member.object);
+    let object = read_value(&member.object);
     match left {
         TSTypeName::IdentifierReference(id) => matches!(object, Expression::Identifier(e) if e.name == id.name),
         TSTypeName::QualifiedName(qualified) => type_name_names(&qualified.left, &qualified.right, object),
@@ -537,7 +529,7 @@ pub(super) fn chain_names(chain: &str, expr: &Expression<'_>) -> bool {
     match (chain.rsplit_once('.'), expr) {
         (None, Expression::Identifier(id)) => id.name == chain,
         (Some((left, right)), Expression::StaticMemberExpression(member)) => {
-            member.property.name == right && chain_names(left, peel_expr(&member.object))
+            member.property.name == right && chain_names(left, read_value(&member.object))
         }
         (None | Some(_), _) => false,
     }
@@ -609,7 +601,7 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
     }
 }
 
-/// An expression read through the wrappers origin/main's `peel_expr` read through: parentheses, `as`, `satisfies` and
+/// An expression read through the wrappers origin/main read a value through: parentheses, `as`, `satisfies` and
 /// `!`, not a `<T>x` assertion or an instantiation.
 pub(super) fn main_peel<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
     loop {
@@ -657,7 +649,7 @@ impl Recognition {
 
     /// An `Object.assign` call, by the path that reads it. Both read only a bare `Object.assign` callee; the
     /// inline-member scan (`inline`) also only a bare first argument and a bare object literal, while the named-member
-    /// read (`record_object_assign_declarator`) read its arguments through `peel_expr`.
+    /// read (`record_object_assign_declarator`) read its arguments through parentheses, `as`, `satisfies` and `!`.
     pub(super) fn of_object_assign(call: &CallExpression<'_>, inline: bool) -> Self {
         let callee = matches!(&call.callee, Expression::StaticMemberExpression(callee)
             if callee.property.name == "assign" && super::well_known::is_named(&callee.object, &super::well_known::OBJECT));
@@ -991,7 +983,7 @@ impl<'src> SourceDataCollector<'src> {
     /// Try to detect: `const Button: FC<ButtonProps> = ({ variant = 'primary' }) => ...`
     pub(super) fn try_fc_annotation<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let type_ann = decl.annotation?;
-        let init_params = match decl.init.map(peel_expr) {
+        let init_params = match decl.init.map(read_value) {
             Some(Expression::ArrowFunctionExpression(afe)) => Some(&*afe.params),
             Some(Expression::FunctionExpression(fe)) => Some(&*fe.params),
             _ => None,
@@ -1050,7 +1042,7 @@ impl<'src> SourceDataCollector<'src> {
     /// Try to detect: `const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(...)`
     pub(super) fn try_forward_ref<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
-        let call = match peel_expr(init) {
+        let call = match read_value(init) {
             Expression::CallExpression(ce) => ce,
             _ => return None,
         };
@@ -1099,7 +1091,7 @@ impl<'src> SourceDataCollector<'src> {
         decl: &Binding<'_, 'a>,
         name: &str,
     ) -> Option<ComponentMapping> {
-        let (params, shape) = match peel_expr(decl.init.as_ref()?) {
+        let (params, shape) = match read_value(decl.init.as_ref()?) {
             Expression::ArrowFunctionExpression(afe) => (&*afe.params, FunctionShape::of_arrow(afe)),
             Expression::FunctionExpression(fe) => (&*fe.params, FunctionShape::of_function(fe)),
             _ => return None,
@@ -1130,7 +1122,7 @@ impl<'src> SourceDataCollector<'src> {
     /// Try to detect: `const Button = anyHOC(function Button(props: ButtonProps) {...})`
     pub(super) fn try_hoc_wrapped<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
-        let call = match peel_expr(init) {
+        let call = match read_value(init) {
             Expression::CallExpression(ce) => ce,
             _ => return None,
         };
@@ -1506,7 +1498,7 @@ impl<'src> SourceDataCollector<'src> {
         name: &str,
     ) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
-        let Expression::ClassExpression(class) = peel_expr(init) else { return None };
+        let Expression::ClassExpression(class) = read_value(init) else { return None };
         if class.id.is_some() {
             return None;
         }
@@ -1579,24 +1571,19 @@ impl<'src> SourceDataCollector<'src> {
         let init = decl.init.as_ref()?;
         // Read as origin/main read it (`main_peel` reaches the identifier, or the call and its first argument), the
         // name is `Plain`; read only through a peel, the binding pass must vouch for it.
-        let recognition = |plain: bool| if plain { Recognition::Plain } else { Recognition::Peeled };
-        let (inner, call) = match peel_expr(init) {
-            Expression::CallExpression(call) => match aliased_component(call) {
-                Some(Expression::Identifier(id)) => {
-                    let plain = matches!(main_peel(init), Expression::CallExpression(_))
-                        && matches!(
-                            call.arguments.first().and_then(Argument::as_expression).map(main_peel),
-                            Some(Expression::Identifier(_))
-                        );
-                    (self.bindings.named(id.name.as_str(), recognition(plain))?, Some(&**call))
-                }
-                _ => return None,
-            },
-            Expression::Identifier(id) => {
-                let plain = matches!(main_peel(init), Expression::Identifier(_));
-                (self.bindings.named(id.name.as_str(), recognition(plain))?, None)
+        let (inner, call) = match read_value(init) {
+            Expression::CallExpression(call) => {
+                let first = call.arguments.first().and_then(Argument::as_expression)?;
+                let inner = super::peeled::value_name(first, &self.bindings)?;
+                // A call written through a wrapper main did not read makes its argument a name only a peel shows.
+                let inner = if peeled_beyond_main(init) {
+                    self.bindings.named(inner.as_str(), Recognition::Peeled)?
+                } else {
+                    inner
+                };
+                (inner, Some(&**call))
             }
-            _ => return None,
+            _ => (super::peeled::value_name(init, &self.bindings)?, None),
         };
         let Some(call) = call else { return Some(AliasShape { inner, call: None }) };
         // The component it receives is not the one it builds when a type argument names the props.
@@ -1700,7 +1687,7 @@ impl<'src> SourceDataCollector<'src> {
     /// PascalCase.
     pub(super) fn try_record_imported_member_alias<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init.as_ref() else { return false };
-        let target = match peel_expr(init) {
+        let target = match read_value(init) {
             Expression::StaticMemberExpression(member) => {
                 let Some(object) = self.receiver_identifier(&member.object) else { return false };
                 let property = member.property.name.as_str();
@@ -1710,21 +1697,17 @@ impl<'src> SourceDataCollector<'src> {
                 (object, Some(property))
             }
             // A constant is not a component whatever it is bound to; `const ORIGIN = Thing` says nothing about `Thing`.
-            Expression::Identifier(id)
-                if self.imported_names.contains(id.name.as_str())
-                    && is_pascal_case(id.name.as_str())
-                    && !super::is_constant_name(name) =>
-            {
-                // Read only through a peel (`<typeof Imported>Imported`), the binding pass must vouch for it.
-                let recognition = if matches!(main_peel(init), Expression::Identifier(_)) {
-                    Recognition::Plain
-                } else {
-                    Recognition::Peeled
-                };
-                let Some(object) = self.bindings.named(id.name.as_str(), recognition) else { return false };
-                (object, None)
-            }
-            _ => return false,
+            // Read only through a peel (`<typeof Imported>Imported`), the binding pass must vouch for the name.
+            _ => match super::peeled::value_name(init, &self.bindings) {
+                Some(object)
+                    if self.imported_names.contains(object.as_str())
+                        && is_pascal_case(object.as_str())
+                        && !super::is_constant_name(name) =>
+                {
+                    (object, None)
+                }
+                _ => return false,
+            },
         };
         self.push_imported_alias(name, &target.0, target.1, decl.span);
         true
@@ -1735,18 +1718,14 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_destructured_imports<'a>(&mut self, declarator: &VariableDeclarator<'a>) {
         let BindingPattern::ObjectPattern(pattern) = &declarator.id else { return };
         let Some(init) = declarator.init.as_ref() else { return };
-        let Expression::Identifier(object) = peel_expr(init) else { return };
-        if !self.imported_names.contains(object.name.as_str()) {
+        let Some(object) = super::peeled::value_name(init, &self.bindings) else { return };
+        if !self.imported_names.contains(object.as_str()) {
             return;
         }
         // Read only through a peel (`<typeof Ui>Ui`), the name must be the import itself: its one declaration.
-        let object = if matches!(main_peel(init), Expression::Identifier(_)) {
-            super::names::Named::plain(object.name.as_str())
-        } else {
-            let Some(_) = self.bindings.imported(object.name.as_str()) else { return };
-            let Some(object) = self.bindings.named(object.name.as_str(), Recognition::Peeled) else { return };
-            object
-        };
+        if matches!(object, super::names::Named::Peeled(_)) && self.bindings.imported(object.as_str()).is_none() {
+            return;
+        }
         for property in &pattern.properties {
             let PropertyKey::StaticIdentifier(key) = &property.key else { continue };
             let BindingPattern::BindingIdentifier(local) = &property.value else { continue };
@@ -1822,14 +1801,9 @@ pub(super) fn is_component_wrapper(scope: &dyn Scope, call: &CallExpression<'_>)
 
 /// Whether a call returns the component it is given, so that what it is bound or exported as is that component: a
 /// component wrapper, or `Object.assign(Impl, { Item })`, which returns `Impl` with the statics attached. The one place
-/// that says which calls make an alias of a component; [`aliased_component`] says which argument it is.
+/// that says which calls make an alias of a component; its first argument is the component (`peeled::value_name`).
 pub(super) fn is_component_alias_call(scope: &dyn Scope, call: &CallExpression<'_>) -> bool {
     is_component_wrapper(scope, call) || is_object_assign_call(call, scope)
-}
-
-/// The argument of a component alias call that is the component: the first.
-pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
-    call.arguments.first()?.as_expression().map(peel_expr)
 }
 
 /// Whether the call is `Object.assign(...)`.

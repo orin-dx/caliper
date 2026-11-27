@@ -348,6 +348,16 @@ sealed: a factory on another module's receiver (finding 5) | plain	Base:Props"fu
 sealed: a factory on another module's receiver (finding 5) | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 sealed: a factory on React's receiver | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 sealed: a factory on React's receiver | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+evidence: a bare local map (finding 1) | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
+evidence: a bare local map (finding 1) | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+evidence: a map on a value of unknown type | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
+evidence: a map on a value of unknown type | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+evidence: a map on an array literal | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
+evidence: a map on an array literal | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+evidence: a helper shadowed by a destructured prop (finding 2) | plain	Base:Props"functionDeclaration" | Button:RenderProps"typedFunctionExpression" exported as Button
+evidence: a helper shadowed by a destructured prop (finding 2) | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+evidence: a helper declared once | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
+evidence: a helper declared once | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via toolkit.createElement
 an element built from forwardRef, plain	Button:Props"forwardRef" exported as Button

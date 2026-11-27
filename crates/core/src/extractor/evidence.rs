@@ -148,10 +148,17 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
         // The call's result is part of the value, and it is an element only while no assertion says it is no element
         // (`(createElement as (t: any) => string)(…)`).
         let callee = super::component::callee_of(it, self.scope);
-        let name = callee.and_then(callee_name);
-        let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
         // origin/main read this callee as written, so any wrapper above it is beyond main here.
         let beyond_main = !matches!(&it.callee, Expression::Identifier(_) | Expression::StaticMemberExpression(_));
+        // A collection method (`items.map(…)`) is read as written; through a wrapper, only on a value known to be a
+        // collection, an array literal (`([1].map as …)(…)`). A bare local function called `map` is no collection method.
+        let collection = matches!(callee, Some(Expression::StaticMemberExpression(member))
+            if matches!(&member.object, Expression::ArrayExpression(_)));
+        let name = callee.filter(|_| !beyond_main || collection).and_then(callee_name);
+        // A helper declared to return an element, through a wrapper, only when the name means that one declaration: a
+        // destructured parameter of the same name is a second one.
+        let calls_helper = matches!(callee, Some(Expression::Identifier(id))
+            if self.scope.is_element_helper(&id.name) && (!beyond_main || self.scope.declarations(&id.name) == 1));
         if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, beyond_main, self.scope)) {
             self.found = true;
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.

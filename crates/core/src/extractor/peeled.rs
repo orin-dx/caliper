@@ -5,6 +5,8 @@
 
 use oxc_ast::ast::{Expression, TSTypeParameterInstantiation};
 
+use super::names::{Bindings, Named};
+
 use super::component::Evidence;
 use super::evidence::Scope;
 
@@ -86,6 +88,50 @@ impl<'b, 'a> Peeled<'b, 'a> {
     }
 }
 
+/// A value beneath parentheses, `as`, `satisfies`, `!` and a `<T>x` assertion (not an instantiation): private, as it
+/// would read a name origin/main never saw.
+fn peel_all<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    loop {
+        expr = match expr {
+            Expression::ParenthesizedExpression(inner) => &inner.expression,
+            Expression::TSAsExpression(inner) => &inner.expression,
+            Expression::TSSatisfiesExpression(inner) => &inner.expression,
+            Expression::TSNonNullExpression(inner) => &inner.expression,
+            Expression::TSTypeAssertion(inner) => &inner.expression,
+            _ => return expr,
+        };
+    }
+}
+
+/// Whether `expr` is a name: an identifier, or a chain of static members on one.
+fn is_name(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Identifier(_) => true,
+        Expression::StaticMemberExpression(member) => is_name(&member.object),
+        _ => false,
+    }
+}
+
+/// A value initializer or argument read beneath its wrappers, sealed: a call, a function, an object or a literal is read
+/// through every wrapper, as it names no binding; a name (an identifier or a member chain) only as origin/main read it
+/// (`component::main_peel`). A name beneath a wrapper main did not read comes back still wrapped, so a match on an
+/// identifier fails as it did on main; read it with [`value_name`], which vouches for it.
+pub(super) fn read_value<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    let all = peel_all(expr);
+    if is_name(all) { super::component::main_peel(expr) } else { all }
+}
+
+/// The identifier a value is beneath its wrappers, as a [`Named`]: `Plain` when origin/main read it
+/// (`component::main_peel`), otherwise only when the file declares it exactly once (`Bindings::unique`).
+pub(super) fn value_name(expr: &Expression<'_>, bindings: &Bindings) -> Option<Named> {
+    let Expression::Identifier(id) = peel_all(expr) else { return None };
+    if matches!(super::component::main_peel(expr), Expression::Identifier(_)) {
+        Some(Named::plain(id.name.as_str()))
+    } else {
+        bindings.unique(id.name.as_str()).map(Named::Peeled)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// The methods `Peeled` exposes. Only `as_plain` and `resolve` hand out the peeled expression, each behind its check;
@@ -100,6 +146,34 @@ mod tests {
         "resolve_called",
         "is_chain",
     ];
+
+    /// No module outside this one peels a value itself: `read_value` and `value_name` are the value peel, and only the
+    /// peel machinery in `component.rs` reads beneath a callee's wrappers.
+    #[test]
+    fn no_module_outside_the_peel_reads_beneath_a_wrapper() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/extractor");
+        let mut found = Vec::new();
+        for file in std::fs::read_dir(&dir).expect("the extractor sources").flatten() {
+            let name = file.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(".rs") || name == "peeled.rs" || name.ends_with("tests.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(file.path()).expect("a source");
+            for (number, line) in source.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                let spells = [concat!("peel", "_expr"), concat!("peel", "_all")].iter().any(|word| code.contains(word));
+                let internal = name == "component.rs";
+                let reads_beneath = !internal
+                    && [concat!("beneath", "("), concat!("layers", "(")]
+                        .iter()
+                        .any(|word| code.contains(word) && !code.contains(concat!("beneath", "_resolved(")));
+                if spells || reads_beneath {
+                    found.push(format!("{name}:{}: {}", number + 1, line.trim()));
+                }
+            }
+        }
+        assert!(found.is_empty(), "reads beneath a wrapper outside the peel:\n{}", found.join("\n"));
+    }
 
     #[test]
     fn peeled_exposes_no_accessor_that_reads_the_expression_unchecked() {

@@ -80,7 +80,7 @@ impl<'a> Visit<'a> for Scan {
         let local = match &node.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(func) => func.id.as_ref().map(|id| id.name.as_str()),
             ExportDefaultDeclarationKind::ClassDeclaration(class) => class.id.as_ref().map(|id| id.name.as_str()),
-            kind => match kind.as_expression().map(super::component::peel_expr) {
+            kind => match kind.as_expression().map(super::peeled::read_value) {
                 Some(Expression::Identifier(id)) => Some(id.name.as_str()),
                 _ => None,
             },
