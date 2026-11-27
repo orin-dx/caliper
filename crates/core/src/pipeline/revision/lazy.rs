@@ -263,6 +263,9 @@ pub(super) struct Lazy {
     /// Components resolved through a walk that passed a file it could not read, with the unread walks they reached:
     /// answered until one of those is due, then resolved again. Never carried to the next revision, never persisted.
     provisional: DashMap<ComponentId, (Arc<Resolved>, Held), FxBuildHasher>,
+    /// Components answered past a file that could not be read whose answer is held nowhere (its walk was due): the
+    /// next request asks again, and an edit names them in its delta as it names a provisional one.
+    unheld: DashMap<ComponentId, (), FxBuildHasher>,
     /// The id of the session's next dependency load, shared by its revisions: a footprint tells one load's failed read
     /// from a later one's.
     load_ids: Arc<dependency_types::LoadIds>,
@@ -507,6 +510,7 @@ impl Revision {
             whole_demand_thread: Mutex::new(None),
             growths: std::sync::atomic::AtomicUsize::new(0),
             provisional: DashMap::default(),
+            unheld: DashMap::default(),
             clock,
             edits,
             load_ids,
@@ -624,7 +628,9 @@ impl Revision {
         }
         // A provisional answer is never carried over: the edit makes every walk past an unreadable file due, so each
         // may answer differently, whatever file it read.
-        touch(previous.provisional.iter().map(|entry| entry.key().clone()), &mut touched, &mut affected_files);
+        let held = previous.provisional.iter().map(|entry| entry.key().clone());
+        let unheld = previous.unheld.iter().map(|entry| entry.key().clone());
+        touch(held.chain(unheld), &mut touched, &mut affected_files);
         // A name the changed file declared before or after keeps no memo, but its keys can still move.
         for groups in [&previous.by_name, &by_name] {
             for (name, group) in groups {
@@ -693,6 +699,7 @@ impl Revision {
                 growths: std::sync::atomic::AtomicUsize::new(0),
                 // An edit makes every walk past an unreadable file due: no provisional answer carries over.
                 provisional: DashMap::default(),
+                unheld: DashMap::default(),
                 clock: previous.clock.clone(),
                 edits: previous.edits.next(),
                 load_ids: previous.load_ids.clone(),
@@ -721,6 +728,7 @@ impl Revision {
         let (mut touched, mut affected_files) = (FxHashSet::default(), Vec::new());
         let memo = previous.memo.iter().map(|entry| entry.key().clone());
         let provisional = previous.provisional.iter().map(|entry| entry.key().clone());
+        let provisional = provisional.chain(previous.unheld.iter().map(|entry| entry.key().clone()));
         touch(memo.chain(provisional), &mut touched, &mut affected_files);
         affected_files.sort();
         affected_files.dedup();
@@ -851,8 +859,11 @@ impl Revision {
                         false => engine.layer.as_ref().and_then(|layer| layer.footprint(&own)).map(Some),
                     };
                     let shared_held = shared.as_ref().is_none_or(|walks| walks.footprint.is_some());
-                    if let (Some(own), true) = (own, shared_held) {
-                        lazy.provisional.insert(id.clone(), (resolved.clone(), Held { own, shared }));
+                    match (own, shared_held) {
+                        (Some(own), true) => {
+                            drop(lazy.provisional.insert(id.clone(), (resolved.clone(), Held { own, shared })))
+                        }
+                        _ => drop(lazy.unheld.insert(id.clone(), ())),
                     }
                     return Some((resolved, engine.layer.clone()));
                 }
@@ -958,6 +969,11 @@ impl Revision {
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
         // context and its memos stay; only the record of what was asked for moves on. Such a load (a retry of a file
         // that stays unreadable) is no growth either: it brings the background load of every name no nearer.
+        // A clean answer that read React's augmentations was read with no walk unread; once one is, any of those
+        // walks may load a file that declares into React, so the answer holds only by them, provisionally.
+        if !extended.unread_walks().is_empty() {
+            lazy.memo.retain(|_, resolved| !resolved.depends_on.reads_augmentations);
+        }
         if extended.resolves_like(layer) {
             lazy.engine.store(Arc::new(Engine {
                 layer: Some(extended),

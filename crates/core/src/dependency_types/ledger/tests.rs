@@ -1496,8 +1496,8 @@ const REACT_MODEL: Model = Model {
     ],
     react: true,
     // Seed 63 restarts over the index on disk with an augmentation unreadable, then flattens; seed 655 recovers a served
-    // augmentation's import.
-    seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 63, 655],
+    // augmentation's import; seed 342 meets an unread walk after a clean augmentation read.
+    seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 63, 342, 655],
     unresolved_past: &[("Card", "tgt/first", &["own_card"]), ("Card2", "tgt2/first", &["own_card2"])],
     withheld_while: &[("Aria", &["aug/afirst", "aug/aug", "aug/aug2"], &["aria-fb", "aria-tone"])],
 };
