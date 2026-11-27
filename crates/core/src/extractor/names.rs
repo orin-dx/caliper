@@ -14,9 +14,6 @@ pub(crate) struct Bindings {
     counts: FxHashMap<CompactString, u32>,
     /// The names an `import` declaration binds.
     imports: FxHashSet<CompactString>,
-    /// The writes to a member of a name: `(object, Some(key))` for a key known statically, `(object, None)` for one
-    /// through a key that is not (`Object[k] = …`), which may be any member.
-    writes: FxHashSet<(CompactString, Option<CompactString>)>,
 }
 
 /// A name the file declares exactly once: the one declaration a bare use of it can mean.
@@ -32,12 +29,6 @@ pub(crate) struct GlobalName(CompactString);
 pub(crate) struct ImportedName(CompactString);
 
 impl UniqueName {
-    pub(super) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl GlobalName {
     pub(super) fn as_str(&self) -> &str {
         &self.0
     }
@@ -66,12 +57,8 @@ impl Named {
 }
 
 impl Bindings {
-    pub(super) fn new(
-        counts: FxHashMap<CompactString, u32>,
-        imports: FxHashSet<CompactString>,
-        writes: FxHashSet<(CompactString, Option<CompactString>)>,
-    ) -> Self {
-        Self { counts, imports, writes }
+    pub(super) fn new(counts: FxHashMap<CompactString, u32>, imports: FxHashSet<CompactString>) -> Self {
+        Self { counts, imports }
     }
 
     /// How many times the file declares `name`.
@@ -100,12 +87,6 @@ impl Bindings {
             Recognition::Plain => Some(Named::Plain(name.into())),
             Recognition::Peeled => self.unique(name).map(Named::Peeled),
         }
-    }
-
-    /// Whether the file writes `member` of the global, through any key that is or may be `member`.
-    pub(super) fn writes_to(&self, global: &GlobalName, member: &str) -> bool {
-        let object = CompactString::from(global.as_str());
-        self.writes.contains(&(object.clone(), Some(member.into()))) || self.writes.contains(&(object, None))
     }
 }
 

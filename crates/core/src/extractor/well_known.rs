@@ -4,10 +4,7 @@
 //! declaration, from the entry's module. The architecture test below fails when an extractor source outside this module
 //! spells one of these names as a string literal, so a new spelling-based path cannot skip the check.
 
-use oxc_ast::ast::{
-    Argument, CallExpression, ComputedMemberExpression, Expression, ObjectPropertyKind, PropertyKey,
-    SimpleAssignmentTarget, StaticMemberExpression,
-};
+use oxc_ast::ast::Expression;
 
 use super::evidence::Scope;
 
@@ -133,122 +130,6 @@ pub(super) fn react_export(exported: &str) -> Option<&'static WellKnown> {
 /// The imports a bare element factory callee may be: React's factories and Preact's `h`.
 pub(super) const FACTORY_IMPORTS: &[&WellKnown] =
     &[&CREATE_ELEMENT, &CLONE_ELEMENT, &JSX, &JSXS, &JSX_DEV, &CREATE_PORTAL, &H];
-
-/// The name and key a write to a member targets, for `names::Bindings::writes_to`: `Some(key)` for a key known
-/// statically (`.assign`, `['assign']`, a template literal without substitutions), `None` for one that is not (`[k]`).
-///
-/// Every simple target counts, in a plain, compound or destructuring assignment and in an update, and the target and
-/// its receiver are read through every wrapper: `(Object as typeof Object).assign = …`, `Object!.assign = …` and
-/// `(Object.assign as any) = …` are writes as `Object.assign = …` is.
-pub(super) fn assignment_write<'a>(target: &SimpleAssignmentTarget<'a>) -> Option<(&'a str, Option<&'a str>)> {
-    match target {
-        SimpleAssignmentTarget::StaticMemberExpression(member) => static_member_write(member),
-        SimpleAssignmentTarget::ComputedMemberExpression(member) => computed_member_write(member),
-        SimpleAssignmentTarget::TSAsExpression(inner) => member_write(&inner.expression),
-        SimpleAssignmentTarget::TSSatisfiesExpression(inner) => member_write(&inner.expression),
-        SimpleAssignmentTarget::TSNonNullExpression(inner) => member_write(&inner.expression),
-        SimpleAssignmentTarget::TSTypeAssertion(inner) => member_write(&inner.expression),
-        _ => None,
-    }
-}
-
-/// The member an expression writes when it is assigned to or deleted (`delete Object.assign`), read through every
-/// wrapper.
-pub(super) fn member_write<'a>(expr: &Expression<'a>) -> Option<(&'a str, Option<&'a str>)> {
-    match super::component::written_through(expr) {
-        Expression::StaticMemberExpression(member) => static_member_write(member),
-        Expression::ComputedMemberExpression(member) => computed_member_write(member),
-        _ => None,
-    }
-}
-
-fn static_member_write<'a>(member: &StaticMemberExpression<'a>) -> Option<(&'a str, Option<&'a str>)> {
-    object_name(super::component::written_through(&member.object))
-        .map(|object| (object, Some(member.property.name.as_str())))
-}
-
-fn computed_member_write<'a>(member: &ComputedMemberExpression<'a>) -> Option<(&'a str, Option<&'a str>)> {
-    object_name(super::component::written_through(&member.object))
-        .map(|object| (object, static_key(&member.expression).known()))
-}
-
-/// The writes a call makes to a member of a name: `Reflect.set(O, key, …)`, `Reflect.defineProperty(O, key, …)`,
-/// `Object.defineProperty(O, key, …)` and each key of `Object.defineProperties(O, { … })`.
-pub(super) fn call_writes<'a>(call: &CallExpression<'a>) -> Vec<(&'a str, Option<&'a str>)> {
-    // The mutator and its target are read through every wrapper: a write behind one is still a write.
-    let through = super::component::written_through;
-    let Expression::StaticMemberExpression(callee) = through(&call.callee) else { return Vec::new() };
-    let Some(receiver) = object_name(through(&callee.object)) else { return Vec::new() };
-    let argument = |index: usize| call.arguments.get(index).and_then(Argument::as_expression);
-    let Some(target) = argument(0).map(through).and_then(object_name) else { return Vec::new() };
-    let global = receiver == OBJECT.name || receiver == REFLECT.name;
-    match callee.property.name.as_str() {
-        "set" | "defineProperty" if global => vec![(target, argument(1).and_then(|key| static_key(key).known()))],
-        // A new prototype may supply any member.
-        "setPrototypeOf" if global => vec![(target, None)],
-        // Every source writes its keys, a later one over an earlier one. A source that is no object literal (a name, a
-        // call, a spread argument) and a spread or computed member may hold any key.
-        "defineProperties" | "assign" if receiver == OBJECT.name => {
-            let mut writes = Vec::new();
-            for source in call.arguments.iter().skip(1) {
-                match source.as_expression().map(through) {
-                    Some(Expression::ObjectExpression(object)) => {
-                        writes.extend(object.properties.iter().map(|property| match property {
-                            ObjectPropertyKind::ObjectProperty(property) if !property.computed => {
-                                let key = match &property.key {
-                                    PropertyKey::StaticIdentifier(key) => Some(key.name.as_str()),
-                                    PropertyKey::StringLiteral(key) => key.value.as_str(),
-                                    _ => None,
-                                };
-                                (target, key)
-                            }
-                            _ => (target, None),
-                        }));
-                    }
-                    _ => writes.push((target, None)),
-                }
-            }
-            writes
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn object_name<'a>(expr: &Expression<'a>) -> Option<&'a str> {
-    match expr {
-        Expression::Identifier(id) => Some(id.name.as_str()),
-        _ => None,
-    }
-}
-
-/// A member key as the program sees it at run time: `Known` for a string or substitution-free template literal, by its
-/// cooked value (every escape decoded: `\x69`, `\u0069`, `\u{69}`, a line continuation), `Unknown` for anything else
-/// (a name, a concatenation, a call, an escape that does not decode), which may be any key.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum StaticKey<'a> {
-    Known(&'a str),
-    Unknown,
-}
-
-impl<'a> StaticKey<'a> {
-    pub(super) fn known(self) -> Option<&'a str> {
-        match self {
-            Self::Known(key) => Some(key),
-            Self::Unknown => None,
-        }
-    }
-}
-
-pub(super) fn static_key<'a>(expr: &Expression<'a>) -> StaticKey<'a> {
-    let key = match expr {
-        Expression::StringLiteral(literal) => literal.value.as_str(),
-        Expression::TemplateLiteral(template) if template.expressions.is_empty() => {
-            template.quasis.first().and_then(|quasi| quasi.value.cooked).and_then(|cooked| cooked.as_str())
-        }
-        _ => None,
-    };
-    key.map_or(StaticKey::Unknown, StaticKey::Known)
-}
 
 /// Whether a callee is written through a wrapper origin/main did not read (`component::main_peel`): the `Peeled` gate
 /// every spelling-based match on a callee goes through.

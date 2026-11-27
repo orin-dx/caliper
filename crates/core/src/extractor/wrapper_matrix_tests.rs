@@ -370,45 +370,6 @@ fn type_arguments_beneath_an_assertion_do_not_name_the_props() {
     }
 }
 
-/// The alias detection and the inline-member scan of `Object.assign(Impl, { Item })` answer one question: they agree
-/// through every wrapper of the callee, of its namespace and of the first argument.
-#[test]
-fn object_assign_attaches_its_inline_members_through_every_wrapper() {
-    let sources = |assign: &str, first: &str| {
-        format!(
-            "{HEADER}interface ItemProps {{ size?: string }}\n\
-             function Impl(props: Props) {{ return {RENDER}; }}\n\
-             export const Root = {assign}({first}, {{ Item: (props: ItemProps) => {RENDER} }});"
-        )
-    };
-    let path = Utf8Path::new("/fixtures/Root.tsx");
-    let (expected, errors) = extracted(path, &sources("Object.assign", "Impl"));
-    assert!(errors.is_empty(), "{errors:?}");
-    let names = |mappings: &[serde_json::Value]| -> Vec<String> {
-        let mut names: Vec<String> =
-            mappings.iter().filter_map(|mapping| mapping["component_name"].as_str().map(str::to_owned)).collect();
-        names.sort();
-        names
-    };
-    assert_eq!(names(&expected), ["Item", "Root"], "{expected:#?}");
-    let mut failures = Vec::new();
-    for assign in [
-        "(Object).assign",
-        "(Object as typeof Object).assign",
-        "Object!.assign",
-        "(Object satisfies ObjectConstructor).assign",
-    ] {
-        for first in ["Impl", "(Impl)", "Impl as typeof Impl", "Impl!"] {
-            let source = sources(assign, first);
-            let (actual, errors) = extracted(path, &source);
-            if !errors.is_empty() || actual != expected {
-                failures.push(format!("{assign}({first}, …): {errors:?}\n{source}\nactual {:?}", names(&actual)));
-            }
-        }
-    }
-    assert!(failures.is_empty(), "{} forms differ from the plain one:\n{}", failures.len(), failures.join("\n\n"));
-}
-
 #[test]
 fn every_detection_form_extracts_the_same_component_through_every_wrapper() {
     let mut failures = Vec::new();
@@ -477,33 +438,6 @@ fn every_detection_form_extracts_the_same_component_through_every_wrapper() {
         }
     }
     assert!(failures.is_empty(), "{} rows differ from what they expect:\n\n{}", failures.len(), failures.join("\n\n"));
-}
-
-/// `Object.assign` through a cast that is no evidence against it makes `Root` an alias of `Impl`, and the inline
-/// member scan reads the call through the same predicate, so `Item` is found with it. A namespace cast to `object`
-/// declares no `assign`, which says nothing; a member declared to return `object` finds neither.
-/// (`Impl` is not published under its own name while `Root` aliases it.)
-#[test]
-fn an_object_assign_through_an_identity_cast_attaches_its_inline_members() {
-    let found = |object: &str| {
-        let source = format!(
-            "interface P {{ a: string }}\n\
-             interface ItemProps {{ b: string }}\n\
-             function Impl(props: P) {{ return <div />; }}\n\
-             export const Root = {object}.assign(Impl, {{ Item: (props: ItemProps) => <div /> }});"
-        );
-        let data = parse_file(Utf8Path::new("/test/compound.tsx"), &source);
-        let mut found: Vec<(String, String)> =
-            data.component_mappings.iter().map(|m| (m.component_name.clone(), m.props_type_name.to_string())).collect();
-        found.sort_unstable();
-        found
-    };
-    let pair = |name: &str, props: &str| (name.to_owned(), props.to_owned());
-    for object in ["Object", "(Object as typeof Object)", "(Object as any)", "(Object)!", "(Object as object)"] {
-        assert_eq!(found(object), [pair("Item", "ItemProps"), pair("Root", "P")], "{object}");
-    }
-    // Not an alias, `Root` takes nothing and `Impl` stands as its own component.
-    assert_eq!(found("(Object as { assign(...args: any[]): object })"), [pair("Impl", "P")]);
 }
 
 /// A PascalCase callee is rendering evidence only while its name describes the call: an assertion stating a result
@@ -1164,7 +1098,6 @@ fn a_namespace_read_for_its_name_has_no_evidence_of_its_own() {
         ))
     };
     assert_eq!(assign("Object"), ["Item", "Root"]);
-    assert_eq!(assign("(Object as unknown as { (): void; assign: typeof Object.assign })"), ["Item", "Root"]);
     let imported =
         |receiver: &str| names_of(&format!("import * as Ui from './ui';\nexport const Button = {receiver}.Button;"));
     assert_eq!(imported("Ui"), ["Button"]);
@@ -1385,22 +1318,19 @@ fn every_detection_main_did_not_make_is_an_identity_cast_or_a_known_react_wrappe
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
     let summary: Vec<String> = by_reason.iter().map(|(reason, n)| format!("{reason} = {n}")).collect();
+    // Round 43 drops every `Object.assign` category: an attachment only a peel exposes is not recorded, so each cast row
+    // reads as main read it (`an_attachment_only_a_peel_exposes_is_not_recorded`).
     // Round 40 drops the PascalCase call's 8 identity casts and 93 casts read as main's plain call: the callee is the
     // global `Object`, which has no declaration that renders, so through a cast it is no element evidence and every cast
     // row reads as main read it (`a_peeled_part_relies_on_the_built_in_and_on_render_evidence`).
     assert_eq!(
         summary,
         [
-            "closed list declines the wrapper, so the component it wraps is listed: Object.assign argument = 11",
             "closed list declines the wrapper, so the component it wraps is listed: wrapper call = 11",
-            "identity cast: Object.assign = 12",
-            "identity cast: Object.assign argument = 8",
             "identity cast: class = 12",
             "identity cast: element factory = 8",
             "known React wrapper or API: class = 126",
             "known React wrapper or API: element factory = 93",
-            "read as main's own plain call: Object.assign = 111",
-            "read as main's own plain call: Object.assign argument = 93",
         ]
     );
 }
@@ -4698,6 +4628,62 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "gate: =, module, imported and re-exported | peeled".to_owned(),
         "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nexport { Root };\nRoot.Item = <any>Item;".to_owned(),
     ));
+    cases.push((
+        "attachments: assign member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "attachments: assign member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: <any>Item });".to_owned(),
+    ));
+    cases.push((
+        "attachments: assign source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "attachments: assign source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "attachments: dot assign | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = Item;".to_owned(),
+    ));
+    cases.push((
+        "attachments: dot assign | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "attachments: inline function (finding 1) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: (p: ItemProps) => createElement('i') });".to_owned(),
+    ));
+    cases.push((
+        "attachments: inline function (finding 1) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => createElement('i') });".to_owned(),
+    ));
+    cases.push((
+        "attachments: named member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "attachments: named member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "attachments: a Reflect['set'] write (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nReflect['set'](Object, 'assign', (t: object) => t);\nObject.assign(Root, { Item: (p: ItemProps) => createElement('i') });".to_owned(),
+    ));
+    cases.push((
+        "attachments: a Reflect['set'] write (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nReflect['set'](Object, 'assign', (t: object) => t);\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => createElement('i') });".to_owned(),
+    ));
+    cases.push((
+        "attachments: a target literal member a source overwrites (finding 3) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport const Public = Object.assign({ Item }, { Item: null });".to_owned(),
+    ));
+    cases.push((
+        "attachments: a target literal member a source overwrites (finding 3) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport const Public = Object.assign({ Item: <any>Item }, { Item: null });".to_owned(),
+    ));
     cases
 }
 
@@ -4802,44 +4788,10 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    // Round 26 adds one: `(wrap as typeof wrap)<Props>(render)` with `wrap` declared once keeps the callee, as main's
-    // plain call does (`a_callee_through_a_cast_is_attached_only_when_its_name_is_declared_once`). Round 27 adds three:
-    // an `Object.assign` through a cast at module level
-    // (`an_object_assign_through_a_cast_attaches_only_at_module_level_to_a_parent_declared_once`). Round 28 adds one: a
-    // member callee's receiver read through a cast when declared once
-    // (`a_receiver_through_a_cast_is_read_only_for_a_callee_and_only_when_declared_once`). Round 29 adds three: an
-    // alias, a callee and a heritage whose receiver is declared once
-    // (`every_receiver_read_through_a_cast_is_read_only_when_declared_once`). Round 30 adds four: a peeled base or
-    // `Object.assign` whose names are trusted (`a_peeled_candidate_is_accepted_only_when_its_names_are_trusted`).
-    // Round 31 adds three: a peeled receiver that resolves to its well-known global or import
-    // (`a_well_known_name_on_a_peeled_path_must_resolve_to_it`). Round 32 adds two: a peeled `Object.assign` whose
-    // target is trusted, bound and exported by default (`an_object_assign_call_is_read_by_its_argument_roles`).
-    // Round 33 adds three: a forwardRef or createElement import behind `<T>x` that resolves
-    // (`every_well_known_entry_resolves_before_a_peeled_match`).
-    // Round 34 adds two: a peeled `Object.assign` beside a write to another `Object` member, and an identifier alias behind
-    // `<T>x` declared once (`a_peeled_candidate_relies_only_on_names_the_binding_pass_vouches_for`).
-    // Round 36 removes 28: an element factory written through a cast and bound to anything but React's or Preact's import
-    // (a destructuring, a `require`, a local function, a relative module, emotion's `jsx`) is read as origin/main read
-    // it, so it is no factory (`a_sealed_peel_reads_a_name_only_as_main_read_it_or_once_it_resolves`).
-    // Round 36 adds three back: a member assigned through `<T>x` declared once, a `memo` imported from React and a
-    // factory on React's receiver behind a cast.
-    // Round 37 adds two: a `map` on an array literal and an element helper declared once, both behind a cast
-    // (`an_evidence_predicate_through_a_cast_needs_binding_evidence`).
-    // Round 38 adds eight: a cast `Object.assign` beside later `Object` sources with unrelated keys
-    // (`every_source_of_an_object_mutation_counts_as_a_write`), five members exposed only by a peel and declared once,
-    // a target behind `<T>x` at module level and an object literal behind `<const>` whose member is declared once
-    // (`an_object_assign_member_is_recognised_by_its_own_read`).
-    // Round 38 adds twelve more: cast forms of a well-known member callee whose receiver resolves to its entry, and a
-    // member assigned through `<T>x` to a parent declared once (`a_peeled_name_relies_on_a_parent_and_receiver_that_resolve`).
-    // Round 39 adds eleven: a well-known member callee behind `<T>x` whose receiver resolves, and an escaped key that is
-    // another member (`a_peeled_child_relies_on_the_whole_call_its_key_and_its_receiver`).
-    // Round 40 adds six: a cast `Object.assign` part with no write to it in four contexts, and a PascalCase callee behind a
-    // cast whose declaration renders by its return type or body (`a_peeled_part_relies_on_the_built_in_and_on_render_evidence`).
-    // Round 41 adds five: a bare callee behind a cast whose declaration renders, and the four trusted `Object.assign`
-    // roles (`a_peeled_part_uses_only_its_own_declaration_and_a_rejection_is_final`).
-    // Round 42 adds two and removes one: a peeled member assigned or `Object.assign`ed at module level to a parent declared
-    // once, and no longer one assigned inside a function (`a_peeled_attachment_passes_one_gate`).
-    assert_eq!(read_as_the_plain_call, 86);
+    // The rows read as main's plain call: each a peeled callee or component main did not read. Round 43 removes every
+    // attachment only a peel exposes (`an_attachment_only_a_peel_exposes_is_not_recorded`), so those rows read as main
+    // read them and are no longer counted.
+    assert_eq!(read_as_the_plain_call, 54);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -4888,9 +4840,9 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         ("heritage, an import declared once", true),
         ("heritage, a global", true),
         ("Object.assign member, declared twice (finding 2)", false),
-        ("Object.assign member, declared once", true),
+        ("Object.assign member, declared once", false),
         ("Object.assign object behind as const, a shadowing local (finding 3)", false),
-        ("Object.assign object behind as const, at module level", true),
+        ("Object.assign object behind as const, at module level", false),
         ("Object.assign object behind satisfies, a shadowing local", false),
         ("factory callee behind an instantiation, declared once", true),
         ("factory callee behind an instantiation, a parameter of its name", false),
@@ -4900,6 +4852,31 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 43, the stop point: a member attachment whose member, source, target, callee or receiver needs a peel to be read
+/// is not recorded. Each plain form is origin/main's; each peeled form is origin/main's own output for it, and attaches
+/// nothing: no component is exported as a member of `Root` or `Public`.
+#[test]
+fn an_attachment_only_a_peel_exposes_is_not_recorded() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for row in [
+        "attachments: assign member",
+        "attachments: assign source",
+        "attachments: dot assign",
+        "attachments: inline function (finding 1)",
+        "attachments: named member",
+        "attachments: a Reflect['set'] write (finding 2)",
+        "attachments: a target literal member a source overwrites (finding 3)",
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let now = factory_parity_output(&cases[&peeled]);
+        assert_eq!(now, base[peeled.as_str()], "{peeled}");
+        assert!(!now.contains("exported as Root.") && !now.contains("exported as Public."), "{peeled}: {now}");
     }
 }
 
@@ -4914,7 +4891,7 @@ fn a_peeled_attachment_passes_one_gate() {
     let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
     let mut failures = Vec::new();
     for (row, holds) in [
-        ("gate: =, module, exported unique", true),
+        ("gate: =, module, exported unique", false),
         ("gate: =, module, imported and re-exported", false),
         ("gate: =, module, shadowed by a parameter", false),
         ("gate: =, module, shadowed by a local", false),
@@ -4996,7 +4973,7 @@ fn a_peeled_attachment_passes_one_gate() {
         ("gate: destructuring, arrow, shadowed by a local", false),
         ("gate: destructuring, arrow, imported", false),
         ("gate: a compound assignment after a string (finding 1)", false),
-        ("gate: an Object.assign declarator, module", true),
+        ("gate: an Object.assign declarator, module", false),
         ("gate: an Object.assign declarator, function (finding 2)", false),
         ("gate: an Object.assign declarator, class static block", false),
         ("gate: an Object.assign declarator, nested block", false),
@@ -5028,10 +5005,10 @@ fn a_peeled_part_uses_only_its_own_declaration_and_a_rejection_is_final() {
         ("tables: a bare callee", true),
         ("tables: a member with its own table", false),
         ("tables: a member with a foreign table (finding 1)", false),
-        ("roles: assign trusted, export default (finding 2)", true),
-        ("roles: assign trusted, export const", true),
-        ("roles: assign trusted, named member", true),
-        ("roles: assign trusted, nested", true),
+        ("roles: assign trusted, export default (finding 2)", false),
+        ("roles: assign trusted, export const", false),
+        ("roles: assign trusted, named member", false),
+        ("roles: assign trusted, nested", false),
         ("roles: assign replaced, export default (finding 2)", false),
         ("roles: assign replaced, export const", false),
         ("roles: assign replaced, named member", false),
@@ -5061,10 +5038,10 @@ fn a_peeled_part_relies_on_the_built_in_and_on_render_evidence() {
     let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
     let mut failures = Vec::new();
     for (row, holds) in [
-        ("builtin: no write, peeled call", true),
-        ("builtin: no write, peeled member", true),
-        ("builtin: no write, peeled source", true),
-        ("builtin: no write, peeled member, bound (finding 2)", true),
+        ("builtin: no write, peeled call", false),
+        ("builtin: no write, peeled member", false),
+        ("builtin: no write, peeled source", false),
+        ("builtin: no write, peeled member, bound (finding 2)", false),
         ("builtin: a direct write, peeled call", false),
         ("builtin: a direct write, peeled member", false),
         ("builtin: a direct write, peeled source", false),
@@ -5149,7 +5126,7 @@ fn a_peeled_child_relies_on_the_whole_call_its_key_and_its_receiver() {
         ("keys: a concatenated key", false),
         ("keys: a key in a constant", false),
         ("keys: Reflect.set with an escaped key", false),
-        ("keys: an escaped key that is another member", true),
+        ("keys: an escaped key that is another member", false),
         ("callees: forwardRef, a bare callee", true),
         ("callees: forwardRef, a member callee on its module", true),
         ("callees: forwardRef, a member callee on another module", false),
@@ -5215,7 +5192,7 @@ fn a_peeled_name_relies_on_a_parent_and_receiver_that_resolve() {
         ("receivers: React.createElement, an import of another module", false),
         ("receivers: Preact.h, Preact's import", true),
         ("receivers: Preact.h, an import of another module", false),
-        ("receivers: Object.assign, a global", true),
+        ("receivers: Object.assign, a global", false),
         ("receivers: Object.assign, an import of another module", false),
     ] {
         let plain = format!("{row} | plain");
@@ -5225,112 +5202,6 @@ fn a_peeled_name_relies_on_a_parent_and_receiver_that_resolve() {
             let expected = if holds { base[plain.as_str()] } else { base[id.as_str()] };
             assert_eq!(factory_parity_output(&cases[&id]), expected, "{id}");
         }
-    }
-}
-
-/// Round 38: a write to `Object.assign` through any source of an `Object.assign` or `Object.defineProperties` call on
-/// `Object` (a later object literal, through `as const` or `satisfies`, a spread, an unreadable source, a spread
-/// argument) means a cast `Object.assign` is not the built-in. Each plain form is origin/main's; a peeled form reads as
-/// the plain form only where no source may write `assign`, and as origin/main read it otherwise.
-#[test]
-fn every_source_of_an_object_mutation_counts_as_a_write() {
-    let base: FxHashMap<&str, &str> =
-        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
-    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
-    for (row, holds) in [
-        ("writes: a later source replaces assign (finding 1)", false),
-        ("writes: a later source as const replaces assign", false),
-        ("writes: a later source satisfies replaces assign", false),
-        ("writes: a spread in a later source", false),
-        ("writes: an unreadable later source", false),
-        ("writes: a spread argument", false),
-        ("writes: defineProperties with a later descriptor", false),
-        ("writes: later sources with unrelated keys", true),
-    ] {
-        let plain = format!("{row} | plain");
-        let peeled = format!("{row} | peeled");
-        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
-        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
-        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
-    }
-}
-
-/// Round 38: an `Object.assign` member value is classified by its own read, not its call's. Read as origin/main read it
-/// (bare, `as`, `satisfies`, `!`, parentheses) in a plain call, it is origin/main's whatever else the file declares.
-/// Exposed only by a peel (`<T>x`, or any member of a cast call), it counts only when the file declares it once: then
-/// the row reads as the plain call with a bare member, and otherwise as origin/main read it. In the statement scan main
-/// read a member only as written, so a member behind `as`, `satisfies`, `!` or parentheses stays unread there. A plain
-/// call never upgrades a peeled member: finding 2's namespace-local `Item` behind `<number>` stays as main gives it.
-#[test]
-fn an_object_assign_member_is_recognised_by_its_own_read() {
-    let base: FxHashMap<&str, &str> =
-        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
-    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
-    for (row, attaches) in [
-        ("members: declarator, bare, plain call, unique | plain", None),
-        ("members: declarator, bare, plain call, ambiguous | plain", None),
-        ("members: declarator, as, plain call, unique | plain", None),
-        ("members: declarator, as, plain call, ambiguous | plain", None),
-        ("members: declarator, assertion, plain call, unique", Some(true)),
-        ("members: declarator, assertion, plain call, ambiguous", Some(false)),
-        ("members: declarator, satisfies, plain call, unique | plain", None),
-        ("members: declarator, satisfies, plain call, ambiguous | plain", None),
-        ("members: declarator, non-null, plain call, unique | plain", None),
-        ("members: declarator, non-null, plain call, ambiguous | plain", None),
-        ("members: declarator, parens, plain call, unique | plain", None),
-        ("members: declarator, parens, plain call, ambiguous | plain", None),
-        ("members: statement, bare, plain call, unique | plain", None),
-        ("members: statement, bare, peeled call, unique", Some(true)),
-        ("members: statement, bare, plain call, ambiguous | plain", None),
-        ("members: statement, bare, peeled call, ambiguous", Some(false)),
-        ("members: statement, as, plain call, unique", Some(false)),
-        ("members: statement, as, peeled call, unique", Some(false)),
-        ("members: statement, as, plain call, ambiguous", Some(false)),
-        ("members: statement, as, peeled call, ambiguous", Some(false)),
-        ("members: statement, assertion, plain call, unique", Some(true)),
-        ("members: statement, assertion, peeled call, unique", Some(true)),
-        ("members: statement, assertion, plain call, ambiguous", Some(false)),
-        ("members: statement, assertion, peeled call, ambiguous", Some(false)),
-        ("members: statement, satisfies, plain call, unique", Some(false)),
-        ("members: statement, satisfies, peeled call, unique", Some(false)),
-        ("members: statement, satisfies, plain call, ambiguous", Some(false)),
-        ("members: statement, satisfies, peeled call, ambiguous", Some(false)),
-        ("members: statement, non-null, plain call, unique", Some(false)),
-        ("members: statement, non-null, peeled call, unique", Some(false)),
-        ("members: statement, non-null, plain call, ambiguous", Some(false)),
-        ("members: statement, non-null, peeled call, ambiguous", Some(false)),
-        ("members: statement, parens, plain call, unique | plain", None),
-        ("members: statement, parens, peeled call, unique", Some(true)),
-        ("members: statement, parens, plain call, ambiguous | plain", None),
-        ("members: statement, parens, peeled call, ambiguous", Some(false)),
-    ] {
-        match attaches {
-            // Read as origin/main read it: main's own output.
-            None => assert_eq!(factory_parity_output(&cases[row]), base[row], "{row}"),
-            Some(attaches) => {
-                let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
-                let expected = if attaches { base[plain.as_str()] } else { base[peeled.as_str()] };
-                assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
-            }
-        }
-    }
-    let row = "members: a namespace-local member behind <T> (finding 2) | plain";
-    assert_eq!(factory_parity_output(&cases[row]), base[row], "{row}");
-    // The target too: behind `<T>x` in a plain call, it is the parent only as a call main never read trusts it, at module
-    // level.
-    for (row, attaches) in [
-        ("targets: a target behind <T>, at module level", true),
-        ("targets: a target behind <T>, in a function", false),
-        ("targets: a target behind <T>, bound in a function", false),
-        ("targets: a target behind <T>, beside a write to Object.assign", false),
-        // An object literal only a peel exposes makes its members peeled.
-        ("objects: an object behind <const>, unique", true),
-        ("objects: an object behind <const>, ambiguous", false),
-    ] {
-        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
-        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
-        let expected = if attaches { base[plain.as_str()] } else { base[peeled.as_str()] };
-        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
 }
 
@@ -5376,7 +5247,7 @@ fn a_sealed_peel_reads_a_name_only_as_main_read_it_or_once_it_resolves() {
     let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
     for (row, resolves) in [
         ("sealed: a member assigned through an assertion, a parameter of its name (finding 1)", false),
-        ("sealed: a member assigned through an assertion, declared once", true),
+        ("sealed: a member assigned through an assertion, declared once", false),
         ("sealed: a wrapper named by convention, a local of its name (finding 3)", false),
         ("sealed: a wrapper named by convention, React's import", true),
         ("sealed: a destructured import shadowed by a namespace local (finding 4)", false),
@@ -5415,7 +5286,7 @@ fn a_peeled_candidate_relies_only_on_names_the_binding_pass_vouches_for() {
         ("UniqueName: Object assign written through defineProperty", false),
         ("UniqueName: Object assign written through defineProperties", false),
         ("UniqueName: Object written through an unknown key", false),
-        ("UniqueName: another Object member written", true),
+        ("UniqueName: another Object member written", false),
         ("UniqueName: an identifier alias declared once", true),
         ("UniqueName: an identifier alias shadowed by a namespace local (finding 3)", false),
     ] {
@@ -5472,11 +5343,11 @@ fn an_object_assign_call_is_read_by_its_argument_roles() {
         ("Object.assign roles, a source declared once (finding 1)", false),
         ("Object.assign roles, a source declared twice", false),
         ("Object.assign roles, an imported source", false),
-        ("Object.assign roles, a target declared once", true),
+        ("Object.assign roles, a target declared once", false),
         ("Object.assign roles, a target declared twice (finding 2)", false),
         ("Object.assign roles, a private target declared twice, bound at module level", false),
         ("Object.assign roles, an imported target", true),
-        ("Object.assign roles, a default export of a target declared once", true),
+        ("Object.assign roles, a default export of a target declared once", false),
         ("Object.assign roles, a default export of a target declared twice", false),
         ("react_api behind a type assertion, an import declared once", true),
         ("react_api behind a type assertion, a parameter of its name", false),
@@ -5507,7 +5378,7 @@ fn a_well_known_name_on_a_peeled_path_must_resolve_to_it() {
         ("well-known React createElement, a namespace local of its name", false),
         ("well-known Promise, the global", true),
         ("well-known Promise, a local of its name", false),
-        ("well-known Object.assign, the global", true),
+        ("well-known Object.assign, the global", false),
         ("well-known Object.assign, a local Object (finding 2)", false),
         ("well-known Object.assign, a parameter of its name", false),
         ("well-known Object.assign, assigned in the file", false),
@@ -5579,37 +5450,6 @@ fn every_receiver_read_through_a_cast_is_read_only_when_declared_once() {
     let finding = "finding: a namespace-local receiver read through a cast";
     assert_eq!(now(finding), base[finding]);
     assert!(!base[finding].contains("PublicButton:"), "{}", base[finding]);
-}
-
-/// Round 27: export propagation finds an `Object.assign`'s parent by its bare name, so one written through a cast,
-/// which origin/main never read, attaches its members only at module level (a statement there, an exported
-/// declaration's initializer or the default export) and only when the file declares the parent exactly once. Written
-/// plainly, it is origin/main's wherever it is, a shadowing local included.
-#[test]
-fn an_object_assign_through_a_cast_attaches_only_at_module_level_to_a_parent_declared_once() {
-    let base: FxHashMap<&str, &str> =
-        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
-    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
-    for (form, attaches) in [
-        ("a shadowing local Root in a function", false),
-        ("at module level", true),
-        ("in a nested function", false),
-        ("in an arrow initializer", false),
-        ("in a class method", false),
-        ("as the default export", true),
-        ("as an exported declaration's initializer", true),
-        ("with a second module-level Root", false),
-    ] {
-        let plain = format!("Object.assign {form} | plain");
-        let cast = format!("Object.assign {form} | typeof itself");
-        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
-        let expected = if attaches { base[plain.as_str()] } else { base[cast.as_str()] };
-        assert_eq!(factory_parity_output(&cases[&cast]), expected, "{cast}");
-    }
-    // The finding: written plainly main attaches the shadowing local's member to the public `Root`; through the cast
-    // main attached nothing, and neither does this head.
-    assert!(base["Object.assign a shadowing local Root in a function | plain"].contains("exported as Root.Item"));
-    assert!(!base["Object.assign a shadowing local Root in a function | typeof itself"].contains("Root.Item"));
 }
 
 /// Round 26: a callee written through a cast is looked up by its bare name (`resolver::callee`), so it is attached only

@@ -110,12 +110,6 @@ pub(super) fn main_read<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> 
     expr
 }
 
-/// What a mutating call (`Object.defineProperty(…)`) or its target is, beneath every wrapper, for the write pass only:
-/// reading a write through any wrapper over-approximates the writes, which only declines more.
-pub(super) fn written_through<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    beneath(expr)
-}
-
 /// What the outermost assertion on a callee, or on the namespace it is read from, says about calling it. Only the
 /// outermost one counts: `(e as A) as B` has type `B` whatever `A` is. An assertion declines a candidate only on
 /// affirmative evidence ([`Evidence::NotRenderable`], which only [`never_renders`] gives); every other type leaves the
@@ -547,8 +541,6 @@ pub(super) struct FileNames<'p> {
     counts: FxHashMap<&'p str, u32>,
     /// The names an `import` declaration binds.
     imports: Vec<&'p str>,
-    /// The writes to a member of a name (`well_known::assignment_write`, `well_known::call_writes`).
-    writes: Vec<(&'p str, Option<&'p str>)>,
 }
 
 impl FileNames<'_> {
@@ -562,7 +554,6 @@ impl FileNames<'_> {
         super::names::Bindings::new(
             self.counts.into_iter().map(|(name, count)| (CompactString::from(name), count)).collect(),
             self.imports.into_iter().map(CompactString::from).collect(),
-            self.writes.into_iter().map(|(object, key)| (object.into(), key.map(CompactString::from))).collect(),
         )
     }
 }
@@ -571,7 +562,7 @@ impl FileNames<'_> {
 pub(super) fn file_names<'p>(program: &Program<'p>) -> FileNames<'p> {
     #[cfg(test)]
     steps::count_walk();
-    let mut names = FileNames { counts: FxHashMap::default(), imports: Vec::new(), writes: Vec::new() };
+    let mut names = FileNames { counts: FxHashMap::default(), imports: Vec::new() };
     oxc_ast_visit::Visit::visit_program(&mut names, program);
     names
 }
@@ -588,23 +579,6 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
             self.imports.push(specifier.local().name.as_str());
         }
         oxc_ast_visit::walk::walk_import_declaration(self, it);
-    }
-
-    fn visit_simple_assignment_target(&mut self, it: &SimpleAssignmentTarget<'a>) {
-        self.writes.extend(super::well_known::assignment_write(it));
-        oxc_ast_visit::walk::walk_simple_assignment_target(self, it);
-    }
-
-    fn visit_unary_expression(&mut self, it: &UnaryExpression<'a>) {
-        if it.operator == oxc_syntax::operator::UnaryOperator::Delete {
-            self.writes.extend(super::well_known::member_write(&it.argument));
-        }
-        oxc_ast_visit::walk::walk_unary_expression(self, it);
-    }
-
-    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        self.writes.extend(super::well_known::call_writes(it));
-        oxc_ast_visit::walk::walk_call_expression(self, it);
     }
 }
 
@@ -1603,7 +1577,7 @@ impl<'src> SourceDataCollector<'src> {
         // An `Object.assign` returns its target only as `assign_roles` reads it: for a call main never read, a target
         // the file declares once, at module level. Otherwise the call is no wrapper, as origin/main judged it.
         let wrapper = if is_object_assign_call(call, &*self) {
-            self.assign_roles(call, false, None).is_some_and(|roles| {
+            self.assign_roles(call, false).is_some_and(|roles| {
                 roles.target.as_ref().map(super::names::Named::as_str) == Some(inner.as_str())
                     && roles.aliases.iter().any(|alias| alias.as_str() == inner.as_str())
             })

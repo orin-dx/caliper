@@ -900,3 +900,17 @@ gate: an Object.assign declarator, arrow | plain	Item:ItemProps"functionDeclarat
 gate: an Object.assign declarator, arrow | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
 gate: =, module, imported and re-exported | plain	Item:ItemProps"functionDeclaration" exported as Root.Item
 gate: =, module, imported and re-exported | peeled	Item:ItemProps"functionDeclaration"
+attachments: assign member | plain	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+attachments: assign member | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+attachments: assign source | plain	Item:ItemProps"functionDeclaration" exported as Public.Item | Public:Props"functionDeclaration" exported as Public | Root:Props"functionDeclaration" exported as Root
+attachments: assign source | peeled	Item:ItemProps"functionDeclaration" | Public:Props"functionDeclaration" exported as Public | Root:Props"functionDeclaration" exported as Root
+attachments: dot assign | plain	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+attachments: dot assign | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+attachments: inline function (finding 1) | plain	Impl:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+attachments: inline function (finding 1) | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+attachments: named member | plain	Item:ItemProps"functionDeclaration" exported as Public.Item | Public:Props"functionDeclaration" exported as Public | Root:Props"functionDeclaration" exported as Root
+attachments: named member | peeled	Item:ItemProps"functionDeclaration" | Public:Props"functionDeclaration" exported as Public | Root:Props"functionDeclaration" exported as Root
+attachments: a Reflect['set'] write (finding 2) | plain	Impl:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+attachments: a Reflect['set'] write (finding 2) | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+attachments: a target literal member a source overwrites (finding 3) | plain	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Public' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Public.Item | Root:Props"functionDeclaration" exported as Root
+attachments: a target literal member a source overwrites (finding 3) | peeled	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Public' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root

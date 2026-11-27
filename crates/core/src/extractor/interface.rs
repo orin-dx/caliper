@@ -408,21 +408,12 @@ impl<'src> SourceDataCollector<'src> {
     fn scan_object_assign_call<'a>(&mut self, call: &CallExpression<'a>) {
         // The arguments as `assign_roles` reads them, as for `record_object_assign_declarator` and the alias rule, which
         // record `Root` as the alias this scan attaches the inline members to.
-        let Some(roles) = self.assign_roles(call, true, None) else { return };
-        let (Some(parent), Some(&(obj, recognition))) = (roles.target.as_ref(), roles.objects.first()) else { return };
+        let Some(roles) = self.assign_roles(call, true) else { return };
+        let (Some(parent), Some(obj)) = (roles.target.as_ref(), roles.objects.first()) else { return };
         if !is_pascal_case(parent.as_str()) {
             return;
         }
         let parent_id = parent;
-        // A parent only a peel exposes, or a member only a peel exposes, is attached only through the one gate.
-        let site = super::uses::AttachmentSite {
-            at: call.span.start,
-            simple: true,
-            parent: parent.as_str(),
-            assign_minimal: Some(roles.minimal),
-        };
-        let allowed = self.attachment_allowed(&site);
-        let parent_peeled = matches!(parent, super::names::Named::Peeled(_));
 
         for prop in &obj.properties {
             let ObjectPropertyKind::ObjectProperty(op) = prop else { continue };
@@ -437,23 +428,14 @@ impl<'src> SourceDataCollector<'src> {
             let (params, span_start, span_end) = match &op.value {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
-                // An identifier as written; beneath a wrapper, only one origin/main did not read (`<number>Item`), which
-                // `trusted_member` vouches for: main read no other wrapped member here.
-                value => {
-                    let exposed = matches!(value, Expression::Identifier(_))
-                        || !matches!(super::component::main_peel(value), Expression::Identifier(_));
-                    if exposed
-                        && let Some(sub) = self.trusted_member(recognition, value)
-                        && ((!parent_peeled && !matches!(sub, super::names::Named::Peeled(_))) || allowed)
-                    {
-                        self.record_attached(Subject::local(sub.as_str()), parent_id, &key_name);
-                    }
+                // An identifier as written, as origin/main read it.
+                Expression::Identifier(sub) => {
+                    let sub = super::names::Named::plain(sub.name.as_str());
+                    self.record_attached(Subject::local(sub.as_str()), parent_id, &key_name);
                     continue;
                 }
+                _ => continue,
             };
-            if parent_peeled && !allowed {
-                continue;
-            }
             self.record_attached(Subject::Inline(span_start), parent_id, &key_name);
             self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);
         }

@@ -230,7 +230,6 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
         .collect();
     collector.comments = comments;
     (collector.element_helpers, collector.rendering_functions) = evidence::element_helpers(&ret.program);
-    collector.top_level_values = uses::top_level_values(&ret.program);
     let names = component::file_names(&ret.program);
     collector.typeof_aliases = component::typeof_aliases(&ret.program, &names);
     collector.bindings = names.into_bindings();
@@ -265,8 +264,6 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) element_helpers: FxHashSet<String>,
     /// Module-level functions that render by their own declaration or body: see `evidence::element_helpers`.
     pub(super) rendering_functions: FxHashSet<String>,
-    /// The starts of the values at the top of the module's own statements: see `uses::top_level_values`.
-    pub(super) top_level_values: FxHashSet<u32>,
     /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
     /// What the one binding pass found (`component::FileNames`): the only source of a `names::UniqueName`.
@@ -370,7 +367,6 @@ impl<'src> SourceDataCollector<'src> {
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
             rendering_functions: FxHashSet::default(),
-            top_level_values: FxHashSet::default(),
             typeof_aliases: FxHashMap::default(),
             bindings: names::Bindings::default(),
             consumed_jsdoc: FxHashSet::default(),

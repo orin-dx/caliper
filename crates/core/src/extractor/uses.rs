@@ -4,7 +4,7 @@
 
 use compact_str::CompactString;
 use oxc_ast::ast::*;
-use oxc_span::{GetSpan, Span};
+use oxc_span::Span;
 use rustc_hash::FxHashMap;
 
 use crate::types::{ComponentExport, DiagnosticCode};
@@ -65,22 +65,6 @@ pub(crate) struct Attachment {
     property: Option<CompactString>,
 }
 
-/// Whether an `Object.assign` call has the minimal shape a call origin/main never read is recognised in: exactly a target
-/// and one object literal (through parentheses, `as const` or `satisfies`), every member a plain key written once.
-fn minimal_object_assign(call: &CallExpression<'_>) -> bool {
-    let [_, source] = call.arguments.as_slice() else { return false };
-    let Some(Expression::ObjectExpression(object)) = source.as_expression().map(super::peeled::read_value) else {
-        return false;
-    };
-    let mut keys = rustc_hash::FxHashSet::default();
-    object.properties.iter().all(|property| match property {
-        ObjectPropertyKind::ObjectProperty(property) if !property.computed => {
-            property.key.static_name().is_some_and(|key| keys.insert(super::js_text::property_name(&key)))
-        }
-        _ => false,
-    })
-}
-
 /// What an `Object.assign` call says its first argument is, the component it returns. `Rejected` is final: no other
 /// reader may take the argument for the component. Only `NotApplicable` (no `Object.assign`, or a first argument that is
 /// no name, such as a nested call) lets a caller read the argument its own way.
@@ -90,67 +74,15 @@ pub(super) enum Role {
     NotApplicable,
 }
 
-/// Where a member attachment only a peel exposes would be recorded ([`SourceDataCollector::attachment_allowed`]).
-pub(super) struct AttachmentSite<'s> {
-    /// The start of the value at the top of the statement or declarator: an assignment, or an `Object.assign` call.
-    pub(super) at: u32,
-    /// Whether the assignment is a simple `=`; an `Object.assign` call always is.
-    pub(super) simple: bool,
-    /// The parent's name, which export propagation finds by its bare spelling.
-    pub(super) parent: &'s str,
-    /// For an `Object.assign` call, whether it has the minimal shape; `None` for an assignment.
-    pub(super) assign_minimal: Option<bool>,
-}
-
-/// The starts of the values at the top of the module's own statements and declarators (an expression statement's
-/// expression, a declarator's or default export's value, each as written and beneath its wrappers): an attachment
-/// only a peel exposes is recorded only at one of them (`attachment_allowed`).
-pub(super) fn top_level_values(program: &Program<'_>) -> rustc_hash::FxHashSet<u32> {
-    use oxc_span::GetSpan;
-    let mut starts = rustc_hash::FxHashSet::default();
-    let mut add = |expr: &Expression<'_>| {
-        starts.insert(expr.span().start);
-        starts.insert(super::peeled::read_value(expr).span().start);
-    };
-    for statement in &program.body {
-        let declaration = match statement {
-            Statement::ExpressionStatement(statement) => {
-                add(&statement.expression);
-                continue;
-            }
-            Statement::ExportDefaultDeclaration(export) => {
-                if let Some(expr) = export.declaration.as_expression() {
-                    add(expr);
-                }
-                continue;
-            }
-            Statement::ExportDeclaration(export) => &export.declaration,
-            statement => match statement.as_declaration() {
-                Some(declaration) => declaration,
-                None => continue,
-            },
-        };
-        if let Declaration::VariableDeclaration(variables) = declaration {
-            for init in variables.declarations.iter().filter_map(|declarator| declarator.init.as_ref()) {
-                add(init);
-            }
-        }
-    }
-    starts
-}
-
-/// The roles of an `Object.assign` call's arguments ([`SourceDataCollector::assign_roles`]).
+/// The roles of a plainly written `Object.assign` call's arguments ([`SourceDataCollector::assign_roles`]), each read as
+/// origin/main read it: a member attachment that only a peel exposes is not recorded.
 pub(super) struct AssignRoles<'b, 'a> {
     /// The first argument's name, the object the call returns.
     pub(super) target: Option<super::names::Named>,
     /// The names the call's result is an alias of.
     pub(super) aliases: Vec<super::names::Named>,
-    /// The object literals whose members are attached, each with its own read: `Plain` only when origin/main read the
-    /// call and the literal (`component::main_peel`); one only a peel exposes (`<const>{ Item }`) makes its members
-    /// `Peeled`.
-    pub(super) objects: Vec<(&'b ObjectExpression<'a>, super::component::Recognition)>,
-    /// Whether the call has the minimal shape, the only one a child only a peel exposes is recorded in.
-    pub(super) minimal: bool,
+    /// The object literals whose members are attached.
+    pub(super) objects: Vec<&'b ObjectExpression<'a>>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -221,103 +153,27 @@ impl<'src> SourceDataCollector<'src> {
         });
     }
 
-    /// Whether this head reads an `Object.assign` call's members onto `parent`, which export propagation finds by its
-    /// bare name: a `Plain` parent as origin/main did; a `Peeled` one (a `UniqueName`) only at module level, only when
-    /// `Object` is the global one and the file writes no member that may be `Object.assign`.
-    pub(super) fn trusts_object_assign(&self, parent: &super::names::Named) -> bool {
-        match parent {
-            super::names::Named::Plain(_) => true,
-            super::names::Named::Peeled(_) => self.function_depth == 0 && self.object_assign_is_builtin(),
-        }
-    }
-
-    /// Whether `Object.assign` is the built-in: `Object` is the global, and the file writes no member that may be
-    /// `assign` (`Bindings::writes_to`). Consulted for every part of an `Object.assign` call only a peel exposes: the
-    /// callee, the target, a source and a member.
-    pub(super) fn object_assign_is_builtin(&self) -> bool {
-        self.bindings
-            .global(super::well_known::OBJECT.name)
-            .is_some_and(|object| !self.bindings.writes_to(&object, "assign"))
-    }
-
-    /// The name an argument or member value of an `Object.assign` call is, classified by its own read and never by the
-    /// call's (`peeled::value_name`): `Plain` only when origin/main read the call and that value as the identifier it
-    /// is. A value only a peel exposes, or any value of a call main never read, only when the file declares the name
-    /// exactly once, as a second declaration may be the one export propagation finds. A plain call never upgrades a
-    /// peeled child.
-    ///
-    /// `minimal` is whether the whole call has the minimal shape (`minimal_object_assign`): a peeled child of any other
-    /// call is not recorded, as a later source may overwrite it.
-    pub(super) fn trusted_member(
-        &self,
-        recognition: super::component::Recognition,
-        value: &Expression<'_>,
-    ) -> Option<super::names::Named> {
-        let named = super::peeled::value_name(value, &self.bindings)?;
-        match recognition {
-            super::component::Recognition::Plain => Some(named),
-            super::component::Recognition::Peeled => {
-                self.bindings.named(named.as_str(), super::component::Recognition::Peeled)
-            }
-        }
-    }
-
-    /// The one gate for a member attachment only a peel exposes (its member, its target or its call): recorded only when
-    /// every condition holds. A plain attachment never comes here and keeps origin/main's reading.
-    pub(super) fn attachment_allowed(&self, site: &AttachmentSite<'_>) -> bool {
-        // (a) A simple `=`: a compound operator stores something else.
-        let simple = site.simple;
-        // (b) A statement or declarator at the top level of the module, not in a function, class or block.
-        let module_scope = self.top_level_values.contains(&site.at);
-        // (c) A parent that resolves to its one declaration in the file, which is not an import.
-        let parent = self.bindings.unique(site.parent).is_some() && self.bindings.imported(site.parent).is_none();
-        // (d) For an `Object.assign` call, the built-in.
-        let builtin = site.assign_minimal.is_none() || self.object_assign_is_builtin();
-        // (e) For an `Object.assign` call, the minimal shape: no later source may overwrite the member.
-        let minimal = site.assign_minimal.unwrap_or(true);
-        simple && module_scope && parent && builtin && minimal
+    /// The name a value of an `Object.assign` call or a member assignment is, only as origin/main read it
+    /// (`peeled::value_name` `Plain`): a name only a peel exposes is attached to nothing.
+    pub(super) fn plain_member(&self, value: &Expression<'_>) -> Option<super::names::Named> {
+        super::peeled::value_name(value, &self.bindings).filter(|named| matches!(named, super::names::Named::Plain(_)))
     }
 
     /// What an `Object.assign` call's arguments are, read in one place for every consumer: the inline-member scan
-    /// (`inline`), the named-member read, the alias rule and the default export. `None` when the call is no
-    /// `Object.assign` or its parent (`parent`, else the target) is not trusted (`trusts_object_assign`).
+    /// (`inline`), the named-member read, the alias rule and the default export. `None` when the call is no plainly
+    /// written `Object.assign` (`Recognition::of_object_assign`): a call only a peel exposes attaches nothing.
     pub(super) fn assign_roles<'b, 'a>(
         &self,
         call: &'b CallExpression<'a>,
         inline: bool,
-        parent: Option<&super::names::Named>,
     ) -> Option<AssignRoles<'b, 'a>> {
-        if !super::component::is_object_assign_call(call, self) {
+        if !super::component::is_object_assign_call(call, self)
+            || super::component::Recognition::of_object_assign(call, inline) == super::component::Recognition::Peeled
+        {
             return None;
         }
-        let recognition = super::component::Recognition::of_object_assign(call, inline);
-        let read = |argument: &'b Argument<'a>| argument.as_expression().map(super::peeled::read_value);
-        let peeled = recognition == super::component::Recognition::Peeled;
-        // A call main never read is recognised only in the minimal shape: a target and one object literal, with no
-        // spread, computed or repeated key, so no later source can overwrite a member.
-        let minimal = minimal_object_assign(call);
-        if peeled && !minimal {
-            return None;
-        }
-        // The target by its own read: one only a peel exposes (`<typeof Root>Root`) counts, in a plain call too, only as
-        // a name declared once at module level, as for a call main never read.
-        let target = call
-            .arguments
-            .first()
-            .and_then(Argument::as_expression)
-            .and_then(|first| self.trusted_member(recognition, first))
-            .filter(|target| {
-                matches!(target, super::names::Named::Plain(_)) || (minimal && self.trusts_object_assign(target))
-            });
-        if peeled {
-            let parent = match parent {
-                Some(parent) => self.bindings.named(parent.as_str(), recognition)?,
-                None => target.clone()?,
-            };
-            if !self.trusts_object_assign(&parent) {
-                return None;
-            }
-        }
+        let target =
+            call.arguments.first().and_then(Argument::as_expression).and_then(|first| self.plain_member(first));
         let mut aliases = Vec::new();
         let mut objects = Vec::new();
         for (position, argument) in call.arguments.iter().enumerate() {
@@ -325,35 +181,15 @@ impl<'src> SourceDataCollector<'src> {
             if inline && position != 1 {
                 continue;
             }
-            match read(argument) {
-                // The call returns its target: for a call main never read, only the first argument is what the result
-                // is, and only when the file declares it once; a later one is a source whose properties are copied.
-                // Read plainly, every identifier argument, as origin/main read it.
-                Some(Expression::Identifier(name)) => {
-                    let alias = match recognition {
-                        super::component::Recognition::Plain => {
-                            Some(super::names::Named::Plain(name.name.as_str().into()))
-                        }
-                        super::component::Recognition::Peeled if position == 0 => target.clone(),
-                        super::component::Recognition::Peeled => None,
-                    };
-                    aliases.extend(alias);
-                }
-                Some(Expression::ObjectExpression(object)) => {
-                    let main_read = argument.as_expression().is_some_and(|value| {
-                        matches!(super::component::main_peel(value), Expression::ObjectExpression(_))
-                    });
-                    let own = if main_read { recognition } else { super::component::Recognition::Peeled };
-                    // Its members count only through `trusted_member`, which records a peeled one only in a call of
-                    // the minimal shape.
-                    objects.push((&**object, own));
-                }
-                // A target only a peel exposes is what the call returns, as `target` vouches for it.
-                _ if position == 0 => aliases.extend(target.clone().filter(|_| !inline)),
+            let Some(value) = argument.as_expression() else { continue };
+            // Every identifier argument is what the result is, and every object literal a source, as main read them.
+            match super::component::main_peel(value) {
+                Expression::Identifier(name) => aliases.push(super::names::Named::plain(name.name.as_str())),
+                Expression::ObjectExpression(object) => objects.push(&**object),
                 _ => {}
             }
         }
-        Some(AssignRoles { target, aliases, objects, minimal })
+        Some(AssignRoles { target, aliases, objects })
     }
 
     /// The component an `Object.assign` call returns, as `assign_roles` reads its target ([`Role`]).
@@ -362,7 +198,7 @@ impl<'src> SourceDataCollector<'src> {
             return Role::NotApplicable;
         }
         let accepted = self
-            .assign_roles(call, false, None)
+            .assign_roles(call, false)
             .and_then(|roles| roles.target.clone().filter(|target| roles.aliases.contains(target)));
         let names =
             call.arguments.first().and_then(Argument::as_expression).is_some_and(super::peeled::names_identifier);
@@ -380,34 +216,20 @@ impl<'src> SourceDataCollector<'src> {
         parent: &super::names::Named,
         init: Option<&Expression<'_>>,
     ) {
-        let Some(init) = init else { return };
-        let Expression::CallExpression(call) = super::peeled::read_value(init) else { return };
-        let Some(roles) = self.assign_roles(call, false, Some(parent)) else { return };
-        let site = AttachmentSite {
-            at: oxc_span::GetSpan::span(init).start,
-            simple: true,
-            parent: parent.as_str(),
-            assign_minimal: Some(roles.minimal),
-        };
-        let allowed = self.attachment_allowed(&site);
-        let peeled = |named: &super::names::Named| matches!(named, super::names::Named::Peeled(_));
+        let Some(Expression::CallExpression(call)) = init.map(super::peeled::read_value) else { return };
+        let Some(roles) = self.assign_roles(call, false) else { return };
         for alias in &roles.aliases {
-            if peeled(alias) && !allowed {
-                continue;
-            }
             self.attached_to.push(Attachment {
                 sub: Subject::local(alias.as_str()),
                 parent: CompactString::from(parent.as_str()),
                 property: None,
             });
         }
-        for &(object, recognition) in &roles.objects {
+        for object in &roles.objects {
             for property in &object.properties {
                 let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
                 let Some(key) = property.key.static_name() else { continue };
-                if let Some(sub) = self.trusted_member(recognition, &property.value)
-                    && (!peeled(&sub) || allowed)
-                {
+                if let Some(sub) = self.plain_member(&property.value) {
                     self.record_attached(Subject::local(sub.as_str()), parent, &super::js_text::property_name(&key));
                 }
             }
@@ -419,27 +241,9 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::AssignmentExpression(assignment) = &statement.expression else { return };
         let AssignmentTarget::StaticMemberExpression(target) = &assignment.left else { return };
         let Expression::Identifier(parent) = &target.object else { return };
-        // The assigned value, read only through a wrapper origin/main did not read (`<number>Item`), only as the one
-        // declaration its name can mean (`value_name`).
-        let Some(sub) = super::peeled::value_name(&assignment.right, &self.bindings) else { return };
-        // A value only a peel exposes attaches only to a parent that resolves too: export propagation finds the parent by
-        // its bare name, and a parameter of that name is a second declaration.
-        let parent = match sub {
-            super::names::Named::Plain(_) => super::names::Named::plain(parent.name.as_str()),
-            super::names::Named::Peeled(_) => {
-                let site = AttachmentSite {
-                    at: statement.expression.span().start,
-                    simple: assignment.operator == oxc_syntax::operator::AssignmentOperator::Assign,
-                    parent: parent.name.as_str(),
-                    assign_minimal: None,
-                };
-                // The gate resolves the parent (`attachment_allowed` (c)); it is found by its bare name from here on.
-                if !self.attachment_allowed(&site) {
-                    return;
-                }
-                super::names::Named::plain(parent.name.as_str())
-            }
-        };
+        // The assigned value as origin/main read it: one only a peel exposes (`<number>Item`) is attached to nothing.
+        let Some(sub) = self.plain_member(&assignment.right) else { return };
+        let parent = super::names::Named::plain(parent.name.as_str());
         self.record_attached(Subject::local(sub.as_str()), &parent, target.property.name.as_str());
     }
 
