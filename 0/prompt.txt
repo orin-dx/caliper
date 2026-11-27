@@ -4376,3 +4376,17 @@ Fix them all please
   
   Body: /tmp/claude-501/pr-degraded.md, "Round 26".
 </agent-message>
+
+---
+
+<task-notification>
+<task-id>addadcbdf4077ad6a</task-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/6f993b0f-3007-4088-bd26-63eda356278e/tasks/addadcbdf4077ad6a.output</output-file>
+<status>completed</status>
+<summary>Agent "Address #527 review round 8 items" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>This agent's report was delivered to you as a message from "addadcbdf4077ad6a" (its SubagentHandback call). Read it there; it is not repeated here.
+</result>
+<usage><subagent_tokens>438865</subagent_tokens><tool_uses>33</tool_uses><duration_ms>1132477</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-addadcbdf4077ad6a</worktreePath><worktreeBranch>worktree-agent-addadcbdf4077ad6a</worktreeBranch></worktree>
+</task-notification>
