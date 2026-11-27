@@ -390,7 +390,7 @@ impl<'src> SourceDataCollector<'src> {
         // and named as main named it (`unknown.wrap`) otherwise.
         if super::component::Recognition::of_name(&call.callee) == super::component::Recognition::Peeled
             && !matches!(call.callee, Expression::StaticMemberExpression(_))
-            && !super::component::chain_root(&call.callee).is_some_and(|root| self.unique_binding(root))
+            && !super::component::chain_root(&call.callee).is_some_and(|root| self.bindings.unique(root).is_some())
         {
             return None;
         }
@@ -514,7 +514,7 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::Identifier(callee) = peeled.expr else { return false };
         // A callee main's factory rule did not read is looked up by its bare name, so only when it means one declaration.
         if super::component::Recognition::of_factory_callee(call) == super::component::Recognition::Peeled
-            && !self.unique_binding(callee.name.as_str())
+            && self.bindings.unique(callee.name.as_str()).is_none()
         {
             return false;
         }

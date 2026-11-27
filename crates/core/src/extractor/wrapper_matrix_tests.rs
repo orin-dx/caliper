@@ -2355,6 +2355,95 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "well-known table: Promise, a parameter of its name | peeled",
             "function g(Promise: unknown) { return Promise; }\nexport const Button = (props: Props) => (Promise as typeof Promise).resolve(<div />);",
         ),
+        // Round 34: the minimal shape and the writes a peeled `Object.assign` is recognised against.
+        (
+            "UniqueName: a later source overwrites the member (finding 1) | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> }, { Item: null });",
+        ),
+        (
+            "UniqueName: a later source overwrites the member (finding 1) | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> }, { Item: null });",
+        ),
+        (
+            "UniqueName: a spread member | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nconst extra = {};\nObject.assign(Root, { ...extra, Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: a spread member | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nconst extra = {};\n(Object.assign as typeof Object.assign)(Root, { ...extra, Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: a computed key | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { ['Item']: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: a computed key | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.assign as typeof Object.assign)(Root, { ['Item']: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: a repeated key | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { Item: (p: ItemProps) => <div />, Item: null });",
+        ),
+        (
+            "UniqueName: a repeated key | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div />, Item: null });",
+        ),
+        (
+            "UniqueName: Object assign written through a string key (finding 2) | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['assign'] = ((root: unknown) => root) as typeof Object.assign;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through a string key (finding 2) | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['assign'] = ((root: unknown) => root) as typeof Object.assign;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through a template key | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject[`assign`] = ((root: unknown) => root) as typeof Object.assign;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through a template key | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject[`assign`] = ((root: unknown) => root) as typeof Object.assign;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through Reflect.set | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nReflect.set(Object, 'assign', (root: unknown) => root);\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through Reflect.set | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nReflect.set(Object, 'assign', (root: unknown) => root);\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through defineProperty | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.defineProperty(Object, 'assign', { value: (root: unknown) => root });\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through defineProperty | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.defineProperty(Object, 'assign', { value: (root: unknown) => root });\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through defineProperties | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.defineProperties(Object, { assign: { value: 1 } });\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object assign written through defineProperties | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.defineProperties(Object, { assign: { value: 1 } });\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object written through an unknown key | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const k: string;\nObject[k] = 1;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: Object written through an unknown key | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const k: string;\nObject[k] = 1;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: another Object member written | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['keys'] = Object.keys;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "UniqueName: another Object member written | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['keys'] = Object.keys;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -2477,6 +2566,23 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "well-known table: h, an import shadowed by a parameter | peeled".to_owned(),
         "// ts\ninterface Props { label?: string }\nimport { h } from 'preact';\nfunction g(h: unknown) { return h; }\nexport const Button = (props: Props) => (<typeof h>h)('button');".to_owned(),
     ));
+    // Round 34: an identifier alias behind a `<T>x` assertion.
+    cases.push((
+        "UniqueName: an identifier alias declared once | plain".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nexport const PublicRoot = Root;".to_owned(),
+    ));
+    cases.push((
+        "UniqueName: an identifier alias declared once | peeled".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nexport const PublicRoot = <typeof Root>Root;".to_owned(),
+    ));
+    cases.push((
+        "UniqueName: an identifier alias shadowed by a namespace local (finding 3) | plain".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nnamespace N { const Root = 123; export const PublicRoot = Root; }".to_owned(),
+    ));
+    cases.push((
+        "UniqueName: an identifier alias shadowed by a namespace local (finding 3) | peeled".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nnamespace N { const Root = 123; export const PublicRoot = <typeof Root>Root; }".to_owned(),
+    ));
     cases
 }
 
@@ -2588,7 +2694,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // target is trusted, bound and exported by default (`an_object_assign_call_is_read_by_its_argument_roles`).
     // Round 33 adds three: a forwardRef or createElement import behind `<T>x` that resolves
     // (`every_well_known_entry_resolves_before_a_peeled_match`).
-    assert_eq!(read_as_the_plain_call, 64);
+    // Round 34 adds two: a peeled `Object.assign` beside a write to another `Object` member, and an identifier alias behind
+    // `<T>x` declared once (`a_peeled_candidate_relies_only_on_names_the_binding_pass_vouches_for`).
+    assert_eq!(read_as_the_plain_call, 66);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2646,6 +2754,39 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
     ] {
         let plain = format!("recognition: {row} | plain");
         let peeled = format!("recognition: {row} | peeled");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 34: a name a peeled candidate relies on is a `names::UniqueName`, which only the binding pass makes. A peeled
+/// `Object.assign` is recognised only in the minimal shape (a target and one object literal, plain keys written once)
+/// and only while the file writes no member that may be `Object.assign`; an identifier alias read only through a
+/// `<T>x` assertion only when the identifier is declared once. Each plain form is origin/main's; each peeled form reads
+/// as the plain form where trusted, and as origin/main read it otherwise.
+#[test]
+fn a_peeled_candidate_relies_only_on_names_the_binding_pass_vouches_for() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, trusted) in [
+        ("UniqueName: a later source overwrites the member (finding 1)", false),
+        ("UniqueName: a spread member", false),
+        ("UniqueName: a computed key", false),
+        ("UniqueName: a repeated key", false),
+        ("UniqueName: Object assign written through a string key (finding 2)", false),
+        ("UniqueName: Object assign written through a template key", false),
+        ("UniqueName: Object assign written through Reflect.set", false),
+        ("UniqueName: Object assign written through defineProperty", false),
+        ("UniqueName: Object assign written through defineProperties", false),
+        ("UniqueName: Object written through an unknown key", false),
+        ("UniqueName: another Object member written", true),
+        ("UniqueName: an identifier alias declared once", true),
+        ("UniqueName: an identifier alias shadowed by a namespace local (finding 3)", false),
+    ] {
+        let plain = format!("{row} | plain");
+        let peeled = format!("{row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");

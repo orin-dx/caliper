@@ -65,13 +65,29 @@ pub(crate) struct Attachment {
     property: Option<CompactString>,
 }
 
+/// Whether an `Object.assign` call has the minimal shape a call origin/main never read is recognised in: exactly a target
+/// and one object literal (through parentheses, `as const` or `satisfies`), every member a plain key written once.
+fn minimal_object_assign(call: &CallExpression<'_>) -> bool {
+    let [_, source] = call.arguments.as_slice() else { return false };
+    let Some(Expression::ObjectExpression(object)) = source.as_expression().map(super::component::peel_expr) else {
+        return false;
+    };
+    let mut keys = rustc_hash::FxHashSet::default();
+    object.properties.iter().all(|property| match property {
+        ObjectPropertyKind::ObjectProperty(property) if !property.computed => {
+            property.key.static_name().is_some_and(|key| keys.insert(super::js_text::property_name(&key)))
+        }
+        _ => false,
+    })
+}
+
 /// The roles of an `Object.assign` call's arguments ([`SourceDataCollector::assign_roles`]).
 pub(super) struct AssignRoles<'b, 'a> {
     pub(super) recognition: super::component::Recognition,
     /// The first argument's name, the object the call returns.
-    pub(super) target: Option<&'a str>,
+    pub(super) target: Option<super::names::Named>,
     /// The names the call's result is an alias of.
-    pub(super) aliases: Vec<&'a str>,
+    pub(super) aliases: Vec<super::names::Named>,
     /// The object literals whose members are attached.
     pub(super) objects: Vec<&'b ObjectExpression<'a>>,
 }
@@ -105,8 +121,8 @@ impl<'src> SourceDataCollector<'src> {
         // An `Object.assign` is its target only as `assign_roles` reads it.
         if super::component::is_object_assign_call(call) {
             let roles = self.assign_roles(call, false, None)?;
-            if let Some(target) = roles.target {
-                return roles.aliases.contains(&target).then(|| CompactString::from(target));
+            if let Some(target) = &roles.target {
+                return roles.aliases.contains(target).then(|| CompactString::from(target.as_str()));
             }
         }
         let first = super::component::aliased_component(call)?;
@@ -138,24 +154,29 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Whether this head reads an `Object.assign` call's members onto `parent`, which export propagation finds by its
-    /// bare name: a `Plain` call as origin/main did; a `Peeled` one only at module level, only when the file declares
-    /// `parent` exactly once, and only when `Object` is the global one and the file does not assign `Object.assign`.
-    pub(super) fn trusts_object_assign(&self, recognition: super::component::Recognition, parent: &str) -> bool {
-        recognition == super::component::Recognition::Plain
-            || (self.function_depth == 0
-                && self.unique_binding(parent)
-                && super::well_known::matches_well_known(
-                    self,
-                    super::well_known::OBJECT.name,
-                    &super::well_known::OBJECT,
-                )
-                && !self.object_assign_assigned)
+    /// bare name: a `Plain` parent as origin/main did; a `Peeled` one (a `UniqueName`) only at module level, only when
+    /// `Object` is the global one and the file writes no member that may be `Object.assign`.
+    pub(super) fn trusts_object_assign(&self, parent: &super::names::Named) -> bool {
+        match parent {
+            super::names::Named::Plain(_) => true,
+            super::names::Named::Peeled(_) => {
+                self.function_depth == 0
+                    && self
+                        .bindings
+                        .global(super::well_known::OBJECT.name)
+                        .is_some_and(|object| !self.bindings.writes_to(&object, "assign"))
+            }
+        }
     }
 
-    /// Whether an identifier member of an `Object.assign` call is attached: always for a `Plain` call, for a `Peeled` one
-    /// only when the file declares it exactly once, as a second declaration may be the one export propagation finds.
-    pub(super) fn trusts_member(&self, recognition: super::component::Recognition, member: &str) -> bool {
-        recognition == super::component::Recognition::Plain || self.unique_binding(member)
+    /// An identifier member of an `Object.assign` call: as written for a `Plain` call, for a `Peeled` one only when the
+    /// file declares it exactly once, as a second declaration may be the one export propagation finds.
+    pub(super) fn trusted_member(
+        &self,
+        recognition: super::component::Recognition,
+        member: &str,
+    ) -> Option<super::names::Named> {
+        self.bindings.named(member, recognition)
     }
 
     /// What an `Object.assign` call's arguments are, read in one place for every consumer: the inline-member scan
@@ -172,14 +193,24 @@ impl<'src> SourceDataCollector<'src> {
         }
         let recognition = super::component::Recognition::of_object_assign(call, inline);
         let read = |argument: &'b Argument<'a>| argument.as_expression().map(super::component::peel_expr);
+        let peeled = recognition == super::component::Recognition::Peeled;
+        // A call main never read is recognised only in the minimal shape: a target and one object literal, with no
+        // spread, computed or repeated key, so no later source can overwrite a member.
+        if peeled && !minimal_object_assign(call) {
+            return None;
+        }
         let target = match call.arguments.first().and_then(read) {
-            Some(Expression::Identifier(target)) => Some(target.name.as_str()),
+            Some(Expression::Identifier(target)) => self.bindings.named(target.name.as_str(), recognition),
             _ => None,
         };
-        if recognition == super::component::Recognition::Peeled
-            && !self.trusts_object_assign(recognition, parent.or(target)?)
-        {
-            return None;
+        if peeled {
+            let parent = match parent {
+                Some(parent) => self.bindings.named(parent, recognition)?,
+                None => target.clone()?,
+            };
+            if !self.trusts_object_assign(&parent) {
+                return None;
+            }
         }
         let mut aliases = Vec::new();
         let mut objects = Vec::new();
@@ -194,14 +225,13 @@ impl<'src> SourceDataCollector<'src> {
                 // Read plainly, every identifier argument, as origin/main read it.
                 Some(Expression::Identifier(name)) => {
                     let alias = match recognition {
-                        super::component::Recognition::Plain => true,
-                        super::component::Recognition::Peeled => {
-                            position == 0 && self.unique_binding(name.name.as_str())
+                        super::component::Recognition::Plain => {
+                            Some(super::names::Named::Plain(name.name.as_str().into()))
                         }
+                        super::component::Recognition::Peeled if position == 0 => target.clone(),
+                        super::component::Recognition::Peeled => None,
                     };
-                    if alias {
-                        aliases.push(name.name.as_str());
-                    }
+                    aliases.extend(alias);
                 }
                 Some(Expression::ObjectExpression(object)) => objects.push(&**object),
                 _ => {}
@@ -217,7 +247,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(roles) = self.assign_roles(call, false, Some(parent)) else { return };
         for alias in &roles.aliases {
             self.attached_to.push(Attachment {
-                sub: Subject::local(alias),
+                sub: Subject::local(alias.as_str()),
                 parent: CompactString::from(parent),
                 property: None,
             });
@@ -227,13 +257,9 @@ impl<'src> SourceDataCollector<'src> {
                 let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
                 let Some(key) = property.key.static_name() else { continue };
                 if let Expression::Identifier(sub) = super::component::peel_expr(&property.value)
-                    && self.trusts_member(roles.recognition, sub.name.as_str())
+                    && let Some(sub) = self.trusted_member(roles.recognition, sub.name.as_str())
                 {
-                    self.record_attached(
-                        Subject::local(sub.name.as_str()),
-                        parent,
-                        &super::js_text::property_name(&key),
-                    );
+                    self.record_attached(Subject::local(sub.as_str()), parent, &super::js_text::property_name(&key));
                 }
             }
         }

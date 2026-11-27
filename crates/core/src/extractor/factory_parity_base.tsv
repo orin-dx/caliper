@@ -318,6 +318,28 @@ well-known table: Promise, an import of its name (finding 2) | plain	Base:Props"
 well-known table: Promise, an import of its name (finding 2) | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 well-known table: Promise, a parameter of its name | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 well-known table: Promise, a parameter of its name | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+UniqueName: a later source overwrites the member (finding 1) | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: a later source overwrites the member (finding 1) | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: a spread member | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: a spread member | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: a computed key | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: a computed key | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: a repeated key | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: a repeated key | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through a string key (finding 2) | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through a string key (finding 2) | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through a template key | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through a template key | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through Reflect.set | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through Reflect.set | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through defineProperty | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through defineProperty | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through defineProperties | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object assign written through defineProperties | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object written through an unknown key | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: Object written through an unknown key | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+UniqueName: another Object member written | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+UniqueName: another Object member written | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via toolkit.createElement
 an element built from forwardRef, plain	Button:Props"forwardRef" exported as Button
@@ -347,3 +369,7 @@ well-known table: h, an import declared once | plain
 well-known table: h, an import declared once | peeled	
 well-known table: h, an import shadowed by a parameter | plain	
 well-known table: h, an import shadowed by a parameter | peeled	
+UniqueName: an identifier alias declared once | plain	PublicRoot:Props"functionDeclaration" exported as PublicRoot | Root:Props"functionDeclaration" exported as Root
+UniqueName: an identifier alias declared once | peeled	Info SkippedCandidate: 'PublicRoot' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Root:Props"functionDeclaration" exported as Root
+UniqueName: an identifier alias shadowed by a namespace local (finding 3) | plain	Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | PublicRoot:Props"functionDeclaration" exported as PublicRoot | Root:Props"functionDeclaration" exported as Root
+UniqueName: an identifier alias shadowed by a namespace local (finding 3) | peeled	Info SkippedCandidate: 'PublicRoot' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Root:Props"functionDeclaration" exported as Root

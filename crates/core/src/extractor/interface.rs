@@ -409,7 +409,8 @@ impl<'src> SourceDataCollector<'src> {
         // The arguments as `assign_roles` reads them, as for `record_object_assign_declarator` and the alias rule, which
         // record `Root` as the alias this scan attaches the inline members to.
         let Some(roles) = self.assign_roles(call, true, None) else { return };
-        let (Some(parent), Some(obj)) = (roles.target, roles.objects.first()) else { return };
+        let (Some(parent), Some(obj)) = (roles.target.as_ref(), roles.objects.first()) else { return };
+        let parent = parent.as_str();
         if !is_pascal_case(parent) {
             return;
         }
@@ -430,8 +431,8 @@ impl<'src> SourceDataCollector<'src> {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
                 Expression::Identifier(sub) => {
-                    if self.trusts_member(recognition, sub.name.as_str()) {
-                        self.record_attached(Subject::local(sub.name.as_str()), parent_id, &key_name);
+                    if let Some(sub) = self.trusted_member(recognition, sub.name.as_str()) {
+                        self.record_attached(Subject::local(sub.as_str()), parent_id, &key_name);
                     }
                     continue;
                 }

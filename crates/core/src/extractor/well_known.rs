@@ -4,7 +4,7 @@
 //! declaration, from the entry's module. The architecture test below fails when an extractor source outside this module
 //! spells one of these names as a string literal, so a new spelling-based path cannot skip the check.
 
-use oxc_ast::ast::Expression;
+use oxc_ast::ast::{Argument, AssignmentTarget, CallExpression, Expression, ObjectPropertyKind, PropertyKey};
 
 use super::evidence::Scope;
 
@@ -130,6 +130,69 @@ pub(super) fn react_export(exported: &str) -> Option<&'static WellKnown> {
 /// The imports a bare element factory callee may be: React's factories and Preact's `h`.
 pub(super) const FACTORY_IMPORTS: &[&WellKnown] =
     &[&CREATE_ELEMENT, &CLONE_ELEMENT, &JSX, &JSXS, &JSX_DEV, &CREATE_PORTAL, &H];
+
+/// The name and key a write to a member targets, for `names::Bindings::writes_to`: `Some(key)` for a key known
+/// statically (`.assign`, `['assign']`, a template literal without substitutions), `None` for one that is not (`[k]`).
+pub(super) fn assignment_write<'a>(target: &AssignmentTarget<'a>) -> Option<(&'a str, Option<&'a str>)> {
+    match target {
+        AssignmentTarget::StaticMemberExpression(member) => {
+            object_name(&member.object).map(|object| (object, Some(member.property.name.as_str())))
+        }
+        AssignmentTarget::ComputedMemberExpression(member) => {
+            object_name(&member.object).map(|object| (object, literal_key(&member.expression)))
+        }
+        _ => None,
+    }
+}
+
+/// The writes a call makes to a member of a name: `Reflect.set(O, key, …)`, `Reflect.defineProperty(O, key, …)`,
+/// `Object.defineProperty(O, key, …)` and each key of `Object.defineProperties(O, { … })`.
+pub(super) fn call_writes<'a>(call: &CallExpression<'a>) -> Vec<(&'a str, Option<&'a str>)> {
+    let Expression::StaticMemberExpression(callee) = &call.callee else { return Vec::new() };
+    let Some(receiver) = object_name(&callee.object) else { return Vec::new() };
+    let argument = |index: usize| call.arguments.get(index).and_then(Argument::as_expression);
+    let Some(target) = argument(0).and_then(object_name) else { return Vec::new() };
+    let global = receiver == OBJECT.name || receiver == REFLECT.name;
+    match callee.property.name.as_str() {
+        "set" | "defineProperty" if global => vec![(target, argument(1).and_then(literal_key))],
+        "defineProperties" if receiver == OBJECT.name => match argument(1) {
+            Some(Expression::ObjectExpression(object)) => object
+                .properties
+                .iter()
+                .map(|property| match property {
+                    ObjectPropertyKind::ObjectProperty(property) if !property.computed => {
+                        let key = match &property.key {
+                            PropertyKey::StaticIdentifier(key) => Some(key.name.as_str()),
+                            PropertyKey::StringLiteral(key) => key.value.as_str(),
+                            _ => None,
+                        };
+                        (target, key)
+                    }
+                    _ => (target, None),
+                })
+                .collect(),
+            _ => vec![(target, None)],
+        },
+        _ => Vec::new(),
+    }
+}
+
+fn object_name<'a>(expr: &Expression<'a>) -> Option<&'a str> {
+    match expr {
+        Expression::Identifier(id) => Some(id.name.as_str()),
+        _ => None,
+    }
+}
+
+fn literal_key<'a>(expr: &Expression<'a>) -> Option<&'a str> {
+    match expr {
+        Expression::StringLiteral(literal) => literal.value.as_str(),
+        Expression::TemplateLiteral(template) if template.expressions.is_empty() => {
+            template.quasis.first().map(|quasi| quasi.value.raw.as_str())
+        }
+        _ => None,
+    }
+}
 
 /// Whether a callee is written through a wrapper origin/main did not read (`component::main_peel`): the `Peeled` gate
 /// every spelling-based match on a callee goes through.

@@ -551,8 +551,10 @@ pub(crate) struct TypeofAlias {
 /// key, …: type and value names in one map). It knows no scopes.
 pub(super) struct FileNames<'p> {
     counts: FxHashMap<&'p str, u32>,
-    /// Whether the file assigns `Object.assign` (`Object.assign = …`).
-    assigns_object_assign: bool,
+    /// The names an `import` declaration binds.
+    imports: Vec<&'p str>,
+    /// The writes to a member of a name (`well_known::assignment_write`, `well_known::call_writes`).
+    writes: Vec<(&'p str, Option<&'p str>)>,
 }
 
 impl FileNames<'_> {
@@ -561,14 +563,13 @@ impl FileNames<'_> {
         self.counts.get(name) == Some(&1)
     }
 
-    /// Whether the file assigns `Object.assign`, for `SourceDataCollector::object_assign_assigned`.
-    pub(super) fn assigns_object_assign(&self) -> bool {
-        self.assigns_object_assign
-    }
-
-    /// The counts, owned, for `SourceDataCollector::binding_counts`.
-    pub(super) fn into_counts(self) -> FxHashMap<CompactString, u32> {
-        self.counts.into_iter().map(|(name, count)| (CompactString::from(name), count)).collect()
+    /// What the pass found, owned, for `SourceDataCollector::bindings`.
+    pub(super) fn into_bindings(self) -> super::names::Bindings {
+        super::names::Bindings::new(
+            self.counts.into_iter().map(|(name, count)| (CompactString::from(name), count)).collect(),
+            self.imports.into_iter().map(CompactString::from).collect(),
+            self.writes.into_iter().map(|(object, key)| (object.into(), key.map(CompactString::from))).collect(),
+        )
     }
 }
 
@@ -576,7 +577,7 @@ impl FileNames<'_> {
 pub(super) fn file_names<'p>(program: &Program<'p>) -> FileNames<'p> {
     #[cfg(test)]
     steps::count_walk();
-    let mut names = FileNames { counts: FxHashMap::default(), assigns_object_assign: false };
+    let mut names = FileNames { counts: FxHashMap::default(), imports: Vec::new(), writes: Vec::new() };
     oxc_ast_visit::Visit::visit_program(&mut names, program);
     names
 }
@@ -588,14 +589,21 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
         *self.counts.entry(it.name.as_str()).or_default() += 1;
     }
 
-    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        if let AssignmentTarget::StaticMemberExpression(target) = &it.left
-            && target.property.name == "assign"
-            && super::well_known::is_named(&target.object, &super::well_known::OBJECT)
-        {
-            self.assigns_object_assign = true;
+    fn visit_import_declaration(&mut self, it: &ImportDeclaration<'a>) {
+        for specifier in it.specifiers.iter().flatten() {
+            self.imports.push(specifier.local().name.as_str());
         }
+        oxc_ast_visit::walk::walk_import_declaration(self, it);
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        self.writes.extend(super::well_known::assignment_write(&it.left));
         oxc_ast_visit::walk::walk_assignment_expression(self, it);
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        self.writes.extend(super::well_known::call_writes(it));
+        oxc_ast_visit::walk::walk_call_expression(self, it);
     }
 }
 
@@ -843,7 +851,7 @@ pub(crate) struct AliasCall {
 
 /// What `const Button = Inner` or `memo(Inner)` re-binds, read before `Inner` needs to be known.
 pub(crate) struct AliasShape {
-    inner: String,
+    inner: super::names::Named,
     call: Option<AliasCall>,
 }
 
@@ -1431,9 +1439,10 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
         let super_name = self.receiver_name(super_class(class)?.named()?);
         // A base main did not read is React's only when its root is no local declaration: a global, or an import.
-        if Recognition::of_name(&class.heritage.as_ref()?.expression) == Recognition::Peeled
-            && !self.not_a_local_declaration(super_name.split('.').next()?)
-        {
+        if Recognition::of_name(&class.heritage.as_ref()?.expression) == Recognition::Peeled && {
+            let root = super_name.split('.').next()?;
+            self.bindings.global(root).is_none() && self.bindings.imported(root).is_none()
+        } {
             return None;
         }
         match self.react_type_export(&super_name)?.as_str() {
@@ -1554,12 +1563,25 @@ impl<'src> SourceDataCollector<'src> {
     /// needs to be known. `None` when the initializer is not that shape, or the call names the props it builds with.
     fn alias_shape<'a>(&mut self, decl: &Binding<'_, 'a>) -> Option<AliasShape> {
         let init = decl.init.as_ref()?;
+        // Read as origin/main read it (`main_peel` reaches the identifier, or the call and its first argument), the
+        // name is `Plain`; read only through a peel, the binding pass must vouch for it.
+        let recognition = |plain: bool| if plain { Recognition::Plain } else { Recognition::Peeled };
         let (inner, call) = match peel_expr(init) {
             Expression::CallExpression(call) => match aliased_component(call) {
-                Some(Expression::Identifier(id)) => (id.name.as_str().to_owned(), Some(&**call)),
+                Some(Expression::Identifier(id)) => {
+                    let plain = matches!(main_peel(init), Expression::CallExpression(_))
+                        && matches!(
+                            call.arguments.first().and_then(Argument::as_expression).map(main_peel),
+                            Some(Expression::Identifier(_))
+                        );
+                    (self.bindings.named(id.name.as_str(), recognition(plain))?, Some(&**call))
+                }
                 _ => return None,
             },
-            Expression::Identifier(id) => (id.name.as_str().to_owned(), None),
+            Expression::Identifier(id) => {
+                let plain = matches!(main_peel(init), Expression::Identifier(_));
+                (self.bindings.named(id.name.as_str(), recognition(plain))?, None)
+            }
             _ => return None,
         };
         let Some(call) = call else { return Some(AliasShape { inner, call: None }) };
@@ -1573,8 +1595,10 @@ impl<'src> SourceDataCollector<'src> {
         // An `Object.assign` returns its target only as `assign_roles` reads it: for a call main never read, a target
         // the file declares once, at module level. Otherwise the call is no wrapper, as origin/main judged it.
         let wrapper = if is_object_assign_call(call) {
-            self.assign_roles(call, false, None)
-                .is_some_and(|roles| roles.target == Some(inner.as_str()) && roles.aliases.contains(&inner.as_str()))
+            self.assign_roles(call, false, None).is_some_and(|roles| {
+                roles.target.as_ref().map(super::names::Named::as_str) == Some(inner.as_str())
+                    && roles.aliases.iter().any(|alias| alias.as_str() == inner.as_str())
+            })
         } else {
             is_component_alias_call(&*self, call)
         };
@@ -1665,6 +1689,7 @@ impl<'src> SourceDataCollector<'src> {
         let target = match peel_expr(init) {
             Expression::StaticMemberExpression(member) => {
                 let Some(object) = self.receiver_identifier(&member.object) else { return false };
+                let object = object.as_str();
                 let property = member.property.name.as_str();
                 if !self.imported_names.contains(object) || !is_pascal_case(property) {
                     return false;
@@ -1735,7 +1760,7 @@ impl<'src> SourceDataCollector<'src> {
         // name's one declaration is an import.
         name == super::well_known::FORWARD_REF.name
             && self.react_api(call).is_none()
-            && (!super::well_known::beyond_main(&call.callee) || self.resolves_to_import(name))
+            && (!super::well_known::beyond_main(&call.callee) || self.bindings.imported(name).is_some())
     }
 
     /// Extract the callee name of a call expression (simple ident or member expr).

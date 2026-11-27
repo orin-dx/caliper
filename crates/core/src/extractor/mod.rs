@@ -34,6 +34,7 @@ mod factory_props;
 mod interface;
 mod js_text;
 mod jsdoc;
+mod names;
 mod reexports;
 mod uses;
 mod values;
@@ -230,8 +231,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     collector.element_helpers = evidence::element_helpers(&ret.program);
     let names = component::file_names(&ret.program);
     collector.typeof_aliases = component::typeof_aliases(&ret.program, &names);
-    collector.object_assign_assigned = names.assigns_object_assign();
-    collector.binding_counts = names.into_counts();
+    collector.bindings = names.into_bindings();
     collector.visit_program(&ret.program);
     let mut data = collector.finish();
     data.jsx_usages = body_facts::attach(&ret.program, &mut data.component_mappings, source_type.is_jsx());
@@ -263,10 +263,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) element_helpers: FxHashSet<String>,
     /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
-    /// How many times the file declares each name, any kind in any scope (`component::FileNames`).
-    pub(super) binding_counts: FxHashMap<CompactString, u32>,
-    /// Whether the file assigns `Object.assign`, so a call through a wrapper may not be the built-in one.
-    pub(super) object_assign_assigned: bool,
+    /// What the one binding pass found (`component::FileNames`): the only source of a `names::UniqueName`.
+    pub(super) bindings: names::Bindings,
     /// Tracks which JSDoc comment spans have already been consumed (by span_end).
     /// Prevents the same comment from leaking to both a component description and its first prop.
     pub(super) consumed_jsdoc: FxHashSet<u32>,
@@ -366,8 +364,7 @@ impl<'src> SourceDataCollector<'src> {
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
             typeof_aliases: FxHashMap::default(),
-            binding_counts: FxHashMap::default(),
-            object_assign_assigned: false,
+            bindings: names::Bindings::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
             scope_path: Vec::new(),
@@ -1358,44 +1355,21 @@ impl<'src> SourceDataCollector<'src> {
     /// plainly (`Ui.Button`), as origin/main read it; written through a wrapper (`(Ui as typeof Ui).Button`), only when
     /// the file declares it exactly once (`unique_binding`), as a second declaration may be the one meant. `None`
     /// otherwise, which is origin/main's answer: no receiver.
-    pub(super) fn receiver_identifier<'a>(&self, object: &Expression<'a>) -> Option<&'a str> {
+    pub(super) fn receiver_identifier(&self, object: &Expression<'_>) -> Option<names::Named> {
         match object {
-            Expression::Identifier(id) => Some(id.name.as_str()),
+            Expression::Identifier(id) => Some(names::Named::Plain(id.name.as_str().into())),
             _ => match component::beneath(object) {
-                Expression::Identifier(id) if self.unique_binding(id.name.as_str()) => Some(id.name.as_str()),
+                Expression::Identifier(id) => self.bindings.unique(id.name.as_str()).map(names::Named::Peeled),
                 _ => None,
             },
         }
-    }
-
-    /// Whether a bare name a `Peeled` candidate relies on can mean one declaration: the file declares it exactly once
-    /// (`component::Recognition`).
-    pub(super) fn unique_binding(&self, name: &str) -> bool {
-        self.binding_counts.get(name) == Some(&1)
-    }
-
-    /// Whether a name a `Peeled` candidate expects to be React's, a global (`Component`) or an import, is no local
-    /// declaration: the file declares it nowhere, or once as an import (`component::Recognition`).
-    pub(super) fn not_a_local_declaration(&self, name: &str) -> bool {
-        self.resolves_to_global(name) || self.resolves_to_import(name)
-    }
-
-    /// Whether a name resolves to a global (`Object`, `Promise`, an unimported `React`): the file declares it nowhere.
-    pub(super) fn resolves_to_global(&self, name: &str) -> bool {
-        !self.binding_counts.contains_key(name)
-    }
-
-    /// Whether a name resolves to an import: its one declaration in the file is the import. Which module it comes from
-    /// is each caller's own check (`react_api`, `is_preact_h`).
-    pub(super) fn resolves_to_import(&self, name: &str) -> bool {
-        self.binding_counts.get(name) == Some(&1) && self.imported_names.contains(name)
     }
 
     /// The dotted name of a callee or a class's heritage, each receiver read by [`Self::receiver_identifier`]: `ui.wrap`,
     /// or `unknown.wrap` as origin/main named a receiver it could not read.
     pub(super) fn receiver_name<'a>(&self, expr: &Expression<'a>) -> String {
         if let Some(id) = self.receiver_identifier(expr) {
-            return id.to_owned();
+            return id.as_str().to_owned();
         }
         match expr {
             Expression::StaticMemberExpression(me) => {
@@ -1627,7 +1601,7 @@ mod wrapper_matrix_tests;
 
 impl evidence::Scope for SourceDataCollector<'_> {
     fn declarations(&self, name: &str) -> u32 {
-        self.binding_counts.get(name).copied().unwrap_or(0)
+        self.bindings.declarations(name)
     }
 
     fn import_of(&self, local: &str) -> Option<(&str, &str)> {
