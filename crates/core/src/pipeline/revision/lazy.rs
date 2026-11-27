@@ -114,12 +114,20 @@ struct Engine {
     shared: u64,
 }
 
-/// An order-free fingerprint of `shared`, the demands whose module searches give React's augmentations.
-fn shared_fingerprint(shared: &[Demand]) -> u64 {
-    use std::hash::BuildHasher;
-    let mut sorted: Vec<&Demand> = shared.iter().collect();
-    sorted.sort();
-    rustc_hash::FxBuildHasher.hash_one(&sorted)
+/// The demands whose module searches give React's augmentations, sorted, with their fingerprint: built once per list,
+/// and carried whole by an edit that leaves a file's shared demands as they were.
+#[derive(Clone)]
+struct SharedDemands {
+    sorted: Arc<[Demand]>,
+    fingerprint: u64,
+}
+
+impl std::ops::Deref for SharedDemands {
+    type Target = [Demand];
+
+    fn deref(&self) -> &[Demand] {
+        &self.sorted
+    }
 }
 
 impl Lazy {
@@ -193,14 +201,14 @@ impl Engine {
         ambient_global_files: &[Utf8PathBuf],
         named_types: &Arc<NamedTypeIndex>,
         // The layer, and the shared demands, whose module searches give React's augmentations.
-        (layer, shared): (Option<Arc<DependencyLayer>>, &[Demand]),
+        (layer, shared): (Option<Arc<DependencyLayer>>, &SharedDemands),
         react_types: &Option<Arc<NamedTypeIndex>>,
     ) -> Engine {
         let named_types = match &layer {
             Some(layer) => Arc::new(named_types.with_fallback(layer.named_types.clone())),
             None => named_types.clone(),
         };
-        let shared = shared_fingerprint(shared);
+        let shared = shared.fingerprint;
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),
             options,
@@ -225,7 +233,7 @@ pub(super) struct Lazy {
     demands: FxHashMap<PathKey, Arc<[Demand]>>,
     /// The demands the session's first load follows for every component ([`shared_demands`]): React's names and the
     /// modules the project imports, whose augmentations any component reading React's interfaces reads.
-    shared: Arc<[Demand]>,
+    shared: SharedDemands,
     /// The unread walks `shared` leads to in one layer, and that layer: asked once per layer, not once per resolution
     /// that reads React's augmentations.
     shared_unread: Mutex<Option<SharedUnread>>,
@@ -282,8 +290,9 @@ pub(super) struct Lazy {
 /// A layer, and what the shared demands lead to in it ([`Lazy::shared_unread`]).
 type SharedUnread = (Arc<dependency_types::DependencyLayer>, Arc<SharedWalks>);
 
-/// The unread walks the shared demands lead to in one layer, and their footprint (`None` when one of them has a file
-/// read since): one copy per layer, which every resolution that reads React's augmentations shares, by reference.
+/// Every unread walk of one layer, and their footprint (`None` when one of them has a file read since): what an answer
+/// that read React's augmentations reads through, since any of those walks may load a file declaring into React. One
+/// copy per layer, which every such resolution shares, by reference.
 pub(super) struct SharedWalks {
     unread: Arc<[Demand]>,
     footprint: Option<dependency_types::Footprint>,
@@ -333,7 +342,7 @@ impl Lazy {
         dependency_types::Retry::Due(self.moment())
     }
 
-    /// The unread walks the shared demands lead to in `layer` ([`Lazy::shared_unread`]).
+    /// Every unread walk of `layer` ([`DependencyLayer::all_unread`]), once per layer.
     fn shared_unread(&self, layer: &Arc<dependency_types::DependencyLayer>) -> Arc<SharedWalks> {
         let mut held = self.shared_unread.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some((at, unread)) = held.as_ref()
@@ -343,7 +352,7 @@ impl Lazy {
         }
         #[cfg(test)]
         self.shared_unread_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let unread: Arc<[Demand]> = Arc::from(layer.unread(&self.shared));
+        let unread: Arc<[Demand]> = Arc::from(layer.all_unread());
         let walks = Arc::new(SharedWalks { footprint: layer.footprint(&unread), unread, bound: Mutex::new(None) });
         *held = Some((layer.clone(), walks.clone()));
         walks
@@ -408,14 +417,16 @@ thread_local! {
     static SHARED_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn shared_demands<'a>(file_demands: impl IntoIterator<Item = &'a [Demand]>) -> Arc<[Demand]> {
+fn shared_demands<'a>(file_demands: impl IntoIterator<Item = &'a [Demand]>) -> SharedDemands {
+    use std::hash::BuildHasher;
     #[cfg(test)]
     SHARED_BUILDS.with(|builds| builds.set(builds.get() + 1));
     let mut shared: Vec<Demand> =
         file_demands.into_iter().flatten().filter(|demand| is_shared(demand)).cloned().collect();
     shared.sort();
     shared.dedup();
-    Arc::from(shared)
+    let fingerprint = rustc_hash::FxBuildHasher.hash_one(&shared);
+    SharedDemands { sorted: Arc::from(shared), fingerprint }
 }
 
 fn demands_by_file(file_demands: Vec<(Utf8PathBuf, Vec<Demand>)>) -> FxHashMap<PathKey, Arc<[Demand]>> {
@@ -595,7 +606,7 @@ impl Revision {
             false => shared_demands(file_demands.values().map(|demands| demands.as_ref())),
         };
         let layer = previous.engine.load().layer.clone();
-        let shared_now = shared_fingerprint(&shared);
+        let shared_now = shared.fingerprint;
         let mut touched: FxHashSet<String> = FxHashSet::default();
         let mut affected_files: Vec<Utf8PathBuf> = Vec::new();
         for entry in previous.memo.iter() {
@@ -787,8 +798,10 @@ impl Revision {
             lazy.resolutions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let (entry, diagnostics, depends_on, evidence, attributes) =
                 resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
-            // The names the resolution reached that the layer lacks, and the demands below them whose walk passed a
-            // file that could not be read (the layer's ledger): the next load follows both, the second once due.
+            // The names the resolution reached that the layer lacks, and the unread walks behind what it read: its
+            // project files' demands reach every package declaration it read but React's augmentations, which come
+            // from every file of the layer and so through every unread walk (`shared` below). The next load follows
+            // both, the second once due, and the answer holds by the second.
             let (missing, unread) = match &engine.layer {
                 Some(layer) => {
                     let roots: Vec<Demand> = depends_on
@@ -799,9 +812,9 @@ impl Revision {
                         .collect();
                     let retry = lazy.retry();
                     let unread = layer.unread(&roots);
-                    // React's augmentations come from every module the project imports, whichever file imports it, and
-                    // the first load followed those for every component: their unread walks and footprint are the
-                    // layer's, built once and shared, and asked again only once that footprint is due.
+                    // React's augmentations come from every file the layer loaded that declares into React, so an
+                    // answer that read them reads through every unread walk: the layer's, built once and shared, and
+                    // asked again only once that footprint is due.
                     let shared = depends_on.reads_augmentations.then(|| lazy.shared_unread(layer));
                     let shared = shared.filter(|walks| !walks.unread.is_empty());
                     let mut missing = layer.missing_at(&roots, retry);
@@ -1428,8 +1441,9 @@ mod read_retry_tests {
         std::fs::write(&edited, format!("{source}// a comment\n")).unwrap();
         SHARED_BUILDS.with(|builds| builds.set(0));
         let second = first.next_lazy(&options, &edited).unwrap().0;
-        assert_eq!(SHARED_BUILDS.with(std::cell::Cell::get), 0, "nothing rebuilt");
-        let shared = |revision: &Revision| revision.lazy.as_ref().unwrap().shared.clone();
+        // The one place a shared list is allocated, sorted and hashed: a comment-only edit reaches it never.
+        assert_eq!(SHARED_BUILDS.with(std::cell::Cell::get), 0, "nothing rebuilt, sorted or hashed");
+        let shared = |revision: &Revision| revision.lazy.as_ref().unwrap().shared.sorted.clone();
         assert!(Arc::ptr_eq(&shared(&first), &shared(&second)));
         std::fs::write(&edited, "export function C0(props: { own: string }) { return null; }\n").unwrap();
         assert!(!shared(&second).is_empty(), "the fixture's imports are shared demands");
@@ -1630,6 +1644,67 @@ mod read_retry_tests {
         // Carrying memos asks about the files the carried memos read, not every importing file of the project.
         let checks = lazy.carry_checks.load(Relaxed);
         assert!(checks <= 20 * 200, "{checks} files asked about over {growths} growths");
+    }
+
+    /// An answer is held by every unread walk behind what its resolution read, package declarations included: `Card`
+    /// imports `BTarget`, which extends `Base` from `base.d.ts`, typed with `Tone` from an unreadable `tone`; that file
+    /// also merges `aria-bt`, typed by `Tone` too, into React. `Box`, a reader of `AriaAttributes`, reads `base.d.ts` but none of its own walks
+    /// reaches `tone`. Once `tone` reads and the retry is due, `Card` and then `Box` equal a cold run's.
+    #[test]
+    fn an_answer_is_held_by_the_unread_walks_behind_the_package_files_it_read() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let files = [
+            ("node_modules/bt-kit/package.json", r#"{ "name": "bt-kit", "version": "1.0.0", "types": "target.d.ts" }"#),
+            (
+                "node_modules/bt-kit/target.d.ts",
+                "import type { Base } from './base';\nexport interface BTarget extends Base { bt: string }\n",
+            ),
+            (
+                "node_modules/bt-kit/base.d.ts",
+                "import type { Tone } from './tone';\n\
+                 declare module 'react' { interface AriaAttributes { 'aria-bt'?: Tone } }\n\
+                 export interface Base { b: string; tone?: Tone }\n",
+            ),
+            (
+                "src/card/Card.tsx",
+                "import type { BTarget } from 'bt-kit';\nexport function Card(props: BTarget) { return null; }\n",
+            ),
+            (
+                "src/box/Box.tsx",
+                "import * as React from 'react';\ninterface BoxProps extends React.AriaAttributes { own?: boolean }\n\
+                 export const Box = (props: BoxProps) => <div />;\n",
+            ),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let tone = root.join("node_modules/bt-kit/tone.d.ts");
+        std::fs::write(&tone, [0xff; 8]).unwrap();
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let cold = |names: &[&str]| {
+            let revision = Revision::cold_lazy(&options, 0);
+            names.iter().map(|name| revision.lazy_component(&options, name).unwrap()).last().unwrap()
+        };
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        drop(revision.lazy_component(&options, "Card").unwrap());
+        let answer = revision.lazy_component(&options, "Box").unwrap();
+        assert!(props(&answer).contains(&"aria-bt".to_owned()));
+        assert!(answer == cold(&["Card", "Box"]), "while `tone` cannot be read");
+        std::fs::write(&tone, "export type Tone = 'warm' | 'cool';\n").unwrap();
+        // An edit elsewhere makes every unread walk due; `Box` is asked first, before anything retries `Card`'s.
+        let plain = root.join("src/plain/Plain.tsx");
+        std::fs::create_dir_all(plain.parent().unwrap()).unwrap();
+        std::fs::write(&plain, "export function Plain(props: { title: string }) { return null; }\n").unwrap();
+        let revision = revision.next_lazy(&options, &plain).unwrap().0;
+        set_clock(&revision, start);
+        assert!(revision.lazy_component(&options, "Box").unwrap() == cold(&["Card", "Box"]), "Box, recovered");
+        assert!(revision.lazy_component(&options, "Card").unwrap() == cold(&["Card"]), "Card, recovered");
     }
 
     /// A search that could not read every file withholds its augmentations: `setup.ts`, the sole importer of `aug-kit`

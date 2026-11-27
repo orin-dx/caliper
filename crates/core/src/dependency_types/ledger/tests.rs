@@ -1399,6 +1399,19 @@ const REACT_PACKAGE: &[(&str, &str)] = &[
          declare module 'react' { interface AriaAttributes { 'aria-tone'?: Tone } }\nexport {};\n",
     ),
     ("node_modules/mk/aug/tone.d.ts", "export type Tone = 'warm' | 'cool';\n"),
+    // `Card3`'s `BTarget` extends `Base`, typed with `Tone`; `base` also merges `aria-bt`, typed by `Tone`, into React,
+    // which a reader of `AriaAttributes` reads through `base` alone, once `Card3` has loaded it.
+    (
+        "node_modules/mk/bt/target.d.ts",
+        "import type { Base } from './base';\nexport interface BTarget extends Base { bt: string }\n",
+    ),
+    (
+        "node_modules/mk/bt/base.d.ts",
+        "import type { Tone } from './tone';\n\
+         declare module 'react' { interface AriaAttributes { 'aria-bt'?: Tone } }\n\
+         export interface Base { b: string; tone?: Tone }\n",
+    ),
+    ("node_modules/mk/bt/tone.d.ts", "export type BTone = 'warm' | 'cool';\nexport type Tone = BTone;\n"),
     ("node_modules/mk/aug/afirst.d.ts", "export interface AFirst { af: string }\n"),
     (
         "node_modules/mk/aug/aug.d.ts",
@@ -1424,6 +1437,12 @@ const REACT_COMPONENTS: &[(&str, &str, &[&str])] = &[
     ),
     // Reads React's `AriaAttributes`, so what the shared walk serves of `aug` reaches it; its oracles still follow the
     // walks the session followed first.
+    (
+        "Card3",
+        "import type { BTarget } from 'mk/bt/target';\ninterface Card3Own extends BTarget { own_card3: string }\n\
+         export function Card3(props: Card3Own) { return null; }\n",
+        &["bt/target", "bt/base", "bt/tone"],
+    ),
     (
         "Aria",
         "import * as React from 'react';\ninterface AriaOwn extends React.AriaAttributes { own_aria?: boolean }\n\
@@ -1464,7 +1483,17 @@ const PLAIN_MODEL: Model = Model {
 const REACT_MODEL: Model = Model {
     package: REACT_PACKAGE,
     components: REACT_COMPONENTS,
-    unreadable: &["tgt/first", "tgt2/first", "tgt/base", "aug/afirst", "aug/aug", "aug/aug2", "aug/tone"],
+    unreadable: &[
+        "tgt/first",
+        "tgt2/first",
+        "tgt/base",
+        "aug/afirst",
+        "aug/aug",
+        "aug/aug2",
+        "aug/tone",
+        "bt/base",
+        "bt/tone",
+    ],
     react: true,
     // Seed 63 restarts over the index on disk with an augmentation unreadable, then flattens; seed 655 recovers a served
     // augmentation's import.
@@ -1661,6 +1690,8 @@ impl ModelRun<'_> {
                 .collect()
         };
         let before = answers(self);
+        // Both passes ask every component, so the reader's oracle is asked for them all before it from now on.
+        self.asked.extend(self.model.components.iter().map(|(name, _, _)| (*name).to_owned()));
         std::fs::write(file, body).unwrap();
         let update = self.session.update_file(file);
         self.log.push(format!("edit {}", file.file_name().unwrap_or_default()));
@@ -1801,7 +1832,14 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
         let next_session = WatchSession::lazy(model.options(&run.root));
         drop(next_session.initialize());
         for (name, _, _) in model.components {
-            let cold = run.oracle.ask(name, &[], false, &[]);
+            // Both sessions ask the components in order, so the reader's cold answer is asked after the others.
+            let before: Vec<String> = match *name == MODEL_READER {
+                true => {
+                    model.components.iter().map(|(other, _, _)| (*other).to_owned()).filter(|o| o != name).collect()
+                }
+                false => Vec::new(),
+            };
+            let cold = run.oracle.ask(name, &[], false, &before);
             let answers =
                 [("this session", run.session.component(name)), ("the next session", next_session.component(name))];
             for (which, answer) in answers {

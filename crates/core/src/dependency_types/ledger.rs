@@ -588,6 +588,22 @@ impl DependencyLayer {
         self.unread_from(roots)
     }
 
+    /// Every walk of the chain that is unread now: what an answer that read React's augmentations read through, since
+    /// any of them may load a file that declares into React.
+    pub(crate) fn all_unread(&self) -> Vec<Demand> {
+        if !self.has_marks() || self.unread_walks().demands.is_empty() {
+            return Vec::new();
+        }
+        let nodes: FxHashSet<&Node> = self
+            .chain()
+            .flat_map(|layer| layer.ledger.marks.keys())
+            .filter(|node| matches!(node, Node::Demand(_)))
+            .collect();
+        let mut unread: Vec<Demand> = nodes.into_iter().filter_map(|node| self.mark(node)?.unread.clone()).collect();
+        unread.sort();
+        unread
+    }
+
     /// [`Self::unread`] over borrowed roots, which it does not iterate while no walk is unread.
     pub(crate) fn unread_from<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Demand> {
         // Marks outlive the walks they record: once every walk recovered, the chain still holds clean ones. Whether a
