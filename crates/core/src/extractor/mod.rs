@@ -168,9 +168,26 @@ pub(crate) fn is_typescript(path: &std::path::Path) -> bool {
     matches!(path.extension().and_then(|extension| extension.to_str()), Some("ts" | "tsx" | "mts" | "cts"))
 }
 
-/// Every static import of the module, as `(local, exported, module)`, before the walk reaches any of them.
-fn hoisted_imports(program: &Program<'_>) -> Vec<(String, String, String)> {
-    let mut imports = Vec::new();
+/// Counts the hoisted-import entries a lookup examines, so a test can show each lookup is one probe.
+#[cfg(test)]
+pub(super) mod probes {
+    use std::cell::Cell;
+
+    thread_local!(static PROBES: Cell<u64> = const { Cell::new(0) });
+
+    pub(in crate::extractor) fn count(entries: u64) {
+        PROBES.with(|probes| probes.set(probes.get() + entries));
+    }
+
+    pub(in crate::extractor) fn take() -> u64 {
+        PROBES.with(|probes| probes.replace(0))
+    }
+}
+
+/// Every static import of the module by its local name, as `(exported, module)`, before the walk reaches any of them:
+/// one map per module, so each lookup is one probe whatever the number of imports.
+fn hoisted_imports(program: &Program<'_>) -> FxHashMap<CompactString, (CompactString, String)> {
+    let mut imports = FxHashMap::default();
     for statement in &program.body {
         let Statement::ImportDeclaration(import) = statement else { continue };
         let module = js_text::lossy(import.source.value);
@@ -180,7 +197,7 @@ fn hoisted_imports(program: &Program<'_>) -> Vec<(String, String, String)> {
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => "default".to_owned(),
                 ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => "*".to_owned(),
             };
-            imports.push((specifier.local().name.to_string(), exported, module.to_string()));
+            imports.insert(CompactString::from(specifier.local().name.as_str()), (exported.into(), module.to_string()));
         }
     }
     imports
@@ -289,7 +306,7 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) element_helpers: FxHashSet<String>,
     /// Every import of the module as `(local, exported, module)`, whatever its position: static imports are hoisted.
     /// Read only for a callee a peel exposes (`Scope::import_of`); a plain read keeps the walker's order, as origin/main.
-    pub(super) hoisted_imports: Vec<(String, String, String)>,
+    pub(super) hoisted_imports: FxHashMap<CompactString, (CompactString, String)>,
     /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
     /// What the one binding pass found (`component::FileNames`): the only source of a `names::UniqueName`.
@@ -392,7 +409,7 @@ impl<'src> SourceDataCollector<'src> {
             comments: Vec::new(),
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
-            hoisted_imports: Vec::new(),
+            hoisted_imports: FxHashMap::default(),
             typeof_aliases: FxHashMap::default(),
             bindings: names::Bindings::default(),
             consumed_jsdoc: FxHashSet::default(),
@@ -1650,7 +1667,9 @@ impl evidence::Scope for SourceDataCollector<'_> {
     }
 
     fn import_of(&self, local: &str) -> Option<(&str, &str)> {
-        let (_, exported, module) = self.hoisted_imports.iter().find(|(name, _, _)| name == local)?;
+        #[cfg(test)]
+        probes::count(1);
+        let (exported, module) = self.hoisted_imports.get(local)?;
         Some((exported.as_str(), module.as_str()))
     }
 

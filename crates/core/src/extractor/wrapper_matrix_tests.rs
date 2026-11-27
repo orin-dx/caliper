@@ -5056,6 +5056,266 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "hoisted: named ./codec, import below | peeled".to_owned(),
         "// ts\nimport { createElement } from 'react';\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport { forwardRef } from './codec';\n".to_owned(),
     ));
+    cases.push((
+        "attach-reads: declarator, assertion, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = <any>(Object.assign({}, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, assertion, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\n<any>(Object.assign(Root, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, assertion, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = <any>(Item);".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, assertion, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst Other = <any>(Object.assign({}, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, assertion, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\n<any>(Object.assign(Other, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, assertion, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nOther.Item = <any>(Item);".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, assertion, function, same name (finding 1) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Root = <any>(Object.assign({}, { Item })); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, assertion, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { <any>(Object.assign(Root, { Item })); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, assertion, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = <any>(Item); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, assertion, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Other = <any>(Object.assign({}, { Item })); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, assertion, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { <any>(Object.assign(Other, { Item })); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, assertion, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { Other.Item = <any>(Item); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: default export, assertion | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default <any>(Object.assign(Impl, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, as, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = (Object.assign({}, { Item })) as any;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, as, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign(Root, { Item })) as any;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, as, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = (Item) as any;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, as, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst Other = (Object.assign({}, { Item })) as any;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, as, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\n(Object.assign(Other, { Item })) as any;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, as, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nOther.Item = (Item) as any;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, as, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Root = (Object.assign({}, { Item })) as any; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, as, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { (Object.assign(Root, { Item })) as any; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, as, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = (Item) as any; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, as, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Other = (Object.assign({}, { Item })) as any; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, as, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { (Object.assign(Other, { Item })) as any; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, as, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { Other.Item = (Item) as any; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: default export, as | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default (Object.assign(Impl, { Item })) as any;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, parens, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = (Object.assign({}, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, parens, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign(Root, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, parens, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = (Item);".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, parens, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst Other = (Object.assign({}, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, parens, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\n(Object.assign(Other, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, parens, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nOther.Item = (Item);".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, parens, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Root = (Object.assign({}, { Item })); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, parens, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { (Object.assign(Root, { Item })); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, parens, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = (Item); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, parens, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Other = (Object.assign({}, { Item })); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, parens, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { (Object.assign(Other, { Item })); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, parens, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { Other.Item = (Item); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: default export, parens | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default (Object.assign(Impl, { Item }));".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, non-null, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = (Object.assign({}, { Item }))!;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, non-null, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign(Root, { Item }))!;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, non-null, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = (Item)!;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, non-null, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst Other = (Object.assign({}, { Item }))!;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, non-null, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\n(Object.assign(Other, { Item }))!;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, non-null, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nOther.Item = (Item)!;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, non-null, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Root = (Object.assign({}, { Item }))!; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, non-null, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { (Object.assign(Root, { Item }))!; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, non-null, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = (Item)!; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, non-null, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Other = (Object.assign({}, { Item }))!; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, non-null, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { (Object.assign(Other, { Item }))!; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, non-null, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { Other.Item = (Item)!; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: default export, non-null | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default (Object.assign(Impl, { Item }))!;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, instantiation, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = (Object.assign<object, object>)({}, { Item });".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, instantiation, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign<object, object>)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, instantiation, module, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = Item<Props>;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, instantiation, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst Other = (Object.assign<object, object>)({}, { Item });".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, instantiation, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\n(Object.assign<object, object>)(Other, { Item });".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, instantiation, module, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nOther.Item = Item<Props>;".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, instantiation, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Root = (Object.assign<object, object>)({}, { Item }); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, instantiation, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { (Object.assign<object, object>)(Root, { Item }); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, instantiation, function, same name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = Item<Props>; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: declarator, instantiation, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Other = (Object.assign<object, object>)({}, { Item }); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: statement, instantiation, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { (Object.assign<object, object>)(Other, { Item }); }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: assignment, instantiation, function, different name | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function Other(props: Props) { return createElement('div'); }\nfunction configure() { Other.Item = Item<Props>; }".to_owned(),
+    ));
+    cases.push((
+        "attach-reads: default export, instantiation | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default (Object.assign<object, object>)(Impl, { Item });".to_owned(),
+    ));
     cases
 }
 
@@ -5226,6 +5486,49 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
+}
+
+/// Round 47: every attachment read is what origin/main read (`uses::attachment_call`, `main_peel`): a declarator's
+/// initializer, an expression statement, an assigned value and a default export through `<any>`, `as`, parentheses, `!`
+/// or an instantiated `Object.assign`, at module and function scope, with the parent the exported name or another.
+/// Each row equals origin/main exactly.
+#[test]
+fn every_attachment_read_is_what_main_read() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let mut rows = 0;
+    for (id, source) in factory_parity_cases() {
+        if id.starts_with("attach-reads: ") {
+            assert_eq!(factory_parity_output(&source), base[id.as_str()], "{id}");
+            rows += 1;
+        }
+    }
+    assert_eq!(rows, 65);
+}
+
+/// Round 47: a closed-list callee behind `<T>x` reads the hoisted imports by local name, one probe per lookup: 500 such
+/// calls cost the same with 500 unrelated imports before React's as with none.
+#[test]
+fn a_hoisted_import_lookup_is_one_probe_whatever_the_imports() {
+    let probes = |imports: usize| {
+        let mut source = String::from("// ts\n");
+        for index in 0..imports {
+            source.push_str(&format!("import {{ thing{index} }} from './things{index}';\n"));
+        }
+        source.push_str("import { createElement, forwardRef } from 'react';\n");
+        for index in 0..500 {
+            source.push_str(&format!(
+                "export const Button{index} = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\n"
+            ));
+        }
+        super::probes::take();
+        let data = parse_file(Utf8Path::new("/fixtures/Buttons.ts"), &source);
+        assert_eq!(data.component_mappings.len(), 500);
+        super::probes::take()
+    };
+    let without = probes(0);
+    assert!(without > 0 && without <= 8 * 500, "{without} probes for 500 calls");
+    assert_eq!(probes(500), without);
 }
 
 /// Round 46: an instantiation is no peel. `(f<A>)(…)` is the form OXC 0.158 parsed as type arguments on the call, so at

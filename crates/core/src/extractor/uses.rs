@@ -58,6 +58,38 @@ pub(crate) struct Attachment {
     property: Option<CompactString>,
 }
 
+/// The rule for every attachment read (a declarator's initializer, an `Object.assign` call, its arguments and member
+/// values, a default export, an assigned value): what origin/main read, `component::main_peel`, and nothing more. The
+/// closed-list peel (`component::callee_of`) only ever recognises a component callee; it never exposes an attachment.
+/// `assign_roles` takes an `AttachmentCall`, which only `attachment_call` and `statement_call` (each main's read at its
+/// site) make, so no other read can reach it.
+#[derive(Clone, Copy)]
+pub(super) struct AttachmentCall<'b, 'a>(&'b CallExpression<'a>);
+
+impl<'b, 'a> AttachmentCall<'b, 'a> {
+    pub(super) fn call(self) -> &'b CallExpression<'a> {
+        self.0
+    }
+}
+
+/// The call an attachment reads, beneath only what origin/main read through (`main_peel`): `<any>Object.assign(…)` is
+/// none.
+pub(super) fn attachment_call<'b, 'a>(expr: &'b Expression<'a>) -> Option<AttachmentCall<'b, 'a>> {
+    match super::component::main_peel(expr) {
+        Expression::CallExpression(call) => Some(AttachmentCall(call)),
+        _ => None,
+    }
+}
+
+/// The call an expression statement is, as written, as origin/main's statement scan read it: `Object.assign(…) as any;`
+/// is none.
+pub(super) fn statement_call<'b, 'a>(expr: &'b Expression<'a>) -> Option<AttachmentCall<'b, 'a>> {
+    match expr {
+        Expression::CallExpression(call) => Some(AttachmentCall(call)),
+        _ => None,
+    }
+}
+
 /// What an `Object.assign` call says its first argument is, the component it returns. `Rejected` is final: no other
 /// reader may take the argument for the component. Only `NotApplicable` (no `Object.assign`, or a first argument that is
 /// no name, such as a nested call) lets a caller read the argument its own way.
@@ -100,12 +132,13 @@ impl<'src> SourceDataCollector<'src> {
     /// `Object.assign(Root, { Item })` give `Inner`, `Card` and `Root`. `None` for a call that is no component alias, or
     /// whose argument is no name.
     pub(super) fn component_wrapped_by(&self, expression: &Expression<'_>) -> Option<super::names::Named> {
-        let Expression::CallExpression(call) = super::peeled::read_value(expression) else { return None };
+        let attachment = attachment_call(expression)?;
+        let call = attachment.call();
         if !super::component::is_component_alias_call(self, call) {
             return None;
         }
         // An `Object.assign` is its target only as `assign_roles` reads it, and a target it rejects stays rejected.
-        match self.assign_target(call) {
+        match self.assign_target(attachment) {
             Role::Accepted(target) => return Some(target),
             Role::Rejected => return None,
             Role::NotApplicable => {}
@@ -118,10 +151,7 @@ impl<'src> SourceDataCollector<'src> {
                 self.bindings.named(inner.as_str(), super::component::Recognition::Peeled)
             }
             Some(inner) => Some(inner),
-            None => match super::peeled::read_value(first) {
-                Expression::CallExpression(_) => self.component_wrapped_by(first),
-                _ => None,
-            },
+            None => self.component_wrapped_by(first),
         }
     }
 
@@ -157,9 +187,10 @@ impl<'src> SourceDataCollector<'src> {
     /// written `Object.assign` (`Recognition::of_object_assign`): a call only a peel exposes attaches nothing.
     pub(super) fn assign_roles<'b, 'a>(
         &self,
-        call: &'b CallExpression<'a>,
+        attachment: AttachmentCall<'b, 'a>,
         inline: bool,
     ) -> Option<AssignRoles<'b, 'a>> {
+        let call = attachment.call();
         if !super::component::is_object_assign_call(call, self)
             || super::component::Recognition::of_object_assign(call, inline) == super::component::Recognition::Peeled
         {
@@ -186,13 +217,14 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// The component an `Object.assign` call returns, as `assign_roles` reads its target ([`Role`]).
-    pub(super) fn assign_target(&self, call: &CallExpression<'_>) -> Role {
+    pub(super) fn assign_target(&self, attachment: AttachmentCall<'_, '_>) -> Role {
+        let call = attachment.call();
         if !super::component::is_object_assign_call(call, self) {
             return Role::NotApplicable;
         }
         // A call `assign_roles` rejects, such as one whose callee only a peel exposes, is no built-in at all: nothing in
         // its arguments is what it returns.
-        let Some(roles) = self.assign_roles(call, false) else { return Role::Rejected };
+        let Some(roles) = self.assign_roles(attachment, false) else { return Role::Rejected };
         let names =
             call.arguments.first().and_then(Argument::as_expression).is_some_and(super::peeled::names_identifier);
         match roles.target.clone().filter(|target| roles.aliases.contains(target)) {
@@ -210,8 +242,8 @@ impl<'src> SourceDataCollector<'src> {
         parent: &super::names::Named,
         init: Option<&Expression<'_>>,
     ) {
-        let Some(Expression::CallExpression(call)) = init.map(super::peeled::read_value) else { return };
-        let Some(roles) = self.assign_roles(call, false) else { return };
+        let Some(attachment) = init.and_then(attachment_call) else { return };
+        let Some(roles) = self.assign_roles(attachment, false) else { return };
         for alias in &roles.aliases {
             self.attached_to.push(Attachment {
                 sub: Subject::local(alias.as_str()),

@@ -1594,7 +1594,10 @@ impl<'src> SourceDataCollector<'src> {
         // An `Object.assign` returns its target only as `assign_roles` reads it: for a call main never read, a target
         // the file declares once, at module level. Otherwise the call is no wrapper, as origin/main judged it.
         let wrapper = if is_object_assign_call(call, &*self) {
-            self.assign_roles(call, false).is_some_and(|roles| {
+            // As an attachment reads it (`uses::attachment_call`): a cast main did not read hides the call.
+            let attachment =
+                super::uses::attachment_call(init).filter(|attachment| std::ptr::eq(attachment.call(), call));
+            attachment.and_then(|attachment| self.assign_roles(attachment, false)).is_some_and(|roles| {
                 roles.target.as_ref().map(super::names::Named::as_str) == Some(inner.as_str())
                     && roles.aliases.iter().any(|alias| alias.as_str() == inner.as_str())
             })

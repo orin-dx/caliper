@@ -393,22 +393,23 @@ impl<'src> SourceDataCollector<'src> {
     /// dot-qualified naming (`"Parent.Sub"`) was considered and explicitly
     /// declined there as speculative.
     pub(super) fn try_scan_object_assign_sub_components<'a>(&mut self, stmt: &ExpressionStatement<'a>) {
-        let Expression::CallExpression(call) = &stmt.expression else { return };
-        self.scan_object_assign_call(call);
+        if let Some(attachment) = super::uses::statement_call(&stmt.expression) {
+            self.scan_object_assign_call(attachment);
+        }
     }
 
     /// The same scan for `const Root = Object.assign(RootImpl, { Item: (props: P) => … })`, whose call is a
     /// declaration's initializer and not a statement.
     pub(super) fn try_scan_object_assign_declarator<'a>(&mut self, init: Option<&Expression<'a>>) {
-        if let Some(Expression::CallExpression(call)) = init.map(super::peeled::read_value) {
-            self.scan_object_assign_call(call);
+        if let Some(attachment) = init.and_then(super::uses::attachment_call) {
+            self.scan_object_assign_call(attachment);
         }
     }
 
-    fn scan_object_assign_call<'a>(&mut self, call: &CallExpression<'a>) {
+    fn scan_object_assign_call<'a>(&mut self, attachment: super::uses::AttachmentCall<'_, 'a>) {
         // The arguments as `assign_roles` reads them, as for `record_object_assign_declarator` and the alias rule, which
         // record `Root` as the alias this scan attaches the inline members to.
-        let Some(roles) = self.assign_roles(call, true) else { return };
+        let Some(roles) = self.assign_roles(attachment, true) else { return };
         let (Some(parent), Some(obj)) = (roles.target.as_ref(), roles.objects.first()) else { return };
         if !is_pascal_case(parent.as_str()) {
             return;
