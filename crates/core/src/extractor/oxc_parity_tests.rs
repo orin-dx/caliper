@@ -283,3 +283,18 @@ fn every_row_reads_as_origin_main_read_it() {
         .collect();
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
 }
+
+/// The flatten walk enters no type: the 600-level chained conditional type of
+/// `deeply_chained_conditional_types_hit_the_depth_guard_not_the_bracket_heuristic` costs it nothing, and the alias
+/// collector's own depth limit stays the only walk over it.
+#[test]
+fn the_flatten_walk_enters_no_type() {
+    let mut ty = "boolean".to_owned();
+    for index in 0..600 {
+        ty = format!("T{index} extends string ? {ty} : never");
+    }
+    let source = format!("type Deep = {ty};\nexport const Button = (forwardRef<HTMLButtonElement, Deep>)(() => null);");
+    super::flatten_probes::take();
+    parse_file(Utf8Path::new("/test/deep-conditional.ts"), &source);
+    assert_eq!(super::flatten_probes::take(), 0);
+}
