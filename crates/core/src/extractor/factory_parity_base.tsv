@@ -1096,3 +1096,57 @@ attach-reads: declarator, instantiation, function, different name | plain	Impl:P
 attach-reads: statement, instantiation, function, different name | plain	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" exported as Other.Item | Other:Props"functionDeclaration" exported as Other | Root:Props"functionDeclaration" exported as Root
 attach-reads: assignment, instantiation, function, different name | plain	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" | Other:Props"functionDeclaration" exported as Other | Root:Props"functionDeclaration" exported as Root
 attach-reads: default export, instantiation | plain	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Button' looks like a component built by a wrapper call, but none of its type arguments names a props type declared in this file or ending in Props | Item:ItemProps"functionDeclaration"
+chain: outermost, initializer | plain	Button:Props"forwardRef" exported as Button
+chain: outermost, initializer | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: outermost, default export | plain	Button:Props"forwardRef" exported as default
+chain: outermost, default export | peeled	
+chain: outermost, return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: outermost, return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside memo, initializer | plain	Button:Props"forwardRef" exported as Button
+chain: inside memo, initializer | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside memo, default export | plain	Button:Props"forwardRef" exported as default
+chain: inside memo, default export | peeled	
+chain: inside memo, return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside memo, return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside forwardRef, initializer | plain	Button:Props"forwardRef" exported as Button
+chain: inside forwardRef, initializer | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside forwardRef, default export | plain	Button:Props"forwardRef" exported as default
+chain: inside forwardRef, default export | peeled	
+chain: inside forwardRef, return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside forwardRef, return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside console.log, initializer (finding) | plain	Button:Props"forwardRef" exported as Button
+chain: inside console.log, initializer (finding) | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside console.log, default export | plain	Button:Props"forwardRef" exported as default
+chain: inside console.log, default export | peeled	
+chain: inside console.log, return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside console.log, return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside styled(), initializer | plain	Button:Props"forwardRef" exported as Button
+chain: inside styled(), initializer | peeled	Button:styled"factoryResult" exported as Button via styled
+chain: inside styled(), default export | plain	Button:Props"forwardRef" exported as default
+chain: inside styled(), default export | peeled	
+chain: inside styled(), return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside styled(), return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside a user HOC, initializer | plain	Button:Props"forwardRef" exported as Button
+chain: inside a user HOC, initializer | peeled	Button:withTheme"factoryResult" exported as Button via withTheme
+chain: inside a user HOC, default export | plain	Button:Props"forwardRef" exported as default
+chain: inside a user HOC, default export | peeled	
+chain: inside a user HOC, return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside a user HOC, return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside an IIFE, initializer | plain	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside an IIFE, initializer | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside an IIFE, default export | plain	
+chain: inside an IIFE, default export | peeled	
+chain: inside an IIFE, return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside an IIFE, return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside a ternary, initializer | plain	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside a ternary, initializer | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside a ternary, default export | plain	
+chain: inside a ternary, default export | peeled	
+chain: inside a ternary, return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside a ternary, return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside a logical, initializer | plain	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside a logical, initializer | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+chain: inside a logical, default export | plain	
+chain: inside a logical, default export | peeled	
+chain: inside a logical, return of an arrow | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+chain: inside a logical, return of an arrow | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call

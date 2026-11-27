@@ -5316,6 +5316,222 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "attach-reads: default export, instantiation | plain".to_owned(),
         "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default (Object.assign<object, object>)(Impl, { Item });".to_owned(),
     ));
+    cases.push((
+        "chain: outermost, initializer | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: outermost, initializer | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: outermost, default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: outermost, default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: outermost, return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: outermost, return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside memo, initializer | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = memo(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside memo, initializer | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = memo((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside memo, default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default memo(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside memo, default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default memo((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside memo, return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => memo(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside memo, return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => memo((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside forwardRef, initializer | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = forwardRef(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside forwardRef, initializer | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = forwardRef((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside forwardRef, default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default forwardRef(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside forwardRef, default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default forwardRef((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside forwardRef, return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => forwardRef(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside forwardRef, return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => forwardRef((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside console.log, initializer (finding) | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = console.log(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside console.log, initializer (finding) | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = console.log((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside console.log, default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default console.log(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside console.log, default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default console.log((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside console.log, return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => console.log(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside console.log, return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => console.log((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside styled(), initializer | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = styled(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside styled(), initializer | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = styled((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside styled(), default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default styled(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside styled(), default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default styled((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside styled(), return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => styled(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside styled(), return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => styled((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a user HOC, initializer | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = withTheme(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a user HOC, initializer | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = withTheme((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a user HOC, default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default withTheme(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a user HOC, default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default withTheme((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a user HOC, return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => withTheme(R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a user HOC, return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => withTheme((<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside an IIFE, initializer | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (() => R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')))();".to_owned(),
+    ));
+    cases.push((
+        "chain: inside an IIFE, initializer | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (() => (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')))();".to_owned(),
+    ));
+    cases.push((
+        "chain: inside an IIFE, default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default (() => R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')))();".to_owned(),
+    ));
+    cases.push((
+        "chain: inside an IIFE, default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default (() => (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')))();".to_owned(),
+    ));
+    cases.push((
+        "chain: inside an IIFE, return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => (() => R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')))();".to_owned(),
+    ));
+    cases.push((
+        "chain: inside an IIFE, return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => (() => (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')))();".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a ternary, initializer | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = flag ? R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')) : null;".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a ternary, initializer | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = flag ? (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')) : null;".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a ternary, default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default flag ? R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')) : null;".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a ternary, default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default flag ? (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')) : null;".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a ternary, return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => flag ? R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div')) : null;".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a ternary, return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => flag ? (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div')) : null;".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a logical, initializer | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = flag && R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a logical, initializer | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = flag && (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a logical, default export | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default flag && R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a logical, default export | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport default flag && (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a logical, return of an arrow | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => flag && R.forwardRef<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "chain: inside a logical, return of an arrow | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef, memo } from 'react';\nimport * as R from 'react';\ndeclare function styled(c: unknown): any;\ndeclare function withTheme<T>(c: T): T;\ndeclare const flag: boolean;\nexport const Button = (props: Props) => flag && (<typeof R.forwardRef>R.forwardRef)<HTMLDivElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
     cases
 }
 
@@ -5424,7 +5640,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // main did not read through a peel. Round 45 cut every other peeled callee (`a_peeled_callee_is_read_only_for_the_closed_list`).
     // Round 46, net three more: the closed-list callees behind `<T>x` whose React import is written below, less the two
     // heritage rows a cast base no longer reads (`an_instantiation_is_transparent_and_a_peeled_base_is_cut`).
-    assert_eq!(read_as_the_plain_call, 24);
+    // Round 48 adds six: a peeled `forwardRef` as the whole initializer or default export, or inside `memo` or `forwardRef`
+    // (`a_peeled_call_is_read_only_in_the_closed_wrapper_chain`).
+    assert_eq!(read_as_the_plain_call, 30);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -5484,6 +5702,51 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let peeled = format!("recognition: {row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 48: a closed-list call only a peel exposes is read only in the closed wrapper chain: the whole initializer or
+/// default export, or the direct argument of React's `memo` or `forwardRef`. Inside any other call (`console.log`,
+/// `styled(…)`, a user HOC, an IIFE) or expression it is read as origin/main read it. Each plain form is origin/main's;
+/// a peeled form reads as the plain form only in the chain, and as main read it otherwise.
+#[test]
+fn a_peeled_call_is_read_only_in_the_closed_wrapper_chain() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, chained) in [
+        ("chain: outermost, initializer", true),
+        ("chain: outermost, default export", true),
+        ("chain: outermost, return of an arrow", false),
+        ("chain: inside memo, initializer", true),
+        ("chain: inside memo, default export", true),
+        ("chain: inside memo, return of an arrow", false),
+        ("chain: inside forwardRef, initializer", true),
+        ("chain: inside forwardRef, default export", true),
+        ("chain: inside forwardRef, return of an arrow", false),
+        ("chain: inside console.log, initializer (finding)", false),
+        ("chain: inside console.log, default export", false),
+        ("chain: inside console.log, return of an arrow", false),
+        ("chain: inside styled(), initializer", false),
+        ("chain: inside styled(), default export", false),
+        ("chain: inside styled(), return of an arrow", false),
+        ("chain: inside a user HOC, initializer", false),
+        ("chain: inside a user HOC, default export", false),
+        ("chain: inside a user HOC, return of an arrow", false),
+        ("chain: inside an IIFE, initializer", false),
+        ("chain: inside an IIFE, default export", false),
+        ("chain: inside an IIFE, return of an arrow", false),
+        ("chain: inside a ternary, initializer", false),
+        ("chain: inside a ternary, default export", false),
+        ("chain: inside a ternary, return of an arrow", false),
+        ("chain: inside a logical, initializer", false),
+        ("chain: inside a logical, default export", false),
+        ("chain: inside a logical, return of an arrow", false),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if chained { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
 }

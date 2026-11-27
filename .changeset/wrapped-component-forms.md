@@ -22,6 +22,7 @@ npm/caliper-docgen: patch
   - The component behind such a cast is still found under its own name.
 
 - Limit: through a cast or assertion that origin/main did not read, only React's `forwardRef`, `memo` and `lazy` are recognised, bare or on React's namespace, with the import that binds them. Nothing else written that way counts: a custom wrapper, a factory, `createElement`, Preact's `h`, `createContext`, a hook, a `map`, a `Promise`, or a PascalCase helper. Those calls are read as before, so a component that relies on one is not listed.
+  - Such a call counts only as the whole value of the declaration or default export, or directly inside React's `memo` or `forwardRef`. Inside any other call, such as `console.log(…)`, `styled(…)` or your own HOC, it is read as before.
 
 - Limit: a name read only because a wrapper was looked through counts only when it cannot mean another declaration in the file. Names written plainly are read as before.
   - A member callee written behind a `<T>x` assertion, such as `(<typeof React.forwardRef>React.forwardRef)<R, Props>(…)`, is `forwardRef` only when its receiver resolves to React's import, wherever the import is written in the file.

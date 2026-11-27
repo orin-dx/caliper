@@ -1118,6 +1118,15 @@ impl<'src> SourceDataCollector<'src> {
         )
     }
 
+    /// Whether `inner`, the first argument of `outer`, is read as a link of the closed wrapper chain. A closed-list call
+    /// only a peel exposes (`(<typeof R.forwardRef>R.forwardRef)<…>(…)`) is a link only as the direct argument of another
+    /// closed-list call, React's `forwardRef` or `memo`: inside any other call (`console.log`, `styled(…)`, a user HOC)
+    /// it is read as origin/main read it, invisible. A plain inner call is read as main read it, whatever its caller.
+    fn in_wrapper_chain(&self, outer: &CallExpression<'_>, inner: &CallExpression<'_>) -> bool {
+        called(inner).as_plain().is_some()
+            || matches!(self.react_api(outer), Some(ReactApi::ForwardRef | ReactApi::Memo))
+    }
+
     /// Try to detect: `const Button = anyHOC(function Button(props: ButtonProps) {...})`
     pub(super) fn try_hoc_wrapped<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
@@ -1135,7 +1144,7 @@ impl<'src> SourceDataCollector<'src> {
 
         // `memo(forwardRef(…))`: the props come from forwardRef's type arguments, or from its render function.
         if let Argument::CallExpression(inner) = first_arg {
-            if !self.is_forward_ref_call(inner) {
+            if !self.is_forward_ref_call(inner) || !self.in_wrapper_chain(call, inner) {
                 return None;
             }
             // `forwardRef<Ref, Props>(…)` names the props in its second type argument; otherwise the render function's
