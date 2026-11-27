@@ -414,15 +414,15 @@ const AUGMENTATION_SCAN_FILES: usize = 64;
 /// and the chain starts again.
 pub(crate) const MAX_CHAIN_DEPTH: usize = 8;
 
-/// The depth limit a test sets: the model flattens at every load.
-#[cfg(test)]
-pub(crate) static CHAIN_DEPTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(MAX_CHAIN_DEPTH);
-
-fn chain_depth() -> usize {
+/// The depth limit of `options`' chain: [`MAX_CHAIN_DEPTH`] outside tests.
+fn chain_depth(options: &PipelineOptions) -> usize {
     #[cfg(test)]
-    return CHAIN_DEPTH.load(Ordering::Relaxed);
+    return options.chain_depth;
     #[cfg(not(test))]
-    MAX_CHAIN_DEPTH
+    {
+        let _ = options;
+        MAX_CHAIN_DEPTH
+    }
 }
 
 /// A set of facts as its size and an order-free hash of its members, kept as facts are added.
@@ -1696,7 +1696,7 @@ fn load_with(
     let resolvers = &ModuleResolvers::new(options);
     let project_dirs: Vec<Utf8PathBuf> =
         options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
-    let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < chain_depth()).cloned();
+    let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < chain_depth(options)).cloned();
     let flatten = previous.filter(|_| parent.is_none());
     let mut loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
     loader.ledger.retry = retry;

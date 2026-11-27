@@ -952,6 +952,21 @@ fn flattening_a_chain_keeps_the_panics_an_earlier_layer_contained() {
     assert_eq!(messages, ["dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic"]);
 }
 
+/// The depth limit is the run's own: with `chain_depth` 0 every extension flattens, and a run with the default limit
+/// alongside it keeps its chain.
+#[test]
+fn the_depth_limit_is_each_run_s_own() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let default = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let flat = PipelineOptions { chain_depth: 0, ..default.clone() };
+    let extend = |options: &PipelineOptions| {
+        let first = Arc::new(load(vec![demand(&root, "ui-kit", "B")], options, None));
+        load(vec![demand(&root, "ui-kit", "Tone")], options, Some(&first))
+    };
+    assert_eq!(extend(&flat).depth, 0, "flattened at once");
+    assert_eq!(extend(&default).depth, 1, "a chain of two");
+}
+
 #[test]
 fn chained_layer_and_flatten_resolve_like_one_cold_load() {
     let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);

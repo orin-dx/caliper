@@ -2070,7 +2070,6 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
     for seed in seeds {
         // Odd seeds flatten the chain at every load, which must not change an answer.
         let depth = if seed % 2 == 1 { 0 } else { crate::dependency_types::MAX_CHAIN_DEPTH };
-        crate::dependency_types::CHAIN_DEPTH.store(depth, std::sync::atomic::Ordering::Relaxed);
         let (tmp, root) = model_project(model);
         let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
         let mut next = |bound: usize| -> usize {
@@ -2080,7 +2079,7 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
             (state % bound as u64) as usize
         };
         let mut unreadable: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-        let session = WatchSession::lazy(model.options(&root));
+        let session = WatchSession::lazy(PipelineOptions { chain_depth: depth, ..model.options(&root) });
         let mut log = Vec::new();
         if next(2) == 0 {
             unreadable.insert(names[next(names.len())]);
@@ -2125,7 +2124,8 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
                 }
                 // A new session over the same cache: a cold start from the index on disk.
                 5 => {
-                    run.session = WatchSession::lazy(model.options(&run.root));
+                    run.session =
+                        WatchSession::lazy(PipelineOptions { chain_depth: depth, ..model.options(&run.root) });
                     drop(run.session.initialize());
                     run.asked.clear();
                     edited_since_change = true;
@@ -2173,8 +2173,6 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
             }
         }
     }
-    crate::dependency_types::CHAIN_DEPTH
-        .store(crate::dependency_types::MAX_CHAIN_DEPTH, std::sync::atomic::Ordering::Relaxed);
     if sweep.is_some() {
         return;
     }
