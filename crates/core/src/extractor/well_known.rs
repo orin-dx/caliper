@@ -4,7 +4,10 @@
 //! declaration, from the entry's module. The architecture test below fails when an extractor source outside this module
 //! spells one of these names as a string literal, so a new spelling-based path cannot skip the check.
 
-use oxc_ast::ast::{Argument, AssignmentTarget, CallExpression, Expression, ObjectPropertyKind, PropertyKey};
+use oxc_ast::ast::{
+    Argument, CallExpression, ComputedMemberExpression, Expression, ObjectPropertyKind, PropertyKey,
+    SimpleAssignmentTarget, StaticMemberExpression,
+};
 
 use super::evidence::Scope;
 
@@ -133,16 +136,40 @@ pub(super) const FACTORY_IMPORTS: &[&WellKnown] =
 
 /// The name and key a write to a member targets, for `names::Bindings::writes_to`: `Some(key)` for a key known
 /// statically (`.assign`, `['assign']`, a template literal without substitutions), `None` for one that is not (`[k]`).
-pub(super) fn assignment_write<'a>(target: &AssignmentTarget<'a>) -> Option<(&'a str, Option<&'a str>)> {
+///
+/// Every simple target counts, in a plain, compound or destructuring assignment and in an update, and the target and
+/// its receiver are read through every wrapper: `(Object as typeof Object).assign = …`, `Object!.assign = …` and
+/// `(Object.assign as any) = …` are writes as `Object.assign = …` is.
+pub(super) fn assignment_write<'a>(target: &SimpleAssignmentTarget<'a>) -> Option<(&'a str, Option<&'a str>)> {
     match target {
-        AssignmentTarget::StaticMemberExpression(member) => {
-            object_name(&member.object).map(|object| (object, Some(member.property.name.as_str())))
-        }
-        AssignmentTarget::ComputedMemberExpression(member) => {
-            object_name(&member.object).map(|object| (object, static_key(&member.expression).known()))
-        }
+        SimpleAssignmentTarget::StaticMemberExpression(member) => static_member_write(member),
+        SimpleAssignmentTarget::ComputedMemberExpression(member) => computed_member_write(member),
+        SimpleAssignmentTarget::TSAsExpression(inner) => member_write(&inner.expression),
+        SimpleAssignmentTarget::TSSatisfiesExpression(inner) => member_write(&inner.expression),
+        SimpleAssignmentTarget::TSNonNullExpression(inner) => member_write(&inner.expression),
+        SimpleAssignmentTarget::TSTypeAssertion(inner) => member_write(&inner.expression),
         _ => None,
     }
+}
+
+/// The member an expression writes when it is assigned to or deleted (`delete Object.assign`), read through every
+/// wrapper.
+pub(super) fn member_write<'a>(expr: &Expression<'a>) -> Option<(&'a str, Option<&'a str>)> {
+    match super::component::written_through(expr) {
+        Expression::StaticMemberExpression(member) => static_member_write(member),
+        Expression::ComputedMemberExpression(member) => computed_member_write(member),
+        _ => None,
+    }
+}
+
+fn static_member_write<'a>(member: &StaticMemberExpression<'a>) -> Option<(&'a str, Option<&'a str>)> {
+    object_name(super::component::written_through(&member.object))
+        .map(|object| (object, Some(member.property.name.as_str())))
+}
+
+fn computed_member_write<'a>(member: &ComputedMemberExpression<'a>) -> Option<(&'a str, Option<&'a str>)> {
+    object_name(super::component::written_through(&member.object))
+        .map(|object| (object, static_key(&member.expression).known()))
 }
 
 /// The writes a call makes to a member of a name: `Reflect.set(O, key, …)`, `Reflect.defineProperty(O, key, …)`,

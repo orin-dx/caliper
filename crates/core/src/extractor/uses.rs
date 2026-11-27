@@ -170,14 +170,17 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn trusts_object_assign(&self, parent: &super::names::Named) -> bool {
         match parent {
             super::names::Named::Plain(_) => true,
-            super::names::Named::Peeled(_) => {
-                self.function_depth == 0
-                    && self
-                        .bindings
-                        .global(super::well_known::OBJECT.name)
-                        .is_some_and(|object| !self.bindings.writes_to(&object, "assign"))
-            }
+            super::names::Named::Peeled(_) => self.function_depth == 0 && self.object_assign_is_builtin(),
         }
+    }
+
+    /// Whether `Object.assign` is the built-in: `Object` is the global, and the file writes no member that may be
+    /// `assign` (`Bindings::writes_to`). Consulted for every part of an `Object.assign` call only a peel exposes: the
+    /// callee, the target, a source and a member.
+    pub(super) fn object_assign_is_builtin(&self) -> bool {
+        self.bindings
+            .global(super::well_known::OBJECT.name)
+            .is_some_and(|object| !self.bindings.writes_to(&object, "assign"))
     }
 
     /// The name an argument or member value of an `Object.assign` call is, classified by its own read and never by the
@@ -201,7 +204,8 @@ impl<'src> SourceDataCollector<'src> {
                 self.bindings.named(named.as_str(), super::component::Recognition::Peeled)?
             }
         };
-        (minimal || matches!(named, super::names::Named::Plain(_))).then_some(named)
+        let plain = matches!(named, super::names::Named::Plain(_));
+        (plain || (minimal && self.object_assign_is_builtin())).then_some(named)
     }
 
     /// What an `Object.assign` call's arguments are, read in one place for every consumer: the inline-member scan

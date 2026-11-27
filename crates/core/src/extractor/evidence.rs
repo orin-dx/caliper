@@ -58,6 +58,8 @@ pub(super) trait Scope {
     fn may_be_react(&self, name: &str) -> bool;
     /// Whether a call to this name returns an element: a same-file function declared to return one.
     fn is_element_helper(&self, name: &str) -> bool;
+    /// Whether this module-level function renders by its own declaration or body: see `element_helpers`.
+    fn renders_when_called(&self, name: &str) -> bool;
     /// Whether the call is React's `memo(…)` or `forwardRef(…)`, by where its callee was imported from.
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool;
     /// Whether `h` called bare (`receiver` is `None`) or on `receiver` (`Preact.h`) is Preact's, by where it was
@@ -189,10 +191,14 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         // Rendering nothing is a valid render.
         Expression::NullLiteral(_) => true,
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
-        // A component invoked directly: `return JoinList({ ... })`. Its result is this function's, which may be a
-        // string or a number, so only a cast to a result React cannot render declines it.
+        // A component invoked directly: `return JoinList({ ... })`, by its spelling, for a callee written as origin/main
+        // read it. A callee only a peel exposes (`(MakeToken as typeof MakeToken)()`) needs the evidence any call
+        // needs: a name declared once whose own declaration or body renders (`Scope::renders_when_called`).
+        Expression::CallExpression(call) if callee_name(&call.callee).is_some_and(super::is_pascal_case) => true,
         Expression::CallExpression(call)
-            if super::component::called(call).as_plain().and_then(callee_name).is_some_and(super::is_pascal_case) =>
+            if super::component::called(call).as_plain().and_then(callee_name).is_some_and(|name| {
+                super::is_pascal_case(name) && scope.declarations(name) == 1 && scope.renders_when_called(name)
+            }) =>
         {
             true
         }
@@ -329,7 +335,11 @@ pub(super) fn renders(shape: &FunctionShape<'_, '_>, react: ReactBinding<'_>) ->
 /// Names of module-level functions whose declared return type is an element, which makes a call to them element
 /// evidence: `renderByProp(render, props, <button />)` with `renderByProp(...): React.ReactElement`. Judged on the
 /// declaration alone, so a helper that returns something else without saying so is not counted.
-pub(super) fn element_helpers(program: &Program<'_>) -> FxHashSet<String> {
+///
+/// The second set is the module-level functions that render by their own declaration or body (`renders`): the
+/// evidence a call only a peel exposes needs (`returns_element`), where a spelling alone sufficed for a callee origin/main
+/// read as written.
+pub(super) fn element_helpers(program: &Program<'_>) -> (FxHashSet<String>, FxHashSet<String>) {
     let mut foreign = FxHashSet::default();
     for stmt in &program.body {
         if let Statement::ImportDeclaration(import) = stmt
@@ -388,7 +398,33 @@ pub(super) fn element_helpers(program: &Program<'_>) -> FxHashSet<String> {
             _ => {}
         }
     }
-    helpers
+    let mut rendering = FxHashSet::default();
+    for statement in &program.body {
+        match statement.as_declaration() {
+            Some(Declaration::FunctionDeclaration(f)) => {
+                if let Some(id) = &f.id
+                    && renders(&FunctionShape::of_function(f), &react).is_ok()
+                {
+                    rendering.insert(id.name.to_string());
+                }
+            }
+            Some(Declaration::VariableDeclaration(variables)) => {
+                for declarator in &variables.declarations {
+                    let BindingPattern::BindingIdentifier(id) = &declarator.id else { continue };
+                    let shape = match declarator.init.as_ref().map(Expression::without_parentheses) {
+                        Some(Expression::ArrowFunctionExpression(f)) => FunctionShape::of_arrow(f),
+                        Some(Expression::FunctionExpression(f)) => FunctionShape::of_function(f),
+                        _ => continue,
+                    };
+                    if renders(&shape, &react).is_ok() {
+                        rendering.insert(id.name.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (helpers, rendering)
 }
 
 /// The imports that are not React's, seen before the file is walked.
@@ -412,6 +448,10 @@ impl Scope for Foreign<'_> {
     }
 
     fn is_element_helper(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn renders_when_called(&self, _name: &str) -> bool {
         false
     }
 

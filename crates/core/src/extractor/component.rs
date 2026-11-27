@@ -590,9 +590,16 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileNames<'a> {
         oxc_ast_visit::walk::walk_import_declaration(self, it);
     }
 
-    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        self.writes.extend(super::well_known::assignment_write(&it.left));
-        oxc_ast_visit::walk::walk_assignment_expression(self, it);
+    fn visit_simple_assignment_target(&mut self, it: &SimpleAssignmentTarget<'a>) {
+        self.writes.extend(super::well_known::assignment_write(it));
+        oxc_ast_visit::walk::walk_simple_assignment_target(self, it);
+    }
+
+    fn visit_unary_expression(&mut self, it: &UnaryExpression<'a>) {
+        if it.operator == oxc_syntax::operator::UnaryOperator::Delete {
+            self.writes.extend(super::well_known::member_write(&it.argument));
+        }
+        oxc_ast_visit::walk::walk_unary_expression(self, it);
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {

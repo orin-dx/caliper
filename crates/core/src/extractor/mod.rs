@@ -229,7 +229,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
         .map(|c| OwnedComment { span_start: c.span.start, span_end: c.span.end, is_block: c.is_block() })
         .collect();
     collector.comments = comments;
-    collector.element_helpers = evidence::element_helpers(&ret.program);
+    (collector.element_helpers, collector.rendering_functions) = evidence::element_helpers(&ret.program);
     let names = component::file_names(&ret.program);
     collector.typeof_aliases = component::typeof_aliases(&ret.program, &names);
     collector.bindings = names.into_bindings();
@@ -262,6 +262,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) imported_names: FxHashSet<CompactString>,
     /// Module-level functions declared to return an element: see `evidence::element_helpers`.
     pub(super) element_helpers: FxHashSet<String>,
+    /// Module-level functions that render by their own declaration or body: see `evidence::element_helpers`.
+    pub(super) rendering_functions: FxHashSet<String>,
     /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
     /// What the one binding pass found (`component::FileNames`): the only source of a `names::UniqueName`.
@@ -364,6 +366,7 @@ impl<'src> SourceDataCollector<'src> {
             comments: Vec::new(),
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
+            rendering_functions: FxHashSet::default(),
             typeof_aliases: FxHashMap::default(),
             bindings: names::Bindings::default(),
             consumed_jsdoc: FxHashSet::default(),
@@ -1616,6 +1619,10 @@ impl evidence::Scope for SourceDataCollector<'_> {
 
     fn is_element_helper(&self, name: &str) -> bool {
         self.element_helpers.contains(name)
+    }
+
+    fn renders_when_called(&self, name: &str) -> bool {
+        self.rendering_functions.contains(name)
     }
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {

@@ -518,22 +518,22 @@ fn an_asserted_callee_renders_only_when_the_assertion_leaves_a_named_result() {
         ("(Object as (value: object) => symbol)", false),
         ("(Object as (value: object) => void)", false),
         ("(Object as (value: object) => (object))", false),
-        ("(Object as (value: object) => { id: string })", true),
-        ("(Object as (value: object) => unknown[])", true),
-        ("(Object as (value: object) => object | null)", true),
-        ("(Object as (value: object) => object & React.ReactElement)", true),
-        ("(Object as unknown as (value: object) => string)", true),
-        ("(Object as (value: object) => number)", true),
-        ("(Object as (value: object) => boolean)", true),
-        ("(Object as (value: object) => string | null)", true),
-        ("(Object as (value: object) => null)", true),
-        ("(Object as (value: object) => string | object)", true),
-        ("(Object as (value: object) => string[])", true),
-        ("(Object as (value: object) => React.ReactElement)", true),
-        ("(Object as (value: object) => React.ReactElement | null)", true),
-        ("(Object as F)", true),
-        ("(Object as typeof Object)", true),
-        ("(Object as any)", true),
+        ("(Object as (value: object) => { id: string })", false),
+        ("(Object as (value: object) => unknown[])", false),
+        ("(Object as (value: object) => object | null)", false),
+        ("(Object as (value: object) => object & React.ReactElement)", false),
+        ("(Object as unknown as (value: object) => string)", false),
+        ("(Object as (value: object) => number)", false),
+        ("(Object as (value: object) => boolean)", false),
+        ("(Object as (value: object) => string | null)", false),
+        ("(Object as (value: object) => null)", false),
+        ("(Object as (value: object) => string | object)", false),
+        ("(Object as (value: object) => string[])", false),
+        ("(Object as (value: object) => React.ReactElement)", false),
+        ("(Object as (value: object) => React.ReactElement | null)", false),
+        ("(Object as F)", false),
+        ("(Object as typeof Object)", false),
+        ("(Object as any)", false),
         ("Object", true),
     ];
     for (callee, renders) in rows {
@@ -1385,6 +1385,9 @@ fn every_detection_main_did_not_make_is_an_identity_cast_or_a_known_react_wrappe
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
     let summary: Vec<String> = by_reason.iter().map(|(reason, n)| format!("{reason} = {n}")).collect();
+    // Round 40 drops the PascalCase call's 8 identity casts and 93 casts read as main's plain call: the callee is the
+    // global `Object`, which has no declaration that renders, so through a cast it is no element evidence and every cast
+    // row reads as main read it (`a_peeled_part_relies_on_the_built_in_and_on_render_evidence`).
     assert_eq!(
         summary,
         [
@@ -1392,14 +1395,12 @@ fn every_detection_main_did_not_make_is_an_identity_cast_or_a_known_react_wrappe
             "closed list declines the wrapper, so the component it wraps is listed: wrapper call = 11",
             "identity cast: Object.assign = 12",
             "identity cast: Object.assign argument = 8",
-            "identity cast: PascalCase call returned = 8",
             "identity cast: class = 12",
             "identity cast: element factory = 8",
             "known React wrapper or API: class = 126",
             "known React wrapper or API: element factory = 93",
             "read as main's own plain call: Object.assign = 111",
             "read as main's own plain call: Object.assign argument = 93",
-            "read as main's own plain call: PascalCase call returned = 93",
         ]
     );
 }
@@ -3497,6 +3498,422 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "callees: a foreign forwardRef beside React's import (finding 3) | peeled".to_owned(),
         "// ts\nimport { createElement, forwardRef } from 'react';\nimport * as codec from './codec';\nexport const Button = (<typeof codec.forwardRef>codec.forwardRef)<HTMLButtonElement, Props>('button');".to_owned(),
     ));
+    cases.push((
+        "builtin: no write, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: no write, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: no write, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: no write, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: no write, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: no write, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: no write, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: no write, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a direct write, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a direct write, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a direct write, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a direct write, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => target;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a direct write, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a direct write, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => target;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a direct write, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a direct write, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a computed write, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject['assign'] = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a computed write, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject['assign'] = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a computed write, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject['assign'] = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a computed write, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject['assign'] = (target: object) => target;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a computed write, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject['assign'] = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a computed write, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject['assign'] = (target: object) => target;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a computed write, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject['assign'] = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a computed write, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject['assign'] = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through an as receiver (finding 1), peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object as typeof Object).assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through an as receiver (finding 1), peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object as typeof Object).assign = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through an as receiver (finding 1), peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object as typeof Object).assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through an as receiver (finding 1), peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object as typeof Object).assign = (target: object) => target;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through an as receiver (finding 1), peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object as typeof Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through an as receiver (finding 1), peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object as typeof Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through an as receiver (finding 1), peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object as typeof Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through an as receiver (finding 1), peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object as typeof Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a <T> receiver, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(<typeof Object>Object).assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a <T> receiver, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(<typeof Object>Object).assign = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a <T> receiver, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(<typeof Object>Object).assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a <T> receiver, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(<typeof Object>Object).assign = (target: object) => target;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a <T> receiver, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(<typeof Object>Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a <T> receiver, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(<typeof Object>Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a <T> receiver, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(<typeof Object>Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a <T> receiver, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(<typeof Object>Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a non-null receiver, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject!.assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a non-null receiver, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject!.assign = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a non-null receiver, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject!.assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a non-null receiver, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject!.assign = (target: object) => target;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a non-null receiver, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject!.assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a non-null receiver, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject!.assign = (target: object) => target;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a non-null receiver, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject!.assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a non-null receiver, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject!.assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a parenthesized receiver, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object).assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a parenthesized receiver, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object).assign = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a parenthesized receiver, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object).assign = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a parenthesized receiver, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object).assign = (target: object) => target;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a parenthesized receiver, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a parenthesized receiver, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a parenthesized receiver, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write through a parenthesized receiver, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object).assign = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write to a cast target, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as any) = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write to a cast target, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as any) = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write to a cast target, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as any) = (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write to a cast target, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as any) = (target: object) => target;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write to a cast target, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as any) = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write to a cast target, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as any) = (target: object) => target;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write to a cast target, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as any) = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a write to a cast target, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n(Object.assign as any) = (target: object) => target;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a compound write, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign ||= (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a compound write, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign ||= (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a compound write, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign ||= (target: object) => target;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a compound write, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign ||= (target: object) => target;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a compound write, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign ||= (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a compound write, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign ||= (target: object) => target;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a compound write, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign ||= (target: object) => target;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a compound write, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign ||= (target: object) => target;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a destructuring write, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n({ assign: Object.assign } = { assign: (target: object) => target });\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a destructuring write, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n({ assign: Object.assign } = { assign: (target: object) => target });\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a destructuring write, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n({ assign: Object.assign } = { assign: (target: object) => target });\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a destructuring write, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n({ assign: Object.assign } = { assign: (target: object) => target });\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a destructuring write, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n({ assign: Object.assign } = { assign: (target: object) => target });\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a destructuring write, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n({ assign: Object.assign } = { assign: (target: object) => target });\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a destructuring write, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n({ assign: Object.assign } = { assign: (target: object) => target });\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a destructuring write, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n({ assign: Object.assign } = { assign: (target: object) => target });\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: an array destructuring write, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n[Object.assign] = [(target: object) => target];\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: an array destructuring write, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n[Object.assign] = [(target: object) => target];\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: an array destructuring write, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n[Object.assign] = [(target: object) => target];\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: an array destructuring write, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n[Object.assign] = [(target: object) => target];\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: an array destructuring write, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n[Object.assign] = [(target: object) => target];\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: an array destructuring write, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n[Object.assign] = [(target: object) => target];\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: an array destructuring write, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n[Object.assign] = [(target: object) => target];\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: an array destructuring write, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\n[Object.assign] = [(target: object) => target];\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a delete, peeled call | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\ndelete (Object as any).assign;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a delete, peeled call | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\ndelete (Object as any).assign;\n(Object.assign as typeof Object.assign)(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a delete, peeled member | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\ndelete (Object as any).assign;\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a delete, peeled member | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\ndelete (Object as any).assign;\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a delete, peeled source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\ndelete (Object as any).assign;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a delete, peeled source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\ndelete (Object as any).assign;\nexport const Public = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a delete, peeled member, bound (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\ndelete (Object as any).assign;\nexport const Public = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "builtin: a delete, peeled member, bound (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction Impl(props: Props) { return createElement('div'); }\ndelete (Object as any).assign;\nexport const Public = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "pascal: a function returning a symbol (finding 3) | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeToken(): symbol { return Symbol(); }\nexport const Button = (props: Props) => MakeToken();".to_owned(),
+    ));
+    cases.push((
+        "pascal: a function returning a symbol (finding 3) | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeToken(): symbol { return Symbol(); }\nexport const Button = (props: Props) => (MakeToken as typeof MakeToken)();".to_owned(),
+    ));
+    cases.push((
+        "pascal: a helper declared to return an element | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard(): React.ReactElement { return <div />; }\nexport const Button = (props: Props) => MakeCard();".to_owned(),
+    ));
+    cases.push((
+        "pascal: a helper declared to return an element | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard(): React.ReactElement { return <div />; }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
+    ));
+    cases.push((
+        "pascal: a helper of a name declared twice | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard(): React.ReactElement { return <div />; }\nnamespace N { export const MakeCard = 1; }\nexport const Button = (props: Props) => MakeCard();".to_owned(),
+    ));
+    cases.push((
+        "pascal: a helper of a name declared twice | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard(): React.ReactElement { return <div />; }\nnamespace N { export const MakeCard = 1; }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
+    ));
+    cases.push((
+        "pascal: a function without a return type | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard() { return <div />; }\nexport const Button = (props: Props) => MakeCard();".to_owned(),
+    ));
+    cases.push((
+        "pascal: a function without a return type | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard() { return <div />; }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
+    ));
     cases
 }
 
@@ -3625,7 +4042,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // member assigned through `<T>x` to a parent declared once (`a_peeled_name_relies_on_a_parent_and_receiver_that_resolve`).
     // Round 39 adds eleven: a well-known member callee behind `<T>x` whose receiver resolves, and an escaped key that is
     // another member (`a_peeled_child_relies_on_the_whole_call_its_key_and_its_receiver`).
-    assert_eq!(read_as_the_plain_call, 74);
+    // Round 40 adds six: a cast `Object.assign` part with no write to it in four contexts, and a PascalCase callee behind a
+    // cast whose declaration renders by its return type or body (`a_peeled_part_relies_on_the_built_in_and_on_render_evidence`).
+    assert_eq!(read_as_the_plain_call, 80);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -3687,6 +4106,84 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
+}
+
+/// Round 40: any part of an `Object.assign` call only a peel exposes (the callee, a member, a source) counts only while
+/// `Object.assign` is the built-in, and a write to it counts in every form: through a wrapped receiver or target, as a
+/// compound or destructuring assignment, or a `delete`. A PascalCase call is an element by its spelling only as origin/main
+/// read the callee; a callee only a peel exposes needs an element helper its name resolves to. Each plain form is
+/// origin/main's; a peeled form reads as the plain form only where the evidence holds, and as origin/main read it
+/// otherwise.
+#[test]
+fn a_peeled_part_relies_on_the_built_in_and_on_render_evidence() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    let mut failures = Vec::new();
+    for (row, holds) in [
+        ("builtin: no write, peeled call", true),
+        ("builtin: no write, peeled member", true),
+        ("builtin: no write, peeled source", true),
+        ("builtin: no write, peeled member, bound (finding 2)", true),
+        ("builtin: a direct write, peeled call", false),
+        ("builtin: a direct write, peeled member", false),
+        ("builtin: a direct write, peeled source", false),
+        ("builtin: a direct write, peeled member, bound (finding 2)", false),
+        ("builtin: a computed write, peeled call", false),
+        ("builtin: a computed write, peeled member", false),
+        ("builtin: a computed write, peeled source", false),
+        ("builtin: a computed write, peeled member, bound (finding 2)", false),
+        ("builtin: a write through an as receiver (finding 1), peeled call", false),
+        ("builtin: a write through an as receiver (finding 1), peeled member", false),
+        ("builtin: a write through an as receiver (finding 1), peeled source", false),
+        ("builtin: a write through an as receiver (finding 1), peeled member, bound (finding 2)", false),
+        ("builtin: a write through a <T> receiver, peeled call", false),
+        ("builtin: a write through a <T> receiver, peeled member", false),
+        ("builtin: a write through a <T> receiver, peeled source", false),
+        ("builtin: a write through a <T> receiver, peeled member, bound (finding 2)", false),
+        ("builtin: a write through a non-null receiver, peeled call", false),
+        ("builtin: a write through a non-null receiver, peeled member", false),
+        ("builtin: a write through a non-null receiver, peeled source", false),
+        ("builtin: a write through a non-null receiver, peeled member, bound (finding 2)", false),
+        ("builtin: a write through a parenthesized receiver, peeled call", false),
+        ("builtin: a write through a parenthesized receiver, peeled member", false),
+        ("builtin: a write through a parenthesized receiver, peeled source", false),
+        ("builtin: a write through a parenthesized receiver, peeled member, bound (finding 2)", false),
+        ("builtin: a write to a cast target, peeled call", false),
+        ("builtin: a write to a cast target, peeled member", false),
+        ("builtin: a write to a cast target, peeled source", false),
+        ("builtin: a write to a cast target, peeled member, bound (finding 2)", false),
+        ("builtin: a compound write, peeled call", false),
+        ("builtin: a compound write, peeled member", false),
+        ("builtin: a compound write, peeled source", false),
+        ("builtin: a compound write, peeled member, bound (finding 2)", false),
+        ("builtin: a destructuring write, peeled call", false),
+        ("builtin: a destructuring write, peeled member", false),
+        ("builtin: a destructuring write, peeled source", false),
+        ("builtin: a destructuring write, peeled member, bound (finding 2)", false),
+        ("builtin: an array destructuring write, peeled call", false),
+        ("builtin: an array destructuring write, peeled member", false),
+        ("builtin: an array destructuring write, peeled source", false),
+        ("builtin: an array destructuring write, peeled member, bound (finding 2)", false),
+        ("builtin: a delete, peeled call", false),
+        ("builtin: a delete, peeled member", false),
+        ("builtin: a delete, peeled source", false),
+        ("builtin: a delete, peeled member, bound (finding 2)", false),
+        ("pascal: a function returning a symbol (finding 3)", false),
+        ("pascal: a helper declared to return an element", true),
+        ("pascal: a helper of a name declared twice", false),
+        // Its body renders: the evidence a callee only a peel exposes needs.
+        ("pascal: a function without a return type", true),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
+        let now = factory_parity_output(&cases[&peeled]);
+        if now != expected {
+            failures.push(format!("{peeled}:\n  expected {expected}\n  now      {now}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Round 39: a child only a peel exposes (an object, a member, a target) is recorded only in an `Object.assign` of the
