@@ -630,6 +630,13 @@ impl DependencyLayer {
         self.missing_at(demands, Retry::Always)
     }
 
+    /// Those of `demands` the chain has not followed.
+    pub(crate) fn unfollowed(&self, demands: &[Demand]) -> Vec<Demand> {
+        #[cfg(test)]
+        UNFOLLOWED_CHECKS.with(|checks| checks.set(checks.get() + demands.len()));
+        demands.iter().filter(|demand| !self.has_demand(&demand.key())).cloned().collect()
+    }
+
     /// [`Self::missing`], following again only the unread walks that are due under `retry`.
     pub(crate) fn missing_at(&self, demands: &[Demand], retry: Retry) -> Vec<Demand> {
         demands
@@ -1402,6 +1409,12 @@ impl Loader<'_> {
         self.packages.insert(Box::from(dir.as_str()), found.clone());
         found
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many demands this thread asked [`DependencyLayer::unfollowed`] about.
+    pub(crate) static UNFOLLOWED_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

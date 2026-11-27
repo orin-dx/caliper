@@ -315,7 +315,8 @@ impl SemanticHook {
     }
 
     /// The kept answer for `key`, else the request in flight for it (raised to `priority` when that goes first), else
-    /// what the checker said when it last answered nothing for it within [`DEGRADED_RETRY`], else a new request this
+    /// what the checker said when it last answered nothing for it, or for every component (an outage), within
+    /// [`DEGRADED_RETRY`], else a new request this
     /// caller makes, registered so the next caller joins it. One lock, so two callers never both ask. A file that could
     /// not be read has no key: its request is neither kept nor joined.
     fn find(&self, key: Option<&(String, u64)>, priority: Priority) -> (Found, u64) {
@@ -325,6 +326,12 @@ impl SemanticHook {
         if let Some(key) = key {
             if let Some(cached) = cache.answers.get(key) {
                 return (Found::Cached(cached.clone()), generation);
+            }
+            // A request already made is joined whatever happened since: an outage or a refusal stops new requests,
+            // not one the checker may still answer.
+            if let Some(pending) = cache.pending.get(key) {
+                pending.priority.raise_to(priority);
+                return (Found::Joined(pending.clone()), generation);
             }
             match cache.degraded.get(key) {
                 Some((at, said)) if now.saturating_duration_since(*at) < DEGRADED_RETRY => {
@@ -339,10 +346,6 @@ impl SemanticHook {
                 }
                 Some(_) => cache.outage = None,
                 None => {}
-            }
-            if let Some(pending) = cache.pending.get(key) {
-                pending.priority.raise_to(priority);
-                return (Found::Joined(pending.clone()), generation);
             }
         }
         let pending = Arc::new(Pending::new(priority));
@@ -848,6 +851,45 @@ mod tests {
         assert_eq!(*checker.asked.lock().unwrap(), ["Button", "Card"], "the unrelated component is asked");
         assert!(!warned(&card), "and answered by the checker: {:?}", card.diagnostics);
         assert!(card.diagnostics.iter().any(|d| d.message.contains("resolved by the TypeScript checker")));
+    }
+
+    /// An outage stops new requests, not one already made: `Card` is asked, then `Button`'s request reports the checker
+    /// down. A second caller for `Card` joins its request instead of taking the outage, while `Other` is refused
+    /// without asking; once `Card`'s request answers, the next caller has the checker's props.
+    #[test]
+    fn an_outage_lets_a_caller_join_a_request_already_in_flight() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(root.join("Button.tsx"), BUTTON).unwrap();
+        std::fs::write(root.join("Card.tsx"), CARD).unwrap();
+        std::fs::write(root.join("Other.tsx"), "export function Other(props: { o: string }) { return null; }").unwrap();
+        let options = crate::pipeline::PipelineOptions { src_dirs: vec![root], ..Default::default() };
+        let structural = crate::pipeline::WatchSession::lazy(options.clone());
+        drop(structural.initialize());
+        let cx = CollapseContext::of(&options);
+        let checker = Arc::new(Holding::default());
+        let hook = SemanticHook::new(checker.clone(), Duration::ZERO);
+        let ask = |key: &str| {
+            hook.refine(structural.component(key).unwrap(), options.html_attributes, cx, Priority::Background)
+        };
+        let outage = |answer: &ComponentAnswer| {
+            answer
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Warning && d.code == DiagnosticCode::SemanticBackend)
+        };
+        drop(ask("Card"));
+        drop(ask("Button"));
+        let button = checker.0.lock().unwrap()[1].2.take().unwrap();
+        button.deliver(Some(SemanticOutcome::unavailable("no tsc in this test")));
+        let joined = ask("Card");
+        assert!(!outage(&joined), "the second caller joins Card's request: {:?}", joined.diagnostics);
+        assert!(outage(&ask("Other")), "a new request is refused during the outage");
+        let asked: Vec<String> = checker.asked().into_iter().map(|(key, _, _)| key).collect();
+        assert_eq!(asked, ["Card", "Button"], "neither the joined caller nor Other asked");
+        checker.answer(0);
+        let answered = ask("Card");
+        assert!(answered.entry.props.contains_key("label"), "the checker's answer: {:?}", answered.entry.props.keys());
     }
 
     /// What [`Replies`] answers while the checker has not recovered.

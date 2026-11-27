@@ -131,6 +131,19 @@ impl std::ops::Deref for SharedDemands {
 }
 
 impl Lazy {
+    /// The revision's shared demands `layer` has not followed, once per layer.
+    fn shared_unfollowed(&self, layer: &DependencyLayer) -> Arc<[Demand]> {
+        let mut held = self.shared_unfollowed.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let list = match held.as_ref() {
+            Some((at, list)) if *at == layer.id() => return list.clone(),
+            Some((_, list)) => layer.unfollowed(list),
+            None => layer.unfollowed(&self.shared),
+        };
+        let list: Arc<[Demand]> = Arc::from(list);
+        *held = Some((layer.id(), list.clone()));
+        list
+    }
+
     /// Drops `id`'s kept answer and records it for the next revision's delta: the one way an answer leaves.
     fn evict(&self, id: &ComponentId) {
         self.memo.remove(id);
@@ -270,6 +283,9 @@ pub(super) struct Lazy {
     /// answer: an answer is kept only if the engine it was resolved against is still the published one, so one
     /// resolved before a publication cannot be put back after the publication dropped what it would have dropped.
     publication: Mutex<()>,
+    /// The shared demands the layer (by id) has not followed. A layer only grows within a revision, so the next
+    /// layer's list is filtered from the last one's, not from every shared demand.
+    shared_unfollowed: Mutex<Option<(u64, Arc<[Demand]>)>>,
     /// The failed reads the project's live demands reach, for the layer they were derived from: every answer read
     /// against that layer reports the same ones, so they are derived once per layer, not once per answer.
     live_warnings: Mutex<Option<LiveWarnings>>,
@@ -318,6 +334,9 @@ pub(super) struct Lazy {
     /// Run once by the next resolution between resolving and keeping its answer, for tests.
     #[cfg(test)]
     before_keep: Mutex<Option<Between>>,
+    /// Run once by the next edit's revision just before it reads this one's layer and answers, for tests.
+    #[cfg(test)]
+    before_snapshot: Mutex<Option<Between>>,
 }
 
 /// A layer, and what the shared demands lead to in it ([`Lazy::shared_unread`]).
@@ -532,6 +551,7 @@ impl Revision {
             engine: ArcSwap::from_pointee(engine),
             growing: Mutex::new(()),
             publication: Mutex::new(()),
+            shared_unfollowed: Mutex::new(None),
             live_warnings: Mutex::new(None),
             #[cfg(test)]
             live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
@@ -559,6 +579,8 @@ impl Revision {
             between: Mutex::new(None),
             #[cfg(test)]
             before_keep: Mutex::new(None),
+            #[cfg(test)]
+            before_snapshot: Mutex::new(None),
         };
         Revision {
             id,
@@ -644,6 +666,13 @@ impl Revision {
             true => previous.shared.clone(),
             false => shared_demands(file_demands.values().map(|demands| demands.as_ref())),
         };
+        #[cfg(test)]
+        if let Some(step) = previous.before_snapshot.lock().ok().and_then(|mut step| step.take()) {
+            step(self);
+        }
+        // The layer and the answers kept over it are read together, as one publication left them: a request that
+        // publishes between two separate reads would carry an answer resolved against a layer the revision lacks.
+        let published = previous.publication.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let layer = previous.engine.load().layer.clone();
         let shared_now = shared.fingerprint;
         let mut touched: FxHashSet<String> = FxHashSet::default();
@@ -666,6 +695,7 @@ impl Revision {
         let held = previous.provisional.iter().map(|entry| entry.key().clone());
         let dropped = previous.dropped.iter().map(|entry| entry.key().clone());
         touch(held.chain(dropped), &mut touched, &mut affected_files);
+        drop(published);
         // A name the changed file declared before or after keeps no memo, but its keys can still move.
         for groups in [&previous.by_name, &by_name] {
             for (name, group) in groups {
@@ -723,6 +753,7 @@ impl Revision {
                 engine: ArcSwap::from_pointee(engine),
                 growing: Mutex::new(()),
                 publication: Mutex::new(()),
+                shared_unfollowed: Mutex::new(None),
                 live_warnings: Mutex::new(None),
                 #[cfg(test)]
                 live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
@@ -751,6 +782,8 @@ impl Revision {
                 between: Mutex::new(None),
                 #[cfg(test)]
                 before_keep: Mutex::new(None),
+                #[cfg(test)]
+                before_snapshot: Mutex::new(None),
             }),
         };
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -764,6 +797,8 @@ impl Revision {
         let start = Instant::now();
         let next = Revision::cold_lazy(options, self.id + 1);
         let (mut touched, mut affected_files) = (FxHashSet::default(), Vec::new());
+        // Every answer given out so far, read in one go so none kept meanwhile is missed.
+        let _published = previous.publication.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let memo = previous.memo.iter().map(|entry| entry.key().clone());
         let provisional = previous.provisional.iter().map(|entry| entry.key().clone());
         let provisional = provisional.chain(previous.dropped.iter().map(|entry| entry.key().clone()));
@@ -868,7 +903,7 @@ impl Revision {
                     // A module an edit imported anew gives its augmentations from the next answer that reads them:
                     // the revision's shared demands the layer has not followed are loaded first.
                     if depends_on.reads_augmentations {
-                        missing.extend(layer.missing_at(&lazy.shared, retry));
+                        missing.extend(lazy.shared_unfollowed(layer).iter().cloned());
                     }
                     if let Some(walks) = &shared
                         && !walks.holds(layer, lazy.moment())
@@ -1794,6 +1829,99 @@ mod read_retry_tests {
         "import * as React from 'react';\ninterface BoxProps extends React.AriaAttributes { own?: boolean }\n\
          export const Box = (props: BoxProps) => <div />;\n",
     );
+
+    /// The shared demands a layer has not followed are derived once per layer, not per answer: 200 readers of React's
+    /// augmentations, each in its own directory importing `aug-kit`, all asked once, check each shared demand a
+    /// bounded number of times.
+    #[test]
+    fn the_unfollowed_shared_demands_are_derived_once_per_layer() {
+        let mut files: Vec<(String, String)> = vec![
+            (
+                "node_modules/aug-kit/package.json".into(),
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
+            ),
+            (
+                "node_modules/aug-kit/index.d.ts".into(),
+                "declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\nexport {};\n".into(),
+            ),
+        ];
+        for n in 0..200 {
+            files.push((
+                format!("src/c{n}/C{n}.tsx"),
+                format!(
+                    "import * as React from 'react';\nimport * as Aug from 'aug-kit';\nexport const aug{n} = Aug;\n\
+                     interface P{n} extends React.AriaAttributes {{ own{n}?: boolean }}\n\
+                     export const C{n} = (props: P{n}) => <div />;\n"
+                ),
+            ));
+        }
+        let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+        let (_tmp, root) = react_fixture(&files);
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let revision = Revision::cold_lazy(&options, 0);
+        let shared = revision.lazy.as_ref().unwrap().shared.len();
+        assert!(shared >= 200, "{shared} shared demands");
+        crate::dependency_types::UNFOLLOWED_CHECKS.with(|checks| checks.set(0));
+        for n in 0..200 {
+            assert!(
+                props(&revision.lazy_component(&options, &format!("C{n}")).unwrap()).contains(&"aria-tw".to_owned())
+            );
+        }
+        let checks = crate::dependency_types::UNFOLLOWED_CHECKS.with(std::cell::Cell::get);
+        assert!(checks <= 200 + 2 * shared, "{checks} checks for 200 answers over {shared} shared demands");
+    }
+
+    /// An edit reads the old layer and the answers kept over it in one go: `Box`, a reader of React's augmentations,
+    /// is provisional while `aug-kit`'s search cannot read `bad`. `bad` reads and the retry is due; an edit to `Plain`
+    /// starts, and just before it reads the old revision, a request there publishes the recovered augmentation and
+    /// keeps `Box`. The next revision answers `Box` and `First`, a reader that was never asked, as a fresh session.
+    #[test]
+    fn an_edit_reads_the_layer_and_the_kept_answers_together() {
+        let (_tmp, root) = react_fixture(&[
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+            (
+                "node_modules/aug-kit/aug.d.ts",
+                "declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\nexport {};\n",
+            ),
+            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
+            ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+            BOX,
+            (
+                "src/first/First.tsx",
+                "import * as React from 'react';\ninterface FirstProps extends React.AriaAttributes { first?: boolean }\n\
+                 export const First = (props: FirstProps) => <div />;\n",
+            ),
+        ]);
+        let bad = root.join("node_modules/aug-kit/bad.d.ts");
+        std::fs::write(&bad, [0xff; 8]).unwrap();
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        drop(revision.lazy_component(&options, "Box").unwrap());
+        std::fs::write(&bad, "export {};\n").unwrap();
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let box_options = options.clone();
+        *revision.lazy.as_ref().unwrap().before_snapshot.lock().unwrap() =
+            Some(Box::new(move |revision: &Revision| {
+                assert!(props(&revision.lazy_component(&box_options, "Box").unwrap()).contains(&"aria-tw".to_owned()));
+            }));
+        let plain = root.join("src/plain/Plain.tsx");
+        std::fs::write(&plain, "export function Plain(props: { title: string; more: string }) { return null; }\n")
+            .unwrap();
+        let next = revision.next_lazy(&options, &plain).unwrap().0;
+        let fresh = Revision::cold_lazy(&options, 0);
+        for name in ["Box", "First"] {
+            let answer = next.lazy_component(&options, name).unwrap();
+            assert!(answer == fresh.lazy_component(&options, name).unwrap(), "{name}: {:?}", props(&answer));
+        }
+    }
 
     /// An answer a growth drops is named by the next edit: `Box` is memoized; `Card`'s walk then meets an unreadable
     /// `base.d.ts` that merges `aria-card` into React, and the growth drops `Box`. Once `base` reads, an unrelated edit
