@@ -83,13 +83,14 @@ fn minimal_object_assign(call: &CallExpression<'_>) -> bool {
 
 /// The roles of an `Object.assign` call's arguments ([`SourceDataCollector::assign_roles`]).
 pub(super) struct AssignRoles<'b, 'a> {
-    pub(super) recognition: super::component::Recognition,
     /// The first argument's name, the object the call returns.
     pub(super) target: Option<super::names::Named>,
     /// The names the call's result is an alias of.
     pub(super) aliases: Vec<super::names::Named>,
-    /// The object literals whose members are attached.
-    pub(super) objects: Vec<&'b ObjectExpression<'a>>,
+    /// The object literals whose members are attached, each with its own read: `Plain` only when origin/main read the
+    /// call and the literal (`component::main_peel`); one only a peel exposes (`<const>{ Item }`) makes its members
+    /// `Peeled`.
+    pub(super) objects: Vec<(&'b ObjectExpression<'a>, super::component::Recognition)>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -177,14 +178,23 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// An identifier member of an `Object.assign` call: as written for a `Plain` call, for a `Peeled` one only when the
-    /// file declares it exactly once, as a second declaration may be the one export propagation finds.
+    /// The name an argument or member value of an `Object.assign` call is, classified by its own read and never by the
+    /// call's (`peeled::value_name`): `Plain` only when origin/main read the call and that value as the identifier it
+    /// is. A value only a peel exposes, or any value of a call main never read, only when the file declares the name
+    /// exactly once, as a second declaration may be the one export propagation finds. A plain call never upgrades a
+    /// peeled child.
     pub(super) fn trusted_member(
         &self,
         recognition: super::component::Recognition,
-        member: &str,
+        value: &Expression<'_>,
     ) -> Option<super::names::Named> {
-        self.bindings.named(member, recognition)
+        let named = super::peeled::value_name(value, &self.bindings)?;
+        match recognition {
+            super::component::Recognition::Plain => Some(named),
+            super::component::Recognition::Peeled => {
+                self.bindings.named(named.as_str(), super::component::Recognition::Peeled)
+            }
+        }
     }
 
     /// What an `Object.assign` call's arguments are, read in one place for every consumer: the inline-member scan
@@ -207,10 +217,14 @@ impl<'src> SourceDataCollector<'src> {
         if peeled && !minimal_object_assign(call) {
             return None;
         }
-        let target = match call.arguments.first().and_then(read) {
-            Some(Expression::Identifier(target)) => self.bindings.named(target.name.as_str(), recognition),
-            _ => None,
-        };
+        // The target by its own read: one only a peel exposes (`<typeof Root>Root`) counts, in a plain call too, only as
+        // a name declared once at module level, as for a call main never read.
+        let target = call
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .and_then(|first| self.trusted_member(recognition, first))
+            .filter(|target| matches!(target, super::names::Named::Plain(_)) || self.trusts_object_assign(target));
         if peeled {
             let parent = match parent {
                 Some(parent) => self.bindings.named(parent.as_str(), recognition)?,
@@ -241,11 +255,19 @@ impl<'src> SourceDataCollector<'src> {
                     };
                     aliases.extend(alias);
                 }
-                Some(Expression::ObjectExpression(object)) => objects.push(&**object),
+                Some(Expression::ObjectExpression(object)) => {
+                    let main_read = argument.as_expression().is_some_and(|value| {
+                        matches!(super::component::main_peel(value), Expression::ObjectExpression(_))
+                    });
+                    let own = if main_read { recognition } else { super::component::Recognition::Peeled };
+                    objects.push((&**object, own));
+                }
+                // A target only a peel exposes is what the call returns, as `target` vouches for it.
+                _ if position == 0 => aliases.extend(target.clone().filter(|_| !inline)),
                 _ => {}
             }
         }
-        Some(AssignRoles { recognition, target, aliases, objects })
+        Some(AssignRoles { target, aliases, objects })
     }
 
     /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is
@@ -264,13 +286,11 @@ impl<'src> SourceDataCollector<'src> {
                 property: None,
             });
         }
-        for object in &roles.objects {
+        for &(object, recognition) in &roles.objects {
             for property in &object.properties {
                 let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
                 let Some(key) = property.key.static_name() else { continue };
-                if let Expression::Identifier(sub) = super::peeled::read_value(&property.value)
-                    && let Some(sub) = self.trusted_member(roles.recognition, sub.name.as_str())
-                {
+                if let Some(sub) = self.trusted_member(recognition, &property.value) {
                     self.record_attached(Subject::local(sub.as_str()), parent, &super::js_text::property_name(&key));
                 }
             }
@@ -285,7 +305,15 @@ impl<'src> SourceDataCollector<'src> {
         // The assigned value, read only through a wrapper origin/main did not read (`<number>Item`), only as the one
         // declaration its name can mean (`value_name`).
         let Some(sub) = super::peeled::value_name(&assignment.right, &self.bindings) else { return };
-        let parent = super::names::Named::plain(parent.name.as_str());
+        // A value only a peel exposes attaches only to a parent that resolves too: export propagation finds the parent by
+        // its bare name, and a parameter of that name is a second declaration.
+        let parent = match sub {
+            super::names::Named::Plain(_) => super::names::Named::plain(parent.name.as_str()),
+            super::names::Named::Peeled(_) => match self.bindings.unique(parent.name.as_str()) {
+                Some(parent) => super::names::Named::Peeled(parent),
+                None => return,
+            },
+        };
         self.record_attached(Subject::local(sub.as_str()), &parent, target.property.name.as_str());
     }
 

@@ -403,3 +403,126 @@ sealed: a destructured import shadowed by a namespace local (finding 4) | plain
 sealed: a destructured import shadowed by a namespace local (finding 4) | peeled	
 sealed: a destructured import declared once | plain	
 sealed: a destructured import declared once | peeled	
+writes: a later source replaces assign (finding 1) | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+writes: a later source replaces assign (finding 1) | peeled	Root:Props"functionDeclaration" exported as Root
+writes: a later source as const replaces assign | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+writes: a later source as const replaces assign | peeled	Root:Props"functionDeclaration" exported as Root
+writes: a later source satisfies replaces assign | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+writes: a later source satisfies replaces assign | peeled	Root:Props"functionDeclaration" exported as Root
+writes: a spread in a later source | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+writes: a spread in a later source | peeled	Root:Props"functionDeclaration" exported as Root
+writes: an unreadable later source | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+writes: an unreadable later source | peeled	Root:Props"functionDeclaration" exported as Root
+writes: a spread argument | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+writes: a spread argument | peeled	Root:Props"functionDeclaration" exported as Root
+writes: defineProperties with a later descriptor | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+writes: defineProperties with a later descriptor | peeled	Root:Props"functionDeclaration" exported as Root
+writes: later sources with unrelated keys | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+writes: later sources with unrelated keys | peeled	Root:Props"functionDeclaration" exported as Root
+members: a namespace-local member behind <T> (finding 2) | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: declarator, bare, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, bare, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, as, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, as, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, assertion, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, assertion, plain call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: declarator, assertion, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, assertion, plain call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: declarator, satisfies, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, satisfies, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, non-null, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, non-null, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, parens, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: declarator, parens, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, bare, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, bare, peeled call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, bare, peeled call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, bare, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, bare, peeled call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, bare, peeled call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, as, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, as, plain call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, as, peeled call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, as, peeled call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, as, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, as, plain call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, as, peeled call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, as, peeled call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, assertion, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, assertion, plain call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, assertion, peeled call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, assertion, peeled call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, assertion, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, assertion, plain call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, assertion, peeled call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, assertion, peeled call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, satisfies, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, satisfies, plain call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, satisfies, peeled call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, satisfies, peeled call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, satisfies, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, satisfies, plain call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, satisfies, peeled call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, satisfies, peeled call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, non-null, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, non-null, plain call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, non-null, peeled call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, non-null, peeled call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, non-null, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, non-null, plain call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, non-null, peeled call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, non-null, peeled call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, parens, plain call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, parens, peeled call, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, parens, peeled call, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+members: statement, parens, plain call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, parens, peeled call, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+members: statement, parens, peeled call, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+targets: a target behind <T>, at module level | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+targets: a target behind <T>, at module level | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+targets: a target behind <T>, in a function | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+targets: a target behind <T>, in a function | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+targets: a target behind <T>, bound in a function | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+targets: a target behind <T>, bound in a function | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+targets: a target behind <T>, beside a write to Object.assign | plain	Item:ItemProps"functionDeclaration" exported as Public.Item | Public:Props"functionDeclaration" exported as Public
+targets: a target behind <T>, beside a write to Object.assign | peeled	Info SkippedCandidate: 'Public' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Public.Item | Root:Props"functionDeclaration"
+objects: an object behind <const>, unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+objects: an object behind <const>, unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+objects: an object behind <const>, ambiguous | plain	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+objects: an object behind <const>, ambiguous | peeled	Info SkippedCandidate: 'Item' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+parents: a member assigned to a parent a parameter of its name (finding 1) | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+parents: a member assigned to a parent a parameter of its name (finding 1) | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+parents: a member assigned to a parent declared once, in a function | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+parents: a member assigned to a parent declared once, in a function | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+receivers: Promise.resolve, a global | plain	Button:Props"typedFunctionExpression" exported as Button
+receivers: Promise.resolve, a global | whole	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Promise.resolve, a global | receiver	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Promise.resolve, a global | both	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Promise.resolve, an import of another module (finding 2) | plain	Button:Props"typedFunctionExpression" exported as Button
+receivers: Promise.resolve, an import of another module (finding 2) | whole	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Promise.resolve, an import of another module (finding 2) | receiver	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Promise.resolve, an import of another module (finding 2) | both	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: React.createElement, React's import | plain	Button:Props"typedFunctionExpression" exported as Button
+receivers: React.createElement, React's import | whole	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: React.createElement, React's import | receiver	Button:Props"typedFunctionExpression" exported as Button
+receivers: React.createElement, React's import | both	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: React.createElement, an import of another module | plain	Button:Props"typedFunctionExpression" exported as Button
+receivers: React.createElement, an import of another module | whole	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: React.createElement, an import of another module | receiver	Button:Props"typedFunctionExpression" exported as Button
+receivers: React.createElement, an import of another module | both	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Preact.h, Preact's import | plain	Button:Props"typedFunctionExpression" exported as Button
+receivers: Preact.h, Preact's import | whole	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Preact.h, Preact's import | receiver	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Preact.h, Preact's import | both	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Preact.h, an import of another module | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Preact.h, an import of another module | whole	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Preact.h, an import of another module | receiver	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Preact.h, an import of another module | both	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+receivers: Object.assign, a global | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+receivers: Object.assign, a global | whole	Root:Props"functionDeclaration" exported as Root
+receivers: Object.assign, a global | receiver	Root:Props"functionDeclaration" exported as Root
+receivers: Object.assign, a global | both	Root:Props"functionDeclaration" exported as Root
+receivers: Object.assign, an import of another module | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+receivers: Object.assign, an import of another module | whole	Root:Props"functionDeclaration" exported as Root
+receivers: Object.assign, an import of another module | receiver	Root:Props"functionDeclaration" exported as Root
+receivers: Object.assign, an import of another module | both	Root:Props"functionDeclaration" exported as Root

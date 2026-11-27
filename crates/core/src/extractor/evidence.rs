@@ -164,7 +164,7 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
             || matches!(callee, Some(Expression::StaticMemberExpression(member))
-                if super::well_known::is_receiver(self.scope, &member.object, &super::well_known::PROMISE)
+                if super::well_known::is_receiver(self.scope, &member.object, &super::well_known::PROMISE, beyond_main)
                     && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
             walk::walk_call_expression(self, it);

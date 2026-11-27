@@ -409,11 +409,10 @@ impl<'src> SourceDataCollector<'src> {
         // The arguments as `assign_roles` reads them, as for `record_object_assign_declarator` and the alias rule, which
         // record `Root` as the alias this scan attaches the inline members to.
         let Some(roles) = self.assign_roles(call, true, None) else { return };
-        let (Some(parent), Some(obj)) = (roles.target.as_ref(), roles.objects.first()) else { return };
+        let (Some(parent), Some(&(obj, recognition))) = (roles.target.as_ref(), roles.objects.first()) else { return };
         if !is_pascal_case(parent.as_str()) {
             return;
         }
-        let recognition = roles.recognition;
         let parent_id = parent;
 
         for prop in &obj.properties {
@@ -429,13 +428,16 @@ impl<'src> SourceDataCollector<'src> {
             let (params, span_start, span_end) = match &op.value {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
-                Expression::Identifier(sub) => {
-                    if let Some(sub) = self.trusted_member(recognition, sub.name.as_str()) {
+                // An identifier as written; beneath a wrapper, only one origin/main did not read (`<number>Item`), which
+                // `trusted_member` vouches for: main read no other wrapped member here.
+                value => {
+                    let exposed = matches!(value, Expression::Identifier(_))
+                        || !matches!(super::component::main_peel(value), Expression::Identifier(_));
+                    if exposed && let Some(sub) = self.trusted_member(recognition, value) {
                         self.record_attached(Subject::local(sub.as_str()), parent_id, &key_name);
                     }
                     continue;
                 }
-                _ => continue,
             };
             self.record_attached(Subject::Inline(span_start), parent_id, &key_name);
             self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);

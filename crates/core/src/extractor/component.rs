@@ -1603,6 +1603,10 @@ impl<'src> SourceDataCollector<'src> {
         } else {
             is_component_alias_call(&*self, call)
         };
+        // A target only a peel exposes that `assign_roles` does not vouch for is no alias, as origin/main read none.
+        if !wrapper && matches!(inner, super::names::Named::Peeled(_)) && is_object_assign_call(call, &*self) {
+            return None;
+        }
         // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
         let call = Some(AliasCall { wrapper, forward_ref: self.is_forward_ref_call(call) });
         Some(AliasShape { inner, call })

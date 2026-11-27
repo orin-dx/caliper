@@ -159,24 +159,30 @@ pub(super) fn call_writes<'a>(call: &CallExpression<'a>) -> Vec<(&'a str, Option
         "set" | "defineProperty" if global => vec![(target, argument(1).and_then(literal_key))],
         // A new prototype may supply any member.
         "setPrototypeOf" if global => vec![(target, None)],
-        "defineProperties" | "assign" if receiver == OBJECT.name => match argument(1).map(through) {
-            Some(Expression::ObjectExpression(object)) => object
-                .properties
-                .iter()
-                .map(|property| match property {
-                    ObjectPropertyKind::ObjectProperty(property) if !property.computed => {
-                        let key = match &property.key {
-                            PropertyKey::StaticIdentifier(key) => Some(key.name.as_str()),
-                            PropertyKey::StringLiteral(key) => key.value.as_str(),
-                            _ => None,
-                        };
-                        (target, key)
+        // Every source writes its keys, a later one over an earlier one. A source that is no object literal (a name, a
+        // call, a spread argument) and a spread or computed member may hold any key.
+        "defineProperties" | "assign" if receiver == OBJECT.name => {
+            let mut writes = Vec::new();
+            for source in call.arguments.iter().skip(1) {
+                match source.as_expression().map(through) {
+                    Some(Expression::ObjectExpression(object)) => {
+                        writes.extend(object.properties.iter().map(|property| match property {
+                            ObjectPropertyKind::ObjectProperty(property) if !property.computed => {
+                                let key = match &property.key {
+                                    PropertyKey::StaticIdentifier(key) => Some(key.name.as_str()),
+                                    PropertyKey::StringLiteral(key) => key.value.as_str(),
+                                    _ => None,
+                                };
+                                (target, key)
+                            }
+                            _ => (target, None),
+                        }));
                     }
-                    _ => (target, None),
-                })
-                .collect(),
-            _ => vec![(target, None)],
-        },
+                    _ => writes.push((target, None)),
+                }
+            }
+            writes
+        }
         _ => Vec::new(),
     }
 }
@@ -206,9 +212,12 @@ pub(super) fn beyond_main(callee: &Expression<'_>) -> bool {
 
 /// Whether a receiver is `entry`: written plainly, by its spelling as origin/main read it; through a wrapper, only when
 /// the name it is written with resolves to the entry ([`matches_well_known`]).
-pub(super) fn is_receiver(scope: &dyn Scope, object: &Expression<'_>, entry: &WellKnown) -> bool {
+///
+/// `beyond_main` says the whole callee was written through a wrapper origin/main did not read: then a bare receiver
+/// resolves too, so it is the entry in every combination of a peeled callee and a peeled receiver.
+pub(super) fn is_receiver(scope: &dyn Scope, object: &Expression<'_>, entry: &WellKnown, beyond_main: bool) -> bool {
     match object {
-        Expression::Identifier(id) => id.name == entry.name,
+        Expression::Identifier(id) if !beyond_main => id.name == entry.name,
         _ => matches!(super::component::beneath_resolved(object, scope),
             Some(Expression::Identifier(id)) if matches_well_known(scope, id.name.as_str(), entry)),
     }

@@ -2706,6 +2706,500 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "sealed: a destructured import declared once | peeled".to_owned(),
         "// ts\nimport * as Ui from './ui';\nexport const { Button: PublicButton } = <typeof Ui>Ui;".to_owned(),
     ));
+    cases.push((
+        "writes: a later source replaces assign (finding 1) | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, { assign: (target: object) => target });\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a later source replaces assign (finding 1) | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, { assign: (target: object) => target });\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a later source as const replaces assign | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, ({ assign: (target: object) => target }) as const);\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a later source as const replaces assign | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, ({ assign: (target: object) => target }) as const);\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a later source satisfies replaces assign | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, { assign: (target: object) => target } satisfies object);\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a later source satisfies replaces assign | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, { assign: (target: object) => target } satisfies object);\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a spread in a later source | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, { ...extra });\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a spread in a later source | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, { ...extra });\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: an unreadable later source | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, extra);\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: an unreadable later source | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, extra);\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a spread argument | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, ...sources);\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: a spread argument | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, ...sources);\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: defineProperties with a later descriptor | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.defineProperties(Object, {}, { assign: { value: 1 } });\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: defineProperties with a later descriptor | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.defineProperties(Object, {}, { assign: { value: 1 } });\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: later sources with unrelated keys | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, { other: 1 });\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "writes: later sources with unrelated keys | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\ndeclare const extra: object;\ndeclare const sources: object[];\nObject.assign(Object, {}, { other: 1 });\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "members: a namespace-local member behind <T> (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; export const Root = Object.assign(Impl, { Item: <number>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, bare, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, bare, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, as, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: (Item as typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, as, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, { Item: (Item as typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, assertion, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, assertion, plain call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, assertion, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, assertion, plain call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, satisfies, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: (Item satisfies typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, satisfies, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, { Item: (Item satisfies typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, non-null, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: Item! });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, non-null, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, { Item: Item! });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, parens, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: (Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: declarator, parens, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, { Item: (Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, bare, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, bare, peeled call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, bare, peeled call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign as typeof Object.assign)(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, bare, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, bare, peeled call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, bare, peeled call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\n(Object.assign as typeof Object.assign)(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, as, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, as, plain call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: (Item as typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, as, peeled call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, as, peeled call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign as typeof Object.assign)(Root, { Item: (Item as typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, as, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, as, plain call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: (Item as typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, as, peeled call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, as, peeled call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\n(Object.assign as typeof Object.assign)(Root, { Item: (Item as typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, assertion, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, assertion, plain call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, assertion, peeled call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, assertion, peeled call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign as typeof Object.assign)(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, assertion, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, assertion, plain call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, assertion, peeled call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, assertion, peeled call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\n(Object.assign as typeof Object.assign)(Root, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, satisfies, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, satisfies, plain call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: (Item satisfies typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, satisfies, peeled call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, satisfies, peeled call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign as typeof Object.assign)(Root, { Item: (Item satisfies typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, satisfies, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, satisfies, plain call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: (Item satisfies typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, satisfies, peeled call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, satisfies, peeled call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\n(Object.assign as typeof Object.assign)(Root, { Item: (Item satisfies typeof Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, non-null, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, non-null, plain call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item! });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, non-null, peeled call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, non-null, peeled call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign as typeof Object.assign)(Root, { Item: Item! });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, non-null, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, non-null, plain call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item! });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, non-null, peeled call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, non-null, peeled call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\n(Object.assign as typeof Object.assign)(Root, { Item: Item! });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, parens, plain call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: (Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, parens, peeled call, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, parens, peeled call, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n(Object.assign as typeof Object.assign)(Root, { Item: (Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, parens, plain call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: (Item) });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, parens, peeled call, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nObject.assign(Root, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "members: statement, parens, peeled call, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\n(Object.assign as typeof Object.assign)(Root, { Item: (Item) });".to_owned(),
+    ));
+    cases.push((
+        "targets: a target behind <T>, at module level | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "targets: a target behind <T>, at module level | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nObject.assign(<typeof Root>Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "targets: a target behind <T>, in a function | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction attach() { Object.assign(Root, { Item }); }".to_owned(),
+    ));
+    cases.push((
+        "targets: a target behind <T>, in a function | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction attach() { Object.assign(<typeof Root>Root, { Item }); }".to_owned(),
+    ));
+    cases.push((
+        "targets: a target behind <T>, bound in a function | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function attach() { const Bound = Object.assign(Root, { Item }); return Bound; }".to_owned(),
+    ));
+    cases.push((
+        "targets: a target behind <T>, bound in a function | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport function attach() { const Bound = Object.assign(<typeof Root>Root, { Item }); return Bound; }".to_owned(),
+    ));
+    cases.push((
+        "targets: a target behind <T>, beside a write to Object.assign | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Root(props: Props) { return createElement('div'); }\nObject.assign(Object, {}, { assign: (target: object) => target });\nexport const Public = Object.assign(Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "targets: a target behind <T>, beside a write to Object.assign | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Root(props: Props) { return createElement('div'); }\nObject.assign(Object, {}, { assign: (target: object) => target });\nexport const Public = Object.assign(<typeof Root>Root, { Item });".to_owned(),
+    ));
+    cases.push((
+        "objects: an object behind <const>, unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "objects: an object behind <const>, unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "objects: an object behind <const>, ambiguous | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "objects: an object behind <const>, ambiguous | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nnamespace N { const Item = 123; }\nexport const Root = Object.assign(Impl, <const>{ Item });".to_owned(),
+    ));
+    cases.push((
+        "parents: a member assigned to a parent a parameter of its name (finding 1) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure(Root: { Item?: typeof Item }) { Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "parents: a member assigned to a parent a parameter of its name (finding 1) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure(Root: { Item?: typeof Item }) { Root.Item = <typeof Item>Item; }".to_owned(),
+    ));
+    cases.push((
+        "parents: a member assigned to a parent declared once, in a function | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "parents: a member assigned to a parent declared once, in a function | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = <typeof Item>Item; }".to_owned(),
+    ));
+    cases.push((
+        "receivers: Promise.resolve, a global | plain".to_owned(),
+        "export const Button = (props: Props) => Promise.resolve(<div />);".to_owned(),
+    ));
+    cases.push((
+        "receivers: Promise.resolve, a global | whole".to_owned(),
+        "export const Button = (props: Props) => (Promise.resolve as typeof Promise.resolve)(<div />);".to_owned(),
+    ));
+    cases.push((
+        "receivers: Promise.resolve, a global | receiver".to_owned(),
+        "export const Button = (props: Props) => (Promise as typeof Promise).resolve(<div />);".to_owned(),
+    ));
+    cases.push((
+        "receivers: Promise.resolve, a global | both".to_owned(),
+        "export const Button = (props: Props) => ((Promise as typeof Promise).resolve as typeof Promise.resolve)(<div />);".to_owned(),
+    ));
+    cases.push((
+        "receivers: Promise.resolve, an import of another module (finding 2) | plain".to_owned(),
+        "import Promise from './codec';\nexport const Button = (props: Props) => Promise.resolve(<div />);".to_owned(),
+    ));
+    cases.push((
+        "receivers: Promise.resolve, an import of another module (finding 2) | whole".to_owned(),
+        "import Promise from './codec';\nexport const Button = (props: Props) => (Promise.resolve as typeof Promise.resolve)(<div />);".to_owned(),
+    ));
+    cases.push((
+        "receivers: Promise.resolve, an import of another module (finding 2) | receiver".to_owned(),
+        "import Promise from './codec';\nexport const Button = (props: Props) => (Promise as typeof Promise).resolve(<div />);".to_owned(),
+    ));
+    cases.push((
+        "receivers: Promise.resolve, an import of another module (finding 2) | both".to_owned(),
+        "import Promise from './codec';\nexport const Button = (props: Props) => ((Promise as typeof Promise).resolve as typeof Promise.resolve)(<div />);".to_owned(),
+    ));
+    cases.push((
+        "receivers: React.createElement, React's import | plain".to_owned(),
+        "import * as React from 'react';\nexport const Button = (props: Props) => React.createElement('div');"
+            .to_owned(),
+    ));
+    cases.push((
+        "receivers: React.createElement, React's import | whole".to_owned(),
+        "import * as React from 'react';\nexport const Button = (props: Props) => (React.createElement as typeof React.createElement)('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: React.createElement, React's import | receiver".to_owned(),
+        "import * as React from 'react';\nexport const Button = (props: Props) => (React as typeof React).createElement('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: React.createElement, React's import | both".to_owned(),
+        "import * as React from 'react';\nexport const Button = (props: Props) => ((React as typeof React).createElement as typeof React.createElement)('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: React.createElement, an import of another module | plain".to_owned(),
+        "import * as React from './codec';\nexport const Button = (props: Props) => React.createElement('div');"
+            .to_owned(),
+    ));
+    cases.push((
+        "receivers: React.createElement, an import of another module | whole".to_owned(),
+        "import * as React from './codec';\nexport const Button = (props: Props) => (React.createElement as typeof React.createElement)('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: React.createElement, an import of another module | receiver".to_owned(),
+        "import * as React from './codec';\nexport const Button = (props: Props) => (React as typeof React).createElement('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: React.createElement, an import of another module | both".to_owned(),
+        "import * as React from './codec';\nexport const Button = (props: Props) => ((React as typeof React).createElement as typeof React.createElement)('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Preact.h, Preact's import | plain".to_owned(),
+        "import * as Preact from 'preact';\nexport const Button = (props: Props) => Preact.h('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Preact.h, Preact's import | whole".to_owned(),
+        "import * as Preact from 'preact';\nexport const Button = (props: Props) => (Preact.h as typeof Preact.h)('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Preact.h, Preact's import | receiver".to_owned(),
+        "import * as Preact from 'preact';\nexport const Button = (props: Props) => (Preact as typeof Preact).h('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Preact.h, Preact's import | both".to_owned(),
+        "import * as Preact from 'preact';\nexport const Button = (props: Props) => ((Preact as typeof Preact).h as typeof Preact.h)('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Preact.h, an import of another module | plain".to_owned(),
+        "import * as Preact from './codec';\nexport const Button = (props: Props) => Preact.h('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Preact.h, an import of another module | whole".to_owned(),
+        "import * as Preact from './codec';\nexport const Button = (props: Props) => (Preact.h as typeof Preact.h)('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Preact.h, an import of another module | receiver".to_owned(),
+        "import * as Preact from './codec';\nexport const Button = (props: Props) => (Preact as typeof Preact).h('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Preact.h, an import of another module | both".to_owned(),
+        "import * as Preact from './codec';\nexport const Button = (props: Props) => ((Preact as typeof Preact).h as typeof Preact.h)('div');".to_owned(),
+    ));
+    cases.push((
+        "receivers: Object.assign, a global | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "receivers: Object.assign, a global | whole".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "receivers: Object.assign, a global | receiver".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object as typeof Object).assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "receivers: Object.assign, a global | both".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n((Object as typeof Object).assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "receivers: Object.assign, an import of another module | plain".to_owned(),
+        "import Object from './codec';\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "receivers: Object.assign, an import of another module | whole".to_owned(),
+        "import Object from './codec';\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "receivers: Object.assign, an import of another module | receiver".to_owned(),
+        "import Object from './codec';\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object as typeof Object).assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "receivers: Object.assign, an import of another module | both".to_owned(),
+        "import Object from './codec';\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n((Object as typeof Object).assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
     cases
 }
 
@@ -2826,7 +3320,13 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // factory on React's receiver behind a cast.
     // Round 37 adds two: a `map` on an array literal and an element helper declared once, both behind a cast
     // (`an_evidence_predicate_through_a_cast_needs_binding_evidence`).
-    assert_eq!(read_as_the_plain_call, 43);
+    // Round 38 adds eight: a cast `Object.assign` beside later `Object` sources with unrelated keys
+    // (`every_source_of_an_object_mutation_counts_as_a_write`), five members exposed only by a peel and declared once,
+    // a target behind `<T>x` at module level and an object literal behind `<const>` whose member is declared once
+    // (`an_object_assign_member_is_recognised_by_its_own_read`).
+    // Round 38 adds twelve more: cast forms of a well-known member callee whose receiver resolves to its entry, and a
+    // member assigned through `<T>x` to a parent declared once (`a_peeled_name_relies_on_a_parent_and_receiver_that_resolve`).
+    assert_eq!(read_as_the_plain_call, 63);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2886,6 +3386,151 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let peeled = format!("recognition: {row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 38: a member assigned through `<T>x` attaches only to a parent that resolves too, as export propagation finds
+/// the parent by its bare name (a parameter named `Root` is a second declaration). And a well-known member callee
+/// (`Promise.resolve`, `React.createElement`, Preact's `h`, `Object.assign`) is read only when its receiver resolves to
+/// the entry in every combination of a peeled whole callee and a peeled receiver: written plainly, as origin/main read
+/// it; through any cast, as the plain call only when the receiver is the global or the import it names.
+#[test]
+fn a_peeled_name_relies_on_a_parent_and_receiver_that_resolve() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, holds) in [
+        ("parents: a member assigned to a parent a parameter of its name (finding 1)", false),
+        ("parents: a member assigned to a parent declared once, in a function", true),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+    for (row, holds) in [
+        ("receivers: Promise.resolve, a global", true),
+        ("receivers: Promise.resolve, an import of another module (finding 2)", false),
+        ("receivers: React.createElement, React's import", true),
+        ("receivers: React.createElement, an import of another module", false),
+        ("receivers: Preact.h, Preact's import", true),
+        ("receivers: Preact.h, an import of another module", false),
+        ("receivers: Object.assign, a global", true),
+        ("receivers: Object.assign, an import of another module", false),
+    ] {
+        let plain = format!("{row} | plain");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        for cast in ["whole", "receiver", "both"] {
+            let id = format!("{row} | {cast}");
+            let expected = if holds { base[plain.as_str()] } else { base[id.as_str()] };
+            assert_eq!(factory_parity_output(&cases[&id]), expected, "{id}");
+        }
+    }
+}
+
+/// Round 38: a write to `Object.assign` through any source of an `Object.assign` or `Object.defineProperties` call on
+/// `Object` (a later object literal, through `as const` or `satisfies`, a spread, an unreadable source, a spread
+/// argument) means a cast `Object.assign` is not the built-in. Each plain form is origin/main's; a peeled form reads as
+/// the plain form only where no source may write `assign`, and as origin/main read it otherwise.
+#[test]
+fn every_source_of_an_object_mutation_counts_as_a_write() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, holds) in [
+        ("writes: a later source replaces assign (finding 1)", false),
+        ("writes: a later source as const replaces assign", false),
+        ("writes: a later source satisfies replaces assign", false),
+        ("writes: a spread in a later source", false),
+        ("writes: an unreadable later source", false),
+        ("writes: a spread argument", false),
+        ("writes: defineProperties with a later descriptor", false),
+        ("writes: later sources with unrelated keys", true),
+    ] {
+        let plain = format!("{row} | plain");
+        let peeled = format!("{row} | peeled");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 38: an `Object.assign` member value is classified by its own read, not its call's. Read as origin/main read it
+/// (bare, `as`, `satisfies`, `!`, parentheses) in a plain call, it is origin/main's whatever else the file declares.
+/// Exposed only by a peel (`<T>x`, or any member of a cast call), it counts only when the file declares it once: then
+/// the row reads as the plain call with a bare member, and otherwise as origin/main read it. In the statement scan main
+/// read a member only as written, so a member behind `as`, `satisfies`, `!` or parentheses stays unread there. A plain
+/// call never upgrades a peeled member: finding 2's namespace-local `Item` behind `<number>` stays as main gives it.
+#[test]
+fn an_object_assign_member_is_recognised_by_its_own_read() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, attaches) in [
+        ("members: declarator, bare, plain call, unique | plain", None),
+        ("members: declarator, bare, plain call, ambiguous | plain", None),
+        ("members: declarator, as, plain call, unique | plain", None),
+        ("members: declarator, as, plain call, ambiguous | plain", None),
+        ("members: declarator, assertion, plain call, unique", Some(true)),
+        ("members: declarator, assertion, plain call, ambiguous", Some(false)),
+        ("members: declarator, satisfies, plain call, unique | plain", None),
+        ("members: declarator, satisfies, plain call, ambiguous | plain", None),
+        ("members: declarator, non-null, plain call, unique | plain", None),
+        ("members: declarator, non-null, plain call, ambiguous | plain", None),
+        ("members: declarator, parens, plain call, unique | plain", None),
+        ("members: declarator, parens, plain call, ambiguous | plain", None),
+        ("members: statement, bare, plain call, unique | plain", None),
+        ("members: statement, bare, peeled call, unique", Some(true)),
+        ("members: statement, bare, plain call, ambiguous | plain", None),
+        ("members: statement, bare, peeled call, ambiguous", Some(false)),
+        ("members: statement, as, plain call, unique", Some(false)),
+        ("members: statement, as, peeled call, unique", Some(false)),
+        ("members: statement, as, plain call, ambiguous", Some(false)),
+        ("members: statement, as, peeled call, ambiguous", Some(false)),
+        ("members: statement, assertion, plain call, unique", Some(true)),
+        ("members: statement, assertion, peeled call, unique", Some(true)),
+        ("members: statement, assertion, plain call, ambiguous", Some(false)),
+        ("members: statement, assertion, peeled call, ambiguous", Some(false)),
+        ("members: statement, satisfies, plain call, unique", Some(false)),
+        ("members: statement, satisfies, peeled call, unique", Some(false)),
+        ("members: statement, satisfies, plain call, ambiguous", Some(false)),
+        ("members: statement, satisfies, peeled call, ambiguous", Some(false)),
+        ("members: statement, non-null, plain call, unique", Some(false)),
+        ("members: statement, non-null, peeled call, unique", Some(false)),
+        ("members: statement, non-null, plain call, ambiguous", Some(false)),
+        ("members: statement, non-null, peeled call, ambiguous", Some(false)),
+        ("members: statement, parens, plain call, unique | plain", None),
+        ("members: statement, parens, peeled call, unique", Some(true)),
+        ("members: statement, parens, plain call, ambiguous | plain", None),
+        ("members: statement, parens, peeled call, ambiguous", Some(false)),
+    ] {
+        match attaches {
+            // Read as origin/main read it: main's own output.
+            None => assert_eq!(factory_parity_output(&cases[row]), base[row], "{row}"),
+            Some(attaches) => {
+                let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+                let expected = if attaches { base[plain.as_str()] } else { base[peeled.as_str()] };
+                assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+            }
+        }
+    }
+    let row = "members: a namespace-local member behind <T> (finding 2) | plain";
+    assert_eq!(factory_parity_output(&cases[row]), base[row], "{row}");
+    // The target too: behind `<T>x` in a plain call, it is the parent only as a call main never read trusts it, at module
+    // level.
+    for (row, attaches) in [
+        ("targets: a target behind <T>, at module level", true),
+        ("targets: a target behind <T>, in a function", false),
+        ("targets: a target behind <T>, bound in a function", false),
+        ("targets: a target behind <T>, beside a write to Object.assign", false),
+        // An object literal only a peel exposes makes its members peeled.
+        ("objects: an object behind <const>, unique", true),
+        ("objects: an object behind <const>, ambiguous", false),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if attaches { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
 }

@@ -138,7 +138,6 @@ mod tests {
         ("mod.rs", "classify_extends", "a heritage type name, Plain-only"),
         ("mod.rs", "is_constant_name", "a predicate on a declaration's own name"),
         ("uses.rs", "local", "builds `Subject::Local` from a vouched `Named`'s text or a plain binding"),
-        ("uses.rs", "trusted_member", "the vouching function itself: returns a `Named` through `Bindings::named`"),
         ("wrapper.rs", "try_record_wrapper_call", "the declarator's own name"),
         ("wrapper.rs", "try_record_tagged_factory", "the declarator's own name"),
         ("wrapper.rs", "record_bound_function_result", "the declarator's own name"),
