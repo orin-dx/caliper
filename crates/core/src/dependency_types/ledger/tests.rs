@@ -1523,7 +1523,7 @@ fn model_project(model: &Model) -> (tempfile::TempDir, Utf8PathBuf) {
     write(&root, "tsconfig.json", MODEL_TSCONFIG);
     write(&root, "src/plain/Plain.tsx", MODEL_PLAIN);
     if model.react {
-        write(&root, "src/setup.ts", "import * as Aug from 'mk/aug';\nexport const aug = Aug;\n");
+        write(&root, "src/setup.ts", MODEL_SETUP);
     }
     for (name, body, _) in model.components {
         write(&root, &format!("src/{name}.tsx"), &model_source(body, 0));
@@ -1578,26 +1578,39 @@ fn prop_names(answer: &ComponentAnswer) -> Vec<String> {
 /// The model's two oracles, each a fresh session with the cache off over a project of its own, memoized by component
 /// and file set: the answer with exactly those files unreadable, and the props with those files declaring nothing
 /// (what the readable files give, decided without any code that handles a failed read).
+/// `setup.ts` while it imports the module whose search gives the React model's augmentations, and once it dropped it.
+const MODEL_SETUP: &str = "import * as Aug from 'mk/aug';\nexport const aug = Aug;\n";
+const MODEL_SETUP_DROPPED: &str = "export const aug = 1;\n";
+
 struct ModelOracle {
     model: &'static Model,
     _tmp: tempfile::TempDir,
     root: Utf8PathBuf,
-    answers: FxHashMap<(String, Vec<String>, bool, Vec<String>), String>,
+    /// Whether the run's `setup.ts` imports `mk/aug` now: the fresh session's does the same.
+    setup: bool,
+    answers: FxHashMap<OracleKey, String>,
 }
+
+/// `(component, files read as unreadable, emptied, components asked before, setup imports mk/aug)`.
+type OracleKey = (String, Vec<String>, bool, Vec<String>, bool);
 
 impl ModelOracle {
     fn new(model: &'static Model) -> Self {
         let (tmp, root) = model_project(model);
-        ModelOracle { model, _tmp: tmp, root, answers: FxHashMap::default() }
+        ModelOracle { model, _tmp: tmp, root, setup: true, answers: FxHashMap::default() }
     }
 
     /// With `before`, the components the fresh session is asked for first, in order: the walks the answer reads.
     fn ask(&mut self, component: &str, files: &[String], empty: bool, before: &[String]) -> String {
-        let (root, model) = (self.root.clone(), self.model);
+        let (root, model, setup) = (self.root.clone(), self.model, self.setup);
         self.answers
-            .entry((component.to_owned(), files.to_vec(), empty, before.to_vec()))
+            .entry((component.to_owned(), files.to_vec(), empty, before.to_vec(), setup))
             .or_insert_with(|| {
                 set_unreadable(model, &root, &files.iter().map(String::as_str).collect(), empty);
+                if model.react {
+                    let body = if setup { MODEL_SETUP } else { MODEL_SETUP_DROPPED };
+                    std::fs::write(root.join("src/setup.ts"), body).unwrap();
+                }
                 let fresh = WatchSession::lazy(PipelineOptions { use_cache: false, ..model.options(&root) });
                 drop(fresh.initialize());
                 for earlier in before {
@@ -1746,6 +1759,8 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
         None => model.seeds.to_vec(),
     };
     for seed in seeds {
+        oracle.setup = true;
+        let mut aug_complete = false;
         // Odd seeds flatten the chain at every load, which must not change an answer.
         let depth = if seed % 2 == 1 { 0 } else { crate::dependency_types::MAX_CHAIN_DEPTH };
         let (tmp, root) = model_project(model);
@@ -1779,7 +1794,13 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
         };
         let mut edited_since_change = true;
         for step in 0..40 {
-            match next(6) {
+            // A session keeps what it loaded once an import is dropped (the layer only grows), so the import of `mk/aug`
+            // is dropped and restored only while its search has never read every file.
+            let mut complete = |unreadable: &std::collections::BTreeSet<&str>, setup: bool| {
+                aug_complete |= setup && !unreadable.iter().any(|file| file.starts_with("aug/"));
+            };
+            complete(&unreadable, run.oracle.setup);
+            match next(7) {
                 0 => {
                     let name = names[next(names.len())];
                     if !unreadable.remove(name) {
@@ -1798,6 +1819,13 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
                 2 => {
                     let file = run.root.join("tsconfig.json");
                     run.edit(&file, &format!("{MODEL_TSCONFIG}{}", "\n".repeat(step + 1)));
+                    edited_since_change = true;
+                }
+                // `setup.ts` drops or restores its import of `mk/aug`, the only one.
+                6 if model.react && !aug_complete => {
+                    run.oracle.setup = !run.oracle.setup;
+                    let body = if run.oracle.setup { MODEL_SETUP } else { MODEL_SETUP_DROPPED };
+                    run.edit(&run.root.join("src/setup.ts"), body);
                     edited_since_change = true;
                 }
                 // A new session over the same cache: a cold start from the index on disk.
@@ -1858,6 +1886,7 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
             }
         }
     }
+    oracle.setup = true;
     if sweep.is_some() {
         return;
     }

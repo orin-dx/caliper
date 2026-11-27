@@ -131,6 +131,29 @@ impl std::ops::Deref for SharedDemands {
 }
 
 impl Lazy {
+    /// Drops `id`'s kept answer and records it for the next revision's delta: the one way an answer leaves.
+    fn evict(&self, id: &ComponentId) {
+        self.memo.remove(id);
+        self.provisional.remove(id);
+        self.dropped.insert(id.clone(), ());
+    }
+
+    /// [`Self::evict`] for every kept answer `stale` says no longer holds: the clean ones, and the provisional ones too
+    /// when `provisional`.
+    fn evict_where(&self, provisional: bool, stale: impl Fn(&Resolved) -> bool) {
+        let gone = |id: &ComponentId, resolved: &Resolved| {
+            let gone = stale(resolved);
+            if gone {
+                self.dropped.insert(id.clone(), ());
+            }
+            !gone
+        };
+        self.memo.retain(|id, resolved| gone(id, resolved));
+        if provisional {
+            self.provisional.retain(|id, (resolved, _)| gone(id, resolved));
+        }
+    }
+
     /// The diagnostics every answer read against `layer` carries: derived from the revision's live demands once for
     /// each layer, as the revision's demands do not change and a layer never does.
     fn live_warnings(&self, layer: &Arc<DependencyLayer>) -> Arc<[Diagnostic]> {
@@ -267,9 +290,9 @@ pub(super) struct Lazy {
     /// Components resolved through a walk that passed a file it could not read, with the unread walks they reached:
     /// answered until one of those is due, then resolved again. Never carried to the next revision, never persisted.
     provisional: DashMap<ComponentId, (Arc<Resolved>, Held), FxBuildHasher>,
-    /// Components answered past a file that could not be read whose answer is held nowhere (its walk was due): the
-    /// next request asks again, and an edit names them in its delta as it names a provisional one.
-    unheld: DashMap<ComponentId, (), FxBuildHasher>,
+    /// Components whose answer this revision gave out and does not keep: evicted ([`Lazy::evict`]), or answered past
+    /// a file that could not be read and held nowhere (its walk was due). The next revision names each in its delta.
+    dropped: DashMap<ComponentId, (), FxBuildHasher>,
     /// The id of the session's next dependency load, shared by its revisions: a footprint tells one load's failed read
     /// from a later one's.
     load_ids: Arc<dependency_types::LoadIds>,
@@ -352,7 +375,8 @@ impl Lazy {
         dependency_types::Retry::Due(self.moment())
     }
 
-    /// Every unread walk of `layer` ([`DependencyLayer::all_unread`]), once per layer.
+    /// The unread walks the revision's live demands reach in `layer`, transitively, once per layer: a walk no project
+    /// file demands any more is not retried, as a fresh session would never follow it.
     fn shared_unread(&self, layer: &Arc<dependency_types::DependencyLayer>) -> Arc<SharedWalks> {
         let mut held = self.shared_unread.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some((at, unread)) = held.as_ref()
@@ -362,7 +386,8 @@ impl Lazy {
         }
         #[cfg(test)]
         self.shared_unread_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let unread: Arc<[Demand]> = Arc::from(layer.all_unread());
+        let unread: Arc<[Demand]> =
+            Arc::from(layer.unread_from(self.demands.values().flat_map(|demands| demands.iter())));
         let walks = Arc::new(SharedWalks { footprint: layer.footprint(&unread), unread, bound: Mutex::new(None) });
         *held = Some((layer.clone(), walks.clone()));
         walks
@@ -518,7 +543,7 @@ impl Revision {
             whole_demand_thread: Mutex::new(None),
             growths: std::sync::atomic::AtomicUsize::new(0),
             provisional: DashMap::default(),
-            unheld: DashMap::default(),
+            dropped: DashMap::default(),
             clock,
             edits,
             load_ids,
@@ -639,8 +664,8 @@ impl Revision {
         // A provisional answer is never carried over: the edit makes every walk past an unreadable file due, so each
         // may answer differently, whatever file it read.
         let held = previous.provisional.iter().map(|entry| entry.key().clone());
-        let unheld = previous.unheld.iter().map(|entry| entry.key().clone());
-        touch(held.chain(unheld), &mut touched, &mut affected_files);
+        let dropped = previous.dropped.iter().map(|entry| entry.key().clone());
+        touch(held.chain(dropped), &mut touched, &mut affected_files);
         // A name the changed file declared before or after keeps no memo, but its keys can still move.
         for groups in [&previous.by_name, &by_name] {
             for (name, group) in groups {
@@ -710,7 +735,7 @@ impl Revision {
                 growths: std::sync::atomic::AtomicUsize::new(0),
                 // An edit makes every walk past an unreadable file due: no provisional answer carries over.
                 provisional: DashMap::default(),
-                unheld: DashMap::default(),
+                dropped: DashMap::default(),
                 clock: previous.clock.clone(),
                 edits: previous.edits.next(),
                 load_ids: previous.load_ids.clone(),
@@ -741,7 +766,7 @@ impl Revision {
         let (mut touched, mut affected_files) = (FxHashSet::default(), Vec::new());
         let memo = previous.memo.iter().map(|entry| entry.key().clone());
         let provisional = previous.provisional.iter().map(|entry| entry.key().clone());
-        let provisional = provisional.chain(previous.unheld.iter().map(|entry| entry.key().clone()));
+        let provisional = provisional.chain(previous.dropped.iter().map(|entry| entry.key().clone()));
         touch(memo.chain(provisional), &mut touched, &mut affected_files);
         affected_files.sort();
         affected_files.dedup();
@@ -802,7 +827,7 @@ impl Revision {
             if hit.holds_under(shared) {
                 return Some((hit, None));
             }
-            lazy.memo.remove(id);
+            lazy.evict(id);
         }
         if let Some(hit) = self.provisional_hit(lazy, id) {
             return Some(hit);
@@ -840,6 +865,11 @@ impl Revision {
                     let shared = shared.filter(|walks| !walks.unread.is_empty());
                     let mut missing = layer.missing_at(&roots, retry);
                     missing.extend(layer.missing_at(&unread, retry));
+                    // A module an edit imported anew gives its augmentations from the next answer that reads them:
+                    // the revision's shared demands the layer has not followed are loaded first.
+                    if depends_on.reads_augmentations {
+                        missing.extend(layer.missing_at(&lazy.shared, retry));
+                    }
                     if let Some(walks) = &shared
                         && !walks.holds(layer, lazy.moment())
                     {
@@ -887,7 +917,7 @@ impl Revision {
                         (Some(own), true) => {
                             drop(lazy.provisional.insert(id.clone(), (resolved.clone(), Held { own, shared })))
                         }
-                        _ => drop(lazy.unheld.insert(id.clone(), ())),
+                        _ => drop(lazy.dropped.insert(id.clone(), ())),
                     }
                     return Some((resolved, engine.layer.clone()));
                 }
@@ -913,7 +943,7 @@ impl Revision {
         if holds {
             return Some((resolved, layer));
         }
-        lazy.provisional.remove(id);
+        lazy.evict(id);
         None
     }
 
@@ -997,7 +1027,7 @@ impl Revision {
         // A clean answer that read React's augmentations was read with no walk unread; once one is, any of those
         // walks may load a file that declares into React, so the answer holds only by them, provisionally.
         if !extended.unread_walks().is_empty() {
-            lazy.memo.retain(|_, resolved| !resolved.depends_on.reads_augmentations);
+            lazy.evict_where(false, |resolved| resolved.depends_on.reads_augmentations);
         }
         if extended.resolves_like(layer) {
             lazy.engine.store(Arc::new(Engine {
@@ -1039,8 +1069,7 @@ impl Revision {
         };
         next.ctx.inherit_memos(&engine.ctx, still_valid);
         if augmentations_changed {
-            lazy.memo.retain(|_, resolved| !resolved.depends_on.reads_augmentations);
-            lazy.provisional.retain(|_, (resolved, _)| !resolved.depends_on.reads_augmentations);
+            lazy.evict_where(true, |resolved| resolved.depends_on.reads_augmentations);
         }
         lazy.engine.store(Arc::new(next));
     }
@@ -1746,6 +1775,102 @@ mod read_retry_tests {
         set_clock(&revision, start);
         assert!(revision.lazy_component(&options, "Box").unwrap() == cold(&["Card", "Box"]), "Box, recovered");
         assert!(revision.lazy_component(&options, "Card").unwrap() == cold(&["Card"]), "Card, recovered");
+    }
+
+    /// Writes `files` under a fresh project root inside the crate, so React's types resolve.
+    fn react_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Utf8PathBuf) {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        (tmp, root)
+    }
+
+    const BOX: (&str, &str) = (
+        "src/box/Box.tsx",
+        "import * as React from 'react';\ninterface BoxProps extends React.AriaAttributes { own?: boolean }\n\
+         export const Box = (props: BoxProps) => <div />;\n",
+    );
+
+    /// An answer a growth drops is named by the next edit: `Box` is memoized; `Card`'s walk then meets an unreadable
+    /// `base.d.ts` that merges `aria-card` into React, and the growth drops `Box`. Once `base` reads, an unrelated edit
+    /// names `Box` among the updated keys, though nobody asked for it since.
+    #[test]
+    fn an_answer_a_growth_dropped_is_named_by_the_next_edit() {
+        let (_tmp, root) = react_fixture(&[
+            (
+                "node_modules/card-kit/package.json",
+                r#"{ "name": "card-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            (
+                "node_modules/card-kit/index.d.ts",
+                "import type { Base } from './base';\nexport interface CardProps extends Base { card: string }\n",
+            ),
+            (
+                "src/card/Card.tsx",
+                "import type { CardProps } from 'card-kit';\nexport function Card(props: CardProps) { return null; }\n",
+            ),
+            ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+            BOX,
+        ]);
+        let base = root.join("node_modules/card-kit/base.d.ts");
+        std::fs::write(&base, [0xff; 8]).unwrap();
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        drop(revision.lazy_component(&options, "Box").unwrap());
+        drop(revision.lazy_component(&options, "Card").unwrap());
+        std::fs::write(
+            &base,
+            "declare module 'react' { interface AriaAttributes { 'aria-card'?: string } }\nexport interface Base { b: string }\n",
+        )
+        .unwrap();
+        let plain = root.join("src/plain/Plain.tsx");
+        std::fs::write(&plain, "export function Plain(props: { title: string; more: string }) { return null; }\n")
+            .unwrap();
+        let (_next, update) = revision.next_lazy(&options, &plain).unwrap();
+        assert!(update.updated_keys.contains(&"Box".to_owned()), "{:?}", update.updated_keys);
+    }
+
+    /// Retries follow the current revision's live demands: `setup.ts`, the only importer of `aug-kit`, whose search
+    /// cannot read `bad`, drops the import. Once `bad` reads and the retry is due, `Box` reads no `aria-tw`: a fresh
+    /// session over the same files has none either.
+    #[test]
+    fn a_walk_no_live_demand_reaches_is_not_retried() {
+        let setup = "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n";
+        let (_tmp, root) = react_fixture(&[
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+            (
+                "node_modules/aug-kit/aug.d.ts",
+                "declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\nexport {};\n",
+            ),
+            ("src/setup.ts", setup),
+            BOX,
+        ]);
+        let bad = root.join("node_modules/aug-kit/bad.d.ts");
+        std::fs::write(&bad, [0xff; 8]).unwrap();
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        drop(revision.lazy_component(&options, "Box").unwrap());
+        let setup_file = root.join("src/setup.ts");
+        std::fs::write(&setup_file, "export const aug = 1;\n").unwrap();
+        let revision = revision.next_lazy(&options, &setup_file).unwrap().0;
+        std::fs::write(&bad, "export {};\n").unwrap();
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let answer = revision.lazy_component(&options, "Box").unwrap();
+        assert!(!props(&answer).contains(&"aria-tw".to_owned()), "no live import of `aug-kit`");
+        assert!(answer == Revision::cold_lazy(&options, 0).lazy_component(&options, "Box").unwrap());
     }
 
     /// An answer resolved before a growth published is not kept after it: `Box` reads React's augmentations while
