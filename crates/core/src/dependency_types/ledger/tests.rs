@@ -1797,7 +1797,9 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
             // A session keeps what it loaded once an import is dropped (the layer only grows), so the import of `mk/aug`
             // is dropped and restored only while its search has never read every file.
             let mut complete = |unreadable: &std::collections::BTreeSet<&str>, setup: bool| {
-                aug_complete |= setup && !unreadable.iter().any(|file| file.starts_with("aug/"));
+                // `tone` is imported by `aug2`, not reached by the search.
+                let searched = ["aug/afirst", "aug/aug", "aug/aug2"];
+                aug_complete |= setup && !unreadable.iter().any(|file| searched.contains(file));
             };
             complete(&unreadable, run.oracle.setup);
             match next(7) {
