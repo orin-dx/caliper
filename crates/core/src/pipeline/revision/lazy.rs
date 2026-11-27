@@ -231,6 +231,9 @@ pub(super) struct Lazy {
     live_warnings: Mutex<Option<LiveWarnings>>,
     #[cfg(test)]
     live_warning_builds: std::sync::atomic::AtomicUsize,
+    /// How many files a growth asked about to carry memos, for tests.
+    #[cfg(test)]
+    carry_checks: std::sync::atomic::AtomicUsize,
     /// How many live demands the derivations of the live warnings walked, for tests.
     #[cfg(test)]
     live_warning_roots: std::sync::atomic::AtomicUsize,
@@ -475,6 +478,8 @@ impl Revision {
             #[cfg(test)]
             live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
+            carry_checks: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
             live_warning_roots: std::sync::atomic::AtomicUsize::new(0),
             whole_demand_started: std::sync::atomic::AtomicBool::new(false),
             whole_demand_thread: Mutex::new(None),
@@ -657,6 +662,8 @@ impl Revision {
                 live_warnings: Mutex::new(None),
                 #[cfg(test)]
                 live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
+                #[cfg(test)]
+                carry_checks: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 live_warning_roots: std::sync::atomic::AtomicUsize::new(0),
                 whole_demand_started: std::sync::atomic::AtomicBool::new(false),
@@ -949,20 +956,16 @@ impl Revision {
         // behind; the rest hold for the larger layer, so the next component does not rebuild them. So does one that
         // read a file whose walk reached an unread one (the old layer's ledger): a project file whose demands did, or a
         // package file whose declarations did, since what lay past the file that could not be read is missing from it.
+        // Each file a carried memo read is asked about, not every file of the project: a growth costs what it carries.
         let unread = layer.unread_walks();
-        let unread_project: FxHashSet<&str> = match unread.is_empty() {
-            true => FxHashSet::default(),
-            false => lazy
-                .demands
-                .iter()
-                .filter(|(_, demands)| unread.reached_by(demands))
-                .map(|(file, _)| std::borrow::Borrow::<str>::borrow(file))
-                .collect(),
-        };
         let kept = |file: &str| {
-            lazy.demands.get(file).is_none_or(|demands| layer.covers(demands))
-                && !unread_project.contains(file)
-                && !unread.declared_in(file)
+            #[cfg(test)]
+            lazy.carry_checks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let project = lazy
+                .demands
+                .get(file)
+                .is_none_or(|demands| layer.covers(demands) && (unread.is_empty() || !unread.reached_by(demands)));
+            project && !unread.declared_in(file)
         };
         // The one rule for every cache a growth carries over, the context's memos and the session's answers alike.
         let still_valid = |deps: &crate::resolver::Dependencies, read_in: &str| {
@@ -1633,6 +1636,62 @@ mod read_retry_tests {
         assert!(answer == cold());
     }
 
+    /// A lazy session serves what a walk past an unreadable file loaded for as long as the walk is unread, and keeps
+    /// nothing of it once a retry replaces the walk: `fallback`'s `Base` augments `HTMLAttributes` with `fb` while
+    /// `first` cannot be read; once `first` declares `Target`, neither component has anything of `base`. Both equal a
+    /// cold run at each step.
+    #[test]
+    fn a_lazy_session_keeps_nothing_a_replaced_partial_walk_loaded() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#);
+        write("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n");
+        write(
+            "node_modules/kit/fallback.d.ts",
+            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
+        );
+        write(
+            "node_modules/kit/base.d.ts",
+            "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
+             export interface Base { base: string }\n",
+        );
+        write(
+            "src/card/Card.tsx",
+            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
+        );
+        write(
+            "src/aria/Aria.tsx",
+            "import * as React from 'react';\ninterface AriaProps extends React.AriaAttributes { own?: boolean }\n\
+             export const Aria = (props: AriaProps) => <div />;\n",
+        );
+        let first = root.join("node_modules/kit/first.d.ts");
+        std::fs::write(&first, [0xff; 8]).unwrap();
+        let options = |use_cache| PipelineOptions {
+            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
+            ..options(&root, use_cache)
+        };
+        let cold = |name: &str| Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
+        let revision = Revision::cold_lazy(&options(true), 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        for name in ["Card", "Aria"] {
+            let answer = revision.lazy_component(&options(true), name).unwrap();
+            assert!(answer == cold(name), "{name}, partial: {:?}", props(&answer));
+        }
+        write("node_modules/kit/first.d.ts", "export interface Target { first: string }\n");
+        set_clock(&revision, start + DEGRADED_RETRY);
+        for name in ["Card", "Aria"] {
+            let answer = revision.lazy_component(&options(true), name).unwrap();
+            assert!(!props(&answer).contains(&"aria-fb".to_owned()) && !props(&answer).contains(&"base".to_owned()));
+            assert!(answer == cold(name), "{name}, recovered: {:?}", props(&answer));
+        }
+    }
+
     /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its
     /// own file importing `many-kit` past one unreadable file, asked for together and then again, all carry the
     /// warning, and the live warnings are derived once for each layer the answers were read against.
@@ -1670,6 +1729,9 @@ mod read_retry_tests {
         assert!(growths >= 100, "each request grows the layer: {growths}");
         let walked = lazy.live_warning_roots.load(Relaxed);
         assert!(walked <= 2 * 200, "{walked} live demands walked over {growths} growths");
+        // Carrying memos asks about the files the carried memos read, not every importing file of the project.
+        let checks = lazy.carry_checks.load(Relaxed);
+        assert!(checks <= 20 * 200, "{checks} files asked about over {growths} growths");
     }
 
     /// An answer that read React's augmentations holds only for the augmentations served when it was resolved:

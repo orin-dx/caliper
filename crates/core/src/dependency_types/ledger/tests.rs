@@ -1135,6 +1135,56 @@ fn a_cyclic_export_walk_past_an_unreadable_file_visits_each_module_once() {
     assert!(recovered.failed_reads_reached(&demands).is_empty(), "nothing left unread");
 }
 
+/// What a walk past an unreadable file loads belongs to that walk: `kit` re-exports `first` (unreadable) and then
+/// `fallback`, whose `Target` extends `Base` from `base`, which also augments React's `HTMLAttributes` with `fb`.
+/// While `first` cannot be read, `Card` has `fallback` and `base` and `Box` has `fb`, as a fresh run has. Once `first`
+/// reads and declares `Target` itself, a fresh run never follows `base`: after an edit neither component keeps
+/// anything of it.
+#[test]
+fn what_a_partial_walk_loads_is_not_kept_once_a_complete_walk_replaces_it() {
+    let (_tmp, root) = react_project(&[
+        ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
+        (
+            "node_modules/kit/fallback.d.ts",
+            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
+        ),
+        (
+            "node_modules/kit/base.d.ts",
+            "import type {} from 'react';\n\
+             declare module 'react' { interface HTMLAttributes<T> { fb?: string } }\n\
+             export interface Base { base: string }\n",
+        ),
+        (
+            "src/card/Card.tsx",
+            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
+        ),
+        ("src/box/Box.tsx", BOX),
+        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+    ]);
+    let first = root.join("node_modules/kit/first.d.ts");
+    std::fs::write(&first, UNREADABLE).unwrap();
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    let fresh = |name: &str| {
+        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
+        drop(fresh.initialize());
+        fresh.component(name)
+    };
+    assert_eq!(names(&session.component("Card")), ["base", "fallback"]);
+    assert!(names(&session.component("Box")).contains(&"fb".to_owned()), "served while `first` cannot be read");
+    for name in ["Card", "Box"] {
+        assert!(session.component(name) == fresh(name), "{name}, partial");
+    }
+    std::fs::write(&first, "export interface Target { first: string }\n").unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+    assert_eq!(names(&session.component("Card")), ["first"]);
+    assert!(!names(&session.component("Box")).contains(&"fb".to_owned()), "nothing of `base` is kept");
+    for name in ["Card", "Box"] {
+        assert!(session.component(name) == fresh(name), "{name}, recovered");
+    }
+}
+
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
 /// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
 /// augmentation did add one.

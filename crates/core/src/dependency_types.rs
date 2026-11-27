@@ -43,6 +43,24 @@ type FxDashSet<K> = DashSet<K, FxBuildHasher>;
 type ModuleCell = Arc<OnceLock<(DemandKey, Partial<Vec<(Utf8PathBuf, Arc<SourceData>)>>)>>;
 /// The augmenting files an incomplete search read, parsed.
 type ProvisionalFiles = Arc<[(Utf8PathBuf, Arc<SourceData>)]>;
+/// The walk a provisional answer came from: `(module, name)`, the name empty for a search of what a module merges into
+/// React.
+type ProvisionalKey = (PathKey, CompactString);
+
+/// How a declaration was reached: only through walks that read every file, or through one that passed a file it could
+/// not read. What a walk loads while past such a file belongs to that walk: what it merges into React (the only
+/// contribution any answer reads without naming it) is served while the walk is, never indexed.
+#[derive(Clone, Debug)]
+enum Reach {
+    Complete,
+    Partial(ProvisionalKey),
+}
+
+/// Whether `data`, parsed from `file`, merges interfaces into the `React` namespace.
+fn merges_into_react(file: &Utf8Path, data: &SourceData) -> bool {
+    let prefix = format!("{file}:React.");
+    data.interfaces.keys().any(|key| key.starts_with(&prefix))
+}
 
 /// A file's data, read and parsed once per load whoever asks first, a failed read included (`Loader::parse_source`).
 type ParseCell = Arc<OnceLock<Result<Option<Arc<SourceData>>, ReadFailed>>>;
@@ -445,7 +463,7 @@ pub(crate) struct DependencyLayer {
     /// Each module whose latest augmentation search could not read a file, with the augmenting files it read: served
     /// to the answers whose live demands reach the module ([`DependencyLayer::served_types`]), never indexed, never
     /// written, so nothing they hold outlives the module's next search, complete or not.
-    provisional: FxHashMap<PathKey, ProvisionalFiles>,
+    provisional: FxHashMap<ProvisionalKey, ProvisionalFiles>,
     /// Each provisional file the layer does not index, once however many modules' searches read it: its imports are
     /// [`serve`]d into `import_map`, its declarations into the one overlay [`DependencyLayer::served_types`] builds.
     provisional_data: FxHashMap<PathKey, Arc<SourceData>>,
@@ -550,7 +568,7 @@ impl DependencyLayer {
     /// The provisional files [`Self::served_types`] serves to `roots`, each once, sorted.
     pub(crate) fn served_files<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<&Utf8PathBuf> {
         let live = self.served_modules(roots);
-        let served = self.provisional.iter().filter(|(module, _)| live.contains(*module));
+        let served = self.provisional.iter().filter(|(key, _)| live.contains(*key));
         let mut files: Vec<&Utf8PathBuf> = served.flat_map(|(_, files)| files.iter().map(|(file, _)| file)).collect();
         files.sort();
         files.dedup();
@@ -558,20 +576,19 @@ impl DependencyLayer {
     }
 
     /// The modules with provisional augmentations that the unread module walks `roots` lead to reach.
-    fn served_modules<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> FxHashSet<PathKey> {
+    fn served_modules<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> FxHashSet<ProvisionalKey> {
         if self.provisional.is_empty() {
             return FxHashSet::default();
         }
-        let module = |demand: &Demand| {
+        let key = |demand: &Demand| {
             let dir = demand.from.parent()?;
             match self.resolution(&(Box::from(dir.as_str()), Box::from(&*demand.specifier)))? {
-                Ok(module) => Some(PathKey::from(module.as_path())),
+                Ok(module) => Some((PathKey::from(module.as_path()), demand.name.clone())),
                 Err(_) => None,
             }
         };
         let walks = self.unread_from(roots);
-        let modules = walks.iter().filter(|walk| walk.name.is_empty()).filter_map(module);
-        modules.filter(|module| self.provisional.contains_key(module)).collect()
+        walks.iter().filter_map(key).filter(|key| self.provisional.contains_key(key)).collect()
     }
 
     pub(crate) fn provisional_files(&self) -> Vec<&Utf8PathBuf> {
@@ -715,7 +732,16 @@ struct Loader<'a> {
     declaring: FxDashSet<PathKey>,
     react_files: FxDashSet<PathKey>,
     augmenters: FxDashMap<PathKey, Vec<Utf8PathBuf>>,
-    provisional: FxDashMap<PathKey, ProvisionalFiles>,
+    provisional: FxDashMap<ProvisionalKey, ProvisionalFiles>,
+    /// The walks this load followed, complete or not: an older provisional answer of each is replaced.
+    walked: FxDashSet<ProvisionalKey>,
+    /// The files a declaration reached only through a walk past a file it could not read, with that walk.
+    reached_partially: FxDashMap<PathKey, ProvisionalKey>,
+    /// The files a declaration reached through walks that read every file.
+    reached_completely: FxDashSet<PathKey>,
+    /// The declarations and demands followed along such a walk, apart from those every walk shares.
+    provisional_claims: FxDashSet<(PathKey, CompactString)>,
+    provisional_demands: FxDashSet<DemandKey>,
     /// For each module in `augmenters`, the stamps of the other packages its search read files from.
     augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
@@ -769,6 +795,11 @@ impl<'a> Loader<'a> {
             react_files: DashSet::default(),
             augmenters: DashMap::default(),
             provisional: DashMap::default(),
+            walked: DashSet::default(),
+            reached_partially: DashMap::default(),
+            reached_completely: DashSet::default(),
+            provisional_claims: DashSet::default(),
+            provisional_demands: DashSet::default(),
             augmenter_crossed: DashMap::default(),
             demands: DashSet::default(),
             ledger: LedgerBuilder::new(parent),
@@ -1045,24 +1076,42 @@ impl Loader<'_> {
 
     /// Runs `demand` on the scope, recording a panic as a diagnostic instead of letting it end the whole load.
     fn spawn_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+        self.spawn_demand_on(scope, demand, Reach::Complete);
+    }
+
+    /// [`Self::spawn_demand`], for a demand reached as `reach` says.
+    fn spawn_demand_on<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand, reach: Reach) {
         scope.spawn(move |scope| {
             let label = format!("dependency demand {}#{}", demand.specifier, demand.name);
-            if let Err(panic) = crate::panic_guard::contain_panic(&label, || self.demand(scope, demand)) {
+            if let Err(panic) = crate::panic_guard::contain_panic(&label, || self.demand(scope, demand, reach)) {
                 self.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(panic);
             }
         });
     }
 
-    fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+    fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand, reach: Reach) {
         #[cfg(test)]
         assert!(&*demand.name != DEMAND_PANIC_TEST_NAME, "injected panic");
         let key = demand.key();
+        if let Reach::Partial(_) = reach {
+            // Along a walk past an unreadable file a demand is followed once per load, and not at all when a complete
+            // walk followed it: its declarations are then the index's.
+            let complete = self.parent.is_some_and(|parent| parent.has_demand(&key)) || self.demands.contains(&key);
+            if complete || !self.provisional_demands.insert(key.clone()) {
+                return;
+            }
+            let followed = self.follow(scope, &demand, &key, reach);
+            if followed.incomplete() {
+                self.ledger.unread_demand(&demand, followed.unread);
+            }
+            return;
+        }
         let known = self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone());
         // A demand whose last walk passed a file it could not read is followed again, once per load.
         if known && !self.ledger.retries(&key) {
             return;
         }
-        let followed = self.follow(scope, &demand, &key);
+        let followed = self.follow(scope, &demand, &key, reach);
         if followed.incomplete() {
             self.ledger.unread_demand(&demand, followed.unread);
         }
@@ -1071,7 +1120,7 @@ impl Loader<'_> {
     /// Follows `demand`, whose key is `key`: what it names is loaded, or why not is in `unresolved`. Incomplete when a
     /// file it needed could not be read: what the readable files gave is loaded for this load, and no reason is kept,
     /// since the name is unknown, not absent.
-    fn follow<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand, key: &DemandKey) -> Partial<()> {
+    fn follow<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand, key: &DemandKey, reach: Reach) -> Partial<()> {
         let node = Node::Demand(key.clone());
         if demand.name.is_empty() {
             return self.module_demand(scope, demand, &node);
@@ -1091,13 +1140,19 @@ impl Loader<'_> {
             let qualified = CompactString::from(format!("React.{}", demand.name));
             return match self.parse(&module) {
                 Ok(Some(data)) if declares(&data, &module, &qualified) => {
-                    self.load_declaration(scope, module, qualified, &node, true)
+                    self.load_declaration(scope, module, qualified, &node, Reach::Complete)
                 }
                 Ok(_) => Partial::DONE,
                 Err(failed) => Partial::unread_at(failed),
             };
         }
         let found = self.find_export(&module, &demand.name);
+        let walk = (PathKey::from(module.as_path()), demand.name.clone());
+        let reach = match reach {
+            Reach::Complete if found.incomplete() => Reach::Partial(walk.clone()),
+            reach => reach,
+        };
+        self.walked.insert(walk);
         // The newest walk of `(module, name)` decides the resolver's partial mapping: what it found past a file it
         // could not read, or, over an older layer's mapping, that it found nothing or another file it did not keep
         // (a re-export cycle), so the older mapping no longer stands.
@@ -1113,7 +1168,7 @@ impl Loader<'_> {
             (true, None) | (false, _) => {}
         }
         let loaded = match found.value {
-            Some((file, name)) => self.load_declaration(scope, file, name, &node, true),
+            Some((file, name)) => self.load_declaration(scope, file, name, &node, reach),
             None if !found.unread.is_empty() => Partial::DONE,
             None => {
                 let cause = self.unresolved_cause(&module, &demand.name);
@@ -1215,7 +1270,16 @@ impl Loader<'_> {
             (demand.key(), self.search_module(demand))
         });
         let loaded = match first {
-            true => self.load_augmentations(scope, &augmenting.value, node, augmenting.unread.is_empty()),
+            true => {
+                let reach = match augmenting.unread.is_empty() {
+                    true => Reach::Complete,
+                    false => match self.resolve(&demand.from, &demand.specifier) {
+                        Ok(module) => Reach::Partial((PathKey::from(module.as_path()), CompactString::default())),
+                        Err(_) => Reach::Complete,
+                    },
+                };
+                self.load_augmentations(scope, &augmenting.value, node, reach)
+            }
             false => {
                 self.ledger.reached(node, Node::Demand(searched_by.clone()));
                 Partial::DONE
@@ -1241,9 +1305,11 @@ impl Loader<'_> {
                 Err(ReadFailed(file)) => unread.push(file),
             }
         }
+        let walk = (PathKey::from(module.as_path()), CompactString::default());
         if !unread.is_empty() {
-            self.provisional.insert(PathKey::from(module.as_path()), Arc::from(parsed.as_slice()));
+            self.provisional.insert(walk.clone(), Arc::from(parsed.as_slice()));
         }
+        self.walked.insert(walk);
         Partial { value: parsed, unread }
     }
 
@@ -1285,13 +1351,13 @@ impl Loader<'_> {
     }
 
     /// Loads the `React.`-qualified declarations of `augmenting`, the parsed files that augment React, and what they
-    /// import: indexed when the search was `complete`, else served provisionally while what they import is loaded.
+    /// import, reached as `reach` says.
     fn load_augmentations<'s>(
         &'s self,
         scope: &rayon::Scope<'s>,
         augmenting: &[(Utf8PathBuf, Arc<SourceData>)],
         from: &Node,
-        complete: bool,
+        reach: Reach,
     ) -> Partial<()> {
         let mut loaded = Partial::DONE;
         for (file, data) in augmenting {
@@ -1302,7 +1368,7 @@ impl Loader<'_> {
                     && name.starts_with("React.")
                 {
                     let name = CompactString::from(name);
-                    loaded = loaded.and(self.load_declaration(scope, file.clone(), name, from, complete));
+                    loaded = loaded.and(self.load_declaration(scope, file.clone(), name, from, reach.clone()));
                 }
             }
         }
@@ -1399,7 +1465,7 @@ impl Loader<'_> {
         file: Utf8PathBuf,
         name: CompactString,
         from: &Node,
-        indexed: bool,
+        reach: Reach,
     ) -> Partial<()> {
         if self.in_project(&file) {
             return Partial::DONE;
@@ -1415,25 +1481,35 @@ impl Loader<'_> {
         let mut stack: Vec<(CompactString, Node)> =
             name.split_once('.').map(|(head, _)| (CompactString::from(head), from.clone())).into_iter().collect();
         stack.push((name, from.clone()));
-        // A provisional declaration claims nothing and is served, not indexed; what it imports is loaded alike.
-        let mut served: FxHashSet<CompactString> = FxHashSet::default();
+        // Along a walk past an unreadable file a declaration claims apart, so a complete walk still follows it, and its
+        // file is noted as reached only so: what it merges into React is then served, not indexed.
+        let file_key = PathKey::from(file.as_path());
+        match &reach {
+            Reach::Complete => drop(self.reached_completely.insert(file_key.clone())),
+            Reach::Partial(walk) => {
+                drop(self.reached_partially.entry(file_key.clone()).or_insert_with(|| walk.clone()))
+            }
+        }
         while let Some((name, reached_from)) = stack.pop() {
-            let claim = (PathKey::from(file.as_path()), name.clone());
+            let claim = (file_key.clone(), name.clone());
             let node = Node::Claim(claim.clone());
             self.ledger.reached(&reached_from, node.clone());
-            let first = match indexed {
-                true => !self.parent.is_some_and(|parent| parent.has_claimed(&claim)) && self.claimed.insert(claim),
-                false => served.insert(name.clone()),
+            let claimed = self.parent.is_some_and(|parent| parent.has_claimed(&claim));
+            let first = match reach {
+                Reach::Complete => !claimed && self.claimed.insert(claim),
+                Reach::Partial(_) => {
+                    !claimed && !self.claimed.contains(&claim) && self.provisional_claims.insert(claim)
+                }
             };
             if !first {
                 continue;
             }
-            if indexed && react {
+            if react {
                 if !self.parent.is_some_and(|parent| parent.has_react_file(file.as_str())) {
-                    self.react_files.insert(PathKey::from(file.as_path()));
+                    self.react_files.insert(file_key.clone());
                 }
-            } else if indexed && !self.parent.is_some_and(|parent| parent.is_dependency_file(&file)) {
-                self.declaring.insert(PathKey::from(file.as_path()));
+            } else if !self.parent.is_some_and(|parent| parent.is_dependency_file(&file)) {
+                self.declaring.insert(file_key.clone());
             }
             // The type a value is declared with (`declare const Primitive: Primitives`) goes with the value.
             let value_type = CompactString::from(format!("typeof {name}"));
@@ -1453,7 +1529,7 @@ impl Loader<'_> {
                     stack.push((qualified, node.clone()));
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
                     self.ledger.reached(&node, Node::Demand(demand.key()));
-                    self.spawn_demand(scope, demand);
+                    self.spawn_demand_on(scope, demand, reach.clone());
                 }
             }
         }
@@ -1722,6 +1798,25 @@ fn load_with(
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();
     files.sort();
+    // A file only a walk past an unreadable file reached, that merges into React, is that walk's: served while the walk
+    // is, never indexed, so a complete walk that no longer reaches it leaves nothing of it behind (`Reach`).
+    let mut moved: FxHashMap<ProvisionalKey, Vec<(Utf8PathBuf, Arc<SourceData>)>> = FxHashMap::default();
+    let mut moved_files: FxHashSet<PathKey> = FxHashSet::default();
+    files.retain(|file| {
+        let Some(walk) = loader.reached_partially.get(file).map(|walk| walk.clone()) else { return true };
+        if loader.reached_completely.contains(file) {
+            return true;
+        }
+        let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
+        match loader.parse(path) {
+            Ok(Some(data)) if merges_into_react(path, &data) => {
+                moved.entry(walk).or_default().push((path.to_owned(), data));
+                moved_files.insert(file.clone());
+                false
+            }
+            _ => true,
+        }
+    });
     // Each file's declarations go straight into the index, and only what the import map reads (imports and
     // re-exports) and the value index (component mappings) is kept apart; a merged copy of every file's data would
     // hold the same declarations twice. An extension indexes only its own files; the parent's answer for the rest.
@@ -1746,24 +1841,28 @@ fn load_with(
     let named_types = Arc::new(named);
     // The provisional augmentations: this load's incomplete searches, and `previous`'s for the modules this load did
     // not search again. A module's newest search replaces what an older one read.
-    let mut provisional: FxHashMap<PathKey, ProvisionalFiles> = previous
+    let mut provisional: FxHashMap<ProvisionalKey, ProvisionalFiles> = previous
         .map(|layer| {
-            let searched =
-                |module: &PathKey| loader.augmenters.contains_key(module) || loader.provisional.contains_key(module);
-            layer
-                .provisional
-                .iter()
-                .filter(|(module, _)| !searched(module))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
+            let searched = |walk: &ProvisionalKey| {
+                loader.walked.contains(walk) || (walk.1.is_empty() && loader.augmenters.contains_key(&walk.0))
+            };
+            layer.provisional.iter().filter(|(walk, _)| !searched(walk)).map(|(k, v)| (k.clone(), v.clone())).collect()
         })
         .unwrap_or_default();
     provisional.extend(std::mem::take(&mut loader.provisional));
+    for (walk, mut files) in moved {
+        if let Some(found) = provisional.get(&walk) {
+            files.extend(found.iter().cloned());
+        }
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        files.dedup_by(|a, b| a.0 == b.0);
+        provisional.insert(walk, Arc::from(files));
+    }
     // Each provisional file, served as an indexed file is, once however many searches read it and not at all when the
     // layer indexes it: which are served depends on the live demands of the revision that reads the layer.
     let mut provisional_data: FxHashMap<PathKey, Arc<SourceData>> = FxHashMap::default();
     for (file, data) in provisional.values().flat_map(|files| files.iter()) {
-        let indexed = loader.declaring.contains(file.as_str())
+        let indexed = (loader.declaring.contains(file.as_str()) && !moved_files.contains(file.as_str()))
             || parent.as_ref().is_some_and(|layer| layer.is_dependency_file(file));
         if indexed || provisional_data.contains_key(file.as_str()) {
             continue;
