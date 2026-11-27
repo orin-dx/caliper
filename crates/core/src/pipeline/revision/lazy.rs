@@ -336,7 +336,13 @@ impl Lazy {
         }
         #[cfg(test)]
         self.shared_unread_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let unread: Arc<[Demand]> = Arc::from(layer.unread(&self.shared));
+        // The shared demands' unread walks, and every live walk whose provisional files the layer serves: a reader of
+        // React's augmentations reads those too, so it holds only while they do and follows them again once due.
+        let mut unread: Vec<Demand> = layer.unread(&self.shared);
+        unread.extend(layer.serving_walks(live_roots(&self.demands)));
+        unread.sort();
+        unread.dedup();
+        let unread: Arc<[Demand]> = Arc::from(unread);
         let walks = Arc::new(SharedWalks { footprint: layer.footprint(&unread), unread, bound: Mutex::new(None) });
         *held = Some((layer.clone(), walks.clone()));
         walks
@@ -1752,6 +1758,59 @@ mod read_retry_tests {
         assert!(distinct.len() > 20, "the answers were read against {} layers", distinct.len());
         let alive = layers.iter().filter(|layer| layer.upgrade().is_some()).count();
         assert!(alive <= 10, "{alive} of the {} layers are alive", layers.len());
+    }
+
+    /// A reader of React's augmentations holds by the live walks that serve what it reads: `Card`'s named walk past an
+    /// unreadable `first` serves `base`, which augments `AriaAttributes` with `aria-fb`, so `Aria` has it. Once `first`
+    /// reads and its retry is due, asking for `Aria` alone follows that walk again: `aria-fb` is gone, as in a cold run.
+    #[test]
+    fn a_reader_of_augmentations_holds_by_the_walks_that_serve_them() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#);
+        write("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n");
+        write(
+            "node_modules/kit/fallback.d.ts",
+            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
+        );
+        write(
+            "node_modules/kit/base.d.ts",
+            "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
+             export interface Base { base: string }\n",
+        );
+        write(
+            "src/card/Card.tsx",
+            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
+        );
+        write(
+            "src/aria/Aria.tsx",
+            "import * as React from 'react';\ninterface AriaProps extends React.AriaAttributes { own?: boolean }\n\
+             export const Aria = (props: AriaProps) => <div />;\n",
+        );
+        std::fs::write(root.join("node_modules/kit/first.d.ts"), [0xff; 8]).unwrap();
+        let options = |use_cache| PipelineOptions {
+            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
+            ..options(&root, use_cache)
+        };
+        let cold = |name: &str| Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
+        let revision = Revision::cold_lazy(&options(true), 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        drop(revision.lazy_component(&options(true), "Card").unwrap());
+        let aria = revision.lazy_component(&options(true), "Aria").unwrap();
+        assert!(props(&aria).contains(&"aria-fb".to_owned()), "served through `Card`'s walk");
+        write("node_modules/kit/first.d.ts", "export interface Target { first: string }\n");
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let aria = revision.lazy_component(&options(true), "Aria").unwrap();
+        assert!(!props(&aria).contains(&"aria-fb".to_owned()), "asked alone, it follows the serving walk again");
+        assert!(aria == cold("Aria"));
+        let card = revision.lazy_component(&options(true), "Card").unwrap();
+        assert_eq!(props(&card), ["first"]);
     }
 
     /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its

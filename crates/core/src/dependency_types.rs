@@ -505,6 +505,8 @@ pub(crate) struct DependencyLayer {
     /// to the answers whose live demands reach the module ([`DependencyLayer::served_types`]), never indexed, never
     /// written, so nothing they hold outlives the module's next search, complete or not.
     provisional: FxHashMap<ProvisionalKey, ProvisionalFiles>,
+    /// The demands this layer's load followed only along a walk past an unreadable file, with that walk.
+    partial_demands: FxHashMap<DemandKey, ProvisionalKey>,
     /// Each provisional file the layer does not index, once however many modules' searches read it: its imports are
     /// [`serve`]d into `import_map`, its declarations into the one overlay [`DependencyLayer::served_types`] builds.
     provisional_data: FxHashMap<PathKey, Arc<SourceData>>,
@@ -621,10 +623,21 @@ impl DependencyLayer {
         files
     }
 
-    /// The modules with provisional augmentations that the unread module walks `roots` lead to reach.
+    /// The walks with provisional files that the unread walks `roots` lead to are: what the layer serves to them.
     fn served_modules<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> FxHashSet<ProvisionalKey> {
+        self.serving(roots).into_iter().map(|(key, _)| key).collect()
+    }
+
+    /// The live unread walks whose provisional files the layer serves to `roots`: what an answer that reads the
+    /// served files holds by and follows again once due.
+    pub(crate) fn serving_walks<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Demand> {
+        self.serving(roots).into_iter().map(|(_, walk)| walk).collect()
+    }
+
+    /// Each unread walk `roots` lead to that has provisional files, with the walk it is keyed by.
+    fn serving<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<(ProvisionalKey, Demand)> {
         if self.provisional.is_empty() {
-            return FxHashSet::default();
+            return Vec::new();
         }
         let key = |demand: &Demand| {
             let dir = demand.from.parent()?;
@@ -634,7 +647,10 @@ impl DependencyLayer {
             }
         };
         let walks = self.unread_from(roots);
-        walks.iter().filter_map(key).filter(|key| self.provisional.contains_key(key)).collect()
+        walks
+            .into_iter()
+            .filter_map(|walk| key(&walk).filter(|key| self.provisional.contains_key(key)).map(|key| (key, walk)))
+            .collect()
     }
 
     pub(crate) fn provisional_files(&self) -> Vec<&Utf8PathBuf> {
@@ -706,6 +722,19 @@ impl DependencyLayer {
 
     fn has_demand(&self, key: &DemandKey) -> bool {
         self.chain().any(|layer| layer.demands.contains(key))
+    }
+
+    /// How a load over this layer reaches the demand `key` when it follows it again: through the walk past an
+    /// unreadable file that first reached it, unless a complete walk followed it too. A retry keeps the reach of the
+    /// path that led to it, so what it loads stays that walk's.
+    fn reach_of(&self, key: &DemandKey) -> Reach {
+        match self.has_demand(key) {
+            true => Reach::Complete,
+            false => match self.chain().find_map(|layer| layer.partial_demands.get(key)) {
+                Some(walk) => Reach::Partial(walk.clone()),
+                None => Reach::Complete,
+            },
+        }
     }
 
     fn has_claimed(&self, key: &(PathKey, CompactString)) -> bool {
@@ -786,13 +815,15 @@ struct Loader<'a> {
     provisional: FxDashMap<ProvisionalKey, ProvisionalFiles>,
     /// The walks this load followed, complete or not: an older provisional answer of each is replaced.
     walked: FxDashSet<ProvisionalKey>,
-    /// The files a declaration reached only through a walk past a file it could not read, with that walk.
-    reached_partially: FxDashMap<PathKey, ProvisionalKey>,
+    /// The files a declaration reached through a walk past a file it could not read, with every such walk: a file is
+    /// served while any of them is live, not only the first to reach it.
+    reached_partially: FxDashMap<PathKey, FxHashSet<ProvisionalKey>>,
     /// The files a declaration reached through walks that read every file.
     reached_completely: FxDashSet<PathKey>,
-    /// The declarations and demands followed along such a walk, apart from those every walk shares.
-    provisional_claims: FxDashSet<(PathKey, CompactString)>,
-    provisional_demands: FxDashSet<DemandKey>,
+    /// The declarations and demands followed along such a walk, apart from those every walk shares: once for each
+    /// walk, so each records everything it reaches.
+    provisional_claims: FxDashSet<(PathKey, CompactString, ProvisionalKey)>,
+    provisional_demands: FxDashSet<(DemandKey, ProvisionalKey)>,
     /// For each module in `augmenters`, the stamps of the other packages its search read files from.
     augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
@@ -1125,10 +1156,6 @@ impl Loader<'_> {
     }
 
     /// Runs `demand` on the scope, recording a panic as a diagnostic instead of letting it end the whole load.
-    fn spawn_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
-        self.spawn_demand_on(scope, demand, Reach::Complete);
-    }
-
     /// [`Self::spawn_demand`], for a demand reached as `reach` says.
     fn spawn_demand_on<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand, reach: Reach) {
         scope.spawn(move |scope| {
@@ -1143,11 +1170,11 @@ impl Loader<'_> {
         #[cfg(test)]
         assert!(&*demand.name != DEMAND_PANIC_TEST_NAME, "injected panic");
         let key = demand.key();
-        if let Reach::Partial(_) = reach {
+        if let Reach::Partial(walk) = &reach {
             // Along a walk past an unreadable file a demand is followed once per load, and not at all when a complete
             // walk followed it: its declarations are then the index's.
             let complete = self.parent.is_some_and(|parent| parent.has_demand(&key)) || self.demands.contains(&key);
-            if complete || !self.provisional_demands.insert(key.clone()) {
+            if complete || !self.provisional_demands.insert((key.clone(), walk.clone())) {
                 return;
             }
             let followed = self.follow(scope, &demand, &key, reach);
@@ -1537,7 +1564,7 @@ impl Loader<'_> {
         match &reach {
             Reach::Complete => drop(self.reached_completely.insert(file_key.clone())),
             Reach::Partial(walk) => {
-                drop(self.reached_partially.entry(file_key.clone()).or_insert_with(|| walk.clone()))
+                self.reached_partially.entry(file_key.clone()).or_default().insert(walk.clone());
             }
         }
         while let Some((name, reached_from)) = stack.pop() {
@@ -1545,10 +1572,11 @@ impl Loader<'_> {
             let node = Node::Claim(claim.clone());
             self.ledger.reached(&reached_from, node.clone());
             let claimed = self.parent.is_some_and(|parent| parent.has_claimed(&claim));
-            let first = match reach {
+            let first = match &reach {
                 Reach::Complete => !claimed && self.claimed.insert(claim),
-                Reach::Partial(_) => {
-                    !claimed && !self.claimed.contains(&claim) && self.provisional_claims.insert(claim)
+                Reach::Partial(walk) => {
+                    let walk_claim = (claim.0.clone(), claim.1.clone(), walk.clone());
+                    !claimed && !self.claimed.contains(&claim) && self.provisional_claims.insert(walk_claim)
                 }
             };
             if !first {
@@ -1775,6 +1803,8 @@ fn load_with(
     let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
     let flatten = previous.filter(|_| parent.is_none());
     let mut loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
+    // A flatten takes the chain's partial demands in; over a parent they are looked up there.
+    let mut partial_demands: FxHashMap<DemandKey, ProvisionalKey> = FxHashMap::default();
     loader.ledger.retry = retry;
     loader.ledger.stamp = stamp;
     loader.ledger.clock = clock;
@@ -1818,6 +1848,9 @@ fn load_with(
                 for file in &layer.react_files {
                     loader.react_files.insert(file.clone());
                 }
+                for (key, walk) in &layer.partial_demands {
+                    partial_demands.entry(key.clone()).or_insert_with(|| walk.clone());
+                }
                 for (module, files) in &layer.augmenters {
                     loader.augmenters.insert(module.clone(), files.clone());
                 }
@@ -1835,7 +1868,8 @@ fn load_with(
     rayon::scope(|scope| {
         for demand in demands {
             let loader = &loader;
-            loader.spawn_demand(scope, demand);
+            let reach = previous.map_or(Reach::Complete, |layer| layer.reach_of(&demand.key()));
+            loader.spawn_demand_on(scope, demand, reach);
         }
     });
     // Only a cold load writes the index. A walk that passed a file it could not read put nothing in the maps it writes
@@ -1853,14 +1887,16 @@ fn load_with(
     let mut moved: FxHashMap<ProvisionalKey, Vec<(Utf8PathBuf, Arc<SourceData>)>> = FxHashMap::default();
     let mut moved_files: FxHashSet<PathKey> = FxHashSet::default();
     files.retain(|file| {
-        let Some(walk) = loader.reached_partially.get(file).map(|walk| walk.clone()) else { return true };
+        let Some(walks) = loader.reached_partially.get(file).map(|walks| walks.clone()) else { return true };
         if loader.reached_completely.contains(file) {
             return true;
         }
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
         match loader.parse(path) {
             Ok(Some(data)) if merges_into_react(path, &data) => {
-                moved.entry(walk).or_default().push((path.to_owned(), data));
+                for walk in walks {
+                    moved.entry(walk).or_default().push((path.to_owned(), data.clone()));
+                }
                 moved_files.insert(file.clone());
                 false
             }
@@ -1938,6 +1974,12 @@ fn load_with(
     let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
     let demands: FxHashSet<DemandKey> = loader.demands.into_iter().collect();
     let files: FxHashSet<PathKey> = files.into_iter().collect();
+    for entry in loader.provisional_demands.iter() {
+        let (key, walk) = entry.key();
+        if !demands.contains(key) {
+            partial_demands.entry(key.clone()).or_insert_with(|| walk.clone());
+        }
+    }
     let ledger = loader.ledger.finish();
     // A walk that found the mapping the chain already holds adds nothing the resolver reads.
     let partial_exports: FxHashMap<_, _> = loader
@@ -1982,6 +2024,7 @@ fn load_with(
         augmenters: loader.augmenters.into_iter().collect(),
         provisional,
         provisional_data,
+        partial_demands,
         partial_exports,
         // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer
         // follows it again.
