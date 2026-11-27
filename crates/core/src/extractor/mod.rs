@@ -159,75 +159,6 @@ pub(crate) fn is_typescript(path: &std::path::Path) -> bool {
     matches!(path.extension().and_then(|extension| extension.to_str()), Some("ts" | "tsx" | "mts" | "cts"))
 }
 
-/// Counts the type nodes the flatten walk enters, so a test can show it enters none.
-#[cfg(test)]
-pub(super) mod flatten_probes {
-    use std::cell::Cell;
-
-    thread_local!(static TYPES: Cell<u64> = const { Cell::new(0) });
-
-    pub(in crate::extractor) fn count_type() {
-        TYPES.with(|types| types.set(types.get() + 1));
-    }
-
-    pub(in crate::extractor) fn take() -> u64 {
-        TYPES.with(|types| types.replace(0))
-    }
-}
-
-/// Reads `(f<A>)(…)` as `f<A>(…)` and `extends (Base<P>)` as `extends Base<P>`: OXC 0.159 keeps a parenthesised
-/// instantiation on the callee or base where OXC 0.158 moved its type arguments onto the call or the heritage, and every
-/// reader here reads the AST as 0.158 shaped it. Only a node without type arguments of its own is rewritten, so nothing
-/// is lost. A `new` callee and a template tag change the same way, but nothing here reads them for a component (the
-/// `instantiation: a new expression` and `a tagged template` rows equal main without a rewrite).
-fn flatten_instantiated_callees<'a>(program: &mut Program<'a>, allocator: &'a Allocator) {
-    struct Flatten<'a> {
-        allocator: &'a Allocator,
-    }
-    impl<'a> Flatten<'a> {
-        /// Moves the type arguments of the instantiation `target` is onto `type_arguments`, as 0.158 parsed it.
-        fn flatten(
-            &self,
-            target: &mut Expression<'a>,
-            type_arguments: &mut Option<OxcBox<'a, TSTypeParameterInstantiation<'a>>>,
-        ) {
-            while type_arguments.is_none() && matches!(target, Expression::TSInstantiationExpression(_)) {
-                let Expression::TSInstantiationExpression(instantiation) =
-                    oxc_allocator::TakeIn::take_in(target, &self.allocator)
-                else {
-                    break;
-                };
-                let instantiation = instantiation.unbox();
-                *target = instantiation.expression;
-                *type_arguments = Some(instantiation.type_arguments);
-            }
-        }
-    }
-    impl<'a> oxc_ast_visit::VisitMut<'a> for Flatten<'a> {
-        fn visit_call_expression(&mut self, it: &mut CallExpression<'a>) {
-            self.flatten(&mut it.callee, &mut it.type_arguments);
-            oxc_ast_visit::walk_mut::walk_call_expression(self, it);
-        }
-
-        fn visit_class_heritage(&mut self, it: &mut ClassHeritage<'a>) {
-            self.flatten(&mut it.expression, &mut it.type_arguments);
-            oxc_ast_visit::walk_mut::walk_class_heritage(self, it);
-        }
-
-        /// No rewrite target is inside a type: an instantiation is an expression, and a type holds none (a `typeof`
-        /// query names a value, it does not call one). Skipping every type keeps this walk off type aliases, interfaces
-        /// and annotations, whose depth the alias collector bounds on its own (`MAX_TYPE_COLLECT_DEPTH`).
-        fn visit_ts_type(&mut self, _it: &mut TSType<'a>) {}
-
-        #[cfg(test)]
-        fn visit_ts_conditional_type(&mut self, it: &mut TSConditionalType<'a>) {
-            flatten_probes::count_type();
-            oxc_ast_visit::walk_mut::walk_ts_conditional_type(self, it);
-        }
-    }
-    oxc_ast_visit::VisitMut::visit_program(&mut Flatten { allocator }, program);
-}
-
 /// Parse a single file and collect all extractable data.
 ///
 /// Completely pure — no I/O, no side effects, no cross-file dependencies.
@@ -259,8 +190,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     let source_type = SourceType::from_path(path).unwrap_or_default();
     // Parentheses carry no meaning here, and a `ParenthesizedExpression` node would hide the wrapper call beneath it.
     let options = ParseOptions { preserve_parens: false, ..ParseOptions::default() };
-    let mut ret = Parser::new(&allocator, source, source_type).with_options(options).parse();
-    flatten_instantiated_callees(&mut ret.program, &allocator);
+    let ret = Parser::new(&allocator, source, source_type).with_options(options).parse();
 
     // .d.ts declaration files use the same React.FC / ForwardRefExoticComponent patterns as .tsx
     // A plain `.ts` file cannot hold JSX but can build components with `createElement` and `forwardRef`, so it is read
@@ -1615,7 +1545,7 @@ impl evidence::Scope for SourceDataCollector<'_> {
     }
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
-        matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
+        matches!(self.react_api(component::callee(call)), Some(ReactApi::Memo | ReactApi::ForwardRef))
     }
 
     fn is_preact_h(&self, receiver: Option<&str>) -> bool {

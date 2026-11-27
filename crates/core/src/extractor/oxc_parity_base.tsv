@@ -25,6 +25,22 @@ instantiation: a default export	Button:Props"wrapperTypeArgument" exported as de
 instantiation: an argument	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 instantiation: a tagged template	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 instantiation: a new expression	Button:Props"typedFunctionExpression" exported as Button
+instantiation: forwardRef inside memo	Button:Props"forwardRef" exported as Button
+instantiation: another module's forwardRef	Button:Props"forwardRef" exported as Button
+instantiation: a class base with an inline props type	Button:__anon_0"classComponent" exported as Button
+instantiation: a component rendered through memo and called	Button:Props"typedFunctionExpression" exported as Button | Inner:Props"functionDeclaration" | Wrapped:Props"wrapperTypeArgument" exported as Wrapped via memo
+instantiation: a component rendered through forwardRef and called	Button:Props"typedFunctionExpression" exported as Button | Inner:Props"functionDeclaration" | Wrapped:Props"forwardRef" exported as Wrapped
+instantiation: a wrapper by convention around a component	Base:Props"functionDeclaration" | Button (default):Props"wrapperTypeArgument" exported as default via withTheme | Button:Props"wrapperTypeArgument" exported as Button via withTheme
+instantiation: a class base with a props type no rule reads	Info SkippedCandidate: 'Button' is a class component extending Component whose props type argument isn't a recognizable props type reference
+normalisation: a function-local enum with a long chain (finding 1)	
+normalisation: a module enum with a long chain	
+normalisation: an expression statement with a long chain	
+normalisation: a type alias with a long union	
+normalisation: an optional instantiated hook (finding 2)	Info SkippedCandidate: 'Label' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+normalisation: an optional instantiated member hook	Info SkippedCandidate: 'Label' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+normalisation: an optional instantiated forwardRef	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+normalisation: an optional instantiated member forwardRef	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+normalisation: an optional call with its own type arguments	Label:Props"typedFunctionExpression" exported as Label
 retreat: plain, callee	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
 retreat: plain, receiver	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
 retreat: plain, argument	Button:Props"functionDeclaration" exported as Button

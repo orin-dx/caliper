@@ -614,7 +614,11 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             {
                 if let Some(mapping) = self.try_class_component(class, name) {
                     self.data.component_mappings.push(mapping);
-                } else if class.heritage.as_ref().is_some_and(|h| h.type_arguments.is_some()) {
+                } else if class
+                    .heritage
+                    .as_ref()
+                    .is_some_and(|h| super::component::heritage_type_arguments(h).is_some())
+                {
                     // Extends Component/PureComponent WITH type args, but the
                     // props argument itself is an exotic shape
                     // extract_type_name_from_type doesn't match. No type args
