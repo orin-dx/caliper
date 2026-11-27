@@ -3200,6 +3200,303 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "receivers: Object.assign, an import of another module | both".to_owned(),
         "import Object from './codec';\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n((Object as typeof Object).assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
     ));
+    cases.push((
+        "shapes: an object behind <const> before a later source (finding 1) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item }, { Item: null });".to_owned(),
+    ));
+    cases.push((
+        "shapes: an object behind <const> before a later source (finding 1) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, <const>{ Item }, { Item: null });".to_owned(),
+    ));
+    cases.push((
+        "shapes: a member behind <T> before a later source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item }, { Item: null });".to_owned(),
+    ));
+    cases.push((
+        "shapes: a member behind <T> before a later source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: <typeof Item>Item }, { Item: null });".to_owned(),
+    ));
+    cases.push((
+        "shapes: a target behind <T> before a later source | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item }, { Item: null });".to_owned(),
+    ));
+    cases.push((
+        "shapes: a target behind <T> before a later source | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(<typeof Impl>Impl, { Item }, { Item: null });".to_owned(),
+    ));
+    cases.push((
+        "keys: a template key with a hex escape (finding 2) | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject[`ass\\x69gn`] = (target: object) => target;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a template key with a hex escape (finding 2) | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject[`ass\\x69gn`] = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a string key with a hex escape | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['ass\\x69gn'] = (target: object) => target;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a string key with a hex escape | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['ass\\x69gn'] = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a template key with a unicode escape | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject[`ass\\u0069gn`] = (target: object) => target;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a template key with a unicode escape | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject[`ass\\u0069gn`] = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a string key with a code point escape | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['ass\\u{69}gn'] = (target: object) => target;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a string key with a code point escape | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['ass\\u{69}gn'] = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a string key with a line continuation | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['ass\\\nign'] = (target: object) => target;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a string key with a line continuation | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['ass\\\nign'] = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a concatenated key | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['ass' + 'ign'] = (target: object) => target;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a concatenated key | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['ass' + 'ign'] = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a key in a constant | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nconst key = 'assign';\nObject[key] = (target: object) => target;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: a key in a constant | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nconst key = 'assign';\nObject[key] = (target: object) => target;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: Reflect.set with an escaped key | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nReflect.set(Object, `ass\\x69gn`, (target: object) => target);\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: Reflect.set with an escaped key | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nReflect.set(Object, `ass\\x69gn`, (target: object) => target);\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: an escaped key that is another member | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject[`oth\\x65r`] = 1;\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "keys: an escaped key that is another member | peeled".to_owned(),
+        "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject[`oth\\x65r`] = 1;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });".to_owned(),
+    ));
+    cases.push((
+        "callees: forwardRef, a bare callee | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { forwardRef } from 'react';\nexport const Button = forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: forwardRef, a bare callee | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { forwardRef } from 'react';\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: forwardRef, a member callee on its module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const Button = React.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: forwardRef, a member callee on its module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const Button = (<typeof React.forwardRef>React.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: forwardRef, a member callee on another module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = codec.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: forwardRef, a member callee on another module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = (<typeof codec.forwardRef>codec.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: forwardRef, a member callee on an aliased namespace | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: forwardRef, a member callee on an aliased namespace | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: memo, a bare callee | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { memo } from 'react';\nexport const Button = memo((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: memo, a bare callee | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { memo } from 'react';\nexport const Button = (<typeof memo>memo)((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: memo, a member callee on its module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const Button = React.memo((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: memo, a member callee on its module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const Button = (<typeof React.memo>React.memo)((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: memo, a member callee on another module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = codec.memo((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: memo, a member callee on another module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = (<typeof codec.memo>codec.memo)((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: memo, a member callee on an aliased namespace | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = R.memo((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: memo, a member callee on an aliased namespace | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = (<typeof R.memo>R.memo)((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "callees: lazy, a bare callee | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { lazy } from 'react';\nexport const Button = lazy(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "callees: lazy, a bare callee | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { lazy } from 'react';\nexport const Button = (<typeof lazy>lazy)(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "callees: lazy, a member callee on its module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const Button = React.lazy(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "callees: lazy, a member callee on its module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const Button = (<typeof React.lazy>React.lazy)(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "callees: lazy, a member callee on another module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = codec.lazy(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "callees: lazy, a member callee on another module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = (<typeof codec.lazy>codec.lazy)(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "callees: lazy, a member callee on an aliased namespace | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = R.lazy(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "callees: lazy, a member callee on an aliased namespace | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = (<typeof R.lazy>R.lazy)(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "callees: createContext, a bare callee | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { createContext } from 'react';\nexport const ButtonContext = createContext<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "callees: createContext, a bare callee | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { createContext } from 'react';\nexport const ButtonContext = (<typeof createContext>createContext)<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "callees: createContext, a member callee on its module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const ButtonContext = React.createContext<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "callees: createContext, a member callee on its module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const ButtonContext = (<typeof React.createContext>React.createContext)<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "callees: createContext, a member callee on another module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const ButtonContext = codec.createContext<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "callees: createContext, a member callee on another module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const ButtonContext = (<typeof codec.createContext>codec.createContext)<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "callees: createContext, a member callee on an aliased namespace | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const ButtonContext = R.createContext<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "callees: createContext, a member callee on an aliased namespace | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const ButtonContext = (<typeof R.createContext>R.createContext)<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "callees: createElement, a bare callee | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (props: Props) => createElement('div');"
+            .to_owned(),
+    ));
+    cases.push((
+        "callees: createElement, a bare callee | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (props: Props) => (<typeof createElement>createElement)('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: createElement, a member callee on its module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const Button = (props: Props) => React.createElement('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: createElement, a member callee on its module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as React from 'react';\nexport const Button = (props: Props) => (<typeof React.createElement>React.createElement)('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: createElement, a member callee on another module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = (props: Props) => codec.createElement('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: createElement, a member callee on another module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = (props: Props) => (<typeof codec.createElement>codec.createElement)('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: createElement, a member callee on an aliased namespace | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = (props: Props) => R.createElement('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: createElement, a member callee on an aliased namespace | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = (props: Props) => (<typeof R.createElement>R.createElement)('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: h, a bare callee | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { h } from 'preact';\nexport const Button = (props: Props) => h('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: h, a bare callee | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { h } from 'preact';\nexport const Button = (props: Props) => (<typeof h>h)('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: h, a member callee on its module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as Preact from 'preact';\nexport const Button = (props: Props) => Preact.h('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: h, a member callee on its module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as Preact from 'preact';\nexport const Button = (props: Props) => (<typeof Preact.h>Preact.h)('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: h, a member callee on another module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = (props: Props) => codec.h('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: h, a member callee on another module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as codec from './codec';\nexport const Button = (props: Props) => (<typeof codec.h>codec.h)('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: h, a member callee on an aliased namespace | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'preact';\nexport const Button = (props: Props) => R.h('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: h, a member callee on an aliased namespace | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'preact';\nexport const Button = (props: Props) => (<typeof R.h>R.h)('div');".to_owned(),
+    ));
+    cases.push((
+        "callees: a foreign forwardRef beside React's import (finding 3) | plain".to_owned(),
+        "// ts\nimport { createElement, forwardRef } from 'react';\nimport * as codec from './codec';\nexport const Button = codec.forwardRef<HTMLButtonElement, Props>('button');".to_owned(),
+    ));
+    cases.push((
+        "callees: a foreign forwardRef beside React's import (finding 3) | peeled".to_owned(),
+        "// ts\nimport { createElement, forwardRef } from 'react';\nimport * as codec from './codec';\nexport const Button = (<typeof codec.forwardRef>codec.forwardRef)<HTMLButtonElement, Props>('button');".to_owned(),
+    ));
     cases
 }
 
@@ -3326,7 +3623,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // (`an_object_assign_member_is_recognised_by_its_own_read`).
     // Round 38 adds twelve more: cast forms of a well-known member callee whose receiver resolves to its entry, and a
     // member assigned through `<T>x` to a parent declared once (`a_peeled_name_relies_on_a_parent_and_receiver_that_resolve`).
-    assert_eq!(read_as_the_plain_call, 63);
+    // Round 39 adds eleven: a well-known member callee behind `<T>x` whose receiver resolves, and an escaped key that is
+    // another member (`a_peeled_child_relies_on_the_whole_call_its_key_and_its_receiver`).
+    assert_eq!(read_as_the_plain_call, 74);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -3388,6 +3687,68 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
+}
+
+/// Round 39: a child only a peel exposes (an object, a member, a target) is recorded only in an `Object.assign` of the
+/// minimal shape, as a later source may overwrite it. A write to `Object.assign` is read by its key's cooked value, and a
+/// key that is not statically known may be any key. A member callee through a wrapper main did not read is React's only
+/// as its receiver resolves, and never by a bare import of the same name. Each plain form is origin/main's; a peeled form
+/// reads as the plain form only where the evidence holds, and as origin/main read it otherwise.
+#[test]
+fn a_peeled_child_relies_on_the_whole_call_its_key_and_its_receiver() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    let mut failures = Vec::new();
+    for (row, holds) in [
+        ("shapes: an object behind <const> before a later source (finding 1)", false),
+        ("shapes: a member behind <T> before a later source", false),
+        ("shapes: a target behind <T> before a later source", false),
+        ("keys: a template key with a hex escape (finding 2)", false),
+        ("keys: a string key with a hex escape", false),
+        ("keys: a template key with a unicode escape", false),
+        ("keys: a string key with a code point escape", false),
+        ("keys: a string key with a line continuation", false),
+        ("keys: a concatenated key", false),
+        ("keys: a key in a constant", false),
+        ("keys: Reflect.set with an escaped key", false),
+        ("keys: an escaped key that is another member", true),
+        ("callees: forwardRef, a bare callee", true),
+        ("callees: forwardRef, a member callee on its module", true),
+        ("callees: forwardRef, a member callee on another module", false),
+        ("callees: forwardRef, a member callee on an aliased namespace", true),
+        ("callees: memo, a bare callee", true),
+        ("callees: memo, a member callee on its module", true),
+        ("callees: memo, a member callee on another module", false),
+        ("callees: memo, a member callee on an aliased namespace", true),
+        ("callees: lazy, a bare callee", true),
+        ("callees: lazy, a member callee on its module", true),
+        ("callees: lazy, a member callee on another module", false),
+        ("callees: lazy, a member callee on an aliased namespace", true),
+        // `createContext` makes no component in any form; through `<T>x` its skip reads as main's peeled row.
+        ("callees: createContext, a bare callee", false),
+        ("callees: createContext, a member callee on its module", false),
+        ("callees: createContext, a member callee on another module", false),
+        ("callees: createContext, a member callee on an aliased namespace", false),
+        ("callees: createElement, a bare callee", true),
+        ("callees: createElement, a member callee on its module", true),
+        ("callees: createElement, a member callee on another module", false),
+        ("callees: createElement, a member callee on an aliased namespace", true),
+        ("callees: h, a bare callee", true),
+        ("callees: h, a member callee on its module", true),
+        ("callees: h, a member callee on another module", false),
+        ("callees: h, a member callee on an aliased namespace", true),
+        ("callees: a foreign forwardRef beside React's import (finding 3)", false),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
+        let now = factory_parity_output(&cases[&peeled]);
+        if now != expected {
+            failures.push(format!("{peeled}:\n  expected {expected}\n  now      {now}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Round 38: a member assigned through `<T>x` attaches only to a parent that resolves too, as export propagation finds

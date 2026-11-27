@@ -433,7 +433,7 @@ impl<'src> SourceDataCollector<'src> {
                 value => {
                     let exposed = matches!(value, Expression::Identifier(_))
                         || !matches!(super::component::main_peel(value), Expression::Identifier(_));
-                    if exposed && let Some(sub) = self.trusted_member(recognition, value) {
+                    if exposed && let Some(sub) = self.trusted_member(recognition, value, roles.minimal) {
                         self.record_attached(Subject::local(sub.as_str()), parent_id, &key_name);
                     }
                     continue;

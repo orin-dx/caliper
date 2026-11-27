@@ -526,3 +526,77 @@ receivers: Object.assign, an import of another module | plain	Item:ItemProps"att
 receivers: Object.assign, an import of another module | whole	Root:Props"functionDeclaration" exported as Root
 receivers: Object.assign, an import of another module | receiver	Root:Props"functionDeclaration" exported as Root
 receivers: Object.assign, an import of another module | both	Root:Props"functionDeclaration" exported as Root
+shapes: an object behind <const> before a later source (finding 1) | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+shapes: an object behind <const> before a later source (finding 1) | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+shapes: a member behind <T> before a later source | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+shapes: a member behind <T> before a later source | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+shapes: a target behind <T> before a later source | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+shapes: a target behind <T> before a later source | peeled	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item
+keys: a template key with a hex escape (finding 2) | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: a template key with a hex escape (finding 2) | peeled	Root:Props"functionDeclaration" exported as Root
+keys: a string key with a hex escape | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: a string key with a hex escape | peeled	Root:Props"functionDeclaration" exported as Root
+keys: a template key with a unicode escape | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: a template key with a unicode escape | peeled	Root:Props"functionDeclaration" exported as Root
+keys: a string key with a code point escape | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: a string key with a code point escape | peeled	Root:Props"functionDeclaration" exported as Root
+keys: a string key with a line continuation | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: a string key with a line continuation | peeled	Root:Props"functionDeclaration" exported as Root
+keys: a concatenated key | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: a concatenated key | peeled	Root:Props"functionDeclaration" exported as Root
+keys: a key in a constant | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: a key in a constant | peeled	Root:Props"functionDeclaration" exported as Root
+keys: Reflect.set with an escaped key | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: Reflect.set with an escaped key | peeled	Root:Props"functionDeclaration" exported as Root
+keys: an escaped key that is another member | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+keys: an escaped key that is another member | peeled	Root:Props"functionDeclaration" exported as Root
+callees: forwardRef, a bare callee | plain	Button:Props"forwardRef" exported as Button
+callees: forwardRef, a bare callee | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: forwardRef, a member callee on its module | plain	Button:Props"forwardRef" exported as Button
+callees: forwardRef, a member callee on its module | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: forwardRef, a member callee on another module | plain	Button:Props"forwardRef" exported as Button
+callees: forwardRef, a member callee on another module | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: forwardRef, a member callee on an aliased namespace | plain	Button:Props"forwardRef" exported as Button
+callees: forwardRef, a member callee on an aliased namespace | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: memo, a bare callee | plain	Button:Props"hocWrapper" exported as Button
+callees: memo, a bare callee | peeled	Button:Props"hocWrapper" exported as Button
+callees: memo, a member callee on its module | plain	Button:Props"hocWrapper" exported as Button
+callees: memo, a member callee on its module | peeled	Button:Props"hocWrapper" exported as Button
+callees: memo, a member callee on another module | plain	Button:Props"hocWrapper" exported as Button
+callees: memo, a member callee on another module | peeled	Button:Props"hocWrapper" exported as Button
+callees: memo, a member callee on an aliased namespace | plain	Button:Props"hocWrapper" exported as Button
+callees: memo, a member callee on an aliased namespace | peeled	Button:Props"hocWrapper" exported as Button
+callees: lazy, a bare callee | plain	Button:lazy"factoryResult" exported as Button via lazy
+callees: lazy, a bare callee | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: lazy, a member callee on its module | plain	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: lazy, a member callee on its module | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: lazy, a member callee on another module | plain	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: lazy, a member callee on another module | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: lazy, a member callee on an aliased namespace | plain	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: lazy, a member callee on an aliased namespace | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: createContext, a bare callee | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'createContext' that creates a context
+callees: createContext, a bare callee | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: createContext, a member callee on its module | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'React.createContext' that creates a context
+callees: createContext, a member callee on its module | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: createContext, a member callee on another module | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'codec.createContext' that is given an argument that is not a render function, a tag or a component reference
+callees: createContext, a member callee on another module | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: createContext, a member callee on an aliased namespace | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'R.createContext' that creates a context
+callees: createContext, a member callee on an aliased namespace | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+callees: createElement, a bare callee | plain	Button:Props"typedFunctionExpression" exported as Button
+callees: createElement, a bare callee | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: createElement, a member callee on its module | plain	Button:Props"typedFunctionExpression" exported as Button
+callees: createElement, a member callee on its module | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: createElement, a member callee on another module | plain	Button:Props"typedFunctionExpression" exported as Button
+callees: createElement, a member callee on another module | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: createElement, a member callee on an aliased namespace | plain	Button:Props"typedFunctionExpression" exported as Button
+callees: createElement, a member callee on an aliased namespace | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: h, a bare callee | plain	Button:Props"typedFunctionExpression" exported as Button
+callees: h, a bare callee | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: h, a member callee on its module | plain	Button:Props"typedFunctionExpression" exported as Button
+callees: h, a member callee on its module | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: h, a member callee on another module | plain	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: h, a member callee on another module | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: h, a member callee on an aliased namespace | plain	Button:Props"typedFunctionExpression" exported as Button
+callees: h, a member callee on an aliased namespace | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+callees: a foreign forwardRef beside React's import (finding 3) | plain	Button:Props"forwardRef" exported as Button
+callees: a foreign forwardRef beside React's import (finding 3) | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)

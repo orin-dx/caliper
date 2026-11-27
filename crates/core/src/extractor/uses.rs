@@ -91,6 +91,8 @@ pub(super) struct AssignRoles<'b, 'a> {
     /// call and the literal (`component::main_peel`); one only a peel exposes (`<const>{ Item }`) makes its members
     /// `Peeled`.
     pub(super) objects: Vec<(&'b ObjectExpression<'a>, super::component::Recognition)>,
+    /// Whether the call has the minimal shape, the only one a child only a peel exposes is recorded in.
+    pub(super) minimal: bool,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -183,18 +185,23 @@ impl<'src> SourceDataCollector<'src> {
     /// is. A value only a peel exposes, or any value of a call main never read, only when the file declares the name
     /// exactly once, as a second declaration may be the one export propagation finds. A plain call never upgrades a
     /// peeled child.
+    ///
+    /// `minimal` is whether the whole call has the minimal shape (`minimal_object_assign`): a peeled child of any other
+    /// call is not recorded, as a later source may overwrite it.
     pub(super) fn trusted_member(
         &self,
         recognition: super::component::Recognition,
         value: &Expression<'_>,
+        minimal: bool,
     ) -> Option<super::names::Named> {
         let named = super::peeled::value_name(value, &self.bindings)?;
-        match recognition {
-            super::component::Recognition::Plain => Some(named),
+        let named = match recognition {
+            super::component::Recognition::Plain => named,
             super::component::Recognition::Peeled => {
-                self.bindings.named(named.as_str(), super::component::Recognition::Peeled)
+                self.bindings.named(named.as_str(), super::component::Recognition::Peeled)?
             }
-        }
+        };
+        (minimal || matches!(named, super::names::Named::Plain(_))).then_some(named)
     }
 
     /// What an `Object.assign` call's arguments are, read in one place for every consumer: the inline-member scan
@@ -214,7 +221,8 @@ impl<'src> SourceDataCollector<'src> {
         let peeled = recognition == super::component::Recognition::Peeled;
         // A call main never read is recognised only in the minimal shape: a target and one object literal, with no
         // spread, computed or repeated key, so no later source can overwrite a member.
-        if peeled && !minimal_object_assign(call) {
+        let minimal = minimal_object_assign(call);
+        if peeled && !minimal {
             return None;
         }
         // The target by its own read: one only a peel exposes (`<typeof Root>Root`) counts, in a plain call too, only as
@@ -223,7 +231,7 @@ impl<'src> SourceDataCollector<'src> {
             .arguments
             .first()
             .and_then(Argument::as_expression)
-            .and_then(|first| self.trusted_member(recognition, first))
+            .and_then(|first| self.trusted_member(recognition, first, minimal))
             .filter(|target| matches!(target, super::names::Named::Plain(_)) || self.trusts_object_assign(target));
         if peeled {
             let parent = match parent {
@@ -260,6 +268,8 @@ impl<'src> SourceDataCollector<'src> {
                         matches!(super::component::main_peel(value), Expression::ObjectExpression(_))
                     });
                     let own = if main_read { recognition } else { super::component::Recognition::Peeled };
+                    // Its members count only through `trusted_member`, which records a peeled one only in a call of
+                    // the minimal shape.
                     objects.push((&**object, own));
                 }
                 // A target only a peel exposes is what the call returns, as `target` vouches for it.
@@ -267,7 +277,7 @@ impl<'src> SourceDataCollector<'src> {
                 _ => {}
             }
         }
-        Some(AssignRoles { target, aliases, objects })
+        Some(AssignRoles { target, aliases, objects, minimal })
     }
 
     /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is
@@ -290,7 +300,7 @@ impl<'src> SourceDataCollector<'src> {
             for property in &object.properties {
                 let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
                 let Some(key) = property.key.static_name() else { continue };
-                if let Some(sub) = self.trusted_member(recognition, &property.value) {
+                if let Some(sub) = self.trusted_member(recognition, &property.value, roles.minimal) {
                     self.record_attached(Subject::local(sub.as_str()), parent, &super::js_text::property_name(&key));
                 }
             }

@@ -139,7 +139,7 @@ pub(super) fn assignment_write<'a>(target: &AssignmentTarget<'a>) -> Option<(&'a
             object_name(&member.object).map(|object| (object, Some(member.property.name.as_str())))
         }
         AssignmentTarget::ComputedMemberExpression(member) => {
-            object_name(&member.object).map(|object| (object, literal_key(&member.expression)))
+            object_name(&member.object).map(|object| (object, static_key(&member.expression).known()))
         }
         _ => None,
     }
@@ -156,7 +156,7 @@ pub(super) fn call_writes<'a>(call: &CallExpression<'a>) -> Vec<(&'a str, Option
     let Some(target) = argument(0).map(through).and_then(object_name) else { return Vec::new() };
     let global = receiver == OBJECT.name || receiver == REFLECT.name;
     match callee.property.name.as_str() {
-        "set" | "defineProperty" if global => vec![(target, argument(1).and_then(literal_key))],
+        "set" | "defineProperty" if global => vec![(target, argument(1).and_then(|key| static_key(key).known()))],
         // A new prototype may supply any member.
         "setPrototypeOf" if global => vec![(target, None)],
         // Every source writes its keys, a later one over an earlier one. A source that is no object literal (a name, a
@@ -194,14 +194,33 @@ fn object_name<'a>(expr: &Expression<'a>) -> Option<&'a str> {
     }
 }
 
-fn literal_key<'a>(expr: &Expression<'a>) -> Option<&'a str> {
-    match expr {
+/// A member key as the program sees it at run time: `Known` for a string or substitution-free template literal, by its
+/// cooked value (every escape decoded: `\x69`, `\u0069`, `\u{69}`, a line continuation), `Unknown` for anything else
+/// (a name, a concatenation, a call, an escape that does not decode), which may be any key.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum StaticKey<'a> {
+    Known(&'a str),
+    Unknown,
+}
+
+impl<'a> StaticKey<'a> {
+    pub(super) fn known(self) -> Option<&'a str> {
+        match self {
+            Self::Known(key) => Some(key),
+            Self::Unknown => None,
+        }
+    }
+}
+
+pub(super) fn static_key<'a>(expr: &Expression<'a>) -> StaticKey<'a> {
+    let key = match expr {
         Expression::StringLiteral(literal) => literal.value.as_str(),
         Expression::TemplateLiteral(template) if template.expressions.is_empty() => {
-            template.quasis.first().map(|quasi| quasi.value.raw.as_str())
+            template.quasis.first().and_then(|quasi| quasi.value.cooked).and_then(|cooked| cooked.as_str())
         }
         _ => None,
-    }
+    };
+    key.map_or(StaticKey::Unknown, StaticKey::Known)
 }
 
 /// Whether a callee is written through a wrapper origin/main did not read (`component::main_peel`): the `Peeled` gate

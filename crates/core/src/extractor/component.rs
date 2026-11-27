@@ -1775,11 +1775,15 @@ impl<'src> SourceDataCollector<'src> {
         }
         let name = match callee_of(call, self) {
             Some(Expression::Identifier(id)) => id.name.as_str(),
-            Some(Expression::StaticMemberExpression(member)) => member.property.name.as_str(),
+            // Through a wrapper main did not read, a member callee is React's (`react_api`, which resolves the
+            // receiver) or none: a bare import of the same name says nothing about its receiver.
+            Some(Expression::StaticMemberExpression(member)) if !super::well_known::beyond_main(&call.callee) => {
+                member.property.name.as_str()
+            }
             _ => return false,
         };
-        // Another module's own `forwardRef` (React Aria's), by name: through a wrapper main did not read, only when the
-        // name's one declaration is an import.
+        // Another module's own `forwardRef` (React Aria's), by name: through a wrapper main did not read, only a bare
+        // callee whose one declaration is an import.
         name == super::well_known::FORWARD_REF.name
             && self.react_api(call).is_none()
             && (!super::well_known::beyond_main(&call.callee) || self.bindings.imported(name).is_some())
