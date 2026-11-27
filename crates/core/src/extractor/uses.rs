@@ -4,7 +4,7 @@
 
 use compact_str::CompactString;
 use oxc_ast::ast::*;
-use oxc_span::Span;
+use oxc_span::{GetSpan, Span};
 use rustc_hash::FxHashMap;
 
 use crate::types::{ComponentExport, DiagnosticCode};
@@ -88,6 +88,55 @@ pub(super) enum Role {
     Accepted(super::names::Named),
     Rejected,
     NotApplicable,
+}
+
+/// Where a member attachment only a peel exposes would be recorded ([`SourceDataCollector::attachment_allowed`]).
+pub(super) struct AttachmentSite<'s> {
+    /// The start of the value at the top of the statement or declarator: an assignment, or an `Object.assign` call.
+    pub(super) at: u32,
+    /// Whether the assignment is a simple `=`; an `Object.assign` call always is.
+    pub(super) simple: bool,
+    /// The parent's name, which export propagation finds by its bare spelling.
+    pub(super) parent: &'s str,
+    /// For an `Object.assign` call, whether it has the minimal shape; `None` for an assignment.
+    pub(super) assign_minimal: Option<bool>,
+}
+
+/// The starts of the values at the top of the module's own statements and declarators (an expression statement's
+/// expression, a declarator's or default export's value, each as written and beneath its wrappers): an attachment
+/// only a peel exposes is recorded only at one of them (`attachment_allowed`).
+pub(super) fn top_level_values(program: &Program<'_>) -> rustc_hash::FxHashSet<u32> {
+    use oxc_span::GetSpan;
+    let mut starts = rustc_hash::FxHashSet::default();
+    let mut add = |expr: &Expression<'_>| {
+        starts.insert(expr.span().start);
+        starts.insert(super::peeled::read_value(expr).span().start);
+    };
+    for statement in &program.body {
+        let declaration = match statement {
+            Statement::ExpressionStatement(statement) => {
+                add(&statement.expression);
+                continue;
+            }
+            Statement::ExportDefaultDeclaration(export) => {
+                if let Some(expr) = export.declaration.as_expression() {
+                    add(expr);
+                }
+                continue;
+            }
+            Statement::ExportDeclaration(export) => &export.declaration,
+            statement => match statement.as_declaration() {
+                Some(declaration) => declaration,
+                None => continue,
+            },
+        };
+        if let Declaration::VariableDeclaration(variables) = declaration {
+            for init in variables.declarations.iter().filter_map(|declarator| declarator.init.as_ref()) {
+                add(init);
+            }
+        }
+    }
+    starts
 }
 
 /// The roles of an `Object.assign` call's arguments ([`SourceDataCollector::assign_roles`]).
@@ -203,17 +252,30 @@ impl<'src> SourceDataCollector<'src> {
         &self,
         recognition: super::component::Recognition,
         value: &Expression<'_>,
-        minimal: bool,
     ) -> Option<super::names::Named> {
         let named = super::peeled::value_name(value, &self.bindings)?;
-        let named = match recognition {
-            super::component::Recognition::Plain => named,
+        match recognition {
+            super::component::Recognition::Plain => Some(named),
             super::component::Recognition::Peeled => {
-                self.bindings.named(named.as_str(), super::component::Recognition::Peeled)?
+                self.bindings.named(named.as_str(), super::component::Recognition::Peeled)
             }
-        };
-        let plain = matches!(named, super::names::Named::Plain(_));
-        (plain || (minimal && self.object_assign_is_builtin())).then_some(named)
+        }
+    }
+
+    /// The one gate for a member attachment only a peel exposes (its member, its target or its call): recorded only when
+    /// every condition holds. A plain attachment never comes here and keeps origin/main's reading.
+    pub(super) fn attachment_allowed(&self, site: &AttachmentSite<'_>) -> bool {
+        // (a) A simple `=`: a compound operator stores something else.
+        let simple = site.simple;
+        // (b) A statement or declarator at the top level of the module, not in a function, class or block.
+        let module_scope = self.top_level_values.contains(&site.at);
+        // (c) A parent that resolves to its one declaration in the file, which is not an import.
+        let parent = self.bindings.unique(site.parent).is_some() && self.bindings.imported(site.parent).is_none();
+        // (d) For an `Object.assign` call, the built-in.
+        let builtin = site.assign_minimal.is_none() || self.object_assign_is_builtin();
+        // (e) For an `Object.assign` call, the minimal shape: no later source may overwrite the member.
+        let minimal = site.assign_minimal.unwrap_or(true);
+        simple && module_scope && parent && builtin && minimal
     }
 
     /// What an `Object.assign` call's arguments are, read in one place for every consumer: the inline-member scan
@@ -243,8 +305,10 @@ impl<'src> SourceDataCollector<'src> {
             .arguments
             .first()
             .and_then(Argument::as_expression)
-            .and_then(|first| self.trusted_member(recognition, first, minimal))
-            .filter(|target| matches!(target, super::names::Named::Plain(_)) || self.trusts_object_assign(target));
+            .and_then(|first| self.trusted_member(recognition, first))
+            .filter(|target| {
+                matches!(target, super::names::Named::Plain(_)) || (minimal && self.trusts_object_assign(target))
+            });
         if peeled {
             let parent = match parent {
                 Some(parent) => self.bindings.named(parent.as_str(), recognition)?,
@@ -316,9 +380,21 @@ impl<'src> SourceDataCollector<'src> {
         parent: &super::names::Named,
         init: Option<&Expression<'_>>,
     ) {
-        let Some(Expression::CallExpression(call)) = init.map(super::peeled::read_value) else { return };
+        let Some(init) = init else { return };
+        let Expression::CallExpression(call) = super::peeled::read_value(init) else { return };
         let Some(roles) = self.assign_roles(call, false, Some(parent)) else { return };
+        let site = AttachmentSite {
+            at: oxc_span::GetSpan::span(init).start,
+            simple: true,
+            parent: parent.as_str(),
+            assign_minimal: Some(roles.minimal),
+        };
+        let allowed = self.attachment_allowed(&site);
+        let peeled = |named: &super::names::Named| matches!(named, super::names::Named::Peeled(_));
         for alias in &roles.aliases {
+            if peeled(alias) && !allowed {
+                continue;
+            }
             self.attached_to.push(Attachment {
                 sub: Subject::local(alias.as_str()),
                 parent: CompactString::from(parent.as_str()),
@@ -329,7 +405,9 @@ impl<'src> SourceDataCollector<'src> {
             for property in &object.properties {
                 let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
                 let Some(key) = property.key.static_name() else { continue };
-                if let Some(sub) = self.trusted_member(recognition, &property.value, roles.minimal) {
+                if let Some(sub) = self.trusted_member(recognition, &property.value)
+                    && (!peeled(&sub) || allowed)
+                {
                     self.record_attached(Subject::local(sub.as_str()), parent, &super::js_text::property_name(&key));
                 }
             }
@@ -348,10 +426,19 @@ impl<'src> SourceDataCollector<'src> {
         // its bare name, and a parameter of that name is a second declaration.
         let parent = match sub {
             super::names::Named::Plain(_) => super::names::Named::plain(parent.name.as_str()),
-            super::names::Named::Peeled(_) => match self.bindings.unique(parent.name.as_str()) {
-                Some(parent) => super::names::Named::Peeled(parent),
-                None => return,
-            },
+            super::names::Named::Peeled(_) => {
+                let site = AttachmentSite {
+                    at: statement.expression.span().start,
+                    simple: assignment.operator == oxc_syntax::operator::AssignmentOperator::Assign,
+                    parent: parent.name.as_str(),
+                    assign_minimal: None,
+                };
+                // The gate resolves the parent (`attachment_allowed` (c)); it is found by its bare name from here on.
+                if !self.attachment_allowed(&site) {
+                    return;
+                }
+                super::names::Named::plain(parent.name.as_str())
+            }
         };
         self.record_attached(Subject::local(sub.as_str()), &parent, target.property.name.as_str());
     }

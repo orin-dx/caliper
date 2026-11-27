@@ -726,3 +726,177 @@ roles: assign replaced, named member | plain	Item:ItemProps"functionDeclaration"
 roles: assign replaced, named member | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
 roles: assign replaced, nested | plain	Impl:Props"functionDeclaration" exported as default | Item:ItemProps"functionDeclaration"
 roles: assign replaced, nested | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration"
+gate: =, module, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, module, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, module, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, module, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, module, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, module, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, module, imported | plain	Item:ItemProps"functionDeclaration"
+gate: =, module, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: =, function, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, function, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, function, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, function, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, function, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, function, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, function, imported | plain	Item:ItemProps"functionDeclaration"
+gate: =, function, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: =, class static block, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, class static block, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, class static block, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, class static block, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, class static block, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, class static block, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, class static block, imported | plain	Item:ItemProps"functionDeclaration"
+gate: =, class static block, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: =, nested block, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, nested block, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, nested block, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, nested block, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, nested block, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, nested block, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, nested block, imported | plain	Item:ItemProps"functionDeclaration"
+gate: =, nested block, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: =, arrow, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, arrow, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, arrow, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, arrow, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, arrow, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: =, arrow, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, arrow, imported | plain	Item:ItemProps"functionDeclaration"
+gate: =, arrow, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: +=, module, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, module, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, module, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, module, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, module, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, module, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, module, imported | plain	Item:ItemProps"functionDeclaration"
+gate: +=, module, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: +=, function, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, function, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, function, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, function, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, function, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, function, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, function, imported | plain	Item:ItemProps"functionDeclaration"
+gate: +=, function, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: +=, class static block, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, class static block, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, class static block, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, class static block, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, class static block, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, class static block, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, class static block, imported | plain	Item:ItemProps"functionDeclaration"
+gate: +=, class static block, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: +=, nested block, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, nested block, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, nested block, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, nested block, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, nested block, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, nested block, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, nested block, imported | plain	Item:ItemProps"functionDeclaration"
+gate: +=, nested block, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: +=, arrow, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, arrow, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, arrow, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, arrow, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, arrow, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: +=, arrow, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: +=, arrow, imported | plain	Item:ItemProps"functionDeclaration"
+gate: +=, arrow, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: ??=, module, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, module, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, module, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, module, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, module, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, module, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, module, imported | plain	Item:ItemProps"functionDeclaration"
+gate: ??=, module, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: ??=, function, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, function, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, function, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, function, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, function, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, function, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, function, imported | plain	Item:ItemProps"functionDeclaration"
+gate: ??=, function, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: ??=, class static block, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, class static block, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, class static block, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, class static block, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, class static block, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, class static block, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, class static block, imported | plain	Item:ItemProps"functionDeclaration"
+gate: ??=, class static block, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: ??=, nested block, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, nested block, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, nested block, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, nested block, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, nested block, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, nested block, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, nested block, imported | plain	Item:ItemProps"functionDeclaration"
+gate: ??=, nested block, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: ??=, arrow, exported unique | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, arrow, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, arrow, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, arrow, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, arrow, shadowed by a local | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: ??=, arrow, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: ??=, arrow, imported | plain	Item:ItemProps"functionDeclaration"
+gate: ??=, arrow, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: destructuring, module, exported unique | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, module, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, module, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, module, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, module, shadowed by a local | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, module, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, module, imported | plain	Item:ItemProps"functionDeclaration"
+gate: destructuring, module, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: destructuring, function, exported unique | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, function, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, function, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, function, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, function, shadowed by a local | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, function, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, function, imported | plain	Item:ItemProps"functionDeclaration"
+gate: destructuring, function, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: destructuring, class static block, exported unique | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, class static block, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, class static block, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, class static block, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, class static block, shadowed by a local | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, class static block, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, class static block, imported | plain	Item:ItemProps"functionDeclaration"
+gate: destructuring, class static block, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: destructuring, nested block, exported unique | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, nested block, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, nested block, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, nested block, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, nested block, shadowed by a local | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, nested block, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, nested block, imported | plain	Item:ItemProps"functionDeclaration"
+gate: destructuring, nested block, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: destructuring, arrow, exported unique | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, arrow, exported unique | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, arrow, shadowed by a parameter | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, arrow, shadowed by a parameter | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, arrow, shadowed by a local | plain	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, arrow, shadowed by a local | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: destructuring, arrow, imported | plain	Item:ItemProps"functionDeclaration"
+gate: destructuring, arrow, imported | peeled	Item:ItemProps"functionDeclaration"
+gate: a compound assignment after a string (finding 1) | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: a compound assignment after a string (finding 1) | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: an Object.assign declarator, module | plain	Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item
+gate: an Object.assign declarator, module | peeled	Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration"
+gate: an Object.assign declarator, function (finding 2) | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: an Object.assign declarator, function (finding 2) | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: an Object.assign declarator, class static block | plain	Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: an Object.assign declarator, class static block | peeled	Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: an Object.assign declarator, nested block | plain	Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: an Object.assign declarator, nested block | peeled	Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: an Object.assign declarator, arrow | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+gate: an Object.assign declarator, arrow | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+gate: =, module, imported and re-exported | plain	Item:ItemProps"functionDeclaration" exported as Root.Item
+gate: =, module, imported and re-exported | peeled	Item:ItemProps"functionDeclaration"

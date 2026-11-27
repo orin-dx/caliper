@@ -414,6 +414,15 @@ impl<'src> SourceDataCollector<'src> {
             return;
         }
         let parent_id = parent;
+        // A parent only a peel exposes, or a member only a peel exposes, is attached only through the one gate.
+        let site = super::uses::AttachmentSite {
+            at: call.span.start,
+            simple: true,
+            parent: parent.as_str(),
+            assign_minimal: Some(roles.minimal),
+        };
+        let allowed = self.attachment_allowed(&site);
+        let parent_peeled = matches!(parent, super::names::Named::Peeled(_));
 
         for prop in &obj.properties {
             let ObjectPropertyKind::ObjectProperty(op) = prop else { continue };
@@ -433,12 +442,18 @@ impl<'src> SourceDataCollector<'src> {
                 value => {
                     let exposed = matches!(value, Expression::Identifier(_))
                         || !matches!(super::component::main_peel(value), Expression::Identifier(_));
-                    if exposed && let Some(sub) = self.trusted_member(recognition, value, roles.minimal) {
+                    if exposed
+                        && let Some(sub) = self.trusted_member(recognition, value)
+                        && ((!parent_peeled && !matches!(sub, super::names::Named::Peeled(_))) || allowed)
+                    {
                         self.record_attached(Subject::local(sub.as_str()), parent_id, &key_name);
                     }
                     continue;
                 }
             };
+            if parent_peeled && !allowed {
+                continue;
+            }
             self.record_attached(Subject::Inline(span_start), parent_id, &key_name);
             self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);
         }

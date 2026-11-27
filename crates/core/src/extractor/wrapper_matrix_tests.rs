@@ -4002,6 +4002,702 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "roles: assign replaced, nested | peeled".to_owned(),
         "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport default memo(Object.assign(<typeof Impl>Impl, {}));".to_owned(),
     ));
+    cases.push((
+        "gate: =, module, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nRoot.Item = Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nRoot.Item = <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nRoot.Item = Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nRoot.Item = <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nRoot.Item = Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nRoot.Item = <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, function, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, function, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item = <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, function, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nfunction configure() { Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, function, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nfunction configure() { Root.Item = <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, function, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nfunction configure() { Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, function, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nfunction configure() { Root.Item = <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, function, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nfunction configure() { Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, function, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nfunction configure() { Root.Item = <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, class static block, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { Root.Item = Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, class static block, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { Root.Item = <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, class static block, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nclass Config { static { Root.Item = Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, class static block, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nclass Config { static { Root.Item = <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, class static block, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nclass Config { static { Root.Item = Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, class static block, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nclass Config { static { Root.Item = <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, class static block, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nclass Config { static { Root.Item = Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, class static block, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nclass Config { static { Root.Item = <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, nested block, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, nested block, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ Root.Item = <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, nested block, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n{ Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, nested block, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n{ Root.Item = <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, nested block, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n{ Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, nested block, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n{ Root.Item = <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, nested block, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n{ Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, nested block, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n{ Root.Item = <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: =, arrow, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { Root.Item = Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: =, arrow, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { Root.Item = <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: =, arrow, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nconst configure = () => { Root.Item = Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: =, arrow, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nconst configure = () => { Root.Item = <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: =, arrow, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nconst configure = () => { Root.Item = Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: =, arrow, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nconst configure = () => { Root.Item = <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: =, arrow, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nconst configure = () => { Root.Item = Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: =, arrow, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nconst configure = () => { Root.Item = <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, module, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item += Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, module, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item += <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, module, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nRoot.Item += Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, module, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nRoot.Item += <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, module, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nRoot.Item += Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, module, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nRoot.Item += <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, module, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nRoot.Item += Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, module, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nRoot.Item += <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, function, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item += Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, function, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item += <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, function, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nfunction configure() { Root.Item += Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, function, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nfunction configure() { Root.Item += <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, function, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nfunction configure() { Root.Item += Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, function, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nfunction configure() { Root.Item += <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, function, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nfunction configure() { Root.Item += Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, function, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nfunction configure() { Root.Item += <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, class static block, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { Root.Item += Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, class static block, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { Root.Item += <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, class static block, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nclass Config { static { Root.Item += Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, class static block, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nclass Config { static { Root.Item += <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, class static block, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nclass Config { static { Root.Item += Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, class static block, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nclass Config { static { Root.Item += <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, class static block, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nclass Config { static { Root.Item += Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, class static block, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nclass Config { static { Root.Item += <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, nested block, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ Root.Item += Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, nested block, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ Root.Item += <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, nested block, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n{ Root.Item += Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, nested block, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n{ Root.Item += <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, nested block, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n{ Root.Item += Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, nested block, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n{ Root.Item += <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, nested block, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n{ Root.Item += Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, nested block, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n{ Root.Item += <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, arrow, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { Root.Item += Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, arrow, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { Root.Item += <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, arrow, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nconst configure = () => { Root.Item += Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, arrow, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nconst configure = () => { Root.Item += <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, arrow, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nconst configure = () => { Root.Item += Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, arrow, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nconst configure = () => { Root.Item += <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, arrow, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nconst configure = () => { Root.Item += Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: +=, arrow, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nconst configure = () => { Root.Item += <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, module, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item ??= Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, module, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item ??= <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, module, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nRoot.Item ??= Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, module, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nRoot.Item ??= <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, module, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nRoot.Item ??= Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, module, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nRoot.Item ??= <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, module, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nRoot.Item ??= Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, module, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nRoot.Item ??= <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, function, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item ??= Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, function, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { Root.Item ??= <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, function, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nfunction configure() { Root.Item ??= Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, function, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nfunction configure() { Root.Item ??= <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, function, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nfunction configure() { Root.Item ??= Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, function, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nfunction configure() { Root.Item ??= <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, function, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nfunction configure() { Root.Item ??= Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, function, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nfunction configure() { Root.Item ??= <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, class static block, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { Root.Item ??= Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, class static block, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { Root.Item ??= <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, class static block, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nclass Config { static { Root.Item ??= Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, class static block, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nclass Config { static { Root.Item ??= <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, class static block, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nclass Config { static { Root.Item ??= Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, class static block, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nclass Config { static { Root.Item ??= <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, class static block, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nclass Config { static { Root.Item ??= Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, class static block, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nclass Config { static { Root.Item ??= <any>Item; } }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, nested block, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ Root.Item ??= Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, nested block, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ Root.Item ??= <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, nested block, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n{ Root.Item ??= Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, nested block, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n{ Root.Item ??= <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, nested block, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n{ Root.Item ??= Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, nested block, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n{ Root.Item ??= <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, nested block, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n{ Root.Item ??= Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, nested block, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n{ Root.Item ??= <any>Item; }".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, arrow, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { Root.Item ??= Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, arrow, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { Root.Item ??= <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, arrow, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nconst configure = () => { Root.Item ??= Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, arrow, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nconst configure = () => { Root.Item ??= <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, arrow, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nconst configure = () => { Root.Item ??= Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, arrow, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nconst configure = () => { Root.Item ??= <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, arrow, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nconst configure = () => { Root.Item ??= Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: ??=, arrow, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nconst configure = () => { Root.Item ??= <any>Item; };".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, module, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n({ Item: Root.Item } = { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, module, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n({ Item: Root.Item } = { Item: <any>Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, module, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n({ Item: Root.Item } = { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, module, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n({ Item: Root.Item } = { Item: <any>Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, module, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n({ Item: Root.Item } = { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, module, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n({ Item: Root.Item } = { Item: <any>Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, module, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n({ Item: Root.Item } = { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, module, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n({ Item: Root.Item } = { Item: <any>Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, function, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { ({ Item: Root.Item } = { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, function, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { ({ Item: Root.Item } = { Item: <any>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, function, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nfunction configure() { ({ Item: Root.Item } = { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, function, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nfunction configure() { ({ Item: Root.Item } = { Item: <any>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, function, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nfunction configure() { ({ Item: Root.Item } = { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, function, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nfunction configure() { ({ Item: Root.Item } = { Item: <any>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, function, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nfunction configure() { ({ Item: Root.Item } = { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, function, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nfunction configure() { ({ Item: Root.Item } = { Item: <any>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, class static block, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { ({ Item: Root.Item } = { Item: Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, class static block, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { ({ Item: Root.Item } = { Item: <any>Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, class static block, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nclass Config { static { ({ Item: Root.Item } = { Item: Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, class static block, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nclass Config { static { ({ Item: Root.Item } = { Item: <any>Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, class static block, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nclass Config { static { ({ Item: Root.Item } = { Item: Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, class static block, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nclass Config { static { ({ Item: Root.Item } = { Item: <any>Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, class static block, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nclass Config { static { ({ Item: Root.Item } = { Item: Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, class static block, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nclass Config { static { ({ Item: Root.Item } = { Item: <any>Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, nested block, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ ({ Item: Root.Item } = { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, nested block, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ ({ Item: Root.Item } = { Item: <any>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, nested block, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n{ ({ Item: Root.Item } = { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, nested block, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\n{ ({ Item: Root.Item } = { Item: <any>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, nested block, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n{ ({ Item: Root.Item } = { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, nested block, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\n{ ({ Item: Root.Item } = { Item: <any>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, nested block, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n{ ({ Item: Root.Item } = { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, nested block, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\n{ ({ Item: Root.Item } = { Item: <any>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, arrow, exported unique | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { ({ Item: Root.Item } = { Item: Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, arrow, exported unique | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { ({ Item: Root.Item } = { Item: <any>Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, arrow, shadowed by a parameter | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nconst configure = () => { ({ Item: Root.Item } = { Item: Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, arrow, shadowed by a parameter | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other(Root: object) { return Root; }\nconst configure = () => { ({ Item: Root.Item } = { Item: <any>Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, arrow, shadowed by a local | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nconst configure = () => { ({ Item: Root.Item } = { Item: Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, arrow, shadowed by a local | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction other() { const Root = {}; return Root; }\nconst configure = () => { ({ Item: Root.Item } = { Item: <any>Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, arrow, imported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nconst configure = () => { ({ Item: Root.Item } = { Item: Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: destructuring, arrow, imported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nconst configure = () => { ({ Item: Root.Item } = { Item: <any>Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: a compound assignment after a string (finding 1) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = '';\nRoot.Item += Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: a compound assignment after a string (finding 1) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nRoot.Item = '';\nRoot.Item += <any>Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, module | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport const Root = Object.assign({}, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, module | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport const Root = Object.assign({}, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, function (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Root = Object.assign({}, { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, function (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nfunction configure() { const Root = Object.assign({}, { Item: <typeof Item>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, class static block | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { const Root = Object.assign({}, { Item: Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, class static block | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nclass Config { static { const Root = Object.assign({}, { Item: <typeof Item>Item }); } }".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, nested block | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ const Root = Object.assign({}, { Item: Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, nested block | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\n{ const Root = Object.assign({}, { Item: <typeof Item>Item }); }".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, arrow | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { const Root = Object.assign({}, { Item: Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: an Object.assign declarator, arrow | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nexport function Root(props: Props) { return createElement('div'); }\nconst configure = () => { const Root = Object.assign({}, { Item: <typeof Item>Item }); };".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, imported and re-exported | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nexport { Root };\nRoot.Item = Item;".to_owned(),
+    ));
+    cases.push((
+        "gate: =, module, imported and re-exported | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nimport { Root } from './root';\nexport { Root };\nRoot.Item = <any>Item;".to_owned(),
+    ));
     cases
 }
 
@@ -4141,7 +4837,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // cast whose declaration renders by its return type or body (`a_peeled_part_relies_on_the_built_in_and_on_render_evidence`).
     // Round 41 adds five: a bare callee behind a cast whose declaration renders, and the four trusted `Object.assign`
     // roles (`a_peeled_part_uses_only_its_own_declaration_and_a_rejection_is_final`).
-    assert_eq!(read_as_the_plain_call, 85);
+    // Round 42 adds two and removes one: a peeled member assigned or `Object.assign`ed at module level to a parent declared
+    // once, and no longer one assigned inside a function (`a_peeled_attachment_passes_one_gate`).
+    assert_eq!(read_as_the_plain_call, 86);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -4203,6 +4901,116 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
+}
+
+/// Round 42: a member attachment only a peel exposes goes through one gate (`attachment_allowed`): a simple `=`, at
+/// the module's top level, to a parent that is its one declaration and no import, and for an `Object.assign` the
+/// built-in in the minimal shape. The product of operator, scope and parent: each plain form is origin/main's, and a
+/// peeled form reads as the plain form only where every condition holds, and as origin/main read it otherwise.
+#[test]
+fn a_peeled_attachment_passes_one_gate() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    let mut failures = Vec::new();
+    for (row, holds) in [
+        ("gate: =, module, exported unique", true),
+        ("gate: =, module, imported and re-exported", false),
+        ("gate: =, module, shadowed by a parameter", false),
+        ("gate: =, module, shadowed by a local", false),
+        ("gate: =, module, imported", false),
+        ("gate: =, function, exported unique", false),
+        ("gate: =, function, shadowed by a parameter", false),
+        ("gate: =, function, shadowed by a local", false),
+        ("gate: =, function, imported", false),
+        ("gate: =, class static block, exported unique", false),
+        ("gate: =, class static block, shadowed by a parameter", false),
+        ("gate: =, class static block, shadowed by a local", false),
+        ("gate: =, class static block, imported", false),
+        ("gate: =, nested block, exported unique", false),
+        ("gate: =, nested block, shadowed by a parameter", false),
+        ("gate: =, nested block, shadowed by a local", false),
+        ("gate: =, nested block, imported", false),
+        ("gate: =, arrow, exported unique", false),
+        ("gate: =, arrow, shadowed by a parameter", false),
+        ("gate: =, arrow, shadowed by a local", false),
+        ("gate: =, arrow, imported", false),
+        ("gate: +=, module, exported unique", false),
+        ("gate: +=, module, shadowed by a parameter", false),
+        ("gate: +=, module, shadowed by a local", false),
+        ("gate: +=, module, imported", false),
+        ("gate: +=, function, exported unique", false),
+        ("gate: +=, function, shadowed by a parameter", false),
+        ("gate: +=, function, shadowed by a local", false),
+        ("gate: +=, function, imported", false),
+        ("gate: +=, class static block, exported unique", false),
+        ("gate: +=, class static block, shadowed by a parameter", false),
+        ("gate: +=, class static block, shadowed by a local", false),
+        ("gate: +=, class static block, imported", false),
+        ("gate: +=, nested block, exported unique", false),
+        ("gate: +=, nested block, shadowed by a parameter", false),
+        ("gate: +=, nested block, shadowed by a local", false),
+        ("gate: +=, nested block, imported", false),
+        ("gate: +=, arrow, exported unique", false),
+        ("gate: +=, arrow, shadowed by a parameter", false),
+        ("gate: +=, arrow, shadowed by a local", false),
+        ("gate: +=, arrow, imported", false),
+        ("gate: ??=, module, exported unique", false),
+        ("gate: ??=, module, shadowed by a parameter", false),
+        ("gate: ??=, module, shadowed by a local", false),
+        ("gate: ??=, module, imported", false),
+        ("gate: ??=, function, exported unique", false),
+        ("gate: ??=, function, shadowed by a parameter", false),
+        ("gate: ??=, function, shadowed by a local", false),
+        ("gate: ??=, function, imported", false),
+        ("gate: ??=, class static block, exported unique", false),
+        ("gate: ??=, class static block, shadowed by a parameter", false),
+        ("gate: ??=, class static block, shadowed by a local", false),
+        ("gate: ??=, class static block, imported", false),
+        ("gate: ??=, nested block, exported unique", false),
+        ("gate: ??=, nested block, shadowed by a parameter", false),
+        ("gate: ??=, nested block, shadowed by a local", false),
+        ("gate: ??=, nested block, imported", false),
+        ("gate: ??=, arrow, exported unique", false),
+        ("gate: ??=, arrow, shadowed by a parameter", false),
+        ("gate: ??=, arrow, shadowed by a local", false),
+        ("gate: ??=, arrow, imported", false),
+        ("gate: destructuring, module, exported unique", false),
+        ("gate: destructuring, module, shadowed by a parameter", false),
+        ("gate: destructuring, module, shadowed by a local", false),
+        ("gate: destructuring, module, imported", false),
+        ("gate: destructuring, function, exported unique", false),
+        ("gate: destructuring, function, shadowed by a parameter", false),
+        ("gate: destructuring, function, shadowed by a local", false),
+        ("gate: destructuring, function, imported", false),
+        ("gate: destructuring, class static block, exported unique", false),
+        ("gate: destructuring, class static block, shadowed by a parameter", false),
+        ("gate: destructuring, class static block, shadowed by a local", false),
+        ("gate: destructuring, class static block, imported", false),
+        ("gate: destructuring, nested block, exported unique", false),
+        ("gate: destructuring, nested block, shadowed by a parameter", false),
+        ("gate: destructuring, nested block, shadowed by a local", false),
+        ("gate: destructuring, nested block, imported", false),
+        ("gate: destructuring, arrow, exported unique", false),
+        ("gate: destructuring, arrow, shadowed by a parameter", false),
+        ("gate: destructuring, arrow, shadowed by a local", false),
+        ("gate: destructuring, arrow, imported", false),
+        ("gate: a compound assignment after a string (finding 1)", false),
+        ("gate: an Object.assign declarator, module", true),
+        ("gate: an Object.assign declarator, function (finding 2)", false),
+        ("gate: an Object.assign declarator, class static block", false),
+        ("gate: an Object.assign declarator, nested block", false),
+        ("gate: an Object.assign declarator, arrow", false),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
+        let now = factory_parity_output(&cases[&peeled]);
+        if now != expected {
+            failures.push(format!("{peeled}:\n  expected {expected}\n  now      {now}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Round 41: a part only a peel exposes counts only with the evidence of the declaration its own name resolves to, and a
@@ -4392,7 +5200,8 @@ fn a_peeled_name_relies_on_a_parent_and_receiver_that_resolve() {
     let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
     for (row, holds) in [
         ("parents: a member assigned to a parent a parameter of its name (finding 1)", false),
-        ("parents: a member assigned to a parent declared once, in a function", true),
+        // Inside a function: round 42's gate attaches only at the module's top level.
+        ("parents: a member assigned to a parent declared once, in a function", false),
     ] {
         let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");

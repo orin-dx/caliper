@@ -30,6 +30,11 @@ npm/caliper-docgen: patch
   - Any part of an `Object.assign` call that only a cast or assertion exposes counts only while `Object.assign` is the built-in: the callee, the target, a source or a member. A plain `Object.assign(Impl, { Item: <typeof Item>Item })` after `Object.assign = …` does not attach `Item`.
     - A write to `Object.assign` counts in every form: through a wrapped receiver (`(Object as typeof Object).assign = …`, `Object!.assign = …`), a cast target, a compound or destructuring assignment, or `delete`.
   - A call to a PascalCase function counts as rendering by its name only when written plainly. Through a cast, as in `(MakeToken as typeof MakeToken)()`, the function must be declared once in the file, and its return type or body must render. A function returning a symbol, a name declared twice, or a global such as `Object` does not count. A member call such as `(codec.MakeToken as typeof codec.MakeToken)()` never borrows the evidence of the file's own `MakeToken`.
+  - A member attached through a name only a cast or assertion shows, as in `Root.Item = <any>Item` or `Object.assign(Root, { Item: <typeof Item>Item })`, needs all of the following. Plainly written attachments are read as before.
+    - It is a plain `=`, not `+=`, `??=` or a destructuring.
+    - It sits at the top level of the module, not inside a function, class or block.
+    - The parent is declared once in the file and is not an import.
+    - For `Object.assign`, the call is the built-in, in its minimal shape.
   - A first argument that `Object.assign` does not vouch for is not read any other way. `export default Object.assign(<typeof Impl>Impl, {})` after `Object.assign` is replaced exports nothing.
   - A member callee written behind a `<T>x` assertion, such as `(<typeof codec.forwardRef>codec.forwardRef)<R, Props>(…)`, is `forwardRef` only when its receiver resolves to React's import. An import of `forwardRef` elsewhere in the file does not count.
   - An identifier alias read only through a `<T>x` assertion in a `.ts` file, such as `const PublicRoot = <typeof Root>Root`, counts only when the file declares `Root` exactly once. The same holds for a member assigned that way: `Root.Item = <number>Item` attaches `Item` only when both `Item` and `Root` are declared once, so a parameter named `Root` breaks it.
