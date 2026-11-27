@@ -610,6 +610,8 @@ pub(super) struct LedgerBuilder<'a> {
     edges: FxDashMap<Node, Vec<Node>>,
     /// The demands whose own walk passed a file it could not read, with those files.
     unread: FxDashMap<DemandKey, (Demand, Arc<[PathKey]>)>,
+    /// What each unread walk's fall-through past an export it could not read could not read further on.
+    unread_past: FxDashMap<DemandKey, Vec<PathKey>>,
     /// One copy of each list of files a walk could not read: the demands of one augmentation search (every directory
     /// of a resolution scope importing the module) share the search's list instead of each holding its own.
     suspect_lists: FxDashMap<Arc<[PathKey]>, ()>,
@@ -634,6 +636,7 @@ impl<'a> LedgerBuilder<'a> {
             reads: DashMap::default(),
             edges: DashMap::default(),
             unread: DashMap::default(),
+            unread_past: DashMap::default(),
             suspect_lists: DashMap::default(),
             retried: DashSet::default(),
         }
@@ -672,6 +675,11 @@ impl<'a> LedgerBuilder<'a> {
     /// `from` reached `to`, whether it followed `to` itself or found it followed already.
     pub(super) fn reached(&self, from: &Node, to: Node) {
         self.edges.entry(from.clone()).or_default().push(to);
+    }
+
+    /// What the fall-through of the unread walk `root` led to could not read `files`: they are that walk's too.
+    pub(super) fn unread_past(&self, root: &DemandKey, files: Vec<PathKey>) {
+        self.unread_past.entry(root.clone()).or_default().extend(files);
     }
 
     /// `demand`'s own walk could not read `files`.
@@ -713,6 +721,7 @@ impl<'a> LedgerBuilder<'a> {
             reads,
             edges,
             unread,
+            unread_past,
             retried,
             retry: _,
             stamp: _,
@@ -723,6 +732,16 @@ impl<'a> LedgerBuilder<'a> {
         let fresh: Vec<(PathKey, bool)> =
             reads.iter().map(|(path, read)| (path.clone(), matches!(read, Read::Failed(_)))).collect();
         let followed_again = !retried.is_empty();
+        // The walk is unread itself, so its entry is there by now.
+        for (root, files) in unread_past {
+            if let Some(mut walk) = unread.get_mut(&root) {
+                let mut all = walk.1.to_vec();
+                all.extend(files);
+                all.sort();
+                all.dedup();
+                walk.1 = Arc::from(all);
+            }
+        }
         let unread: FxHashMap<Node, (Demand, Arc<[PathKey]>)> =
             unread.into_iter().map(|(key, walk)| (Node::Demand(key), walk)).collect();
         let mut marks: FxHashMap<Node, Mark> = FxHashMap::default();

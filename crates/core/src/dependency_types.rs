@@ -43,9 +43,6 @@ type FxDashSet<K> = DashSet<K, FxBuildHasher>;
 type ModuleCell = Arc<OnceLock<(DemandKey, Partial<Vec<(Utf8PathBuf, Arc<SourceData>)>>)>>;
 /// The augmenting files an incomplete search read, parsed.
 type ProvisionalFiles = Arc<[(Utf8PathBuf, Arc<SourceData>)]>;
-/// The walk a provisional answer came from: `(module, name)`, the name empty for a search of what a module merges into
-/// React.
-type ProvisionalKey = (PathKey, CompactString);
 
 /// A file's data, read and parsed once per load whoever asks first, a failed read included (`Loader::parse_source`).
 type ParseCell = Arc<OnceLock<Result<Option<Arc<SourceData>>, ReadFailed>>>;
@@ -482,6 +479,8 @@ pub(crate) struct DependencyLayer {
     /// `(directory, specifier)` → module, for every resolution the loader made.
     resolutions: FxHashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     files: FxHashSet<PathKey>,
+    /// The files indexed only for a walk past an unreadable export ([`Keep::Transient`]), carried by a flatten.
+    transient_files: FxHashSet<PathKey>,
     /// React's files whose declarations' imports were followed; their imports are in `import_map`.
     react_files: FxHashSet<PathKey>,
     /// Each module a demand reached, with the files its re-exports lead to that augment React.
@@ -489,7 +488,7 @@ pub(crate) struct DependencyLayer {
     /// Each module whose latest augmentation search could not read a file, with the augmenting files it read: served
     /// to the answers whose live demands reach the module ([`DependencyLayer::served_types`]), never indexed, never
     /// written, so nothing they hold outlives the module's next search, complete or not.
-    provisional: FxHashMap<ProvisionalKey, ProvisionalFiles>,
+    provisional: FxHashMap<PathKey, ProvisionalFiles>,
     /// Each provisional file the layer does not index, once however many modules' searches read it: its imports are
     /// [`serve`]d into `import_map`, its declarations into the one overlay [`DependencyLayer::served_types`] builds.
     provisional_data: FxHashMap<PathKey, Arc<SourceData>>,
@@ -618,14 +617,14 @@ impl DependencyLayer {
     }
 
     /// The module searches with provisional files that the unread walks `roots` lead to: what the layer serves them.
-    fn served_modules<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> FxHashSet<ProvisionalKey> {
+    fn served_modules<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> FxHashSet<PathKey> {
         if self.provisional.is_empty() {
             return FxHashSet::default();
         }
         let key = |demand: &Demand| {
-            let dir = demand.from.parent()?;
+            let dir = demand.from.parent().filter(|_| demand.name.is_empty())?;
             match self.resolution(&(Box::from(dir.as_str()), Box::from(&*demand.specifier)))? {
-                Ok(module) => Some((PathKey::from(module.as_path()), demand.name.clone())),
+                Ok(module) => Some(PathKey::from(module.as_path())),
                 Err(_) => None,
             }
         };
@@ -777,11 +776,16 @@ struct Loader<'a> {
     partial_exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
     claimed: FxDashSet<(PathKey, CompactString)>,
     declaring: FxDashSet<PathKey>,
+    /// The declarations and demands each walk past an unreadable export reached ([`Keep::Transient`]), and the files
+    /// holding the declarations.
+    transient: FxDashSet<(DemandKey, (PathKey, CompactString))>,
+    transient_demands: FxDashSet<(DemandKey, DemandKey)>,
+    transient_files: FxDashSet<PathKey>,
     react_files: FxDashSet<PathKey>,
     augmenters: FxDashMap<PathKey, Vec<Utf8PathBuf>>,
-    provisional: FxDashMap<ProvisionalKey, ProvisionalFiles>,
-    /// The walks this load followed, complete or not: an older provisional answer of each is replaced.
-    walked: FxDashSet<ProvisionalKey>,
+    provisional: FxDashMap<PathKey, ProvisionalFiles>,
+    /// The modules this load searched, complete or not: an older provisional answer of each is replaced.
+    walked: FxDashSet<PathKey>,
     /// For each module in `augmenters`, the stamps of the other packages its search read files from.
     augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
@@ -832,6 +836,9 @@ impl<'a> Loader<'a> {
             partial_exports: DashMap::default(),
             claimed: DashSet::default(),
             declaring: DashSet::default(),
+            transient: DashSet::default(),
+            transient_files: DashSet::default(),
+            transient_demands: DashSet::default(),
             react_files: DashSet::default(),
             augmenters: DashMap::default(),
             provisional: DashMap::default(),
@@ -1110,25 +1117,40 @@ impl Loader<'_> {
     }
 
     /// Runs `demand` on the scope, recording a panic as a diagnostic instead of letting it end the whole load.
-    fn spawn_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+    fn spawn_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand, past: Option<DemandKey>) {
         scope.spawn(move |scope| {
             let label = format!("dependency demand {}#{}", demand.specifier, demand.name);
-            if let Err(panic) = crate::panic_guard::contain_panic(&label, || self.demand(scope, demand)) {
+            if let Err(panic) = crate::panic_guard::contain_panic(&label, || self.demand(scope, demand, past)) {
                 self.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(panic);
             }
         });
     }
 
-    fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+    /// `past` is the unread walk whose fall-through past an export it could not read led here, if one did.
+    fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand, past: Option<DemandKey>) {
         #[cfg(test)]
         assert!(&*demand.name != DEMAND_PANIC_TEST_NAME, "injected panic");
         let key = demand.key();
+        // A walk past an unreadable export is followed again whole while it is unread, so nothing it reaches is kept,
+        // and what it could not read is that walk's: a name already loaded for good needs nothing more.
+        if let Some(root) = past {
+            let known = self.parent.is_some_and(|parent| parent.has_demand(&key))
+                || self.demands.contains(&key)
+                || !self.transient_demands.insert((root.clone(), key.clone()));
+            if !known {
+                let followed = self.follow(scope, &demand, &key, Some(&root));
+                if followed.incomplete() {
+                    self.ledger.unread_past(&root, followed.unread);
+                }
+            }
+            return;
+        }
         let known = self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone());
         // A demand whose last walk passed a file it could not read is followed again, once per load.
         if known && !self.ledger.retries(&key) {
             return;
         }
-        let followed = self.follow(scope, &demand, &key);
+        let followed = self.follow(scope, &demand, &key, None);
         if followed.incomplete() {
             self.ledger.unread_demand(&demand, followed.unread);
         }
@@ -1137,17 +1159,30 @@ impl Loader<'_> {
     /// Follows `demand`, whose key is `key`: what it names is loaded, or why not is in `unresolved`. Incomplete when a
     /// file it needed could not be read: what the readable files gave is loaded for this load, and no reason is kept,
     /// since the name is unknown, not absent.
-    fn follow<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand, key: &DemandKey) -> Partial<()> {
+    fn follow<'s>(
+        &'s self,
+        scope: &rayon::Scope<'s>,
+        demand: &Demand,
+        key: &DemandKey,
+        past: Option<&DemandKey>,
+    ) -> Partial<()> {
         let node = Node::Demand(key.clone());
         if demand.name.is_empty() {
-            return self.module_demand(scope, demand, &node);
+            return if past.is_some() { Partial::DONE } else { self.module_demand(scope, demand, &node) };
         }
         let module = match self.resolve(&demand.from, &demand.specifier) {
             Ok(module) => module,
             Err(reason) => {
-                self.unresolved.insert(key.clone(), reason);
+                if past.is_none() {
+                    self.unresolved.insert(key.clone(), reason);
+                }
                 return Partial::DONE;
             }
+        };
+        let keep = |incomplete: bool| match (past, incomplete) {
+            (Some(root), _) => Keep::Transient(root),
+            (None, true) => Keep::Transient(key),
+            (None, false) => Keep::Indexed,
         };
         if self.in_project(&module) {
             return Partial::DONE;
@@ -1157,7 +1192,7 @@ impl Loader<'_> {
             let qualified = CompactString::from(format!("React.{}", demand.name));
             return match self.parse(&module) {
                 Ok(Some(data)) if declares(&data, &module, &qualified) => {
-                    self.load_declaration(scope, module, qualified, &node, true)
+                    self.load_declaration(scope, module, qualified, &node, keep(false))
                 }
                 Ok(_) => Partial::DONE,
                 Err(failed) => Partial::unread_at(failed),
@@ -1178,15 +1213,20 @@ impl Loader<'_> {
             (true, None) | (false, _) if superseded() => drop(self.partial_exports.insert(mapping.clone(), None)),
             (true, None) | (false, _) => {}
         }
+        // What a lookup reaches past an export it could not read answers as on `main`, but only until the lookup is
+        // followed again.
+        let keep = keep(found.incomplete());
         let loaded = match found.value {
-            Some((file, name)) => self.load_declaration(scope, file, name, &node, true),
+            Some((file, name)) => self.load_declaration(scope, file, name, &node, keep),
             None if !found.unread.is_empty() => Partial::DONE,
             None => {
                 let cause = self.unresolved_cause(&module, &demand.name);
                 if cause.incomplete() {
                     return Partial { value: (), unread: cause.unread };
                 }
-                self.unresolved.insert(key.clone(), cause.value.unwrap_or(Unresolved::NotExported));
+                if past.is_none() {
+                    self.unresolved.insert(key.clone(), cause.value.unwrap_or(Unresolved::NotExported));
+                }
                 Partial::DONE
             }
         };
@@ -1307,7 +1347,7 @@ impl Loader<'_> {
                 Err(ReadFailed(file)) => unread.push(file),
             }
         }
-        let walk = (PathKey::from(module.as_path()), CompactString::default());
+        let walk = PathKey::from(module.as_path());
         if !unread.is_empty() {
             self.provisional.insert(walk.clone(), Arc::from(parsed.as_slice()));
         }
@@ -1371,7 +1411,8 @@ impl Loader<'_> {
                     && name.starts_with("React.")
                 {
                     let name = CompactString::from(name);
-                    loaded = loaded.and(self.load_declaration(scope, file.clone(), name, from, complete));
+                    let keep = if complete { Keep::Indexed } else { Keep::Served };
+                    loaded = loaded.and(self.load_declaration(scope, file.clone(), name, from, keep));
                 }
             }
         }
@@ -1468,7 +1509,7 @@ impl Loader<'_> {
         file: Utf8PathBuf,
         name: CompactString,
         from: &Node,
-        indexed: bool,
+        keep: Keep<'_>,
     ) -> Partial<()> {
         if self.in_project(&file) {
             return Partial::DONE;
@@ -1484,29 +1525,39 @@ impl Loader<'_> {
         let mut stack: Vec<(CompactString, Node)> =
             name.split_once('.').map(|(head, _)| (CompactString::from(head), from.clone())).into_iter().collect();
         stack.push((name, from.clone()));
-        // A served (provisional) declaration touches nothing permanent: no claim, no mark, no declaring file. Only the
-        // demands for what it imports are loaded, as any import is.
         let file_key = PathKey::from(file.as_path());
         let mut served: FxHashSet<CompactString> = FxHashSet::default();
         while let Some((name, reached_from)) = stack.pop() {
             let claim = (file_key.clone(), name.clone());
             let node = Node::Claim(claim.clone());
-            let first = match indexed {
-                true => {
+            let claimed = |claim: &(PathKey, CompactString)| {
+                self.parent.is_some_and(|parent| parent.has_claimed(claim)) || self.claimed.contains(claim)
+            };
+            let first = match keep {
+                Keep::Indexed => {
                     self.ledger.reached(&reached_from, node.clone());
                     !self.parent.is_some_and(|parent| parent.has_claimed(&claim)) && self.claimed.insert(claim)
                 }
-                false => served.insert(name.clone()),
+                Keep::Served => served.insert(name.clone()),
+                Keep::Transient(root) => !claimed(&claim) && self.transient.insert((root.clone(), claim)),
             };
             if !first {
                 continue;
             }
-            if indexed && react {
-                if !self.parent.is_some_and(|parent| parent.has_react_file(file.as_str())) {
-                    self.react_files.insert(file_key.clone());
+            match keep {
+                // React's own declarations never enter the index; only their imports are kept.
+                Keep::Indexed | Keep::Transient(_) if react => {
+                    if !self.parent.is_some_and(|parent| parent.has_react_file(file.as_str())) {
+                        self.react_files.insert(file_key.clone());
+                    }
                 }
-            } else if indexed && !self.parent.is_some_and(|parent| parent.is_dependency_file(&file)) {
-                self.declaring.insert(file_key.clone());
+                Keep::Indexed if !self.parent.is_some_and(|parent| parent.is_dependency_file(&file)) => {
+                    self.declaring.insert(file_key.clone());
+                }
+                Keep::Transient(_) => {
+                    self.transient_files.insert(file_key.clone());
+                }
+                Keep::Indexed | Keep::Served => {}
             }
             // The type a value is declared with (`declare const Primitive: Primitives`) goes with the value.
             let value_type = CompactString::from(format!("typeof {name}"));
@@ -1525,10 +1576,14 @@ impl Loader<'_> {
                 } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
                     stack.push((qualified, node.clone()));
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
-                    if indexed {
+                    if keep == Keep::Indexed {
                         self.ledger.reached(&node, Node::Demand(demand.key()));
                     }
-                    self.spawn_demand(scope, demand);
+                    let past = match keep {
+                        Keep::Transient(root) => Some(root.clone()),
+                        Keep::Indexed | Keep::Served => None,
+                    };
+                    self.spawn_demand(scope, demand, past);
                 }
             }
         }
@@ -1764,6 +1819,9 @@ fn load_with(
                 for file in &layer.files {
                     loader.declaring.insert(file.clone());
                 }
+                for file in &layer.transient_files {
+                    loader.transient_files.insert(file.clone());
+                }
                 for file in &layer.react_files {
                     loader.react_files.insert(file.clone());
                 }
@@ -1784,7 +1842,7 @@ fn load_with(
     rayon::scope(|scope| {
         for demand in demands {
             let loader = &loader;
-            loader.spawn_demand(scope, demand);
+            loader.spawn_demand(scope, demand, None);
         }
     });
     // Only a cold load writes the index. A walk that passed a file it could not read put nothing in the maps it writes
@@ -1813,6 +1871,26 @@ fn load_with(
             component_mappings.extend(data.component_mappings.iter().cloned());
         }
     }
+    // What a walk past an unreadable export reached answers that walk's components, but with no augmentation of React,
+    // which every answer would read; never a dependency file, so a load that reaches it for good indexes it whole.
+    let mut transient_files: Vec<PathKey> = loader
+        .transient_files
+        .iter()
+        .map(|file| file.clone())
+        .filter(|file| !loader.declaring.contains(file))
+        .filter(|file| {
+            !parent
+                .as_ref()
+                .is_some_and(|layer| layer.is_dependency_file(Utf8Path::new(std::borrow::Borrow::<str>::borrow(file))))
+        })
+        .collect();
+    transient_files.sort();
+    for file in &transient_files {
+        let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
+        if let Ok(Some(data)) = loader.parse(path) {
+            serve(&mut named, &mut imports, path, &without_react_namespace(&data));
+        }
+    }
     component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
     let mut component_positions: FxHashMap<CompactString, Vec<usize>> = FxHashMap::default();
     for (position, mapping) in component_mappings.iter().enumerate() {
@@ -1821,11 +1899,9 @@ fn load_with(
     let named_types = Arc::new(named);
     // The provisional augmentations: this load's incomplete searches, and `previous`'s for the modules this load did
     // not search again. A module's newest search replaces what an older one read.
-    let mut provisional: FxHashMap<ProvisionalKey, ProvisionalFiles> = previous
+    let mut provisional: FxHashMap<PathKey, ProvisionalFiles> = previous
         .map(|layer| {
-            let searched = |walk: &ProvisionalKey| {
-                loader.walked.contains(walk) || (walk.1.is_empty() && loader.augmenters.contains_key(&walk.0))
-            };
+            let searched = |walk: &PathKey| loader.walked.contains(walk) || loader.augmenters.contains_key(walk);
             layer.provisional.iter().filter(|(walk, _)| !searched(walk)).map(|(k, v)| (k.clone(), v.clone())).collect()
         })
         .unwrap_or_default();
@@ -1900,6 +1976,7 @@ fn load_with(
         exports,
         resolutions,
         files,
+        transient_files: transient_files.into_iter().collect(),
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
         provisional,
@@ -1927,6 +2004,20 @@ fn load_with(
     }
 }
 
+/// How [`Loader::load_declaration`] keeps what it loads.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Keep<'k> {
+    /// Claimed, marked and indexed.
+    Indexed,
+    /// A provisional augmentation, served by the overlay: nothing claimed, marked or indexed; its imports are loaded as
+    /// any import is.
+    Served,
+    /// Reached past an export the unread walk it names could not read: indexed for the layer's answers with no
+    /// augmentation of React, never claimed or marked, and what it imports is transient too, so the walk's retry
+    /// follows it all again; what it could not read is that walk's.
+    Transient(&'k DemandKey),
+}
+
 /// An order-free fingerprint of a served set ([`DependencyLayer::served_fingerprint`]).
 pub(crate) fn served_fingerprint_of(files: &[Utf8PathBuf]) -> u64 {
     let mut fingerprint = Fingerprint::default();
@@ -1941,6 +2032,18 @@ pub(crate) fn served_fingerprint_of(files: &[Utf8PathBuf]) -> u64 {
 fn serve(named: &mut NamedTypeIndex, imports: &mut GlobalSourceData, path: &Utf8Path, data: &SourceData) {
     serve_declarations(named, data);
     serve_imports(imports, path, data);
+}
+
+/// `data` without what it declares into the `React` namespace.
+fn without_react_namespace(data: &SourceData) -> SourceData {
+    let react = |key: &String| key.rsplit_once(':').is_some_and(|(_, name)| name.starts_with("React."));
+    let mut data = data.clone();
+    data.interfaces.retain(|key, _| !react(key));
+    data.interface_type_params.retain(|key, _| !react(key));
+    data.type_aliases.retain(|key, _| !react(key));
+    data.type_alias_params.retain(|key, _| !react(key));
+    data.type_param_defaults.retain(|key, _| !react(key));
+    data
 }
 
 /// [`serve`]'s declarations: what a provisional file gives the overlay its revision builds.

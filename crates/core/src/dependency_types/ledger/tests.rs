@@ -1301,6 +1301,55 @@ fn a_recovered_import_of_a_served_augmentation_is_not_followed_again() {
     assert_eq!(failed, [PathKey::from(bad.as_path())], "only `bad` is still unread");
 }
 
+/// What a lookup reaches only by falling through an unreadable export serves no other component: `kit` re-exports
+/// `first` (unreadable) and then `fallback`, whose `Target` extends `Base` from `base`, which also merges `aria-fb`
+/// into React. While `first` cannot be read `Card` has `fallback`'s and `Base`'s props, as on `main`, but `Aria` has
+/// no `aria-fb`; once `first` reads and an edit retries the lookup, `Card` has `first`'s prop alone and `Aria` still
+/// no `aria-fb`. Both equal a fresh run at each step.
+#[test]
+fn what_a_fall_through_reaches_serves_no_other_component() {
+    let (_tmp, root) = react_project(&[
+        ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
+        (
+            "node_modules/kit/fallback.d.ts",
+            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
+        ),
+        (
+            "node_modules/kit/base.d.ts",
+            "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
+             export interface Base { base: string }\n",
+        ),
+        (
+            "src/card/Card.tsx",
+            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
+        ),
+        (
+            "src/aria/Aria.tsx",
+            "import * as React from 'react';\ninterface AriaOwn extends React.AriaAttributes { own?: boolean }\n\
+             export const Aria = (props: AriaOwn) => <div />;\n",
+        ),
+        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+    ]);
+    let first = root.join("node_modules/kit/first.d.ts");
+    std::fs::write(&first, UNREADABLE).unwrap();
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    let check = |step: &str, card: &[&str]| {
+        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
+        drop(fresh.initialize());
+        assert_eq!(names(&session.component("Card")), card, "{step}");
+        assert!(!names(&session.component("Aria")).contains(&"aria-fb".to_owned()), "{step}");
+        for name in ["Card", "Aria"] {
+            assert!(session.component(name) == fresh.component(name), "{name}, {step}");
+        }
+    };
+    check("falling through", &["base", "fallback"]);
+    std::fs::write(&first, "export interface Target { first: string }\n").unwrap();
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+    check("recovered", &["first"]);
+}
+
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
 /// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
 /// augmentation did add one.
@@ -1813,7 +1862,12 @@ const REACT_PACKAGE: &[(&str, &str)] = &[
         "node_modules/mk/tgt/fallback.d.ts",
         "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
     ),
-    ("node_modules/mk/tgt/base.d.ts", "export interface Base { base: string }\n"),
+    // The fallbacks' `Base` also merges `aria-base` into React, which nothing reached past an unreadable export serves.
+    (
+        "node_modules/mk/tgt/base.d.ts",
+        "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-base'?: string } }\n\
+         export interface Base { base: string }\n",
+    ),
     ("node_modules/mk/tgt2/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
     ("node_modules/mk/tgt2/first.d.ts", "export interface Target2 { first2: string }\n"),
     (
@@ -1867,6 +1921,9 @@ struct Model {
     unreadable: &'static [&'static str],
     react: bool,
     seeds: &'static [u64],
+    /// The package files reached only past a file that can be unreadable, as an answer reads them while it is: with
+    /// nothing merged into React. The oracle that empties the unreadable files, so walks pass them, writes these.
+    past_unreadable: &'static [(&'static str, &'static str)],
 }
 
 const PLAIN_MODEL: Model = Model {
@@ -1875,6 +1932,7 @@ const PLAIN_MODEL: Model = Model {
     unreadable: &["index", "a", "stub", "b", "cyc/first", "nest", "deep", "leaf", "prim"],
     react: false,
     seeds: &[1, 2, 3, 5, 8, 13, 21, 34],
+    past_unreadable: &[],
 };
 
 const REACT_MODEL: Model = Model {
@@ -1883,6 +1941,8 @@ const REACT_MODEL: Model = Model {
     unreadable: &["tgt/first", "tgt2/first", "tgt/base", "aug/afirst", "aug/aug"],
     react: true,
     seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    // `Base` is reached only by falling through an unreadable `first`.
+    past_unreadable: &[("node_modules/mk/tgt/base.d.ts", "export interface Base { base: string }\n")],
 };
 
 impl Model {
@@ -1921,10 +1981,12 @@ fn set_unreadable(model: &Model, root: &Utf8Path, unreadable: &std::collections:
         let Some(name) = path.strip_prefix("node_modules/mk/").and_then(|name| name.strip_suffix(".d.ts")) else {
             continue;
         };
+        let past = model.past_unreadable.iter().find(|(past, _)| past == path).map(|(_, body)| *body);
         match (unreadable.contains(name), empty) {
             (true, false) => std::fs::write(root.join(path), UNREADABLE).unwrap(),
             (true, true) => std::fs::write(root.join(path), "export {};\n").unwrap(),
-            (false, _) => std::fs::write(root.join(path), body).unwrap(),
+            (false, true) => std::fs::write(root.join(path), past.unwrap_or(body)).unwrap(),
+            (false, false) => std::fs::write(root.join(path), body).unwrap(),
         }
     }
 }

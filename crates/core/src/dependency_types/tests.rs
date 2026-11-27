@@ -1816,7 +1816,10 @@ fn answers(layer: &DependencyLayer, root: &Utf8Path, demands: &[Demand]) -> Answ
         layer.chain().flat_map(|layer| layer.files.iter().chain(&layer.react_files).cloned()).collect();
     // What answers read: the provisional augmentations are served, not loaded.
     files.extend(layer.provisional_files().into_iter().map(|file| PathKey::from(file.as_path())));
+    // And what a walk past an unreadable export reached, for that walk's answers; a later load may index it for good.
+    files.extend(layer.chain().flat_map(|layer| layer.transient_files.iter().cloned()));
     files.sort();
+    files.dedup();
     let dir = |demand: &Demand| demand.from.parent().unwrap().to_owned();
     let augmenters = |module: &str| layer.augmenters_of(&PathKey::from(root.join(module).as_path())).cloned();
     (

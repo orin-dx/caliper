@@ -1624,6 +1624,122 @@ mod read_retry_tests {
         assert!(steps <= 50, "{steps} footprint entries checked by 200 hits");
     }
 
+    /// What a lookup reaches past an export it could not read serves no other answer, and the timed retry follows it
+    /// again: `kit` re-exports `first` (unreadable) and then `fallback`, whose `Target` extends `Base` from `base`,
+    /// which also merges `aria-fb` into React. `Card` is asked, then `Aria`, a reader of `AriaAttributes`; once `first`
+    /// reads and the retry is due, `Card` has `first`'s prop alone. Each answer equals a cold run's, and `Aria` never
+    /// has the attribute.
+    #[test]
+    fn a_fall_through_serves_no_other_answer_and_a_timed_retry_follows_it_again() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let files = [
+            ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+            ("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
+            (
+                "node_modules/kit/fallback.d.ts",
+                "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
+            ),
+            (
+                "node_modules/kit/base.d.ts",
+                "import type {} from 'react';\n\
+                 declare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
+                 export interface Base { base: string }\n",
+            ),
+            (
+                "src/card/Card.tsx",
+                "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
+            ),
+            (
+                "src/aria/Aria.tsx",
+                "import * as React from 'react';\ninterface AriaOwn extends React.AriaAttributes { own?: boolean }\n\
+                 export const Aria = (props: AriaOwn) => <div />;\n",
+            ),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let first = root.join("node_modules/kit/first.d.ts");
+        std::fs::write(&first, [0xff; 8]).unwrap();
+        let options = |use_cache| PipelineOptions {
+            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
+            ..options(&root, use_cache)
+        };
+        let cold = |name| Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
+        let revision = Revision::cold_lazy(&options(true), 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        let check = |step: &str, card: &[&str]| {
+            let answer = revision.lazy_component(&options(true), "Card").unwrap();
+            assert_eq!(props(&answer), card, "{step}");
+            assert!(answer == cold("Card"), "Card, {step}");
+            let answer = revision.lazy_component(&options(true), "Aria").unwrap();
+            assert!(!props(&answer).contains(&"aria-fb".to_owned()), "{step}");
+            assert!(answer == cold("Aria"), "Aria, {step}");
+        };
+        check("falling through", &["base", "fallback"]);
+        std::fs::write(&first, "export interface Target { first: string }\n").unwrap();
+        set_clock(&revision, start + DEGRADED_RETRY);
+        check("recovered", &["first"]);
+    }
+
+    /// What a walk past an unreadable export reached stays in a flattened layer while the walk is unread: `Card` falls
+    /// through `kit`'s unreadable `first` to `fallback`'s `Target extends Base`, a dozen requests grow the layer past
+    /// its depth limit with the retry not due, and `Card3`, beside `Card` (the same demand, not followed again), has
+    /// `fallback`'s and `Base`'s props, as a cold run does.
+    #[test]
+    fn a_flatten_keeps_what_an_unread_fall_through_reached() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#);
+        write("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n");
+        write(
+            "node_modules/kit/fallback.d.ts",
+            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
+        );
+        write("node_modules/kit/base.d.ts", "export interface Base { base: string }\n");
+        std::fs::write(root.join("node_modules/kit/first.d.ts"), [0xff; 8]).unwrap();
+        write(
+            "node_modules/many-kit/package.json",
+            r#"{ "name": "many-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        );
+        write("node_modules/many-kit/index.d.ts", "export interface ManyProps { many: string }\n");
+        for name in ["Card", "Card3"] {
+            write(
+                &format!("src/card/{name}.tsx"),
+                &format!(
+                    "import type {{ Target }} from 'kit';\nexport function {name}(props: Target) {{ return null; }}\n"
+                ),
+            );
+        }
+        for n in 0..12 {
+            write(
+                &format!("src/c{n}/C{n}.tsx"),
+                &format!(
+                    "import type {{ ManyProps }} from 'many-kit';\n\
+                     export function C{n}(props: ManyProps & {{ own{n}: string }}) {{ return null; }}\n"
+                ),
+            );
+        }
+        let options = options(&root, false);
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        assert_eq!(props(&revision.lazy_component(&options, "Card").unwrap()), ["base", "fallback"]);
+        for n in 0..12 {
+            drop(revision.lazy_component(&options, &format!("C{n}")).unwrap());
+        }
+        let answer = revision.lazy_component(&options, "Card3").unwrap();
+        assert_eq!(props(&answer), ["base", "fallback"]);
+        assert!(answer == Revision::cold_lazy(&options, 0).lazy_component(&options, "Card3").unwrap());
+    }
+
     /// A retry that replaces a walk: `kit` re-exports `first` (unreadable) and then `fallback`, whose `Target` extends
     /// `Base` from an unreadable `base`. Once `first` reads and declares `Target` itself, the retry follows it, and no
     /// live walk reaches `base` any more: `C` and its warnings equal a cold run's, and the carried set is derived
