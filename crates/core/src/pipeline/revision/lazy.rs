@@ -1685,6 +1685,65 @@ mod read_retry_tests {
         check("recovered", &["first"]);
     }
 
+    /// A served augmentation's unreadable import is the search's: `aug-kit`'s search passes an unreadable `bad` and
+    /// serves `aug`, whose `aria-tone` is typed by `Tone` from an unreadable `tone`. `First`, a reader of
+    /// `AriaAttributes`, reports both files; once `tone` reads and the retry is due, it has `Tone`'s members, as a cold
+    /// run does.
+    #[test]
+    fn a_served_augmentation_s_import_is_reported_and_retried_with_its_search() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let files = [
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+            (
+                "node_modules/aug-kit/aug.d.ts",
+                "import type { Tone } from './tone';\n\
+                 declare module 'react' { interface AriaAttributes { 'aria-tone'?: Tone } }\nexport {};\n",
+            ),
+            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
+            (
+                "src/first/First.tsx",
+                "import * as React from 'react';\ninterface FirstProps extends React.AriaAttributes { own?: boolean }\n\
+                 export const First = (props: FirstProps) => <div />;\n",
+            ),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let (bad, tone) = (root.join("node_modules/aug-kit/bad.d.ts"), root.join("node_modules/aug-kit/tone.d.ts"));
+        std::fs::write(&bad, [0xff; 8]).unwrap();
+        std::fs::write(&tone, [0xff; 8]).unwrap();
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let io = |answer: &ComponentAnswer| -> Vec<Option<String>> {
+            let io = |d: &&Diagnostic| d.code == crate::types::DiagnosticCode::IoError;
+            let mut files: Vec<Option<String>> = answer.diagnostics.iter().filter(io).map(|d| d.file.clone()).collect();
+            files.sort();
+            files
+        };
+        let cold = || Revision::cold_lazy(&options, 0).lazy_component(&options, "First").unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        let answer = revision.lazy_component(&options, "First").unwrap();
+        assert_eq!(io(&answer), [Some(bad.to_string()), Some(tone.to_string())]);
+        assert!(answer == cold(), "both unreadable");
+        std::fs::write(&tone, "export type Tone = 'warm' | 'cool';\n").unwrap();
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let answer = revision.lazy_component(&options, "First").unwrap();
+        assert_eq!(io(&answer), [Some(bad.to_string())]);
+        let tone_of =
+            |answer: &ComponentAnswer| format!("{:?}", answer.entry.props.get("aria-tone").map(|p| &p.prop_type));
+        assert_eq!(tone_of(&answer), tone_of(&cold()), "tone reads");
+        assert!(answer == cold(), "tone reads");
+    }
+
     /// What a walk past an unreadable export reached stays in a flattened layer while the walk is unread: `Card` falls
     /// through `kit`'s unreadable `first` to `fallback`'s `Target extends Base`, a dozen requests grow the layer past
     /// its depth limit with the retry not due, and `Card3`, beside `Card` (the same demand, not followed again), has

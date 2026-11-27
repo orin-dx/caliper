@@ -1299,6 +1299,9 @@ fn a_recovered_import_of_a_served_augmentation_is_not_followed_again() {
     assert_eq!(unread.iter().map(|demand| demand.name.clone()).collect::<Vec<_>>(), [CompactString::default()]);
     let failed: Vec<PathKey> = second.failed_reads_reached(std::slice::from_ref(&setup)).into_iter().collect();
     assert_eq!(failed, [PathKey::from(bad.as_path())], "only `bad` is still unread");
+    assert!(second.named_types.lookup_type_alias_exact(&tone, "Tone").is_some(), "the retry indexes `Tone`");
+    let served = second.served_types(std::slice::from_ref(&setup));
+    assert!(served.lookup_type_alias_exact(&tone, "Tone").is_some(), "and serves it");
 }
 
 /// What a served augmentation's import could not read is the search's: `kit2`'s search passes an unreadable `bad` and
@@ -2009,8 +2012,9 @@ const REACT_MODEL: Model = Model {
     components: REACT_COMPONENTS,
     unreadable: &["tgt/first", "tgt2/first", "tgt/base", "aug/afirst", "aug/aug", "aug/aug2", "aug/tone"],
     react: true,
-    // Seed 63 restarts over the index on disk with an augmentation unreadable, then flattens.
-    seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 63],
+    // Seed 63 restarts over the index on disk with an augmentation unreadable, then flattens; seed 655 recovers a served
+    // augmentation's import.
+    seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 63, 655],
     // `Base` is reached only by falling through an unreadable `first`.
     past_unreadable: &[("node_modules/mk/tgt/base.d.ts", "export interface Base { base: string }\n")],
 };

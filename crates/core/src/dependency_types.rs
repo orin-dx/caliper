@@ -1549,7 +1549,12 @@ impl Loader<'_> {
                     self.ledger.reached(&reached_from, node.clone());
                     !self.parent.is_some_and(|parent| parent.has_claimed(&claim)) && self.claimed.insert(claim)
                 }
-                Keep::Served => served.insert(name.clone()),
+                // A served declaration claims nothing, but the ledger records that the search reached it and what it
+                // imports: a memo read in its file holds only while that walk does, and its warnings are the search's.
+                Keep::Served => {
+                    self.ledger.reached(&reached_from, node.clone());
+                    served.insert(name.clone())
+                }
                 Keep::Transient(root) => !claimed(&claim) && self.transient.insert((root.clone(), claim)),
             };
             if !first {
@@ -1587,12 +1592,8 @@ impl Loader<'_> {
                 } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
                     stack.push((qualified, node.clone()));
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
-                    // A served augmentation claims nothing, so what it imports goes with the search that served it: the
-                    // search's walk reaches the import's, and so do its warnings.
-                    match keep {
-                        Keep::Indexed => self.ledger.reached(&node, Node::Demand(demand.key())),
-                        Keep::Served => self.ledger.reached(from, Node::Demand(demand.key())),
-                        Keep::Transient(_) => {}
+                    if !matches!(keep, Keep::Transient(_)) {
+                        self.ledger.reached(&node, Node::Demand(demand.key()));
                     }
                     let past = match keep {
                         Keep::Transient(root) => Some(root.clone()),
