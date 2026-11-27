@@ -125,36 +125,51 @@ impl Lazy {
         }
         #[cfg(test)]
         self.live_warning_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let roots = self.demands.values().flat_map(|demands| demands.iter());
-        #[cfg(test)]
-        let roots = roots.inspect(|_| {
-            self.live_warning_roots.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        });
-        let failed = layer.failed_reads_reached(roots);
+        let failed = self.failed_reads_live(layer, true);
         let warnings: Arc<[Diagnostic]> = Arc::from(layer.panic_diagnostics_of(&failed));
         *cached = Some((layer.clone(), failed, warnings.clone()));
         warnings
     }
 
+    /// The failed reads the revision's live demands reach in `layer`: the one derivation, `counted` for tests unless
+    /// it only checks a carried set.
+    fn failed_reads_live(&self, layer: &DependencyLayer, counted: bool) -> FxHashSet<PathKey> {
+        let roots = self.demands.values().flat_map(|demands| demands.iter());
+        #[cfg(test)]
+        let roots = roots.inspect(|_| {
+            if counted {
+                self.live_warning_roots.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+        #[cfg(not(test))]
+        let _ = counted;
+        layer.failed_reads_reached(roots)
+    }
+
     /// Carries the live warnings derived for `previous` to `extended`, a layer loaded over it, by what that load read:
     /// a file it read again leaves them, one it could not read joins them. Every walk a lazy load follows starts at
-    /// the revision's live demands, so each failure it met is reached, and a growth costs what it read, not a walk of
-    /// every live demand.
+    /// the revision's live demands, so each failure it met is reached, and a growth that only adds walks costs what
+    /// it read, not a walk of every live demand. A load that followed a walk again (a retry) may have replaced what it
+    /// reaches, leaving a failure no live demand leads to any more: the set is derived again.
     fn inherit_warnings(&self, previous: &Arc<DependencyLayer>, extended: &Arc<DependencyLayer>) {
         let mut cached = self.live_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let carried = cached.as_ref().filter(|(at, ..)| Arc::ptr_eq(at, previous)).map(|(_, failed, _)| failed.clone());
         let Some(mut failed) = carried else {
             return;
         };
-        for (file, failed_again) in extended.fresh_reads() {
-            match failed_again {
-                true => drop(failed.insert(file.clone())),
-                false => drop(failed.remove(file)),
+        if extended.followed_again() {
+            failed = self.failed_reads_live(extended, true);
+        } else {
+            for (file, failed_again) in extended.fresh_reads() {
+                match failed_again {
+                    true => drop(failed.insert(file.clone())),
+                    false => drop(failed.remove(file)),
+                }
             }
         }
         debug_assert_eq!(
             failed,
-            extended.failed_reads_reached(self.demands.values().flat_map(|demands| demands.iter())),
+            self.failed_reads_live(extended, false),
             "the carried live warnings are the ones a derivation finds"
         );
         let warnings: Arc<[Diagnostic]> = Arc::from(extended.panic_diagnostics_of(&failed));
@@ -227,7 +242,7 @@ pub(super) struct Lazy {
     growths: std::sync::atomic::AtomicUsize,
     /// Components resolved through a walk that passed a file it could not read, with the unread walks they reached:
     /// answered until one of those is due, then resolved again. Never carried to the next revision, never persisted.
-    provisional: DashMap<ComponentId, (Arc<Resolved>, dependency_types::Footprint), FxBuildHasher>,
+    provisional: DashMap<ComponentId, (Arc<Resolved>, Held), FxBuildHasher>,
     /// The id of the session's next dependency load, shared by its revisions: a footprint tells one load's failed read
     /// from a later one's.
     load_ids: Arc<dependency_types::LoadIds>,
@@ -256,10 +271,43 @@ pub(super) struct Lazy {
 type SharedUnread = (Arc<dependency_types::DependencyLayer>, Arc<SharedWalks>);
 
 /// The unread walks the shared demands lead to in one layer, and their footprint (`None` when one of them has a file
-/// read since): one copy per layer, which every resolution that reads React's augmentations shares.
+/// read since): one copy per layer, which every resolution that reads React's augmentations shares, by reference.
 pub(super) struct SharedWalks {
     unread: Arc<[Demand]>,
     footprint: Option<dependency_types::Footprint>,
+    /// Until when `footprint` holds, in the layer it was last checked against: every answer that shares it asks.
+    bound: Mutex<Option<(Arc<DependencyLayer>, Option<dependency_types::FootprintBound>)>>,
+}
+
+impl SharedWalks {
+    /// Whether the footprint still holds in `layer` at `now`, its entries checked once for each layer.
+    fn holds(&self, layer: &Arc<DependencyLayer>, now: dependency_types::Moment) -> bool {
+        let Some(footprint) = &self.footprint else { return false };
+        let mut held = self.bound.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bound = match held.as_ref() {
+            Some((at, bound)) if Arc::ptr_eq(at, layer) => *bound,
+            _ => {
+                let bound = layer.footprint_bound(footprint);
+                *held = Some((layer.clone(), bound));
+                bound
+            }
+        };
+        bound.is_some_and(|bound| bound.holds_at(now))
+    }
+}
+
+/// What a provisional answer holds by: the footprint of its own unread walks, and the shared walks' by reference.
+#[derive(Clone)]
+pub(super) struct Held {
+    own: Option<dependency_types::Footprint>,
+    shared: Option<Arc<SharedWalks>>,
+}
+
+impl Held {
+    fn holds(&self, layer: &Arc<DependencyLayer>, now: dependency_types::Moment) -> bool {
+        self.own.as_ref().is_none_or(|own| layer.footprint_holds(own, now))
+            && self.shared.as_ref().is_none_or(|shared| shared.holds(layer, now))
+    }
 }
 
 /// What a test runs inside a request ([`Lazy::between`]).
@@ -283,7 +331,7 @@ impl Lazy {
         #[cfg(test)]
         self.shared_unread_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let unread: Arc<[Demand]> = Arc::from(layer.unread(&self.shared));
-        let walks = Arc::new(SharedWalks { footprint: layer.footprint(&unread), unread });
+        let walks = Arc::new(SharedWalks { footprint: layer.footprint(&unread), unread, bound: Mutex::new(None) });
         *held = Some((layer.clone(), walks.clone()));
         walks
     }
@@ -741,7 +789,7 @@ impl Revision {
                     let mut missing = layer.missing_at(&roots, retry);
                     missing.extend(layer.missing_at(&unread, retry));
                     if let Some(walks) = &shared
-                        && !walks.footprint.as_ref().is_some_and(|held| layer.footprint_holds(held, lazy.moment()))
+                        && !walks.holds(layer, lazy.moment())
                     {
                         #[cfg(test)]
                         lazy.shared_walk_visits.fetch_add(walks.unread.len(), std::sync::atomic::Ordering::Relaxed);
@@ -766,10 +814,14 @@ impl Revision {
                 // The answer and its warnings both come from `engine`; held nowhere, the next request asks again.
                 let (own, shared) = unread;
                 if !own.is_empty() || shared.is_some() {
-                    let own = (!own.is_empty()).then(|| engine.layer.as_ref().and_then(|layer| layer.footprint(&own)));
-                    let parts = own.into_iter().chain(shared.map(|walks| walks.footprint.clone()));
-                    if let Some(footprint) = parts.collect::<Option<Vec<_>>>().map(dependency_types::Footprint::union) {
-                        lazy.provisional.insert(id.clone(), (resolved.clone(), footprint));
+                    // Each part must have a footprint, or the walk is due and the answer is held nowhere.
+                    let own = match own.is_empty() {
+                        true => Some(None),
+                        false => engine.layer.as_ref().and_then(|layer| layer.footprint(&own)).map(Some),
+                    };
+                    let shared_held = shared.as_ref().is_none_or(|walks| walks.footprint.is_some());
+                    if let (Some(own), true) = (own, shared_held) {
+                        lazy.provisional.insert(id.clone(), (resolved.clone(), Held { own, shared }));
                     }
                     return Some((resolved, engine.layer.clone()));
                 }
@@ -787,11 +839,11 @@ impl Revision {
         lazy: &Lazy,
         id: &ComponentId,
     ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
-        let (resolved, footprint) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
+        let (resolved, held) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
         let engine = lazy.engine.load();
         let layer = engine.layer.clone();
-        let holds = resolved.holds_under(engine.served)
-            && layer.as_ref().is_some_and(|layer| layer.footprint_holds(&footprint, lazy.moment()));
+        let holds =
+            resolved.holds_under(engine.served) && layer.as_ref().is_some_and(|layer| held.holds(layer, lazy.moment()));
         if holds {
             return Some((resolved, layer));
         }
@@ -1474,6 +1526,111 @@ mod read_retry_tests {
         let third = second.next_lazy(&options, &edited).unwrap().0;
         assert_eq!(SHARED_BUILDS.with(std::cell::Cell::get), 1, "a changed import rebuilds the list");
         assert_eq!((shared(&second).len(), shared(&third).len()), (1000, 999), "one shared demand a file");
+    }
+
+    /// The shared walks' footprint is held by reference and checked once per layer: 200 components read React's
+    /// augmentations past 50 unreadable shared modules. Their provisional answers retain O(200 + 50) failed reads, not
+    /// 200 copies of 50, and asking again checks the 50 once, not once an answer.
+    #[test]
+    fn the_shared_footprint_is_held_once() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        let mut setup = String::new();
+        for m in 0..50 {
+            write(
+                &format!("node_modules/aug{m}/package.json"),
+                &format!(r#"{{ "name": "aug{m}", "version": "1.0.0", "types": "index.d.ts" }}"#),
+            );
+            std::fs::write(root.join(format!("node_modules/aug{m}/index.d.ts")), [0xff; 8]).unwrap();
+            setup.push_str(&format!("import * as A{m} from 'aug{m}';\nexport const a{m} = A{m};\n"));
+        }
+        write("src/setup.ts", &setup);
+        for n in 0..200 {
+            write(
+                &format!("src/c{n}/C{n}.tsx"),
+                &format!(
+                    "import * as React from 'react';\ninterface C{n}Props extends React.AriaAttributes {{ own?: boolean }}\n\
+                     export const C{n} = (props: C{n}Props) => <div />;\n"
+                ),
+            );
+        }
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        for n in 0..200 {
+            drop(revision.lazy_component(&options, &format!("C{n}")).unwrap());
+        }
+        let lazy = revision.lazy.as_ref().unwrap();
+        let mut shared: Vec<*const SharedWalks> = Vec::new();
+        let mut retained = 0;
+        for entry in lazy.provisional.iter() {
+            let (_, held) = entry.value();
+            retained += held.own.as_ref().map_or(0, dependency_types::Footprint::len);
+            if let Some(walks) = &held.shared
+                && !shared.contains(&Arc::as_ptr(walks))
+            {
+                shared.push(Arc::as_ptr(walks));
+                retained += walks.footprint.as_ref().map_or(0, dependency_types::Footprint::len);
+            }
+        }
+        assert_eq!(lazy.provisional.len(), 200, "every answer is provisional");
+        assert!(retained <= 200 + 50, "{retained} failed reads retained");
+        crate::dependency_types::FOOTPRINT_STEPS.with(|steps| steps.set(0));
+        for n in 0..200 {
+            drop(revision.lazy_component(&options, &format!("C{n}")).unwrap());
+        }
+        let steps = crate::dependency_types::FOOTPRINT_STEPS.with(std::cell::Cell::get);
+        assert!(steps <= 50, "{steps} footprint entries checked by 200 hits");
+    }
+
+    /// A retry that replaces a walk: `kit` re-exports `first` (unreadable) and then `fallback`, whose `Target` extends
+    /// `Base` from an unreadable `base`. Once `first` reads and declares `Target` itself, the retry follows it, and no
+    /// live walk reaches `base` any more: `C` and its warnings equal a cold run's, and the carried set is derived
+    /// again rather than kept by read status (the debug check agrees).
+    #[test]
+    fn a_retry_that_replaces_a_walk_derives_the_live_warnings_again() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#);
+        write("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n");
+        write(
+            "node_modules/kit/fallback.d.ts",
+            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
+        );
+        write("src/c/C.tsx", "import type { Target } from 'kit';\nexport function C(props: Target) { return null; }\n");
+        let (first, base) = (root.join("node_modules/kit/first.d.ts"), root.join("node_modules/kit/base.d.ts"));
+        std::fs::write(&first, [0xff; 8]).unwrap();
+        std::fs::write(&base, [0xff; 8]).unwrap();
+        let options = options(&root, false);
+        let io = |answer: &ComponentAnswer| -> Vec<Option<String>> {
+            let io = |d: &&Diagnostic| d.code == crate::types::DiagnosticCode::IoError;
+            let mut files: Vec<Option<String>> = answer.diagnostics.iter().filter(io).map(|d| d.file.clone()).collect();
+            files.sort();
+            files
+        };
+        let cold = || Revision::cold_lazy(&options, 0).lazy_component(&options, "C").unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        let answer = revision.lazy_component(&options, "C").unwrap();
+        assert_eq!(io(&answer), [Some(base.to_string()), Some(first.to_string())]);
+        write("node_modules/kit/first.d.ts", "export interface Target { first: string }\n");
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let answer = revision.lazy_component(&options, "C").unwrap();
+        assert_eq!(props(&answer), ["first"]);
+        assert_eq!(io(&answer), io(&cold()), "no stale warning for `base`");
+        assert!(answer == cold());
     }
 
     /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its

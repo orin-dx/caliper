@@ -219,13 +219,30 @@ impl UnreadWalks {
 pub(crate) struct Footprint(Box<[Unreadable]>);
 
 impl Footprint {
-    /// The footprint of an answer read through each of `parts`: every file in any of them, once.
-    pub(crate) fn union(parts: Vec<Footprint>) -> Footprint {
-        let mut files: Vec<Unreadable> = parts.into_iter().flat_map(|part| part.0.into_vec()).collect();
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        files.dedup_by(|a, b| a.path == b.path);
-        Footprint(files.into_boxed_slice())
+    /// How many failed reads it holds, for tests.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
     }
+}
+
+/// Until when a footprint holds in a layer ([`DependencyLayer::footprint_bound`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FootprintBound {
+    edits: Edits,
+    until: Instant,
+}
+
+impl FootprintBound {
+    pub(crate) fn holds_at(self, now: Moment) -> bool {
+        self.edits >= now.edits && now.at < self.until
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many footprint entries this thread checked against a layer, for tests.
+    pub(crate) static FOOTPRINT_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// A file an answer's walks could not read, and the stamp and time of the failed read the answer saw.
@@ -244,6 +261,8 @@ pub(super) struct ReadLedger {
     /// The reads this layer's load made itself, each with whether it failed: what a growth changed, a flatten's
     /// included (its `reads` are the chain's too).
     fresh: Vec<(PathKey, bool)>,
+    /// Whether this layer's load followed again a walk the chain had followed: what it reaches may have changed.
+    followed_again: bool,
     /// How many reverse traversals of earlier marks `finish` made (one for a flatten, none over a parent), for tests.
     #[cfg(test)]
     traversals: usize,
@@ -357,6 +376,11 @@ impl DependencyLayer {
         &self.ledger.fresh
     }
 
+    /// Whether this layer's load followed again a walk the chain had followed, which can change what reaches what.
+    pub(crate) fn followed_again(&self) -> bool {
+        self.ledger.followed_again
+    }
+
     /// One warning for each file whose latest read in the chain failed, sorted by message, for tests.
     #[cfg(test)]
     pub(crate) fn read_warnings(&self) -> Vec<Diagnostic> {
@@ -410,11 +434,29 @@ impl DependencyLayer {
     /// Whether an answer with `footprint` still holds: every file in it is still the failed read the answer saw (no
     /// load read it since, whichever walk), its retry has not passed, and no edit arrived since.
     pub(crate) fn footprint_holds(&self, footprint: &Footprint, now: Moment) -> bool {
-        footprint.0.iter().all(|Unreadable { path, read, at }| {
+        self.footprint_bound(footprint).is_some_and(|bound| bound.holds_at(now))
+    }
+
+    /// Until when an answer with `footprint` holds in this layer: the fewest edits and the earliest retry among its
+    /// failed reads. `None` when one of its files is no longer the failed read the answer saw. The layer never changes,
+    /// so the bound holds for the layer: what is shared by many answers is checked once.
+    pub(crate) fn footprint_bound(&self, footprint: &Footprint) -> Option<FootprintBound> {
+        let mut bound: Option<FootprintBound> = None;
+        for Unreadable { path, read, at } in footprint.0.iter() {
+            #[cfg(test)]
+            FOOTPRINT_STEPS.with(|steps| steps.set(steps.get() + 1));
             let same = matches!(self.latest_read(std::borrow::Borrow::borrow(path)),
                 Some(Read::Failed(failed)) if failed.stamp == *read && failed.at == *at);
-            same && read.moment.edits >= now.edits && now.at < at.0 + DEGRADED_RETRY
-        })
+            if !same {
+                return None;
+            }
+            let next = FootprintBound { edits: read.moment.edits, until: at.0 + DEGRADED_RETRY };
+            bound = Some(match bound {
+                Some(held) => FootprintBound { edits: held.edits.min(next.edits), until: held.until.min(next.until) },
+                None => next,
+            });
+        }
+        bound
     }
 
     /// How many distinct lists of files this layer's own unread walks hold, for tests.
@@ -680,6 +722,7 @@ impl<'a> LedgerBuilder<'a> {
         let reads: FxHashMap<PathKey, Read> = reads.into_iter().collect();
         let fresh: Vec<(PathKey, bool)> =
             reads.iter().map(|(path, read)| (path.clone(), matches!(read, Read::Failed(_)))).collect();
+        let followed_again = !retried.is_empty();
         let unread: FxHashMap<Node, (Demand, Arc<[PathKey]>)> =
             unread.into_iter().map(|(key, walk)| (Node::Demand(key), walk)).collect();
         let mut marks: FxHashMap<Node, Mark> = FxHashMap::default();
@@ -742,6 +785,7 @@ impl<'a> LedgerBuilder<'a> {
                 reads,
                 marks,
                 fresh,
+                followed_again,
                 #[cfg(test)]
                 traversals: traversals.get(),
             };
@@ -751,6 +795,7 @@ impl<'a> LedgerBuilder<'a> {
             reads,
             marks,
             fresh: Vec::new(),
+            followed_again: false,
             #[cfg(test)]
             traversals: 0,
         });
@@ -759,6 +804,7 @@ impl<'a> LedgerBuilder<'a> {
             merged.traversals = traversals.get();
         }
         merged.fresh = fresh;
+        merged.followed_again = followed_again;
         merged.reads.retain(|_, read| matches!(read, Read::Failed(_)));
         merged.marks.retain(|_, mark| !mark.is_clean());
         merged

@@ -28,7 +28,11 @@ use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 mod ledger;
-pub(crate) use ledger::{Clock, DEGRADED_RETRY, Edits, Footprint, LoadIds, Moment, Retry, Stamp, UnreadWalks};
+#[cfg(test)]
+pub(crate) use ledger::FOOTPRINT_STEPS;
+pub(crate) use ledger::{
+    Clock, DEGRADED_RETRY, Edits, Footprint, FootprintBound, LoadIds, Moment, Retry, Stamp, UnreadWalks,
+};
 use ledger::{LedgerBuilder, Node, ReadLedger};
 
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
@@ -113,6 +117,16 @@ impl Unkept {
         unread.sort();
         unread
     }
+}
+
+/// One export walk's state: the lookups on its path (a re-export cycle meets one of them), and the ones it finished
+/// without finding the name, with why their answer was not kept. A walk returns at the first module that answers, so a
+/// lookup it meets again after finishing it finds nothing again, whatever path led there: once per walk, a dense graph
+/// of `export *` cycles costs its size, not its paths.
+#[derive(Default)]
+struct Walk {
+    on_path: FxHashSet<(PathKey, CompactString)>,
+    finished: FxHashMap<(PathKey, CompactString), Unkept>,
 }
 
 /// What one load found for `(module, name)` past a module it could not read, with those modules: the same for the
@@ -879,7 +893,7 @@ impl Loader<'_> {
     /// Incomplete when the walk passed a module it could not read: what it found then is the best this load has.
     fn find_export(&self, module: &Utf8Path, name: &str) -> Partial<Option<(Utf8PathBuf, CompactString)>> {
         let mut unkept = Unkept::default();
-        let value = self.find_export_in(module, name, &mut FxHashSet::default(), &mut unkept);
+        let value = self.find_export_in(module, name, &mut Walk::default(), &mut unkept);
         Partial { value, unread: unkept.unread_sorted() }
     }
 
@@ -892,7 +906,7 @@ impl Loader<'_> {
         &self,
         module: &Utf8Path,
         name: &str,
-        visited: &mut FxHashSet<(PathKey, CompactString)>,
+        visited: &mut Walk,
         unkept: &mut Unkept,
     ) -> Option<(Utf8PathBuf, CompactString)> {
         let key = (PathKey::from(module), CompactString::from(name));
@@ -907,7 +921,11 @@ impl Loader<'_> {
             unkept.unread.extend(unread.iter().cloned());
             return found;
         }
-        if !visited.insert(key.clone()) {
+        if let Some(seen) = visited.finished.get(&key) {
+            unkept.absorb(seen.clone());
+            return None;
+        }
+        if !visited.on_path.insert(key.clone()) {
             unkept.cycle = true;
             return None;
         }
@@ -915,7 +933,10 @@ impl Loader<'_> {
         self.export_visits.fetch_add(1, Ordering::Relaxed);
         let mut own = Unkept::default();
         let found = self.find_export_uncached(module, name, visited, &mut own);
-        visited.remove(&key);
+        visited.on_path.remove(&key);
+        if found.is_none() {
+            visited.finished.insert(key.clone(), own.clone());
+        }
         match (own.cycle, own.unread.is_empty()) {
             (false, true) => {
                 if let Some(dir) = module.parent() {
@@ -939,7 +960,7 @@ impl Loader<'_> {
         &self,
         module: &Utf8Path,
         name: &str,
-        visited: &mut FxHashSet<(PathKey, CompactString)>,
+        visited: &mut Walk,
         unkept: &mut Unkept,
     ) -> Option<(Utf8PathBuf, CompactString)> {
         let data = match self.parse(module) {

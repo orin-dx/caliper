@@ -1085,6 +1085,56 @@ fn an_export_walk_past_an_unreadable_file_visits_each_module_once() {
     assert_eq!(cold.export_of_complete(&index, "Target"), Some(&target));
 }
 
+/// The lattice of `an_export_walk_past_an_unreadable_file_visits_each_module_once`, dense with cycles: every module
+/// also re-exports the level above it, so each lookup below the top meets one on its path. One walk still visits
+/// each `(module, name)` once, and the answer is the cold one past the lattice.
+#[test]
+fn a_cyclic_export_walk_past_an_unreadable_file_visits_each_module_once() {
+    const DEPTH: usize = 25;
+    let mut files: Vec<(String, String)> = vec![
+        (
+            "node_modules/cyclic/package.json".into(),
+            r#"{ "name": "cyclic", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
+        ),
+        (
+            "node_modules/cyclic/index.d.ts".into(),
+            "export * from './l0a';\nexport * from './l0b';\nexport * from './target';\n".into(),
+        ),
+        ("node_modules/cyclic/target.d.ts".into(), "export interface Target { t: string }\n".into()),
+        ("node_modules/cyclic/bottom.d.ts".into(), "export * from './bad';\nexport * from './l0a';\n".into()),
+    ];
+    for level in 0..DEPTH {
+        let mut next = match level + 1 == DEPTH {
+            true => "export * from './bottom';\n".to_owned(),
+            false => format!("export * from './l{0}a';\nexport * from './l{0}b';\n", level + 1),
+        };
+        if level > 0 {
+            next.push_str(&format!("export * from './l{}a';\n", level - 1));
+        }
+        for side in ["a", "b"] {
+            files.push((format!("node_modules/cyclic/l{level}{side}.d.ts"), next.clone()));
+        }
+    }
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = project(&files);
+    let bad = root.join("node_modules/cyclic/bad.d.ts");
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    let options = PipelineOptions { use_cache: false, ..options(&root) };
+    let demands = vec![Demand { from: root.join("src/Card.tsx"), specifier: "cyclic".into(), name: "Target".into() }];
+    let index = root.join("node_modules/cyclic/index.d.ts");
+    let target = Some((root.join("node_modules/cyclic/target.d.ts"), CompactString::from("Target")));
+    let failed = Arc::new(load(demands.clone(), &options, None));
+    let modules = 2 * DEPTH + 3;
+    assert!(failed.export_visits <= 2 * modules, "{} lookups over {modules} modules", failed.export_visits);
+    assert_eq!(failed.export_for_resolver(&index, "Target"), Some(target.clone()));
+    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
+    let recovered = load(failed.missing(&demands), &options, Some(&failed));
+    // A cycle's answer depends on where the walk entered it, so a complete one is kept nowhere, as on a cold run.
+    let cold = load(demands.clone(), &options, None);
+    assert_eq!(recovered.export_for_resolver(&index, "Target"), cold.export_for_resolver(&index, "Target"));
+    assert!(recovered.failed_reads_reached(&demands).is_empty(), "nothing left unread");
+}
+
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
 /// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
 /// augmentation did add one.
