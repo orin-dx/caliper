@@ -88,11 +88,10 @@ fn component_argument_evidence(
     if creates_context {
         return Err("creates a context");
     }
-    let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::peeled::read_value) else {
+    let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::component::peel_expr) else {
         return Err("has no argument that could be a component");
     };
-    let element_type_arg =
-        || super::component::call_type_arguments(call).is_some_and(|a| a.params.iter().any(is_element_type_arg));
+    let element_type_arg = || call.type_arguments.as_ref().is_some_and(|a| a.params.iter().any(is_element_type_arg));
     let sufficient = |r: Result<(), &'static str>| r.map(|()| ArgumentEvidence::Sufficient);
     match first {
         Expression::ArrowFunctionExpression(f) => sufficient(
@@ -138,15 +137,10 @@ impl<'src> SourceDataCollector<'src> {
     /// Record `const Name = callee<...>(first, ...)` as a candidate. Returns whether it was recorded.
     pub(super) fn try_record_wrapper_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
-        let Expression::CallExpression(call) = super::peeled::read_value(init) else { return false };
-        let Some(type_arguments) = super::component::call_type_arguments(call) else { return false };
+        let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
+        let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        let creates_context = self.react_api(call) == Some(super::ReactApi::CreateContext);
-        // Main read no callee name through an assertion, `satisfies` or `!`, so a call written through one is left to the
-        // rules main ran after this one (the alias deferral and the factory rule), as there.
-        if super::component::wrapped_beyond_main(&call.callee) {
-            return false;
-        }
+        let creates_context = self.react_api(&call.callee) == Some(super::ReactApi::CreateContext);
         let needs_payload = match component_argument_evidence(creates_context, call, &*self) {
             Ok(ArgumentEvidence::Sufficient) => false,
             Ok(ArgumentEvidence::TagNeedsPayload) => true,
@@ -161,14 +155,14 @@ impl<'src> SourceDataCollector<'src> {
             .iter()
             .map(|ty| WrapperTypeArg { reference: self.extract_type_name_from_type(ty) })
             .collect();
-        let callee = self.wrapper_callee(call);
+        let Some(callee) = self.wrapper_callee(call) else { return false };
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
         self.pending_wrappers.push(PendingWrapper {
             name: name.to_owned(),
             needs_payload,
             tag: None,
             type_args,
-            callee,
+            callee: Some(callee),
             rule: DetectionRule::WrapperTypeArgument,
             description,
             tags,
@@ -187,15 +181,12 @@ impl<'src> SourceDataCollector<'src> {
         name: &str,
     ) -> bool {
         let Some(init) = decl.init else { return false };
-        let Expression::CallExpression(call) = super::peeled::read_value(init) else { return false };
-        // Main's claim, as in `try_record_wrapper_call`: a callee written through an assertion, `satisfies` or `!` is
-        // left to the later rules.
-        if super::component::call_type_arguments(call).is_some() || super::component::wrapped_beyond_main(&call.callee)
-        {
+        let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
+        if call.type_arguments.is_some() {
             return false;
         }
         let [tag, config] = call.arguments.as_slice() else { return false };
-        let Some(Expression::StringLiteral(tag)) = tag.as_expression().map(super::peeled::read_value) else {
+        let Some(Expression::StringLiteral(tag)) = tag.as_expression().map(super::component::peel_expr) else {
             return false;
         };
         let tag_name = tag.value.as_str().map(str::to_owned);
@@ -204,7 +195,7 @@ impl<'src> SourceDataCollector<'src> {
                 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         });
         let has_config =
-            matches!(config.as_expression().map(super::peeled::read_value), Some(Expression::ObjectExpression(_)));
+            matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
         let Some(callee) = self.extract_callee_name(call) else { return false };
         let element_builder = match callee.rsplit_once('.') {
             Some((receiver, name)) => super::evidence::is_element_factory_name(name, Some(receiver), &*self),
@@ -232,7 +223,7 @@ impl<'src> SourceDataCollector<'src> {
     /// `withContext<HTMLDivElement, OverlayProps>(BaseOverlay, …)`. The call's own props then replace those of the
     /// component it receives.
     pub(super) fn call_names_props_type<'a>(&mut self, call: &CallExpression<'a>) -> bool {
-        let Some(type_arguments) = super::component::call_type_arguments(call) else { return false };
+        let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
         let type_args: Vec<WrapperTypeArg> = type_arguments
             .params
             .iter()
@@ -377,24 +368,10 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// The callee of a generic call that builds a component, and its type arguments, for the props its result type
-    /// adds (`resolver::callee`). `None` for a call without type arguments, and for a callee asserted to another type
-    /// (`(wrap as G)<P>(…)`), whose declaration no longer describes the call.
+    /// adds (`resolver::callee`). `None` for a call without type arguments.
     pub(super) fn wrapper_callee<'a>(&mut self, call: &CallExpression<'a>) -> Option<WrapperCallee> {
-        if !self.describes_call(&super::component::called(call)) {
-            return None;
-        }
-        let type_arguments = super::component::call_type_arguments(call)?;
+        let type_arguments = call.type_arguments.as_ref()?;
         let name = self.extract_callee_name(call)?;
-        // A callee main did not read is looked up by its bare name (`resolver::callee`), so it is kept only when its
-        // root can mean one declaration. A member callee's receiver is already read that way (`receiver_identifier`),
-        // and named as main named it (`unknown.wrap`) otherwise.
-        let written = super::component::unwrap_transparent(&call.callee);
-        if super::component::Recognition::of_name(written) == super::component::Recognition::Peeled
-            && !matches!(written, Expression::StaticMemberExpression(_))
-            && !super::component::chain_root(written).is_some_and(|root| self.bindings.unique(root).is_some())
-        {
-            return None;
-        }
         Some(WrapperCallee {
             name: name.as_str().into(),
             type_args: type_arguments.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect(),
@@ -510,29 +487,17 @@ impl<'src> SourceDataCollector<'src> {
     /// rules' business, and a constant name is never one.
     pub(super) fn try_record_factory_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
-        let Expression::CallExpression(call) = super::peeled::read_value(init) else { return false };
-        let peeled = super::component::called(call);
-        // Through any wrapper, the assertion's evidence is read; the callee itself only where it resolves.
-        if matches!(peeled.evidence(), super::component::Evidence::NotRenderable) {
-            return false;
-        }
-        let Some(Expression::Identifier(callee)) = super::component::callee_of(call, &*self) else { return false };
-        // A callee main's factory rule did not read is looked up by its bare name, so only when the binding pass vouches
-        // for it (`names::Named`).
-        let recognition = super::component::Recognition::of_factory_callee(call);
-        let Some(callee_name) = self.bindings.named(callee.name.as_str(), recognition) else { return false };
+        let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
+        let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
-        let element_builder = super::evidence::is_element_factory_name(callee_name.as_str(), None, &*self);
-        if super::is_constant_name(name) || explained || element_builder || self.react_api(call).is_some() {
+        let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);
+        if super::is_constant_name(name) || explained || element_builder || self.react_api(&call.callee).is_some() {
             return false;
         }
-        // A cast that says the call gives no component (`NotRenderable`, the closed list) declines it; any other is
-        // read through to the callee, as main read it.
-        if matches!(peeled.evidence(), super::component::Evidence::NotRenderable) {
-            return false;
-        }
-        let type_args = super::component::call_type_arguments(call)
+        let type_args = call
+            .type_arguments
+            .as_ref()
             .map(|arguments| arguments.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect())
             .unwrap_or_default();
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
@@ -540,7 +505,7 @@ impl<'src> SourceDataCollector<'src> {
         self.try_defer_identifier_alias(name, decl.span);
         self.pending_factory_calls.push(PendingFactoryCall {
             name: name.to_owned(),
-            callee: WrapperCallee { name: callee_name.as_str().into(), type_args },
+            callee: WrapperCallee { name: callee.name.as_str().into(), type_args },
             description,
             tags,
             span: decl.span,
@@ -681,7 +646,8 @@ fn returned_local_call<'a>(
             if name.name != returned.name {
                 continue;
             }
-            let Some(Expression::CallExpression(call)) = declarator.init.as_ref().map(super::peeled::read_value) else {
+            let Some(Expression::CallExpression(call)) = declarator.init.as_ref().map(super::component::peel_expr)
+            else {
                 return None;
             };
             return collector.wrapper_callee(call);

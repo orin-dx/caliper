@@ -393,28 +393,32 @@ impl<'src> SourceDataCollector<'src> {
     /// dot-qualified naming (`"Parent.Sub"`) was considered and explicitly
     /// declined there as speculative.
     pub(super) fn try_scan_object_assign_sub_components<'a>(&mut self, stmt: &ExpressionStatement<'a>) {
-        if let Some(attachment) = super::uses::statement_call(&stmt.expression) {
-            self.scan_object_assign_call(attachment);
-        }
+        let Expression::CallExpression(call) = &stmt.expression else { return };
+        self.scan_object_assign_call(call);
     }
 
     /// The same scan for `const Root = Object.assign(RootImpl, { Item: (props: P) => … })`, whose call is a
     /// declaration's initializer and not a statement.
     pub(super) fn try_scan_object_assign_declarator<'a>(&mut self, init: Option<&Expression<'a>>) {
-        if let Some(attachment) = init.and_then(super::uses::attachment_call) {
-            self.scan_object_assign_call(attachment);
+        if let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) {
+            self.scan_object_assign_call(call);
         }
     }
 
-    fn scan_object_assign_call<'a>(&mut self, attachment: super::uses::AttachmentCall<'_, 'a>) {
-        // The arguments as `assign_roles` reads them, as for `record_object_assign_declarator` and the alias rule, which
-        // record `Root` as the alias this scan attaches the inline members to.
-        let Some(roles) = self.assign_roles(attachment, true) else { return };
-        let (Some(parent), Some(obj)) = (roles.target.as_ref(), roles.objects.first()) else { return };
-        if !is_pascal_case(parent.as_str()) {
+    fn scan_object_assign_call<'a>(&mut self, call: &CallExpression<'a>) {
+        let Expression::StaticMemberExpression(callee) = &call.callee else { return };
+        if !matches!(&callee.object, Expression::Identifier(id) if id.name.as_str() == "Object") {
             return;
         }
-        let parent_id = parent;
+        if callee.property.name.as_str() != "assign" {
+            return;
+        }
+        let Some(Argument::Identifier(parent_id)) = call.arguments.first() else { return };
+        if !is_pascal_case(parent_id.name.as_str()) {
+            return;
+        }
+        let Some(second_arg) = call.arguments.get(1) else { return };
+        let Some(Expression::ObjectExpression(obj)) = second_arg.as_expression() else { return };
 
         for prop in &obj.properties {
             let ObjectPropertyKind::ObjectProperty(op) = prop else { continue };
@@ -429,15 +433,13 @@ impl<'src> SourceDataCollector<'src> {
             let (params, span_start, span_end) = match &op.value {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
-                // An identifier as written, as origin/main read it.
                 Expression::Identifier(sub) => {
-                    let sub = super::names::Named::plain(sub.name.as_str());
-                    self.record_attached(Subject::local(sub.as_str()), parent_id, &key_name);
+                    self.record_attached(Subject::local(sub.name.as_str()), parent_id.name.as_str(), &key_name);
                     continue;
                 }
                 _ => continue,
             };
-            self.record_attached(Subject::Inline(span_start), parent_id, &key_name);
+            self.record_attached(Subject::Inline(span_start), parent_id.name.as_str(), &key_name);
             self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);
         }
     }
@@ -452,15 +454,15 @@ impl<'src> SourceDataCollector<'src> {
         if !is_pascal_case(parent.name.as_str()) || !is_pascal_case(key_name) {
             return;
         }
-        let (params, span_start, span_end) = match super::peeled::read_value(&assignment.right) {
+        let (params, span_start, span_end) = match super::component::peel_expr(&assignment.right) {
             Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
             Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
             Expression::CallExpression(call) => {
                 // `Root.Item = memo(...)` is a component this scan cannot read; any other call (`createContext`)
                 // is not a component, so it is not reported.
-                let wrapper = match super::component::callee_of(call, &*self) {
-                    Some(Expression::Identifier(id)) => id.name.as_str(),
-                    Some(Expression::StaticMemberExpression(member)) => member.property.name.as_str(),
+                let wrapper = match super::component::peel_expr(&call.callee) {
+                    Expression::Identifier(id) => id.name.as_str(),
+                    Expression::StaticMemberExpression(member) => member.property.name.as_str(),
                     _ => return,
                 };
                 if matches!(wrapper, "memo" | "forwardRef") {
@@ -477,7 +479,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             _ => return,
         };
-        self.record_attached(Subject::Inline(span_start), &super::names::Named::plain(parent.name.as_str()), key_name);
+        self.record_attached(Subject::Inline(span_start), parent.name.as_str(), key_name);
         self.record_inline_sub_component(key_name.to_owned(), "a property-assigned", params, span_start, span_end);
     }
 

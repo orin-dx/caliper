@@ -16,27 +16,30 @@ pub(super) type NoRender = &'static str;
 /// Names whose type, as a return annotation, means the function renders.
 const ELEMENT_TYPE_NAMES: &[&str] = &["Element", "ReactElement", "ReactNode", "ReactPortal", "JSX"];
 
+/// Callees that produce an element, by name. Preact's `h` is not here: so short a name proves nothing until it is
+/// known to be imported from Preact (`Scope::is_preact_h`).
+const ELEMENT_FACTORIES: &[&str] = &["createElement", "cloneElement", "jsx", "jsxs", "jsxDEV", "createPortal"];
+
 /// Whether a callee name names an element factory, given the receiver it was called on (`Preact` in `Preact.h(…)`).
 /// `h` counts only as Preact's own binding, bare or on Preact's namespace: `codec.h(…)` and a local helper called `h`
 /// are not factories.
 pub(super) fn is_element_factory_name(name: &str, receiver: Option<&str>, scope: &dyn Scope) -> bool {
-    if name == super::well_known::H.name {
+    if name == "h" {
         return scope.is_preact_h(receiver);
     }
-    super::well_known::ELEMENT_FACTORIES.iter().any(|entry| entry.name == name)
+    ELEMENT_FACTORIES.contains(&name)
 }
 
-/// Whether a callee, read as written as origin/main read it, is an element factory: a bare factory name, or one on a
-/// receiver named as written (`""` for a receiver that is no name).
+/// Whether a call's callee is an element factory: see [`is_element_factory_name`].
 pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Scope) -> bool {
     match callee {
         Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), None, scope),
         Expression::StaticMemberExpression(m) => {
             let receiver = match &m.object {
-                Expression::Identifier(object) => object.name.as_str(),
-                _ => "",
+                Expression::Identifier(object) => Some(object.name.as_str()),
+                _ => Some(""),
             };
-            is_element_factory_name(m.property.name.as_str(), Some(receiver), scope)
+            is_element_factory_name(m.property.name.as_str(), receiver, scope)
         }
         _ => false,
     }
@@ -58,10 +61,6 @@ pub(super) trait Scope {
     /// Whether `h` called bare (`receiver` is `None`) or on `receiver` (`Preact.h`) is Preact's, by where it was
     /// imported from.
     fn is_preact_h(&self, receiver: Option<&str>) -> bool;
-    /// How many times the file declares `name`, any kind in any scope (`well_known::matches_well_known`).
-    fn declarations(&self, name: &str) -> u32;
-    /// The exported name and module specifier of the import that binds `local`, if one does.
-    fn import_of(&self, local: &str) -> Option<(&str, &str)>;
 }
 
 fn leftmost_and_rightmost<'n>(name: &'n TSTypeName<'_>) -> Option<(&'n str, &'n str)> {
@@ -140,18 +139,14 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        // The callee as origin/main read it, as written: a callee only a peel exposes is no evidence (the closed list,
-        // React's `forwardRef`, `memo` and `lazy`, makes components, not elements).
-        let callee = Some(super::component::unwrap_transparent(&it.callee))
-            .filter(|callee| matches!(callee, Expression::Identifier(_) | Expression::StaticMemberExpression(_)));
-        let name = callee.and_then(callee_name);
-        let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
-        if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, self.scope)) {
+        let name = callee_name(&it.callee);
+        let calls_helper = matches!(&it.callee, Expression::Identifier(id) if self.scope.is_element_helper(&id.name));
+        if calls_helper || is_element_factory_callee(&it.callee, self.scope) {
             self.found = true;
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
-            || matches!(callee, Some(Expression::StaticMemberExpression(member))
-                if super::well_known::is_receiver(&member.object, &super::well_known::PROMISE)
+            || matches!(&it.callee, Expression::StaticMemberExpression(member)
+                if matches!(&member.object, Expression::Identifier(id) if id.name == "Promise")
                     && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
             walk::walk_call_expression(self, it);
@@ -177,11 +172,7 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         Expression::NullLiteral(_) => true,
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
         // A component invoked directly: `return JoinList({ ... })`.
-        Expression::CallExpression(call)
-            if callee_name(super::component::unwrap_transparent(&call.callee)).is_some_and(super::is_pascal_case) =>
-        {
-            true
-        }
+        Expression::CallExpression(call) if callee_name(&call.callee).is_some_and(super::is_pascal_case) => true,
         e if is_children(e) => true,
         e => value_has_element(e, scope),
     }
@@ -225,8 +216,7 @@ impl<'a> Visit<'a> for OwnBody<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        // Calling a hook is the evidence, whatever an assertion says the hook returns.
-        if self.nested == 0 && callee_name(super::component::unwrap_transparent(&it.callee)).is_some_and(is_hook_name) {
+        if self.nested == 0 && callee_name(&it.callee).is_some_and(is_hook_name) {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);
@@ -383,14 +373,6 @@ impl Scope for Foreign<'_> {
 
     fn is_preact_h(&self, _receiver: Option<&str>) -> bool {
         false
-    }
-
-    fn declarations(&self, _name: &str) -> u32 {
-        u32::MAX
-    }
-
-    fn import_of(&self, _local: &str) -> Option<(&str, &str)> {
-        None
     }
 
     fn is_element_helper(&self, _name: &str) -> bool {

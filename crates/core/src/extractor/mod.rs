@@ -34,13 +34,10 @@ mod factory_props;
 mod interface;
 mod js_text;
 mod jsdoc;
-mod names;
-mod peeled;
 mod reexports;
 mod uses;
 mod values;
 mod visit;
-mod well_known;
 mod wrapper;
 pub(crate) mod written;
 
@@ -55,12 +52,6 @@ pub(super) enum ReactApi {
 }
 
 impl ReactApi {
-    /// Whether a callee only a peel exposes is read as this API: React's `forwardRef` and `memo` (and `lazy`, which no
-    /// rule reads as an API), and nothing else.
-    fn in_closed_list(self) -> bool {
-        matches!(self, Self::ForwardRef | Self::Memo)
-    }
-
     /// The API a module exports under this name.
     fn of_export(name: &str) -> Option<Self> {
         match name {
@@ -168,39 +159,46 @@ pub(crate) fn is_typescript(path: &std::path::Path) -> bool {
     matches!(path.extension().and_then(|extension| extension.to_str()), Some("ts" | "tsx" | "mts" | "cts"))
 }
 
-/// Counts the hoisted-import entries a lookup examines, so a test can show each lookup is one probe.
-#[cfg(test)]
-pub(super) mod probes {
-    use std::cell::Cell;
-
-    thread_local!(static PROBES: Cell<u64> = const { Cell::new(0) });
-
-    pub(in crate::extractor) fn count(entries: u64) {
-        PROBES.with(|probes| probes.set(probes.get() + entries));
+/// Reads `(f<A>)(…)` as `f<A>(…)` and `extends (Base<P>)` as `extends Base<P>`: OXC 0.159 keeps a parenthesised
+/// instantiation on the callee or base where OXC 0.158 moved its type arguments onto the call or the heritage, and every
+/// reader here reads the AST as 0.158 shaped it. Only a node without type arguments of its own is rewritten, so nothing
+/// is lost. A `new` callee and a template tag change the same way, but nothing here reads them for a component (the
+/// `instantiation: a new expression` and `a tagged template` rows equal main without a rewrite).
+fn flatten_instantiated_callees<'a>(program: &mut Program<'a>, allocator: &'a Allocator) {
+    struct Flatten<'a> {
+        allocator: &'a Allocator,
     }
-
-    pub(in crate::extractor) fn take() -> u64 {
-        PROBES.with(|probes| probes.replace(0))
-    }
-}
-
-/// Every static import of the module by its local name, as `(exported, module)`, before the walk reaches any of them:
-/// one map per module, so each lookup is one probe whatever the number of imports.
-fn hoisted_imports(program: &Program<'_>) -> FxHashMap<CompactString, (CompactString, String)> {
-    let mut imports = FxHashMap::default();
-    for statement in &program.body {
-        let Statement::ImportDeclaration(import) = statement else { continue };
-        let module = js_text::lossy(import.source.value);
-        for specifier in import.specifiers.iter().flatten() {
-            let exported = match specifier {
-                ImportDeclarationSpecifier::ImportSpecifier(s) => s.imported.name().to_string(),
-                ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => "default".to_owned(),
-                ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => "*".to_owned(),
-            };
-            imports.insert(CompactString::from(specifier.local().name.as_str()), (exported.into(), module.to_string()));
+    impl<'a> Flatten<'a> {
+        /// Moves the type arguments of the instantiation `target` is onto `type_arguments`, as 0.158 parsed it.
+        fn flatten(
+            &self,
+            target: &mut Expression<'a>,
+            type_arguments: &mut Option<OxcBox<'a, TSTypeParameterInstantiation<'a>>>,
+        ) {
+            while type_arguments.is_none() && matches!(target, Expression::TSInstantiationExpression(_)) {
+                let Expression::TSInstantiationExpression(instantiation) =
+                    oxc_allocator::TakeIn::take_in(target, &self.allocator)
+                else {
+                    break;
+                };
+                let instantiation = instantiation.unbox();
+                *target = instantiation.expression;
+                *type_arguments = Some(instantiation.type_arguments);
+            }
         }
     }
-    imports
+    impl<'a> oxc_ast_visit::VisitMut<'a> for Flatten<'a> {
+        fn visit_call_expression(&mut self, it: &mut CallExpression<'a>) {
+            self.flatten(&mut it.callee, &mut it.type_arguments);
+            oxc_ast_visit::walk_mut::walk_call_expression(self, it);
+        }
+
+        fn visit_class_heritage(&mut self, it: &mut ClassHeritage<'a>) {
+            self.flatten(&mut it.expression, &mut it.type_arguments);
+            oxc_ast_visit::walk_mut::walk_class_heritage(self, it);
+        }
+    }
+    oxc_ast_visit::VisitMut::visit_program(&mut Flatten { allocator }, program);
 }
 
 /// Parse a single file and collect all extractable data.
@@ -234,7 +232,8 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     let source_type = SourceType::from_path(path).unwrap_or_default();
     // Parentheses carry no meaning here, and a `ParenthesizedExpression` node would hide the wrapper call beneath it.
     let options = ParseOptions { preserve_parens: false, ..ParseOptions::default() };
-    let ret = Parser::new(&allocator, source, source_type).with_options(options).parse();
+    let mut ret = Parser::new(&allocator, source, source_type).with_options(options).parse();
+    flatten_instantiated_callees(&mut ret.program, &allocator);
 
     // .d.ts declaration files use the same React.FC / ForwardRefExoticComponent patterns as .tsx
     // A plain `.ts` file cannot hold JSX but can build components with `createElement` and `forwardRef`, so it is read
@@ -271,10 +270,6 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
         .collect();
     collector.comments = comments;
     collector.element_helpers = evidence::element_helpers(&ret.program);
-    collector.hoisted_imports = hoisted_imports(&ret.program);
-    let names = component::file_names(&ret.program);
-    collector.typeof_aliases = component::typeof_aliases(&ret.program, &names);
-    collector.bindings = names.into_bindings();
     collector.visit_program(&ret.program);
     let mut data = collector.finish();
     data.jsx_usages = body_facts::attach(&ret.program, &mut data.component_mappings, source_type.is_jsx());
@@ -304,13 +299,6 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) imported_names: FxHashSet<CompactString>,
     /// Module-level functions declared to return an element: see `evidence::element_helpers`.
     pub(super) element_helpers: FxHashSet<String>,
-    /// Every import of the module as `(local, exported, module)`, whatever its position: static imports are hoisted.
-    /// Read only for a callee a peel exposes (`Scope::import_of`); a plain read keeps the walker's order, as origin/main.
-    pub(super) hoisted_imports: FxHashMap<CompactString, (CompactString, String)>,
-    /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
-    pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
-    /// What the one binding pass found (`component::FileNames`): the only source of a `names::UniqueName`.
-    pub(super) bindings: names::Bindings,
     /// Tracks which JSDoc comment spans have already been consumed (by span_end).
     /// Prevents the same comment from leaking to both a component description and its first prop.
     pub(super) consumed_jsdoc: FxHashSet<u32>,
@@ -344,7 +332,7 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) pending_aliases: Vec<component::PendingAlias>,
     /// The alias shape `try_rename_identifier_wrapped_component` read for the current declarator when its component was
     /// not collected yet.
-    pub(super) alias_candidate: Option<component::AliasShape>,
+    pub(super) alias_candidate: Option<(String, Option<component::AliasCall>)>,
     /// Calls to a plain function bound to a PascalCase name, resolved by what the callee returns.
     pub(super) pending_factory_calls: Vec<wrapper::PendingFactoryCall>,
     /// The own props factory calls bound to PascalCase names give, attached to the mappings detection builds from them.
@@ -409,9 +397,6 @@ impl<'src> SourceDataCollector<'src> {
             comments: Vec::new(),
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
-            hoisted_imports: FxHashMap::default(),
-            typeof_aliases: FxHashMap::default(),
-            bindings: names::Bindings::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
             scope_path: Vec::new(),
@@ -788,54 +773,19 @@ impl<'src> SourceDataCollector<'src> {
     /// `forwardRef`, `React.forwardRef`, `R.forwardRef` for `import * as R from "react"`, and `import { forwardRef as fr }`
     /// all name the same one, while a `forwardRef` imported from another module is not React's. A name no import binds
     /// (the global `React`, or `const { forwardRef } = React`) is read as written.
-    pub(super) fn react_api(&self, call: &CallExpression<'_>) -> Option<ReactApi> {
+    pub(super) fn react_api(&self, callee: &Expression<'_>) -> Option<ReactApi> {
         let import_of = |local: &str| self.data.imports.iter().find(|import| import.local_name.as_str() == local);
-        // A callee written through a wrapper origin/main did not read matches React only through the table.
-        let beyond_main = well_known::beyond_main(&call.callee);
-        match component::callee_of(call, self)? {
+        match component::peel_expr(callee) {
             Expression::Identifier(id) => match import_of(id.name.as_str()) {
                 Some(import) if is_react_module(&import.specifier) => {
-                    let api = ReactApi::of_export(import.exported_name.as_str())?;
-                    let resolves = || {
-                        well_known::react_export(import.exported_name.as_str())
-                            .is_some_and(|entry| well_known::matches_well_known(self, id.name.as_str(), entry))
-                    };
-                    (!beyond_main || resolves()).then_some(api)
+                    ReactApi::of_export(import.exported_name.as_str())
                 }
                 Some(_) => None,
-                // Through a wrapper main did not read, only the closed list (`component::callee_of`), by the hoisted
-                // import: a static import below the call binds it too.
-                None if beyond_main => {
-                    let (exported, module) = evidence::Scope::import_of(self, id.name.as_str())?;
-                    let api = ReactApi::of_export(exported).filter(|api| api.in_closed_list())?;
-                    is_react_module(module).then_some(api)
-                }
                 None => ReactApi::of_export(id.name.as_str()),
             },
             Expression::StaticMemberExpression(member) => {
-                // `callee_of` judged the member; the namespace is only read for its name. Through a wrapper main did
-                // not read (`component::main_peel`), only when the name resolves to React's import (`well_known`).
-                let object = match component::main_peel(&member.object) {
-                    Expression::Identifier(object) if !beyond_main => object,
-                    _ => match component::beneath_resolved(&member.object, self)? {
-                        Expression::Identifier(object)
-                            if well_known::matches_well_known(self, object.name.as_str(), &well_known::REACT) =>
-                        {
-                            object
-                        }
-                        _ => return None,
-                    },
-                };
-                let peeled_receiver = !matches!(component::main_peel(&member.object), Expression::Identifier(_));
-                // A receiver only a peel exposes reads only the closed list.
-                let api = ReactApi::of_export(member.property.name.as_str())
-                    .filter(|api| !(beyond_main || peeled_receiver) || api.in_closed_list())?;
-                // A member only a peel exposes is React's by the hoisted import that `callee_of` validated, wherever the
-                // import is written; a plain one by the walker's imports, as origin/main read it.
-                if beyond_main || peeled_receiver {
-                    let (exported, module) = evidence::Scope::import_of(self, object.name.as_str())?;
-                    return (is_react_module(module) && matches!(exported, "*" | "default")).then_some(api);
-                }
+                let Expression::Identifier(object) = component::peel_expr(&member.object) else { return None };
+                let api = ReactApi::of_export(member.property.name.as_str())?;
                 match import_of(object.name.as_str()) {
                     Some(import)
                         if is_react_module(&import.specifier)
@@ -844,7 +794,7 @@ impl<'src> SourceDataCollector<'src> {
                         Some(api)
                     }
                     Some(_) => None,
-                    None => (object.name == well_known::REACT.name).then_some(api),
+                    None => (object.name == "React").then_some(api),
                 }
             }
             _ => None,
@@ -1401,41 +1351,11 @@ impl<'src> SourceDataCollector<'src> {
         self.classify_extends(&name, type_args)
     }
 
-    /// The dotted name an expression is written as, read as origin/main read it: no wrapper is peeled, so
-    /// `(Button as typeof Button).defaultProps` names `unknown`. Static metadata and assignment targets read this.
     pub(super) fn expression_to_ident_name<'a>(&self, expr: &Expression<'a>) -> String {
         match expr {
             Expression::Identifier(id) => id.name.as_str().to_owned(),
             Expression::StaticMemberExpression(me) => {
                 format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str())
-            }
-            _ => "unknown".to_owned(),
-        }
-    }
-
-    /// The identifier a member expression's receiver is, the one read every peeled receiver goes through: written
-    /// plainly (`Ui.Button`), as origin/main read it; written through a wrapper (`(Ui as typeof Ui).Button`), only when
-    /// the file declares it exactly once (`unique_binding`), as a second declaration may be the one meant. `None`
-    /// otherwise, which is origin/main's answer: no receiver.
-    pub(super) fn receiver_identifier(&self, object: &Expression<'_>) -> Option<names::Named> {
-        match object {
-            Expression::Identifier(id) => Some(names::Named::Plain(id.name.as_str().into())),
-            _ => match component::beneath_resolved(object, self)? {
-                Expression::Identifier(id) => self.bindings.unique(id.name.as_str()).map(names::Named::Peeled),
-                _ => None,
-            },
-        }
-    }
-
-    /// The dotted name of a callee or a class's heritage, each receiver read by [`Self::receiver_identifier`]: `ui.wrap`,
-    /// or `unknown.wrap` as origin/main named a receiver it could not read.
-    pub(super) fn receiver_name<'a>(&self, expr: &Expression<'a>) -> String {
-        if let Some(id) = self.receiver_identifier(expr) {
-            return id.as_str().to_owned();
-        }
-        match expr {
-            Expression::StaticMemberExpression(me) => {
-                format!("{}.{}", self.receiver_name(&me.object), me.property.name.as_str())
             }
             _ => "unknown".to_owned(),
         }
@@ -1658,21 +1578,7 @@ mod tests;
 #[cfg(test)]
 mod scope_tests;
 
-#[cfg(test)]
-mod wrapper_matrix_tests;
-
 impl evidence::Scope for SourceDataCollector<'_> {
-    fn declarations(&self, name: &str) -> u32 {
-        self.bindings.declarations(name)
-    }
-
-    fn import_of(&self, local: &str) -> Option<(&str, &str)> {
-        #[cfg(test)]
-        probes::count(1);
-        let (exported, module) = self.hoisted_imports.get(local)?;
-        Some((exported.as_str(), module.as_str()))
-    }
-
     fn may_be_react(&self, name: &str) -> bool {
         SourceDataCollector::may_be_react(self, name)
     }
@@ -1682,16 +1588,13 @@ impl evidence::Scope for SourceDataCollector<'_> {
     }
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
-        matches!(self.react_api(call), Some(ReactApi::Memo | ReactApi::ForwardRef))
+        matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
     }
 
     fn is_preact_h(&self, receiver: Option<&str>) -> bool {
         self.data.imports.iter().any(|import| {
             let binds = match receiver {
-                None => {
-                    import.local_name.as_str() == well_known::H.name
-                        && import.exported_name.as_str() == well_known::H.name
-                }
+                None => import.local_name.as_str() == "h" && import.exported_name.as_str() == "h",
                 Some(object) => {
                     import.local_name.as_str() == object && matches!(import.exported_name.as_str(), "*" | "default")
                 }
@@ -1700,3 +1603,6 @@ impl evidence::Scope for SourceDataCollector<'_> {
         })
     }
 }
+
+#[cfg(test)]
+mod oxc_parity_tests;

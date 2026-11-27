@@ -60,8 +60,8 @@ use oxc_syntax::scope::ScopeFlags;
 use oxc_syntax::symbol::SymbolId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::component::peel_expr;
 use super::js_text;
-use super::peeled::read_value;
 use crate::types::collected::{
     BodyFacts, ComponentMapping, JsxAttributeFact, JsxElementFact, JsxTag, JsxUsage, JsxUsageAttribute, SpreadOf,
 };
@@ -139,7 +139,7 @@ impl ComponentFn<'_, '_> {
 /// The function an expression is, through parentheses, type assertions and the first argument of wrapper calls
 /// (`memo(forwardRef((props, ref) => …))`).
 fn unwrap<'b, 'a>(expr: &'b Expression<'a>) -> Option<ComponentFn<'b, 'a>> {
-    match read_value(expr) {
+    match peel_expr(expr) {
         Expression::FunctionExpression(function) => Some(ComponentFn::Function(function)),
         Expression::ArrowFunctionExpression(arrow) => Some(ComponentFn::Arrow(arrow)),
         Expression::CallExpression(call) => unwrap(call.arguments.first()?.as_expression()?),
@@ -150,7 +150,7 @@ fn unwrap<'b, 'a>(expr: &'b Expression<'a>) -> Option<ComponentFn<'b, 'a>> {
 /// The span of the function or class a nested component's initializer is, through the same wrappers as [`unwrap`]
 /// (`observer(class extends Component { … })`).
 fn nested_component(expr: &Expression<'_>) -> Option<oxc_span::Span> {
-    match read_value(expr) {
+    match peel_expr(expr) {
         Expression::ClassExpression(class) => Some(class.span),
         Expression::CallExpression(call) => nested_component(call.arguments.first()?.as_expression()?),
         _ => unwrap(expr).map(|function| function.span()),
@@ -616,7 +616,7 @@ impl<'s, 'a> Reader<'s, 'a> {
     }
 
     fn whole_expr(&self, expr: &Expression<'_>) -> Option<SpreadOf> {
-        match read_value(expr) {
+        match peel_expr(expr) {
             Expression::Identifier(id) => self.symbol_of(id).and_then(|symbol| self.whole.get(&symbol).copied()),
             _ => None,
         }
@@ -625,7 +625,7 @@ impl<'s, 'a> Reader<'s, 'a> {
     /// The prop an attribute's value is, when it is exactly one: an unchanged destructured name, `props.x`, `rest.x`.
     fn value_prop(&self, value: Option<&JSXAttributeValue<'_>>) -> Option<String> {
         let Some(JSXAttributeValue::ExpressionContainer(container)) = value else { return None };
-        let (object, key) = match read_value(container.expression.as_expression()?) {
+        let (object, key) = match peel_expr(container.expression.as_expression()?) {
             Expression::Identifier(id) => {
                 return self.symbol_of(id).and_then(|symbol| self.locals.get(&symbol).cloned());
             }

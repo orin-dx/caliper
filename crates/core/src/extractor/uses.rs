@@ -58,58 +58,6 @@ pub(crate) struct Attachment {
     property: Option<CompactString>,
 }
 
-/// The rule for every attachment read (a declarator's initializer, an `Object.assign` call, its arguments and member
-/// values, a default export, an assigned value): what origin/main read, `component::main_peel`, and nothing more. The
-/// closed-list peel (`component::callee_of`) only ever recognises a component callee; it never exposes an attachment.
-/// `assign_roles` takes an `AttachmentCall`, which only `attachment_call` and `statement_call` (each main's read at its
-/// site) make, so no other read can reach it.
-#[derive(Clone, Copy)]
-pub(super) struct AttachmentCall<'b, 'a>(&'b CallExpression<'a>);
-
-impl<'b, 'a> AttachmentCall<'b, 'a> {
-    pub(super) fn call(self) -> &'b CallExpression<'a> {
-        self.0
-    }
-}
-
-/// The call an attachment reads, beneath only what origin/main read through (`main_peel`): `<any>Object.assign(…)` is
-/// none.
-pub(super) fn attachment_call<'b, 'a>(expr: &'b Expression<'a>) -> Option<AttachmentCall<'b, 'a>> {
-    match super::component::main_peel(expr) {
-        Expression::CallExpression(call) => Some(AttachmentCall(call)),
-        _ => None,
-    }
-}
-
-/// The call an expression statement is, as written, as origin/main's statement scan read it: `Object.assign(…) as any;`
-/// is none.
-pub(super) fn statement_call<'b, 'a>(expr: &'b Expression<'a>) -> Option<AttachmentCall<'b, 'a>> {
-    match expr {
-        Expression::CallExpression(call) => Some(AttachmentCall(call)),
-        _ => None,
-    }
-}
-
-/// What an `Object.assign` call says its first argument is, the component it returns. `Rejected` is final: no other
-/// reader may take the argument for the component. Only `NotApplicable` (no `Object.assign`, or a first argument that is
-/// no name, such as a nested call) lets a caller read the argument its own way.
-pub(super) enum Role {
-    Accepted(super::names::Named),
-    Rejected,
-    NotApplicable,
-}
-
-/// The roles of a plainly written `Object.assign` call's arguments ([`SourceDataCollector::assign_roles`]), each read as
-/// origin/main read it: a member attachment that only a peel exposes is not recorded.
-pub(super) struct AssignRoles<'b, 'a> {
-    /// The first argument's name, the object the call returns.
-    pub(super) target: Option<super::names::Named>,
-    /// The names the call's result is an alias of.
-    pub(super) aliases: Vec<super::names::Named>,
-    /// The object literals whose members are attached.
-    pub(super) objects: Vec<&'b ObjectExpression<'a>>,
-}
-
 impl<'src> SourceDataCollector<'src> {
     fn uses_of(&mut self, name: &str) -> &mut NameUses {
         self.name_uses.entry(CompactString::from(name)).or_default()
@@ -121,8 +69,8 @@ impl<'src> SourceDataCollector<'src> {
 
     /// A local name the module exports, and the name it exports it under (`export function Name` is `Name` under
     /// `Name`, `export { Name as Other }` under `Other`, `export default Name` under `default`).
-    pub(super) fn record_exported_local(&mut self, local: &super::names::Named, exported: &str) {
-        let names = self.exported_locals.entry(CompactString::from(local.as_str())).or_default();
+    pub(super) fn record_exported_local(&mut self, local: &str, exported: &str) {
+        let names = self.exported_locals.entry(CompactString::from(local)).or_default();
         if !names.iter().any(|name| name == exported) {
             names.push(CompactString::from(exported));
         }
@@ -131,27 +79,15 @@ impl<'src> SourceDataCollector<'src> {
     /// The local component a default export's call wraps: `React.forwardRef(Inner) as T`, `memo(forwardRef(Card))` and
     /// `Object.assign(Root, { Item })` give `Inner`, `Card` and `Root`. `None` for a call that is no component alias, or
     /// whose argument is no name.
-    pub(super) fn component_wrapped_by(&self, expression: &Expression<'_>) -> Option<super::names::Named> {
-        let attachment = attachment_call(expression)?;
-        let call = attachment.call();
+    pub(super) fn component_wrapped_by(&self, expression: &Expression<'_>) -> Option<CompactString> {
+        let Expression::CallExpression(call) = super::component::peel_expr(expression) else { return None };
         if !super::component::is_component_alias_call(self, call) {
             return None;
         }
-        // An `Object.assign` is its target only as `assign_roles` reads it, and a target it rejects stays rejected.
-        match self.assign_target(attachment) {
-            Role::Accepted(target) => return Some(target),
-            Role::Rejected => return None,
-            Role::NotApplicable => {}
-        }
-        let first = call.arguments.first()?.as_expression()?;
-        // The argument's name as `value_name` vouches for it; a call written through a wrapper main did not read makes it
-        // a name only a peel shows.
-        match super::peeled::value_name(first, &self.bindings) {
-            Some(inner) if super::component::peeled_beyond_main(expression) => {
-                self.bindings.named(inner.as_str(), super::component::Recognition::Peeled)
-            }
-            Some(inner) => Some(inner),
-            None => self.component_wrapped_by(first),
+        let first = super::component::aliased_component(call)?;
+        match first {
+            Expression::Identifier(id) => Some(CompactString::from(id.name.as_str())),
+            _ => self.component_wrapped_by(first),
         }
     }
 
@@ -168,96 +104,42 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// `Parent.property = Sub` or `Object.assign(Parent, { property: Sub })`.
-    pub(super) fn record_attached(&mut self, sub: Subject, parent: &super::names::Named, property: &str) {
+    pub(super) fn record_attached(&mut self, sub: Subject, parent: &str, property: &str) {
         self.attached_to.push(Attachment {
             sub,
-            parent: CompactString::from(parent.as_str()),
+            parent: CompactString::from(parent),
             property: Some(CompactString::from(property)),
         });
     }
 
-    /// The name a value of an `Object.assign` call or a member assignment is, only as origin/main read it
-    /// (`peeled::value_name` `Plain`): a name only a peel exposes is attached to nothing.
-    pub(super) fn plain_member(&self, value: &Expression<'_>) -> Option<super::names::Named> {
-        super::peeled::value_name(value, &self.bindings).filter(|named| matches!(named, super::names::Named::Plain(_)))
-    }
-
-    /// What an `Object.assign` call's arguments are, read in one place for every consumer: the inline-member scan
-    /// (`inline`), the named-member read, the alias rule and the default export. `None` when the call is no plainly
-    /// written `Object.assign` (`Recognition::of_object_assign`): a call only a peel exposes attaches nothing.
-    pub(super) fn assign_roles<'b, 'a>(
-        &self,
-        attachment: AttachmentCall<'b, 'a>,
-        inline: bool,
-    ) -> Option<AssignRoles<'b, 'a>> {
-        let call = attachment.call();
-        if !super::component::is_object_assign_call(call, self)
-            || super::component::Recognition::of_object_assign(call, inline) == super::component::Recognition::Peeled
-        {
-            return None;
-        }
-        let target =
-            call.arguments.first().and_then(Argument::as_expression).and_then(|first| self.plain_member(first));
-        let mut aliases = Vec::new();
-        let mut objects = Vec::new();
-        for (position, argument) in call.arguments.iter().enumerate() {
-            // The inline-member scan reads the second argument only.
-            if inline && position != 1 {
-                continue;
-            }
-            let Some(value) = argument.as_expression() else { continue };
-            // Every identifier argument is what the result is, and every object literal a source, as main read them.
-            match super::component::main_peel(value) {
-                Expression::Identifier(name) => aliases.push(super::names::Named::plain(name.name.as_str())),
-                Expression::ObjectExpression(object) => objects.push(&**object),
-                _ => {}
-            }
-        }
-        Some(AssignRoles { target, aliases, objects })
-    }
-
-    /// The component an `Object.assign` call returns, as `assign_roles` reads its target ([`Role`]).
-    pub(super) fn assign_target(&self, attachment: AttachmentCall<'_, '_>) -> Role {
-        let call = attachment.call();
-        if !super::component::is_object_assign_call(call, self) {
-            return Role::NotApplicable;
-        }
-        // A call `assign_roles` rejects, such as one whose callee only a peel exposes, is no built-in at all: nothing in
-        // its arguments is what it returns.
-        let Some(roles) = self.assign_roles(attachment, false) else { return Role::Rejected };
-        let names =
-            call.arguments.first().and_then(Argument::as_expression).is_some_and(super::peeled::names_identifier);
-        match roles.target.clone().filter(|target| roles.aliases.contains(target)) {
-            Some(target) => Role::Accepted(target),
-            None if names => Role::Rejected,
-            // A target that is no name, such as `memo(Impl)`, of an accepted call: its caller reads it.
-            None => Role::NotApplicable,
-        }
-    }
-
     /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is
     /// the root under another name, with `Sub` attached.
-    pub(super) fn record_object_assign_declarator(
-        &mut self,
-        parent: &super::names::Named,
-        init: Option<&Expression<'_>>,
-    ) {
-        let Some(attachment) = init.and_then(attachment_call) else { return };
-        let Some(roles) = self.assign_roles(attachment, false) else { return };
-        for alias in &roles.aliases {
-            self.attached_to.push(Attachment {
-                sub: Subject::local(alias.as_str()),
-                parent: CompactString::from(parent.as_str()),
-                property: None,
-            });
+    pub(super) fn record_object_assign_declarator(&mut self, parent: &str, init: Option<&Expression<'_>>) {
+        let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
+        if !super::component::is_object_assign_call(call) {
+            return;
         }
-        for object in &roles.objects {
-            for property in &object.properties {
-                let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
-                let Some(key) = property.key.static_name() else { continue };
-                if let Some(sub) = self.plain_member(&property.value) {
-                    self.record_attached(Subject::local(sub.as_str()), parent, &super::js_text::property_name(&key));
+        for argument in &call.arguments {
+            match argument.as_expression().map(super::component::peel_expr) {
+                Some(Expression::Identifier(root)) => self.attached_to.push(Attachment {
+                    sub: Subject::local(root.name.as_str()),
+                    parent: CompactString::from(parent),
+                    property: None,
+                }),
+                Some(Expression::ObjectExpression(object)) => {
+                    for property in &object.properties {
+                        let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
+                        let Some(key) = property.key.static_name() else { continue };
+                        if let Expression::Identifier(sub) = super::component::peel_expr(&property.value) {
+                            self.record_attached(
+                                Subject::local(sub.name.as_str()),
+                                parent,
+                                &super::js_text::property_name(&key),
+                            );
+                        }
+                    }
                 }
+                _ => {}
             }
         }
     }
@@ -266,11 +148,12 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn record_member_assignment(&mut self, statement: &ExpressionStatement<'_>) {
         let Expression::AssignmentExpression(assignment) = &statement.expression else { return };
         let AssignmentTarget::StaticMemberExpression(target) = &assignment.left else { return };
-        let Expression::Identifier(parent) = &target.object else { return };
-        // The assigned value as origin/main read it: one only a peel exposes (`<number>Item`) is attached to nothing.
-        let Some(sub) = self.plain_member(&assignment.right) else { return };
-        let parent = super::names::Named::plain(parent.name.as_str());
-        self.record_attached(Subject::local(sub.as_str()), &parent, target.property.name.as_str());
+        let (Expression::Identifier(parent), Expression::Identifier(sub)) =
+            (&target.object, super::component::peel_expr(&assignment.right))
+        else {
+            return;
+        };
+        self.record_attached(Subject::local(sub.name.as_str()), parent.name.as_str(), target.property.name.as_str());
     }
 
     /// How the module exports each of its exported components: the exported locals under their export names, and any
@@ -314,13 +197,11 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     pub(super) fn record_call(&mut self, call: &CallExpression<'_>) {
-        // As origin/main read the call: a callee only a peel exposes is no use and builds no element.
-        let callee = super::component::main_peel(super::component::unwrap_transparent(&call.callee));
-        if let Expression::Identifier(callee) = callee {
+        if let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
         let renders_argument = super::component::is_component_wrapper(&*self, call)
-            || super::evidence::is_element_factory_callee(callee, &*self);
+            || super::evidence::is_element_factory_callee(super::component::peel_expr(&call.callee), &*self);
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;
         }

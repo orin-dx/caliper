@@ -1,6 +1,5 @@
 //! `impl Visit for SourceDataCollector` — the AST walker entry points.
 
-use super::names;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use oxc_syntax::scope::ScopeFlags;
@@ -65,7 +64,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         for spec in &node.specifiers {
             // Recorded as a local declaration for now; `finish()` turns it into a re-export when `local` is an import.
             let (local, exported) = (spec.local.name().as_str(), spec.exported.name().as_str());
-            self.record_exported_local(&names::Named::plain(local), exported);
+            self.record_exported_local(local, exported);
             self.pending_local_exports.push((self.data.exports.len(), local.to_owned()));
             self.data.exports.push(LexedExport::LocalDeclaration {
                 name: exported.to_owned(),
@@ -94,7 +93,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 } else {
                     self.data.component_mappings.push(public);
                 }
-                self.record_exported_local(&names::Named::plain(exported), exported);
+                self.record_exported_local(exported, exported);
             }
         }
 
@@ -133,7 +132,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 for declarator in &vd.declarations {
                     match &declarator.id {
                         BindingPattern::BindingIdentifier(id) => {
-                            self.record_exported_local(&names::Named::plain(id.name.as_str()), id.name.as_str());
+                            self.record_exported_local(id.name.as_str(), id.name.as_str());
                         }
                         // `export const { Option, Item: Row } = Imported` exports `Option` and `Row`.
                         BindingPattern::ObjectPattern(pattern) => {
@@ -144,10 +143,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                                     is_type_only: false,
                                     declared_as: None,
                                 });
-                                self.record_exported_local(
-                                    &names::Named::plain(local.name.as_str()),
-                                    local.name.as_str(),
-                                );
+                                self.record_exported_local(local.name.as_str(), local.name.as_str());
                             }
                         }
                         _ => {}
@@ -156,7 +152,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             }
             declaration => {
                 if let Some(name) = declaration_name(declaration) {
-                    self.record_exported_local(&names::Named::plain(name), name);
+                    self.record_exported_local(name, name);
                 }
             }
         }
@@ -344,7 +340,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                 let name = id.name.as_str().to_owned();
                 self.try_collect_variant_bag(declarator, &name);
-                self.record_object_assign_declarator(&names::Named::plain(&name), declarator.init.as_ref());
+                self.record_object_assign_declarator(&name, declarator.init.as_ref());
                 if self.is_tsx && self.function_depth == 0 {
                     self.try_scan_object_assign_declarator(declarator.init.as_ref());
                 }
@@ -357,7 +353,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 if self.function_depth == 0
                     && node.kind.is_const()
                     && let Some(Expression::Identifier(target)) =
-                        declarator.init.as_ref().map(super::peeled::read_value)
+                        declarator.init.as_ref().map(super::component::peel_expr)
                 {
                     self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
                 }
@@ -618,7 +614,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             {
                 if let Some(mapping) = self.try_class_component(class, name) {
                     self.data.component_mappings.push(mapping);
-                } else if super::component::super_class(class).is_some_and(|h| h.type_arguments().is_some()) {
+                } else if class.heritage.as_ref().is_some_and(|h| h.type_arguments.is_some()) {
                     // Extends Component/PureComponent WITH type args, but the
                     // props argument itself is an exotic shape
                     // extract_type_name_from_type doesn't match. No type args
@@ -661,13 +657,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let local = match &node.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(func) => func.id.as_ref().map(|id| id.name.as_str()),
             ExportDefaultDeclarationKind::ClassDeclaration(class) => class.id.as_ref().map(|id| id.name.as_str()),
-            kind => match kind.as_expression().map(super::peeled::read_value) {
+            kind => match kind.as_expression().map(super::component::peel_expr) {
                 Some(Expression::Identifier(id)) => Some(id.name.as_str()),
                 _ => None,
             },
         };
         if let Some(name) = local {
-            self.record_exported_local(&names::Named::plain(name), "default");
+            self.record_exported_local(name, "default");
             // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
             // when it is an import, as `export { Tooltip as default }` is.
             self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));

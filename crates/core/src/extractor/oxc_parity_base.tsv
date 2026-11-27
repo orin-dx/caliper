@@ -1,0 +1,52 @@
+instantiation: forwardRef, a bare callee	Button:Props"forwardRef" exported as Button
+instantiation: forwardRef, a member chain	Button:Props"forwardRef" exported as Button
+instantiation: memo, a bare callee	Button:Props"hocWrapper" exported as Button via memo
+instantiation: memo, a member chain	Button:Props"hocWrapper" exported as Button via React.memo
+instantiation: lazy, a bare callee	Button:lazy"factoryResult" exported as Button via lazy
+instantiation: createElement, a bare callee	Button:Props"typedFunctionExpression" exported as Button
+instantiation: createElement, a member chain	Button:Props"typedFunctionExpression" exported as Button
+instantiation: h, a bare callee	Button:Props"typedFunctionExpression" exported as Button
+instantiation: cloneElement, a bare callee	Button:Props"typedFunctionExpression" exported as Button
+instantiation: Object.assign, an inline member (finding 1)	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+instantiation: Object.assign, a declarator	Impl:Props"functionDeclaration" exported as Root | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:__anon_1"wrapperTypeArgument" exported as Root via Object.assign
+instantiation: Object.assign, a default export	Button:__anon_0"wrapperTypeArgument" exported as default via Object.assign | Impl:Props"functionDeclaration"
+instantiation: Promise.resolve	Button:Props"typedFunctionExpression" exported as Button
+instantiation: Array.isArray	Button:Props"typedFunctionExpression" exported as Button
+instantiation: a map	Button:ListProps"typedFunctionExpression" exported as Button
+instantiation: a helper (finding 2)	Button:Props"typedFunctionExpression" exported as Button
+instantiation: a factory call	Button:createButton"factoryResult" exported as Button via createButton
+instantiation: a hook	Label:Props"typedFunctionExpression" exported as Label
+instantiation: a PascalCase call	Button:Props"typedFunctionExpression" exported as Button | Info SkippedCandidate: 'Inner' is only ever called as a function in this file, never rendered or passed on, so it is a helper, not a component
+instantiation: a wrapper	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via withTheme
+instantiation: a class base	Button:Props"classComponent" exported as Button
+instantiation: a member class base	Button:Props"classComponent" exported as Button
+instantiation: a tag	Button:Props"typedFunctionExpression" exported as Button | Foo:T"functionDeclaration"
+instantiation: a default export	Button:Props"wrapperTypeArgument" exported as default via memo | Impl:Props"functionDeclaration"
+instantiation: an argument	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+instantiation: a tagged template	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+instantiation: a new expression	Button:Props"typedFunctionExpression" exported as Button
+retreat: plain, callee	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: plain, receiver	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: plain, argument	Button:Props"functionDeclaration" exported as Button
+retreat: plain, initializer	Button:Props"functionDeclaration" exported as Button
+retreat: plain, class base	Button:Props"classComponent" exported as Button | Impl:Props"functionDeclaration"
+retreat: as, callee	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: as, receiver	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: as, argument	Button:Props"functionDeclaration" exported as Button
+retreat: as, initializer	Button:Props"functionDeclaration" exported as Button
+retreat: as, class base	Impl:Props"functionDeclaration"
+retreat: assertion, callee	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+retreat: assertion, receiver	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: assertion, argument	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+retreat: assertion, initializer	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+retreat: assertion, class base	Impl:Props"functionDeclaration"
+retreat: satisfies, callee	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: satisfies, receiver	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: satisfies, argument	Button:Props"functionDeclaration" exported as Button
+retreat: satisfies, initializer	Button:Props"functionDeclaration" exported as Button
+retreat: satisfies, class base	Impl:Props"functionDeclaration"
+retreat: non-null, callee	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: non-null, receiver	Button:Props"forwardRef" exported as Button | Impl:Props"functionDeclaration"
+retreat: non-null, argument	Button:Props"functionDeclaration" exported as Button
+retreat: non-null, initializer	Button:Props"functionDeclaration" exported as Button
+retreat: non-null, class base	Impl:Props"functionDeclaration"
