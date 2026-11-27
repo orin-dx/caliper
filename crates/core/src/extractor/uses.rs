@@ -21,13 +21,6 @@ pub(crate) struct NameUses {
     rendered: u32,
 }
 
-#[cfg(test)]
-impl NameUses {
-    pub(super) fn rendered(&self) -> u32 {
-        self.rendered
-    }
-}
-
 /// Which component an export or attachment is of. A named component is the module's binding of that name. An inline
 /// sub-component (`Parent.Sub = (props: P) => …`) and an anonymous default export are no binding, and `A.Item = …`
 /// beside `B.Item = …`, or a default export named after its file beside a binding of that name, give two mappings one
@@ -289,18 +282,12 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     pub(super) fn record_call(&mut self, call: &CallExpression<'_>) {
-        // A call is a use of the value called, whatever an assertion says it returns: `(Helper as H)(props)` calls
-        // `Helper`.
-        let peeled = super::component::called(call);
-        if let Some(Expression::Identifier(callee)) = peeled.resolve_called(&*self) {
+        // As origin/main read the call: a callee only a peel exposes is no use and builds no element.
+        if let Expression::Identifier(callee) = super::component::main_peel(&call.callee) {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
-        // An element factory asserted to give a string (`(createElement as (t: any) => string)(Foo)`) builds no
-        // element of its argument.
         let renders_argument = super::component::is_component_wrapper(&*self, call)
-            || peeled.resolve(&*self).is_some_and(|callee| {
-                super::evidence::is_element_factory_callee(callee, super::well_known::beyond_main(&call.callee), &*self)
-            });
+            || super::evidence::is_element_factory_callee(super::component::main_peel(&call.callee), &*self);
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;
         }

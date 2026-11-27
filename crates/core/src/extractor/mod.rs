@@ -55,6 +55,12 @@ pub(super) enum ReactApi {
 }
 
 impl ReactApi {
+    /// Whether a callee only a peel exposes is read as this API: React's `forwardRef` and `memo` (and `lazy`, which no
+    /// rule reads as an API), and nothing else.
+    fn in_closed_list(self) -> bool {
+        matches!(self, Self::ForwardRef | Self::Memo)
+    }
+
     /// The API a module exports under this name.
     fn of_export(name: &str) -> Option<Self> {
         match name {
@@ -162,6 +168,24 @@ pub(crate) fn is_typescript(path: &std::path::Path) -> bool {
     matches!(path.extension().and_then(|extension| extension.to_str()), Some("ts" | "tsx" | "mts" | "cts"))
 }
 
+/// Every static import of the module, as `(local, exported, module)`, before the walk reaches any of them.
+fn hoisted_imports(program: &Program<'_>) -> Vec<(String, String, String)> {
+    let mut imports = Vec::new();
+    for statement in &program.body {
+        let Statement::ImportDeclaration(import) = statement else { continue };
+        let module = js_text::lossy(import.source.value);
+        for specifier in import.specifiers.iter().flatten() {
+            let exported = match specifier {
+                ImportDeclarationSpecifier::ImportSpecifier(s) => s.imported.name().to_string(),
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => "default".to_owned(),
+                ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => "*".to_owned(),
+            };
+            imports.push((specifier.local().name.to_string(), exported, module.to_string()));
+        }
+    }
+    imports
+}
+
 /// Parse a single file and collect all extractable data.
 ///
 /// Completely pure — no I/O, no side effects, no cross-file dependencies.
@@ -229,7 +253,8 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
         .map(|c| OwnedComment { span_start: c.span.start, span_end: c.span.end, is_block: c.is_block() })
         .collect();
     collector.comments = comments;
-    (collector.element_helpers, collector.rendering_functions) = evidence::element_helpers(&ret.program);
+    collector.element_helpers = evidence::element_helpers(&ret.program);
+    collector.hoisted_imports = hoisted_imports(&ret.program);
     let names = component::file_names(&ret.program);
     collector.typeof_aliases = component::typeof_aliases(&ret.program, &names);
     collector.bindings = names.into_bindings();
@@ -262,8 +287,9 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) imported_names: FxHashSet<CompactString>,
     /// Module-level functions declared to return an element: see `evidence::element_helpers`.
     pub(super) element_helpers: FxHashSet<String>,
-    /// Module-level functions that render by their own declaration or body: see `evidence::element_helpers`.
-    pub(super) rendering_functions: FxHashSet<String>,
+    /// Every import of the module as `(local, exported, module)`, whatever its position: static imports are hoisted.
+    /// Read only for a callee a peel exposes (`Scope::import_of`); a plain read keeps the walker's order, as origin/main.
+    pub(super) hoisted_imports: Vec<(String, String, String)>,
     /// Module-level `type F = typeof f`, by alias name: see `component::typeof_aliases`.
     pub(super) typeof_aliases: FxHashMap<CompactString, component::TypeofAlias>,
     /// What the one binding pass found (`component::FileNames`): the only source of a `names::UniqueName`.
@@ -366,7 +392,7 @@ impl<'src> SourceDataCollector<'src> {
             comments: Vec::new(),
             imported_names: FxHashSet::default(),
             element_helpers: FxHashSet::default(),
-            rendering_functions: FxHashSet::default(),
+            hoisted_imports: Vec::new(),
             typeof_aliases: FxHashMap::default(),
             bindings: names::Bindings::default(),
             consumed_jsdoc: FxHashSet::default(),
@@ -760,7 +786,13 @@ impl<'src> SourceDataCollector<'src> {
                     (!beyond_main || resolves()).then_some(api)
                 }
                 Some(_) => None,
-                None if beyond_main => None,
+                // Through a wrapper main did not read, only the closed list (`component::callee_of`), by the hoisted
+                // import: a static import below the call binds it too.
+                None if beyond_main => {
+                    let (exported, module) = evidence::Scope::import_of(self, id.name.as_str())?;
+                    let api = ReactApi::of_export(exported).filter(|api| api.in_closed_list())?;
+                    is_react_module(module).then_some(api)
+                }
                 None => ReactApi::of_export(id.name.as_str()),
             },
             Expression::StaticMemberExpression(member) => {
@@ -777,7 +809,10 @@ impl<'src> SourceDataCollector<'src> {
                         _ => return None,
                     },
                 };
-                let api = ReactApi::of_export(member.property.name.as_str())?;
+                let peeled_receiver = !matches!(component::main_peel(&member.object), Expression::Identifier(_));
+                // A receiver only a peel exposes reads only the closed list.
+                let api = ReactApi::of_export(member.property.name.as_str())
+                    .filter(|api| !(beyond_main || peeled_receiver) || api.in_closed_list())?;
                 match import_of(object.name.as_str()) {
                     Some(import)
                         if is_react_module(&import.specifier)
@@ -1609,8 +1644,8 @@ impl evidence::Scope for SourceDataCollector<'_> {
     }
 
     fn import_of(&self, local: &str) -> Option<(&str, &str)> {
-        let import = self.data.imports.iter().find(|import| import.local_name.as_str() == local)?;
-        Some((import.exported_name.as_str(), import.specifier.as_str()))
+        let (_, exported, module) = self.hoisted_imports.iter().find(|(name, _, _)| name == local)?;
+        Some((exported.as_str(), module.as_str()))
     }
 
     fn may_be_react(&self, name: &str) -> bool {
@@ -1619,10 +1654,6 @@ impl evidence::Scope for SourceDataCollector<'_> {
 
     fn is_element_helper(&self, name: &str) -> bool {
         self.element_helpers.contains(name)
-    }
-
-    fn renders_when_called(&self, name: &str) -> bool {
-        self.rendering_functions.contains(name)
     }
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {

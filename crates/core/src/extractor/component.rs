@@ -141,8 +141,6 @@ fn layers<'a, 'b>(
     let mut type_arguments = None;
     let mut outermost = None;
     loop {
-        #[cfg(test)]
-        steps::count();
         expr = match wrapper(expr) {
             Some(Wrapper::Transparent(inner)) => inner,
             Some(Wrapper::Asserted(inner, ty)) => {
@@ -732,20 +730,10 @@ pub(super) fn typeof_aliases(program: &Program<'_>, names: &FileNames<'_>) -> Fx
         .collect()
 }
 
-/// Counts the wrapper layers `peel` reads, so a test can show that a chain of assertions is read in one pass.
+/// Counts the work the binding pass and the alias reads do, so a test can show each is linear in the module.
 #[cfg(test)]
 pub(super) mod steps {
     use std::cell::Cell;
-
-    thread_local!(static STEPS: Cell<u64> = const { Cell::new(0) });
-
-    pub(in crate::extractor) fn count() {
-        STEPS.with(|steps| steps.set(steps.get() + 1));
-    }
-
-    pub(in crate::extractor) fn take() -> u64 {
-        STEPS.with(|steps| steps.replace(0))
-    }
 
     thread_local!(static WALKS: Cell<u64> = const { Cell::new(0) });
 
@@ -802,8 +790,25 @@ pub(super) fn beneath_resolved<'a, 'b>(expr: &'b Expression<'a>, scope: &dyn Sco
 
 /// What a call invokes, when its name still describes the call: `(forwardRef as F)(…)` and `(forwardRef<R, P>)(…)`
 /// call `forwardRef`; `(Object as (v: object) => object)(…)` calls nothing by a name. See [`Peeled::named`].
+///
+/// A callee only a peel exposes (beyond origin/main's read) is read only for the closed list: React's `forwardRef`,
+/// `memo` and `lazy`, bare or on React's namespace, with the import that binds it (`well_known::CLOSED_LIST`).
 pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>, scope: &dyn Scope) -> Option<&'b Expression<'a>> {
-    called(call).resolve(scope)
+    let peeled = called(call);
+    peeled.as_plain().or_else(|| peeled.resolve(scope).filter(|callee| in_closed_list(callee, scope)))
+}
+
+fn in_closed_list(callee: &Expression<'_>, scope: &dyn Scope) -> bool {
+    use super::well_known::{CLOSED_LIST, REACT, matches_any, matches_well_known};
+    match callee {
+        Expression::Identifier(id) => matches_any(scope, id.name.as_str(), CLOSED_LIST),
+        Expression::StaticMemberExpression(member) => {
+            CLOSED_LIST.iter().any(|entry| entry.name == member.property.name.as_str())
+                && matches!(beneath(&member.object),
+                    Expression::Identifier(object) if matches_well_known(scope, object.name.as_str(), &REACT))
+        }
+        _ => false,
+    }
 }
 
 /// A call's callee, peeled for its call signatures.
@@ -1805,15 +1810,6 @@ pub(super) fn is_object_assign_call(call: &CallExpression<'_>, scope: &dyn Scope
 /// `memo`, anything named like `forwardRef`, `withX(...)` higher-order components, `createXComponent(...)` factories,
 /// `observer`, and curried wrappers such as `connect(...)(Component)` or `styled(...)(Component)`.
 fn is_component_wrapper_call(call: &CallExpression<'_>, scope: &dyn Scope) -> bool {
-    // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`. A callee origin/main could not
-    // read follows the naming convention only when its name resolves to an import: a local function named `memo` or
-    // `withX`, written through a wrapper, is no evidence (`Peeled::resolve` alone admits a unique local).
-    if super::well_known::beyond_main(&call.callee)
-        && !chain_root(&call.callee)
-            .is_some_and(|root| scope.declarations(root) == 1 && scope.import_of(root).is_some())
-    {
-        return false;
-    }
     let callee = match callee_of(call, scope) {
         Some(Expression::Identifier(id)) => id.name.as_str(),
         Some(Expression::StaticMemberExpression(m)) => m.property.name.as_str(),

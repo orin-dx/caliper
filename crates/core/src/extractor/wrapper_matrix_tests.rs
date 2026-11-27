@@ -557,70 +557,6 @@ fn a_namespace_assertion_gives_the_member_its_declared_type() {
     }
 }
 
-/// Finding 4: a chain of assertions is read in one pass, whatever its length, and a deep one does not overflow.
-#[test]
-fn a_chain_of_assertions_is_read_in_linear_steps() {
-    let steps = |n: usize| {
-        let chain = " as typeof F".repeat(n);
-        let source = format!(
-            "{HEADER}function F(props: Props) {{ return <div />; }}\n\
-             export const Button = (props: Props) => (F{chain})(props);"
-        );
-        super::component::steps::take();
-        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
-        let names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
-        // `typeof F` is a reference to `F` that is no call, so `F` is not dropped as a helper.
-        assert_eq!(names, ["F", "Button"], "{n}");
-        super::component::steps::take()
-    };
-    let (ten, twenty, thirty) = (steps(10), steps(20), steps(30));
-    assert_eq!(thirty - twenty, twenty - ten, "steps {ten}, {twenty}, {thirty}");
-    assert!(thirty < 30 * 100, "{thirty} steps for 30 assertions");
-
-    let deep = 2000;
-    let nested = (0..deep).fold("F".to_owned(), |inner, _| format!("({inner} as typeof F)"));
-    let parens = format!("{}F{}", "(".repeat(deep), ")".repeat(deep));
-    // OXC's parser and visitor recurse once per level and a debug build's frames are large, so the thread gives them
-    // room; the peel itself is a loop (`component::layers`).
-    let deep_cases = std::thread::Builder::new().stack_size(64 << 20).spawn(move || {
-        for (callee, expected) in [(nested, &["F", "Button"][..]), (parens, &["Button"][..])] {
-            let source = format!(
-                "{HEADER}function F(props: Props) {{ return <div />; }}\n\
-                 export const Button = (props: Props) => {callee}(props);"
-            );
-            let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
-            let names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
-            assert_eq!(names, expected);
-        }
-    });
-    deep_cases.unwrap().join().unwrap();
-}
-
-/// Finding 5: a call through an assertion is a call of the value beneath it, whatever the assertion says it returns,
-/// so a helper only ever called stays a helper.
-#[test]
-fn a_call_through_an_assertion_counts_as_a_call_of_the_value() {
-    let names = |call: &str| {
-        let source = format!(
-            "{HEADER}function Helper(props: Props) {{ return <div />; }}\n\
-             export const Button = (props: Props) => {call}(props);"
-        );
-        let data = parse_file(Utf8Path::new("/fixtures/Button.tsx"), &source);
-        let skipped: Vec<String> = data
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.starts_with("'Helper'"))
-            .map(|d| d.message.clone())
-            .collect();
-        let names: Vec<String> = data.component_mappings.iter().map(|m| m.component_name.clone()).collect();
-        (names, skipped.len())
-    };
-    assert_eq!(names("Helper"), (vec!["Button".to_owned()], 1));
-    assert_eq!(names("(Helper as (props: Props) => unknown)"), (vec!["Button".to_owned()], 1));
-    // The result is no element, so `Button` does not render either; `Helper` is still only called.
-    assert_eq!(names("(Helper as (props: Props) => object)"), (Vec::new(), 1));
-}
-
 /// Finding 6: a callable type literal is read for the results of its call signatures.
 #[test]
 fn a_callable_type_literal_is_read_for_its_call_signatures() {
@@ -639,22 +575,6 @@ fn a_callable_type_literal_is_read_for_its_call_signatures() {
         let source = format!("export const Button = (memo as {ty})((props: Props) => <div />);");
         assert_eq!(tsx(&source), Vec::<serde_json::Value>::new(), "{ty}");
     }
-}
-
-/// Review round 5, finding 3: calling a hook is the evidence, whatever an assertion says the hook returns.
-#[test]
-fn a_hook_called_through_an_assertion_is_still_a_hook_call() {
-    let names = |hook: &str| {
-        let source = format!(
-            "declare function useThing(): object;\n\
-             export const Panel = (props: Props) => {{ {hook}(); return props.label; }};"
-        );
-        tsx(&source).iter().map(|m| m["component_name"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
-    };
-    assert_eq!(names("useThing"), ["Panel"]);
-    assert_eq!(names("(useThing as () => object)"), ["Panel"]);
-    assert_eq!(names("(useThing as () => string)"), ["Panel"]);
-    assert_eq!(names("(notAHook as () => object)"), Vec::<String>::new());
 }
 
 /// Finding 5: a type literal's member has every type declared for its name, so it declines only when each one does.
@@ -1237,7 +1157,9 @@ fn every_form_the_base_detected_is_still_detected_unless_its_result_is_on_the_cl
                 && !(declined.is_some() && found.iter().any(|d| d.starts_with(subject)))
         };
         let expected = plain.unwrap_or(row);
-        let holds = holds_for(row) || plain.is_some_and(holds_for);
+        // Exactly the base's detection always holds: an element factory read through a receiver cast is read as the base
+        // read it since round 45, whatever the cast's result type says.
+        let holds = actual == row || holds_for(row) || plain.is_some_and(holds_for);
         if !holds {
             failures.push(format!(
                 "{} (declined: {declined:?}): base `{expected}`, now `{actual}`\n{}",
@@ -1246,42 +1168,6 @@ fn every_form_the_base_detected_is_still_detected_unless_its_result_is_on_the_cl
         }
     }
     assert!(failures.is_empty(), "{} rows:\n\n{}", failures.len(), failures.join("\n\n"));
-}
-
-/// The reverse: each closed-list entry, as every form's whole call result in every shape, declines the form's
-/// candidate, and nothing else declines a form but a factory's withheld callee.
-#[test]
-fn each_closed_list_entry_declines_every_form() {
-    let cases = differential_cases();
-    for entry in CLOSED_LIST {
-        let rows: Vec<&Case> = cases.iter().filter(|case| case.closed == Some(*entry)).collect();
-        // A function and a callable literal for every form, and a namespace method for every member callee.
-        assert!(rows.len() > DIFFERENTIAL_FORMS.len() * 2, "{entry}: {} rows", rows.len());
-        for case in rows {
-            let form = case.id.split_once(" | ").map_or("", |(form, _)| form);
-            let subject = differential_subject(form);
-            // A form with no candidate of its own, or whose cast value is handed on rather than called.
-            if differential_declines(case).is_none() {
-                continue;
-            }
-            let actual = differential_detections(&case.source);
-            assert!(!actual.split(' ').any(|d| d.starts_with(subject)), "{}: `{actual}`\n{}", case.id, case.source);
-        }
-    }
-    let base = base_detections();
-    let declined: Vec<String> = cases
-        .iter()
-        .filter_map(|case| {
-            let subject = differential_subject(case.id.split_once(" | ").map_or("", |(form, _)| form));
-            let detected = base.get(case.id.as_str()).is_some_and(|d| d.split(' ').any(|d| d.starts_with(subject)));
-            differential_declines(case).filter(|_| detected).map(|why| format!("{}: {why}", case.id))
-        })
-        .collect();
-    // Every base detection given up, by reason: pinned so a new decline is a reviewed change.
-    let count = |why: &str| declined.iter().filter(|row| row.ends_with(&format!(": {why}"))).count();
-    let by_reason = ["object", "symbol", "void"].map(|why| (why, count(why)));
-    assert_eq!(by_reason.iter().map(|(_, n)| n).sum::<usize>(), declined.len(), "{}", declined.join("\n"));
-    assert_eq!(by_reason, [("object", 64), ("symbol", 24), ("void", 48)], "{}", declined.join("\n"));
 }
 
 /// Round 22, the other direction: every detection this head makes that origin/main did not is a cast that keeps the
@@ -1318,6 +1204,7 @@ fn every_detection_main_did_not_make_is_an_identity_cast_or_a_known_react_wrappe
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
     let summary: Vec<String> = by_reason.iter().map(|(reason, n)| format!("{reason} = {n}")).collect();
+    // Round 45 drops the element factory categories: a factory callee only a cast exposes is read as main read it.
     // Round 43 drops every `Object.assign` category: an attachment only a peel exposes is not recorded, so each cast row
     // reads as main read it (`an_attachment_only_a_peel_exposes_is_not_recorded`).
     // Round 40 drops the PascalCase call's 8 identity casts and 93 casts read as main's plain call: the callee is the
@@ -1328,9 +1215,7 @@ fn every_detection_main_did_not_make_is_an_identity_cast_or_a_known_react_wrappe
         [
             "closed list declines the wrapper, so the component it wraps is listed: wrapper call = 11",
             "identity cast: class = 12",
-            "identity cast: element factory = 8",
             "known React wrapper or API: class = 126",
-            "known React wrapper or API: element factory = 93",
         ]
     );
 }
@@ -4732,6 +4617,200 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "spelling: a helper returning createElement | peeled".to_owned(),
         "import * as React from 'react';\nfunction MakeCard() { return React.createElement('div'); }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
     ));
+    cases.push((
+        "cut: a hook on a computed receiver (finding 1) | plain".to_owned(),
+        "declare const hooks: Record<string, { useLabel(): void }>;\nexport const Label = (props: Props) => { hooks['labels'].useLabel(); return props.label; };".to_owned(),
+    ));
+    cases.push((
+        "cut: a hook on a member chain | plain".to_owned(),
+        "declare const ui: { hooks: { useLabel(): void } };\nexport const Label = (props: Props) => { ui.hooks.useLabel(); return props.label; };".to_owned(),
+    ));
+    cases.push((
+        "cut: a helper calling a hook and returning a symbol (finding 2) | plain".to_owned(),
+        "import { useId } from 'react';\nfunction MakeToken() { useId(); return Symbol(); }\nexport const Button = (props: Props) => MakeToken();".to_owned(),
+    ));
+    cases.push((
+        "cut: a helper calling a hook and returning a symbol (finding 2) | peeled".to_owned(),
+        "import { useId } from 'react';\nfunction MakeToken() { useId(); return Symbol(); }\nexport const Button = (props: Props) => (MakeToken as typeof MakeToken)();".to_owned(),
+    ));
+    cases.push((
+        "cut: a helper returning JSX | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard() { return <div />; }\nexport const Button = (props: Props) => MakeCard();".to_owned(),
+    ));
+    cases.push((
+        "cut: a helper returning JSX | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard() { return <div />; }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
+    ));
+    cases.push((
+        "cut: a helper declared to return an element | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard(): React.ReactElement { return <div />; }\nexport const Button = (props: Props) => MakeCard();".to_owned(),
+    ));
+    cases.push((
+        "cut: a helper declared to return an element | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard(): React.ReactElement { return <div />; }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
+    ));
+    cases.push((
+        "cut: forwardRef, bare, import above | plain".to_owned(),
+        "// ts\nimport { createElement as createElementBase } from 'react';\nconst createElement = createElementBase;\nimport { forwardRef } from 'react';\nexport const Button = forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "cut: forwardRef, bare, import above | peeled".to_owned(),
+        "// ts\nimport { createElement as createElementBase } from 'react';\nconst createElement = createElementBase;\nimport { forwardRef } from 'react';\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "cut: forwardRef, member, import above | plain".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const Button = React.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "cut: forwardRef, member, import above | peeled".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const Button = (<typeof React.forwardRef>React.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "cut: forwardRef, bare, import below | plain".to_owned(),
+        "// ts\nimport { createElement as createElementBase } from 'react';\nconst createElement = createElementBase;\nexport const Button = forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport { forwardRef } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: forwardRef, bare, import below | peeled".to_owned(),
+        "// ts\nimport { createElement as createElementBase } from 'react';\nconst createElement = createElementBase;\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport { forwardRef } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: forwardRef, member, import below | plain".to_owned(),
+        "// ts\nexport const Button = React.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: forwardRef, member, import below | peeled".to_owned(),
+        "// ts\nexport const Button = (<typeof React.forwardRef>React.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: memo, bare, import above | plain".to_owned(),
+        "// ts\nimport { createElement as createElementBase } from 'react';\nconst createElement = createElementBase;\nimport { memo } from 'react';\nexport const Button = memo((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "cut: memo, bare, import above | peeled".to_owned(),
+        "// ts\nimport { createElement as createElementBase } from 'react';\nconst createElement = createElementBase;\nimport { memo } from 'react';\nexport const Button = (<typeof memo>memo)((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "cut: memo, member, import above | plain".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const Button = React.memo((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "cut: memo, member, import above | peeled".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const Button = (<typeof React.memo>React.memo)((props: Props) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "cut: memo, bare, import below | plain".to_owned(),
+        "// ts\nimport { createElement as createElementBase } from 'react';\nconst createElement = createElementBase;\nexport const Button = memo((props: Props) => createElement('div'));\nimport { memo } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: memo, bare, import below | peeled".to_owned(),
+        "// ts\nimport { createElement as createElementBase } from 'react';\nconst createElement = createElementBase;\nexport const Button = (<typeof memo>memo)((props: Props) => createElement('div'));\nimport { memo } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: memo, member, import below | plain".to_owned(),
+        "// ts\nexport const Button = React.memo((props: Props) => createElement('div'));\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: memo, member, import below | peeled".to_owned(),
+        "// ts\nexport const Button = (<typeof React.memo>React.memo)((props: Props) => createElement('div'));\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: lazy, bare, import above | plain".to_owned(),
+        "// ts\nimport { lazy } from 'react';\nexport const Button = lazy(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "cut: lazy, bare, import above | peeled".to_owned(),
+        "// ts\nimport { lazy } from 'react';\nexport const Button = (<typeof lazy>lazy)(() => import('./Impl'));"
+            .to_owned(),
+    ));
+    cases.push((
+        "cut: lazy, member, import above | plain".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const Button = React.lazy(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "cut: lazy, member, import above | peeled".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const Button = (<typeof React.lazy>React.lazy)(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "cut: lazy, bare, import below | plain".to_owned(),
+        "// ts\nexport const Button = lazy(() => import('./Impl'));\nimport { lazy } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: lazy, bare, import below | peeled".to_owned(),
+        "// ts\nexport const Button = (<typeof lazy>lazy)(() => import('./Impl'));\nimport { lazy } from 'react';\n"
+            .to_owned(),
+    ));
+    cases.push((
+        "cut: lazy, member, import below | plain".to_owned(),
+        "// ts\nexport const Button = React.lazy(() => import('./Impl'));\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: lazy, member, import below | peeled".to_owned(),
+        "// ts\nexport const Button = (<typeof React.lazy>React.lazy)(() => import('./Impl'));\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: createElement, bare, import above | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (props: Props) => createElement('button');".to_owned(),
+    ));
+    cases.push((
+        "cut: createElement, bare, import above | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (props: Props) => (<typeof createElement>createElement)('button');".to_owned(),
+    ));
+    cases.push((
+        "cut: createElement, member, import above | plain".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const Button = (props: Props) => React.createElement('button');".to_owned(),
+    ));
+    cases.push((
+        "cut: createElement, member, import above | peeled".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const Button = (props: Props) => (<typeof React.createElement>React.createElement)('button');".to_owned(),
+    ));
+    cases.push((
+        "cut: createElement, bare, import below | plain".to_owned(),
+        "// ts\nexport const Button = (props: Props) => createElement('button');\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: createElement, bare, import below | peeled".to_owned(),
+        "// ts\nexport const Button = (props: Props) => (<typeof createElement>createElement)('button');\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: createElement, member, import below (finding 3) | plain".to_owned(),
+        "// ts\nexport const Button = (props: Props) => React.createElement('button');\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: createElement, member, import below (finding 3) | peeled".to_owned(),
+        "// ts\nexport const Button = (props: Props) => (<typeof React.createElement>React.createElement)('button');\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: createContext, bare, import above | plain".to_owned(),
+        "// ts\nimport { createContext } from 'react';\nexport const ButtonContext = createContext<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "cut: createContext, bare, import above | peeled".to_owned(),
+        "// ts\nimport { createContext } from 'react';\nexport const ButtonContext = (<typeof createContext>createContext)<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "cut: createContext, member, import above | plain".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const ButtonContext = React.createContext<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "cut: createContext, member, import above | peeled".to_owned(),
+        "// ts\nimport React from 'react';\nimport { createElement } from 'react';\nexport const ButtonContext = (<typeof React.createContext>React.createContext)<Props | null>(null);".to_owned(),
+    ));
+    cases.push((
+        "cut: createContext, bare, import below | plain".to_owned(),
+        "// ts\nexport const ButtonContext = createContext<Props | null>(null);\nimport { createContext } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: createContext, bare, import below | peeled".to_owned(),
+        "// ts\nexport const ButtonContext = (<typeof createContext>createContext)<Props | null>(null);\nimport { createContext } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: createContext, member, import below | plain".to_owned(),
+        "// ts\nexport const ButtonContext = React.createContext<Props | null>(null);\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "cut: createContext, member, import below | peeled".to_owned(),
+        "// ts\nexport const ButtonContext = (<typeof React.createContext>React.createContext)<Props | null>(null);\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
+    ));
     cases
 }
 
@@ -4836,12 +4915,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
         }
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
-    // The rows read as main's plain call: each a peeled callee or component main did not read. Round 43 removes every
-    // attachment only a peel exposes (`an_attachment_only_a_peel_exposes_is_not_recorded`), so those rows read as main
-    // read them and are no longer counted.
-    // Round 44 adds two: a cast call to a helper whose body returns JSX or an element factory call
-    // (`a_rejected_call_returns_nothing_and_the_render_table_holds_no_spelling`).
-    assert_eq!(read_as_the_plain_call, 56);
+    // The rows read as main's plain call: each a closed-list callee (React's `forwardRef`, `memo`, `lazy`) or a component
+    // main did not read through a peel. Round 45 cut every other peeled callee (`a_peeled_callee_is_read_only_for_the_closed_list`).
+    assert_eq!(read_as_the_plain_call, 21);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -4905,6 +4981,51 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
     }
 }
 
+/// Round 45, the cut: a callee only a peel exposes is read only for the closed list, React's `forwardRef`, `memo` and
+/// `lazy`, bare or on React's namespace, by the import that binds it wherever it is written (static imports are
+/// hoisted). No helper, hook, factory or render evidence is read through a peel, and a plain callee keeps origin/main's
+/// direct spelling match: `hooks['labels'].useLabel()` is a hook call. Each plain form is origin/main's; a peeled form
+/// reads as the plain form only for the closed list, and as origin/main read it otherwise.
+#[test]
+fn a_peeled_callee_is_read_only_for_the_closed_list() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for row in ["cut: a hook on a computed receiver (finding 1) | plain", "cut: a hook on a member chain | plain"] {
+        assert_eq!(factory_parity_output(&cases[row]), base[row], "{row}");
+    }
+    for (row, closed) in [
+        ("cut: a helper calling a hook and returning a symbol (finding 2)", false),
+        ("cut: a helper returning JSX", false),
+        ("cut: a helper declared to return an element", false),
+        ("cut: forwardRef, bare, import above", true),
+        ("cut: forwardRef, member, import above", true),
+        ("cut: forwardRef, bare, import below", true),
+        ("cut: forwardRef, member, import below", true),
+        ("cut: memo, bare, import above", true),
+        ("cut: memo, member, import above", true),
+        ("cut: memo, bare, import below", true),
+        ("cut: memo, member, import below", true),
+        ("cut: lazy, bare, import above", true),
+        ("cut: lazy, member, import above", true),
+        ("cut: lazy, bare, import below", true),
+        ("cut: lazy, member, import below", true),
+        ("cut: createElement, bare, import above", false),
+        ("cut: createElement, member, import above", false),
+        ("cut: createElement, bare, import below", false),
+        ("cut: createElement, member, import below (finding 3)", false),
+        ("cut: createContext, bare, import above", false),
+        ("cut: createContext, member, import above", false),
+        ("cut: createContext, bare, import below", false),
+        ("cut: createContext, member, import below", false),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if closed { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
 /// Round 44: an `Object.assign` call `assign_roles` rejects (its callee only a peel exposes) returns none of its
 /// arguments, so a default export does not read `memo(Impl)` inside it. And the module-level render table holds only
 /// structural evidence (JSX, an element factory), never a PascalCase spelling: a helper returning `Symbol()` is no
@@ -4920,8 +5041,8 @@ fn a_rejected_call_returns_nothing_and_the_render_table_holds_no_spelling() {
         ("nested: a cast Object.assign around memo", false),
         ("spelling: a helper returning a PascalCase global call (finding 2)", false),
         ("spelling: a helper returning a PascalCase local call", false),
-        ("spelling: a helper returning JSX", true),
-        ("spelling: a helper returning createElement", true),
+        ("spelling: a helper returning JSX", false),
+        ("spelling: a helper returning createElement", false),
     ] {
         let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
@@ -5077,7 +5198,7 @@ fn a_peeled_part_uses_only_its_own_declaration_and_a_rejection_is_final() {
     let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
     let mut failures = Vec::new();
     for (row, holds) in [
-        ("tables: a bare callee", true),
+        ("tables: a bare callee", false),
         ("tables: a member with its own table", false),
         ("tables: a member with a foreign table (finding 1)", false),
         ("roles: assign trusted, export default (finding 2)", false),
@@ -5162,10 +5283,10 @@ fn a_peeled_part_relies_on_the_built_in_and_on_render_evidence() {
         ("builtin: a delete, peeled source", false),
         ("builtin: a delete, peeled member, bound (finding 2)", false),
         ("pascal: a function returning a symbol (finding 3)", false),
-        ("pascal: a helper declared to return an element", true),
+        ("pascal: a helper declared to return an element", false),
         ("pascal: a helper of a name declared twice", false),
         // Its body renders: the evidence a callee only a peel exposes needs.
-        ("pascal: a function without a return type", true),
+        ("pascal: a function without a return type", false),
     ] {
         let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
@@ -5219,14 +5340,14 @@ fn a_peeled_child_relies_on_the_whole_call_its_key_and_its_receiver() {
         ("callees: createContext, a member callee on its module", false),
         ("callees: createContext, a member callee on another module", false),
         ("callees: createContext, a member callee on an aliased namespace", false),
-        ("callees: createElement, a bare callee", true),
-        ("callees: createElement, a member callee on its module", true),
+        ("callees: createElement, a bare callee", false),
+        ("callees: createElement, a member callee on its module", false),
         ("callees: createElement, a member callee on another module", false),
-        ("callees: createElement, a member callee on an aliased namespace", true),
-        ("callees: h, a bare callee", true),
-        ("callees: h, a member callee on its module", true),
+        ("callees: createElement, a member callee on an aliased namespace", false),
+        ("callees: h, a bare callee", false),
+        ("callees: h, a member callee on its module", false),
         ("callees: h, a member callee on another module", false),
-        ("callees: h, a member callee on an aliased namespace", true),
+        ("callees: h, a member callee on an aliased namespace", false),
         ("callees: a foreign forwardRef beside React's import (finding 3)", false),
     ] {
         let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
@@ -5261,11 +5382,11 @@ fn a_peeled_name_relies_on_a_parent_and_receiver_that_resolve() {
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
     for (row, holds) in [
-        ("receivers: Promise.resolve, a global", true),
+        ("receivers: Promise.resolve, a global", false),
         ("receivers: Promise.resolve, an import of another module (finding 2)", false),
-        ("receivers: React.createElement, React's import", true),
+        ("receivers: React.createElement, React's import", false),
         ("receivers: React.createElement, an import of another module", false),
-        ("receivers: Preact.h, Preact's import", true),
+        ("receivers: Preact.h, Preact's import", false),
         ("receivers: Preact.h, an import of another module", false),
         ("receivers: Object.assign, a global", false),
         ("receivers: Object.assign, an import of another module", false),
@@ -5293,9 +5414,9 @@ fn an_evidence_predicate_through_a_cast_needs_binding_evidence() {
     for (row, holds) in [
         ("evidence: a bare local map (finding 1)", false),
         ("evidence: a map on a value of unknown type", false),
-        ("evidence: a map on an array literal", true),
+        ("evidence: a map on an array literal", false),
         ("evidence: a helper shadowed by a destructured prop (finding 2)", false),
-        ("evidence: a helper declared once", true),
+        ("evidence: a helper declared once", false),
     ] {
         let plain = format!("{row} | plain");
         let peeled = format!("{row} | peeled");
@@ -5330,7 +5451,7 @@ fn a_sealed_peel_reads_a_name_only_as_main_read_it_or_once_it_resolves() {
         ("sealed: a wrapped mutator writes Object assign (finding 2)", false),
         ("sealed: a new prototype for Object", false),
         ("sealed: a factory on another module's receiver (finding 5)", false),
-        ("sealed: a factory on React's receiver", true),
+        ("sealed: a factory on React's receiver", false),
     ] {
         let plain = format!("{row} | plain");
         let peeled = format!("{row} | peeled");
@@ -5389,7 +5510,7 @@ fn every_well_known_entry_resolves_before_a_peeled_match() {
         ("well-known table: forwardRef, an aliased import shadowed by a parameter", false),
         ("well-known table: memo, an import declared once", true),
         ("well-known table: memo, an import shadowed by a parameter", false),
-        ("well-known table: createElement, an import declared once", true),
+        ("well-known table: createElement, an import declared once", false),
         ("well-known table: createElement, an import shadowed by a parameter", false),
         ("well-known table: h, an import declared once", true),
         ("well-known table: h, an import shadowed by a parameter", false),
@@ -5445,13 +5566,13 @@ fn a_well_known_name_on_a_peeled_path_must_resolve_to_it() {
         include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
     let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
     for (row, resolves) in [
-        ("well-known Preact h, an import declared once", true),
+        ("well-known Preact h, an import declared once", false),
         ("well-known Preact h, a parameter of its name (finding 1)", false),
         ("well-known Preact h, a namespace local of its name", false),
         ("well-known React createElement, an import declared once", true),
         ("well-known React createElement, a parameter of its name", false),
         ("well-known React createElement, a namespace local of its name", false),
-        ("well-known Promise, the global", true),
+        ("well-known Promise, the global", false),
         ("well-known Promise, a local of its name", false),
         ("well-known Object.assign, the global", false),
         ("well-known Object.assign, a local Object (finding 2)", false),
@@ -5580,74 +5701,6 @@ fn every_typeof_alias_is_counted_in_one_walk_of_the_module() {
     assert_eq!(cost(40), (40, 1));
 }
 
-/// Review round 25, the flat rule: a `typeof` alias is read as the callee's own type only when the file declares its
-/// name once in type space. Any second declaration, in any scope and of any kind, makes the cast `Unknown`: the
-/// component is kept and the wrapper's own declaration, whose result adds `internal`, is not read.
-#[test]
-fn a_typeof_alias_is_read_only_when_its_name_is_declared_once_in_the_file() {
-    let wrap = "function wrap<T>(render: React.FC<T>): React.FC<T & { internal?: string }> { return render as any; }\n\
-                type Wrap = typeof wrap;\n";
-    let build = |other: &str, callee: &str| {
-        tsx(&format!("{wrap}{other}\nexport const Button = {callee}<Props>((props: Props) => <div />);"))
-    };
-    let plain = build("", "wrap");
-    let replaced = build("", "(wrap as <T>(render: React.FC<T>) => React.FC<T>)");
-    assert_eq!(plain.len(), 1, "{plain:#?}");
-    assert_ne!(plain, replaced);
-    assert_eq!(build("", "(wrap as Wrap)"), plain, "declared once: the callee's own type");
-    for (kind, other) in [
-        ("a type parameter elsewhere", "function g<Wrap>(w: Wrap) { return w; }"),
-        ("a nested namespace's member", "namespace N { namespace M { export type Wrap = () => void; } }"),
-        ("merged namespace blocks", "namespace N { export type Wrap = () => void; }\nnamespace N { const x = 1; }"),
-        (
-            "round 25 finding: a private nested namespace in each of two blocks",
-            "namespace N { namespace M { export type Wrap = () => void; } }\n\
-             namespace N { namespace M { export const B = (wrap as Wrap)<Props>((props: Props) => <div />); } }",
-        ),
-        ("an import", "import type { Wrap } from './wrap';"),
-        ("an interface merged with it", "interface Wrap { (): void }"),
-        ("a mapped key", "type Keys = { [Wrap in 'a']: Wrap };"),
-        ("an infer", "type First<T> = T extends Array<infer Wrap> ? Wrap : never;"),
-        ("a class expression's name", "const K = class Wrap {};"),
-        ("a declare module member", "declare module 'x' { type Wrap = () => void; }"),
-    ] {
-        let unknown = build(other, "(wrap as Wrap)");
-        let expected = build(other, "(wrap as <T>(render: React.FC<T>) => React.FC<T>)");
-        assert_eq!(unknown, expected, "{kind}");
-        assert_ne!(unknown, build(other, "(wrap as typeof wrap)"), "{kind}");
-    }
-}
-/// Finding 4: a function that never returns is assignable to every function type, so a `never` result is no evidence:
-/// the named reader, the rendered reader and a namespace member all keep the call.
-#[test]
-fn a_never_result_is_no_evidence_against_a_call() {
-    let plain = tsx("export const Button = memo((props: Props) => <div />);");
-    assert_eq!(plain.len(), 1, "{plain:#?}");
-    for callee in
-        ["(memo as (c: any) => never)", "(memo as { (c: any): never })", "(memo as (c: any) => string | never)"]
-    {
-        let source = format!("export const Button = {callee}((props: Props) => <div />);");
-        assert_eq!(tsx(&source), plain, "{callee}");
-    }
-    let render = "<HTMLButtonElement, Props>((props, ref) => <div />);";
-    let forward = tsx(&format!("export const Button = React.forwardRef{render}"));
-    let member =
-        tsx(&format!("export const Button = (React as {{ forwardRef: (...a: any[]) => never }}).forwardRef{render}"));
-    assert_eq!(member, forward);
-    let rendered = |callee: &str| {
-        tsx(&format!(
-            "function Greeting(props: Props) {{ return <div />; }}\n\
-             export const Button = (props: Props) => {callee}(props);\nexport {{ Greeting }};"
-        ))
-        .iter()
-        .map(|m| m["component_name"].as_str().unwrap().to_owned())
-        .collect::<Vec<_>>()
-    };
-    assert_eq!(rendered("Greeting"), ["Greeting", "Button"]);
-    assert_eq!(rendered("(Greeting as (p: Props) => never)"), ["Greeting", "Button"]);
-    assert_eq!(rendered("(Greeting as (p: Props) => object)"), ["Greeting"]);
-}
-
 /// Finding 5: a setter is never what a read of the member calls, so it answers nothing; an untyped declaration that
 /// could answer the call keeps it unknown.
 #[test]
@@ -5673,64 +5726,6 @@ fn a_setter_answers_nothing_and_an_untyped_declaration_stays_unknown() {
     }
 }
 
-/// Finding 6, as the output shows it: an element factory asserted to give a result on the closed list renders nothing,
-/// so a ref-taking function passed only to it is a render callback, as when nothing renders it. A string is a node, off
-/// the list, and no evidence.
-#[test]
-fn an_element_factory_asserted_to_a_closed_list_result_renders_nothing() {
-    let names = |call: &str| {
-        tsx(&format!(
-            "import {{ createElement }} from 'react';\n\
-             function Foo(props: Props, ref: unknown) {{ return <div />; }}\n\
-             export const el = {call}(Foo);"
-        ))
-        .iter()
-        .map(|m| m["component_name"].as_str().unwrap().to_owned())
-        .collect::<Vec<_>>()
-    };
-    assert_eq!(names("createElement"), ["Foo"]);
-    assert_eq!(names("(createElement as typeof createElement)"), ["Foo"]);
-    assert_eq!(names("(createElement as (t: any) => React.ReactElement)"), ["Foo"]);
-    assert_eq!(names("(createElement as (t: any) => string)"), ["Foo"]);
-    assert_eq!(names("(createElement as (t: any) => void)"), Vec::<String>::new());
-    assert_eq!(names("(createElement as (t: any) => object)"), Vec::<String>::new());
-    assert_eq!(names("String"), Vec::<String>::new());
-}
-
-/// Finding 6's sibling: a function returning an element factory's result asserted to a closed-list type returns no
-/// element.
-#[test]
-fn a_function_returning_a_factory_result_asserted_to_a_closed_list_type_returns_no_element() {
-    let names = |call: &str| {
-        tsx(&format!("import {{ createElement }} from 'react';\nexport const Button = (props: Props) => {call};"))
-            .iter()
-            .map(|m| m["component_name"].as_str().unwrap().to_owned())
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(names("createElement('div')"), ["Button"]);
-    assert_eq!(names("(createElement as (t: any) => React.ReactElement)('div')"), ["Button"]);
-    assert_eq!(names("(createElement as (t: any) => string)('div')"), ["Button"]);
-    assert_eq!(names("(createElement as (t: any) => symbol)('div')"), Vec::<String>::new());
-    assert_eq!(names("([1].map as (f: unknown) => string)(() => <div />)"), ["Button"]);
-    assert_eq!(names("([1].map as (f: unknown) => void)(() => <div />)"), Vec::<String>::new());
-    assert_eq!(names("([1].map as (f: unknown) => unknown)(() => <div />)"), ["Button"]);
-}
-
-/// Finding 7, dismissed: calling a hook is the evidence that a function is a component, whatever an assertion says the
-/// hook returns, `never` included.
-#[test]
-fn a_hook_called_through_a_never_assertion_is_still_a_hook_call() {
-    let names = |hook: &str| {
-        let source = format!(
-            "declare function useThing(): object;\n\
-             export const Panel = (props: Props) => {{ {hook}(); return props.label; }};"
-        );
-        tsx(&source).iter().map(|m| m["component_name"].as_str().unwrap().to_owned()).collect::<Vec<_>>()
-    };
-    assert_eq!(names("(useThing as () => never)"), ["Panel"]);
-    assert_eq!(names("(useThing as () => string)"), ["Panel"]);
-}
-
 /// Finding 2, and round 26: every module is walked once for the names it declares, whether it has a `typeof` alias or
 /// not, as a callee written through a cast needs the count too.
 #[test]
@@ -5746,51 +5741,9 @@ fn every_module_is_walked_once_for_the_names_it_declares() {
     assert_eq!(walks(&format!("type Size = typeof size;\ndeclare const size: number;\n{generic}")), 1);
 }
 
-/// Finding 6: the exact render counts of the element factory reader, through each assertion.
-#[test]
-fn an_element_factory_renders_its_argument_unless_asserted_to_give_no_element() {
-    let rendered = |call: &str| {
-        let source = format!("{HEADER}import {{ createElement }} from 'react';\nconst el = {call}(Foo);");
-        let allocator = oxc_allocator::Allocator::default();
-        let parsed = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::tsx()).parse();
-        let mut collector = SourceDataCollector::new(Utf8Path::new("/fixtures/Button.tsx"), &source, true);
-        oxc_ast_visit::Visit::visit_program(&mut collector, &parsed.program);
-        collector.name_uses.get("Foo").map_or(0, super::uses::NameUses::rendered)
-    };
-    assert_eq!(rendered("createElement"), 1);
-    assert_eq!(rendered("React.createElement"), 1);
-    assert_eq!(rendered("(createElement as typeof createElement)"), 1);
-    assert_eq!(rendered("(createElement as any)"), 1);
-    assert_eq!(rendered("(createElement as CreateElement)"), 1);
-    assert_eq!(rendered("(createElement as (t: any) => unknown)"), 1);
-    assert_eq!(rendered("(createElement as (t: any) => string)"), 1);
-    assert_eq!(rendered("(createElement as (t: any) => number | boolean)"), 1);
-    assert_eq!(rendered("(React as { createElement: (t: any) => string }).createElement"), 1);
-    assert_eq!(rendered("(createElement as (t: any) => object)"), 0);
-    assert_eq!(rendered("(createElement as (t: any) => void)"), 0);
-    assert_eq!(rendered("(React as { createElement: (t: any) => symbol }).createElement"), 0);
-    // A component wrapper renders its argument by its name, whatever it returns.
-    assert_eq!(rendered("memo"), 1);
-}
-
 /// The components a `.tsx` source after `HEADER` publishes, by name, in order.
 fn names(source: &str) -> Vec<String> {
     tsx(source).iter().map(|m| m["component_name"].as_str().unwrap().to_owned()).collect()
-}
-
-/// Round 7, finding A: `any[]` is assignable to `ReactNode` (an iterable of `any`), so a namespace method asserted to
-/// return it is no evidence against `map`, and the callback's JSX is the function's result.
-#[test]
-fn a_map_asserted_to_return_any_array_still_renders_its_callback() {
-    let list = |map: &str| {
-        names(&format!(
-            "export const List = ({{ rows }}: {{ rows: string[] }}) => (rows as {{ map(render: (row: string) => \
-             React.ReactNode): {map} }}).map(row => <span>{{row}}</span>);"
-        ))
-    };
-    assert_eq!(list("any[]"), ["List"]);
-    assert_eq!(list("unknown[]"), ["List"]);
-    assert_eq!(list("object"), Vec::<String>::new());
 }
 
 /// Round 7, finding B: a wrapper whose callee is asserted to another signature has no declaration to read for the
@@ -5816,20 +5769,6 @@ fn an_asserted_wrapper_keeps_the_props_its_type_arguments_name() {
         Some(("PublicProps".to_owned(), None))
     );
     assert_eq!(mapping("(ui as { withContext(View: unknown): object }).withContext"), None);
-}
-
-/// Round 7, finding C: an object type is no evidence that a call gives no element, as React's own element is one
-/// (`{ type; props; key }`): only the closed list is.
-#[test]
-fn a_factory_asserted_to_an_element_shaped_object_still_renders() {
-    let div = |result: &str| {
-        names(&format!(
-            "export const Div = (props: Props) => (React as {{ createElement(tag: 'div'): {result} }}).createElement('div');"
-        ))
-    };
-    assert_eq!(div("{ type: string; props: {}; key: string | null }"), ["Div"]);
-    assert_eq!(div("{}"), ["Div"]);
-    assert_eq!(div("object"), Vec::<String>::new());
 }
 
 /// Review round 12: an `extends` target is constructed, so its construct signatures say what it gives; a callee is

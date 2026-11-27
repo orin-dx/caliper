@@ -127,45 +127,20 @@ pub(super) fn react_export(exported: &str) -> Option<&'static WellKnown> {
     })
 }
 
-/// The imports a bare element factory callee may be: React's factories and Preact's `h`.
-pub(super) const FACTORY_IMPORTS: &[&WellKnown] =
-    &[&CREATE_ELEMENT, &CLONE_ELEMENT, &JSX, &JSXS, &JSX_DEV, &CREATE_PORTAL, &H];
-
 /// Whether a callee is written through a wrapper origin/main did not read (`component::main_peel`): the `Peeled` gate
 /// every spelling-based match on a callee goes through.
 pub(super) fn beyond_main(callee: &Expression<'_>) -> bool {
     super::component::peeled_beyond_main(callee)
 }
 
-/// Whether a receiver is `entry`: written plainly, by its spelling as origin/main read it; through a wrapper, only when
-/// the name it is written with resolves to the entry ([`matches_well_known`]).
-///
-/// `beyond_main` says the whole callee was written through a wrapper origin/main did not read: then a bare receiver
-/// resolves too, so it is the entry in every combination of a peeled callee and a peeled receiver.
-pub(super) fn is_receiver(scope: &dyn Scope, object: &Expression<'_>, entry: &WellKnown, beyond_main: bool) -> bool {
-    match object {
-        Expression::Identifier(id) if !beyond_main => id.name == entry.name,
-        _ => matches!(super::component::beneath_resolved(object, scope),
-            Some(Expression::Identifier(id)) if matches_well_known(scope, id.name.as_str(), entry)),
-    }
+/// Whether a receiver is `entry`, by its spelling as written, as origin/main read it.
+pub(super) fn is_receiver(object: &Expression<'_>, entry: &WellKnown) -> bool {
+    matches!(object, Expression::Identifier(id) if id.name == entry.name)
 }
 
-/// The receiver name a member callee is matched with: written plainly, as origin/main read it; through a wrapper, only
-/// when it resolves to one of `entries`; `""` otherwise, as origin/main named a receiver it could not read.
-pub(super) fn receiver_among<'a>(
-    scope: &dyn Scope,
-    object: &Expression<'a>,
-    beyond_main: bool,
-    entries: &[&WellKnown],
-) -> &'a str {
-    match object {
-        Expression::Identifier(id) if !beyond_main => id.name.as_str(),
-        _ => match super::component::beneath_resolved(object, scope) {
-            Some(Expression::Identifier(id)) if matches_any(scope, id.name.as_str(), entries) => id.name.as_str(),
-            _ => "",
-        },
-    }
-}
+/// React's `forwardRef`, `memo` and `lazy`: the closed list a callee only a peel exposes is read for
+/// (`component::callee_of`), and only with the import that binds it.
+pub(super) const CLOSED_LIST: &[&WellKnown] = &[&FORWARD_REF, &MEMO, &LAZY];
 
 #[cfg(test)]
 mod tests {

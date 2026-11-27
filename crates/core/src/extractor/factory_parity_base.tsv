@@ -926,3 +926,51 @@ spelling: a helper returning JSX | plain	Button:Props"typedFunctionExpression" e
 spelling: a helper returning JSX | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 spelling: a helper returning createElement | plain	Button:Props"typedFunctionExpression" exported as Button
 spelling: a helper returning createElement | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+cut: a hook on a computed receiver (finding 1) | plain	Label:Props"typedFunctionExpression" exported as Label
+cut: a hook on a member chain | plain	Label:Props"typedFunctionExpression" exported as Label
+cut: a helper calling a hook and returning a symbol (finding 2) | plain	Button:Props"typedFunctionExpression" exported as Button
+cut: a helper calling a hook and returning a symbol (finding 2) | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+cut: a helper returning JSX | plain	Button:Props"typedFunctionExpression" exported as Button
+cut: a helper returning JSX | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+cut: a helper declared to return an element | plain	Button:Props"typedFunctionExpression" exported as Button
+cut: a helper declared to return an element | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+cut: forwardRef, bare, import above | plain	Button:Props"forwardRef" exported as Button
+cut: forwardRef, bare, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: forwardRef, member, import above | plain	Button:Props"forwardRef" exported as Button
+cut: forwardRef, member, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: forwardRef, bare, import below | plain	Button:Props"forwardRef" exported as Button
+cut: forwardRef, bare, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: forwardRef, member, import below | plain	Button:Props"forwardRef" exported as Button
+cut: forwardRef, member, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: memo, bare, import above | plain	Button:Props"hocWrapper" exported as Button
+cut: memo, bare, import above | peeled	Button:Props"hocWrapper" exported as Button
+cut: memo, member, import above | plain	Button:Props"hocWrapper" exported as Button
+cut: memo, member, import above | peeled	Button:Props"hocWrapper" exported as Button
+cut: memo, bare, import below | plain	Button:Props"hocWrapper" exported as Button
+cut: memo, bare, import below | peeled	Button:Props"hocWrapper" exported as Button
+cut: memo, member, import below | plain	Button:Props"hocWrapper" exported as Button
+cut: memo, member, import below | peeled	Button:Props"hocWrapper" exported as Button
+cut: lazy, bare, import above | plain	Button:lazy"factoryResult" exported as Button via lazy
+cut: lazy, bare, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: lazy, member, import above | plain	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: lazy, member, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: lazy, bare, import below | plain	Button:lazy"factoryResult" exported as Button via lazy
+cut: lazy, bare, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: lazy, member, import below | plain	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: lazy, member, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: createElement, bare, import above | plain	Button:Props"typedFunctionExpression" exported as Button
+cut: createElement, bare, import above | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+cut: createElement, member, import above | plain	Button:Props"typedFunctionExpression" exported as Button
+cut: createElement, member, import above | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+cut: createElement, bare, import below | plain	Button:Props"typedFunctionExpression" exported as Button
+cut: createElement, bare, import below | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+cut: createElement, member, import below (finding 3) | plain	Button:Props"typedFunctionExpression" exported as Button
+cut: createElement, member, import below (finding 3) | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+cut: createContext, bare, import above | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'createContext' that creates a context
+cut: createContext, bare, import above | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: createContext, member, import above | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'React.createContext' that creates a context
+cut: createContext, member, import above | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: createContext, bare, import below | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'createContext' that creates a context
+cut: createContext, bare, import below | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+cut: createContext, member, import below | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'React.createContext' that creates a context
+cut: createContext, member, import below | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)

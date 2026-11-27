@@ -26,22 +26,17 @@ pub(super) fn is_element_factory_name(name: &str, receiver: Option<&str>, scope:
     super::well_known::ELEMENT_FACTORIES.iter().any(|entry| entry.name == name)
 }
 
-/// Whether a call's peeled callee is an element factory: see [`is_element_factory_name`]. Written through a wrapper
-/// origin/main did not read (`beyond_main`), a bare callee must resolve to a factory import and a receiver to React's
-/// or Preact's (`well_known`).
-pub(super) fn is_element_factory_callee(callee: &Expression<'_>, beyond_main: bool, scope: &dyn Scope) -> bool {
-    use super::well_known::{FACTORY_IMPORTS, PREACT, REACT, matches_any, receiver_among};
+/// Whether a callee, read as written as origin/main read it, is an element factory: a bare factory name, or one on a
+/// receiver named as written (`""` for a receiver that is no name).
+pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Scope) -> bool {
     match callee {
-        Expression::Identifier(id) => {
-            (!beyond_main || matches_any(scope, id.name.as_str(), FACTORY_IMPORTS))
-                && is_element_factory_name(id.name.as_str(), None, scope)
-        }
+        Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), None, scope),
         Expression::StaticMemberExpression(m) => {
-            let receiver = receiver_among(scope, &m.object, beyond_main, &[&REACT, &PREACT]);
-            // A member callee read only through a wrapper names a factory only on a receiver that resolves to React's or
-            // Preact's: `(codec.createElement as …)` is `codec`'s. Read plainly, by name, as origin/main read it.
-            (!beyond_main || !receiver.is_empty())
-                && is_element_factory_name(m.property.name.as_str(), Some(receiver), scope)
+            let receiver = match &m.object {
+                Expression::Identifier(object) => object.name.as_str(),
+                _ => "",
+            };
+            is_element_factory_name(m.property.name.as_str(), Some(receiver), scope)
         }
         _ => false,
     }
@@ -56,15 +51,8 @@ pub(super) type ReactBinding<'f> = &'f dyn Scope;
 pub(super) trait Scope {
     /// Whether a type name can be React's: see [`ReactBinding`].
     fn may_be_react(&self, name: &str) -> bool;
-    /// Whether a PascalCase call counts as an element by its spelling (`returns_element`). Off while the module-level
-    /// render table is built (`element_helpers`): an entry holds only structural evidence, never a spelling.
-    fn credits_spelling(&self) -> bool {
-        true
-    }
     /// Whether a call to this name returns an element: a same-file function declared to return one.
     fn is_element_helper(&self, name: &str) -> bool;
-    /// Whether this module-level function renders by its own declaration or body: see `element_helpers`.
-    fn renders_when_called(&self, name: &str) -> bool;
     /// Whether the call is React's `memo(…)` or `forwardRef(…)`, by where its callee was imported from.
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool;
     /// Whether `h` called bare (`receiver` is `None`) or on `receiver` (`Preact.h`) is Preact's, by where it was
@@ -114,34 +102,12 @@ pub(super) fn type_renders(ty: &TSType<'_>, react: ReactBinding<'_>) -> bool {
     }
 }
 
-/// A callee's name as it is written: a bare identifier, or a member's property. A table keyed by a module-level name
-/// (`Scope::renders_when_called`, the element helpers) is looked up only with a `Bare` one: `codec.MakeToken` is not
-/// the file's own `MakeToken`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Callee<'n> {
-    Bare(&'n str),
-    Member(&'n str),
-}
-
-impl<'n> Callee<'n> {
-    fn of(callee: &'n Expression<'_>) -> Option<Self> {
-        match callee {
-            Expression::Identifier(id) => Some(Self::Bare(id.name.as_str())),
-            Expression::StaticMemberExpression(m) => Some(Self::Member(m.property.name.as_str())),
-            _ => None,
-        }
-    }
-
-    /// The name alone, for a convention read by spelling (`map`, a hook, a PascalCase call main read as written).
-    fn name(self) -> &'n str {
-        match self {
-            Self::Bare(name) | Self::Member(name) => name,
-        }
-    }
-}
-
 fn callee_name<'n>(callee: &'n Expression<'_>) -> Option<&'n str> {
-    Callee::of(callee).map(Callee::name)
+    match callee {
+        Expression::Identifier(id) => Some(id.name.as_str()),
+        Expression::StaticMemberExpression(m) => Some(m.property.name.as_str()),
+        _ => None,
+    }
 }
 
 fn is_hook_name(name: &str) -> bool {
@@ -174,26 +140,18 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        // The call's result is part of the value, and it is an element only while no assertion says it is no element
-        // (`(createElement as (t: any) => string)(…)`).
-        let callee = super::component::callee_of(it, self.scope);
-        // origin/main read this callee as written, so any wrapper above it is beyond main here.
-        let beyond_main = !matches!(&it.callee, Expression::Identifier(_) | Expression::StaticMemberExpression(_));
-        // A collection method (`items.map(…)`) is read as written; through a wrapper, only on a value known to be a
-        // collection, an array literal (`([1].map as …)(…)`). A bare local function called `map` is no collection method.
-        let collection = matches!(callee, Some(Expression::StaticMemberExpression(member))
-            if matches!(&member.object, Expression::ArrayExpression(_)));
-        let name = callee.filter(|_| !beyond_main || collection).and_then(callee_name);
-        // A helper declared to return an element, through a wrapper, only when the name means that one declaration: a
-        // destructured parameter of the same name is a second one.
-        let calls_helper = matches!(callee, Some(Expression::Identifier(id))
-            if self.scope.is_element_helper(&id.name) && (!beyond_main || self.scope.declarations(&id.name) == 1));
-        if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, beyond_main, self.scope)) {
+        // The callee as origin/main read it, as written: a callee only a peel exposes is no evidence (the closed list,
+        // React's `forwardRef`, `memo` and `lazy`, makes components, not elements).
+        let callee = Some(&it.callee)
+            .filter(|callee| matches!(callee, Expression::Identifier(_) | Expression::StaticMemberExpression(_)));
+        let name = callee.and_then(callee_name);
+        let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
+        if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, self.scope)) {
             self.found = true;
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
             || matches!(callee, Some(Expression::StaticMemberExpression(member))
-                if super::well_known::is_receiver(self.scope, &member.object, &super::well_known::PROMISE, beyond_main)
+                if super::well_known::is_receiver(&member.object, &super::well_known::PROMISE)
                     && matches!(member.property.name.as_str(), "resolve" | "all"))
         {
             walk::walk_call_expression(self, it);
@@ -218,20 +176,8 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         // Rendering nothing is a valid render.
         Expression::NullLiteral(_) => true,
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
-        // A component invoked directly: `return JoinList({ ... })`, by its spelling, for a callee written as origin/main
-        // read it. A callee only a peel exposes (`(MakeToken as typeof MakeToken)()`) needs the evidence any call
-        // needs: a name declared once whose own declaration or body renders (`Scope::renders_when_called`).
-        Expression::CallExpression(call)
-            if scope.credits_spelling() && callee_name(&call.callee).is_some_and(super::is_pascal_case) =>
-        {
-            true
-        }
-        Expression::CallExpression(call)
-            if matches!(super::component::called(call).as_plain().and_then(Callee::of), Some(Callee::Bare(name))
-                if super::is_pascal_case(name) && scope.declarations(name) == 1 && scope.renders_when_called(name)) =>
-        {
-            true
-        }
+        // A component invoked directly: `return JoinList({ ... })`.
+        Expression::CallExpression(call) if callee_name(&call.callee).is_some_and(super::is_pascal_case) => true,
         e if is_children(e) => true,
         e => value_has_element(e, scope),
     }
@@ -276,11 +222,7 @@ impl<'a> Visit<'a> for OwnBody<'_> {
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         // Calling a hook is the evidence, whatever an assertion says the hook returns.
-        if self.nested == 0
-            && super::component::beneath_resolved(&it.callee, self.scope)
-                .and_then(callee_name)
-                .is_some_and(is_hook_name)
-        {
+        if self.nested == 0 && callee_name(&it.callee).is_some_and(is_hook_name) {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);
@@ -365,11 +307,7 @@ pub(super) fn renders(shape: &FunctionShape<'_, '_>, react: ReactBinding<'_>) ->
 /// Names of module-level functions whose declared return type is an element, which makes a call to them element
 /// evidence: `renderByProp(render, props, <button />)` with `renderByProp(...): React.ReactElement`. Judged on the
 /// declaration alone, so a helper that returns something else without saying so is not counted.
-///
-/// The second set is the module-level functions that render by their own declaration or body (`renders`): the
-/// evidence a call only a peel exposes needs (`returns_element`), where a spelling alone sufficed for a callee origin/main
-/// read as written.
-pub(super) fn element_helpers(program: &Program<'_>) -> (FxHashSet<String>, FxHashSet<String>) {
+pub(super) fn element_helpers(program: &Program<'_>) -> FxHashSet<String> {
     let mut foreign = FxHashSet::default();
     for stmt in &program.body {
         if let Statement::ImportDeclaration(import) = stmt
@@ -428,33 +366,7 @@ pub(super) fn element_helpers(program: &Program<'_>) -> (FxHashSet<String>, FxHa
             _ => {}
         }
     }
-    let mut rendering = FxHashSet::default();
-    for statement in &program.body {
-        match statement.as_declaration() {
-            Some(Declaration::FunctionDeclaration(f)) => {
-                if let Some(id) = &f.id
-                    && renders(&FunctionShape::of_function(f), &react).is_ok()
-                {
-                    rendering.insert(id.name.to_string());
-                }
-            }
-            Some(Declaration::VariableDeclaration(variables)) => {
-                for declarator in &variables.declarations {
-                    let BindingPattern::BindingIdentifier(id) = &declarator.id else { continue };
-                    let shape = match declarator.init.as_ref().map(Expression::without_parentheses) {
-                        Some(Expression::ArrowFunctionExpression(f)) => FunctionShape::of_arrow(f),
-                        Some(Expression::FunctionExpression(f)) => FunctionShape::of_function(f),
-                        _ => continue,
-                    };
-                    if renders(&shape, &react).is_ok() {
-                        rendering.insert(id.name.to_string());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    (helpers, rendering)
+    helpers
 }
 
 /// The imports that are not React's, seen before the file is walked.
@@ -463,10 +375,6 @@ struct Foreign<'f>(&'f FxHashSet<String>);
 impl Scope for Foreign<'_> {
     fn may_be_react(&self, name: &str) -> bool {
         !self.0.contains(name)
-    }
-
-    fn credits_spelling(&self) -> bool {
-        false
     }
 
     fn is_preact_h(&self, _receiver: Option<&str>) -> bool {
@@ -482,10 +390,6 @@ impl Scope for Foreign<'_> {
     }
 
     fn is_element_helper(&self, _name: &str) -> bool {
-        false
-    }
-
-    fn renders_when_called(&self, _name: &str) -> bool {
         false
     }
 

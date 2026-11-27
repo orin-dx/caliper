@@ -67,16 +67,6 @@ impl<'b, 'a> Peeled<'b, 'a> {
         (self.names() && scope.declarations(root) <= 1).then_some(self.expr)
     }
 
-    /// The value called, whatever the assertion says the call returns (`(Helper as H)(props)` calls `Helper`): as written
-    /// when origin/main read it, otherwise when its root name resolves, as [`Self::resolve`].
-    pub(super) fn resolve_called(&self, scope: &dyn Scope) -> Option<&'b Expression<'a>> {
-        if std::ptr::eq(super::component::main_read(self.original), self.expr) {
-            return Some(self.expr);
-        }
-        let root = super::component::chain_root(self.expr)?;
-        (scope.declarations(root) <= 1).then_some(self.expr)
-    }
-
     /// Whether the expression is the dotted chain `chain` (a `typeof` alias's query): a comparison, not a spelling read.
     pub(super) fn is_chain(&self, chain: &str) -> bool {
         super::component::chain_names(chain, self.expr)
@@ -142,16 +132,8 @@ pub(super) fn value_name(expr: &Expression<'_>, bindings: &Bindings) -> Option<N
 mod tests {
     /// The methods `Peeled` exposes. Only `as_plain` and `resolve` hand out the peeled expression, each behind its check;
     /// a new method fails here until it is reviewed.
-    const METHODS: &[&str] = &[
-        "new",
-        "evidence",
-        "type_arguments",
-        "with_type_arguments",
-        "as_plain",
-        "resolve",
-        "resolve_called",
-        "is_chain",
-    ];
+    const METHODS: &[&str] =
+        &["new", "evidence", "type_arguments", "with_type_arguments", "as_plain", "resolve", "is_chain"];
 
     /// No module outside this one peels a value itself: `read_value` and `value_name` are the value peel, and only the
     /// peel machinery in `component.rs` reads beneath a callee's wrappers.

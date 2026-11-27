@@ -515,7 +515,7 @@ impl<'src> SourceDataCollector<'src> {
         if matches!(peeled.evidence(), super::component::Evidence::NotRenderable) {
             return false;
         }
-        let Some(Expression::Identifier(callee)) = peeled.resolve(&*self) else { return false };
+        let Some(Expression::Identifier(callee)) = super::component::callee_of(call, &*self) else { return false };
         // A callee main's factory rule did not read is looked up by its bare name, so only when the binding pass vouches
         // for it (`names::Named`).
         let recognition = super::component::Recognition::of_factory_callee(call);
