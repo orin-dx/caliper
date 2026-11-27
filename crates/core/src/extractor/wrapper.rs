@@ -511,7 +511,11 @@ impl<'src> SourceDataCollector<'src> {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let peeled = super::component::called(call);
-        let Expression::Identifier(callee) = peeled.expr else { return false };
+        // Through any wrapper, the assertion's evidence is read; the callee itself only where it resolves.
+        if matches!(peeled.evidence(), super::component::Evidence::NotRenderable) {
+            return false;
+        }
+        let Some(Expression::Identifier(callee)) = peeled.resolve(&*self) else { return false };
         // A callee main's factory rule did not read is looked up by its bare name, so only when the binding pass vouches
         // for it (`names::Named`).
         let recognition = super::component::Recognition::of_factory_callee(call);
@@ -524,7 +528,7 @@ impl<'src> SourceDataCollector<'src> {
         }
         // A cast that says the call gives no component (`NotRenderable`, the closed list) declines it; any other is
         // read through to the callee, as main read it.
-        if matches!(peeled.evidence, super::component::Evidence::NotRenderable) {
+        if matches!(peeled.evidence(), super::component::Evidence::NotRenderable) {
             return false;
         }
         let type_args = super::component::call_type_arguments(call)

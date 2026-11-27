@@ -340,6 +340,14 @@ UniqueName: Object written through an unknown key | plain	Base:Props"functionDec
 UniqueName: Object written through an unknown key | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
 UniqueName: another Object member written | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
 UniqueName: another Object member written | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+sealed: a wrapped mutator writes Object assign (finding 2) | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+sealed: a wrapped mutator writes Object assign (finding 2) | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+sealed: a new prototype for Object | plain	Base:Props"functionDeclaration" | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+sealed: a new prototype for Object | peeled	Base:Props"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+sealed: a factory on another module's receiver (finding 5) | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
+sealed: a factory on another module's receiver (finding 5) | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+sealed: a factory on React's receiver | plain	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
+sealed: a factory on React's receiver | peeled	Base:Props"functionDeclaration" | Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
 finding: a require's member	Base:Props"functionDeclaration" | Button:Props"typedFunctionExpression" exported as Button
 finding: a named import's member from a relative module	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via toolkit.createElement
 an element built from forwardRef, plain	Button:Props"forwardRef" exported as Button
@@ -373,3 +381,15 @@ UniqueName: an identifier alias declared once | plain	PublicRoot:Props"functionD
 UniqueName: an identifier alias declared once | peeled	Info SkippedCandidate: 'PublicRoot' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Root:Props"functionDeclaration" exported as Root
 UniqueName: an identifier alias shadowed by a namespace local (finding 3) | plain	Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | PublicRoot:Props"functionDeclaration" exported as PublicRoot | Root:Props"functionDeclaration" exported as Root
 UniqueName: an identifier alias shadowed by a namespace local (finding 3) | peeled	Info SkippedCandidate: 'PublicRoot' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Root:Props"functionDeclaration" exported as Root
+sealed: a member assigned through an assertion, a parameter of its name (finding 1) | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+sealed: a member assigned through an assertion, a parameter of its name (finding 1) | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+sealed: a member assigned through an assertion, declared once | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+sealed: a member assigned through an assertion, declared once | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+sealed: a wrapper named by convention, a local of its name (finding 3) | plain	PublicRoot:Props"functionDeclaration" exported as PublicRoot | Root:Props"functionDeclaration" exported as Root
+sealed: a wrapper named by convention, a local of its name (finding 3) | peeled	Info SkippedCandidate: 'PublicRoot' passes component 'Root' to a call that does not look like a component wrapper | Root:Props"functionDeclaration" exported as Root
+sealed: a wrapper named by convention, React's import | plain	PublicRoot:Props"functionDeclaration" exported as PublicRoot | Root:Props"functionDeclaration" exported as Root
+sealed: a wrapper named by convention, React's import | peeled	Info SkippedCandidate: 'PublicRoot' passes component 'Root' to a call that does not look like a component wrapper | Root:Props"functionDeclaration" exported as Root
+sealed: a destructured import shadowed by a namespace local (finding 4) | plain	
+sealed: a destructured import shadowed by a namespace local (finding 4) | peeled	
+sealed: a destructured import declared once | plain	
+sealed: a destructured import declared once | peeled	

@@ -148,14 +148,18 @@ pub(super) fn assignment_write<'a>(target: &AssignmentTarget<'a>) -> Option<(&'a
 /// The writes a call makes to a member of a name: `Reflect.set(O, key, …)`, `Reflect.defineProperty(O, key, …)`,
 /// `Object.defineProperty(O, key, …)` and each key of `Object.defineProperties(O, { … })`.
 pub(super) fn call_writes<'a>(call: &CallExpression<'a>) -> Vec<(&'a str, Option<&'a str>)> {
-    let Expression::StaticMemberExpression(callee) = &call.callee else { return Vec::new() };
-    let Some(receiver) = object_name(&callee.object) else { return Vec::new() };
+    // The mutator and its target are read through every wrapper: a write behind one is still a write.
+    let through = super::component::written_through;
+    let Expression::StaticMemberExpression(callee) = through(&call.callee) else { return Vec::new() };
+    let Some(receiver) = object_name(through(&callee.object)) else { return Vec::new() };
     let argument = |index: usize| call.arguments.get(index).and_then(Argument::as_expression);
-    let Some(target) = argument(0).and_then(object_name) else { return Vec::new() };
+    let Some(target) = argument(0).map(through).and_then(object_name) else { return Vec::new() };
     let global = receiver == OBJECT.name || receiver == REFLECT.name;
     match callee.property.name.as_str() {
         "set" | "defineProperty" if global => vec![(target, argument(1).and_then(literal_key))],
-        "defineProperties" if receiver == OBJECT.name => match argument(1) {
+        // A new prototype may supply any member.
+        "setPrototypeOf" if global => vec![(target, None)],
+        "defineProperties" | "assign" if receiver == OBJECT.name => match argument(1).map(through) {
             Some(Expression::ObjectExpression(object)) => object
                 .properties
                 .iter()
@@ -197,7 +201,7 @@ fn literal_key<'a>(expr: &Expression<'a>) -> Option<&'a str> {
 /// Whether a callee is written through a wrapper origin/main did not read (`component::main_peel`): the `Peeled` gate
 /// every spelling-based match on a callee goes through.
 pub(super) fn beyond_main(callee: &Expression<'_>) -> bool {
-    !matches!(super::component::main_peel(callee), Expression::Identifier(_) | Expression::StaticMemberExpression(_))
+    super::component::peeled_beyond_main(callee)
 }
 
 /// Whether a receiver is `entry`: written plainly, by its spelling as origin/main read it; through a wrapper, only when
@@ -205,8 +209,8 @@ pub(super) fn beyond_main(callee: &Expression<'_>) -> bool {
 pub(super) fn is_receiver(scope: &dyn Scope, object: &Expression<'_>, entry: &WellKnown) -> bool {
     match object {
         Expression::Identifier(id) => id.name == entry.name,
-        _ => matches!(super::component::beneath(object),
-            Expression::Identifier(id) if matches_well_known(scope, id.name.as_str(), entry)),
+        _ => matches!(super::component::beneath_resolved(object, scope),
+            Some(Expression::Identifier(id)) if matches_well_known(scope, id.name.as_str(), entry)),
     }
 }
 
@@ -220,8 +224,8 @@ pub(super) fn receiver_among<'a>(
 ) -> &'a str {
     match object {
         Expression::Identifier(id) if !beyond_main => id.name.as_str(),
-        _ => match super::component::beneath(object) {
-            Expression::Identifier(id) if matches_any(scope, id.name.as_str(), entries) => id.name.as_str(),
+        _ => match super::component::beneath_resolved(object, scope) {
+            Some(Expression::Identifier(id)) if matches_any(scope, id.name.as_str(), entries) => id.name.as_str(),
             _ => "",
         },
     }

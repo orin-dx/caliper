@@ -458,7 +458,7 @@ impl<'src> SourceDataCollector<'src> {
             Expression::CallExpression(call) => {
                 // `Root.Item = memo(...)` is a component this scan cannot read; any other call (`createContext`)
                 // is not a component, so it is not reported.
-                let wrapper = match super::component::callee_of(call) {
+                let wrapper = match super::component::callee_of(call, &*self) {
                     Some(Expression::Identifier(id)) => id.name.as_str(),
                     Some(Expression::StaticMemberExpression(member)) => member.property.name.as_str(),
                     _ => return,

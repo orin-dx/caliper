@@ -35,6 +35,7 @@ mod interface;
 mod js_text;
 mod jsdoc;
 mod names;
+mod peeled;
 mod reexports;
 mod uses;
 mod values;
@@ -745,7 +746,7 @@ impl<'src> SourceDataCollector<'src> {
         let import_of = |local: &str| self.data.imports.iter().find(|import| import.local_name.as_str() == local);
         // A callee written through a wrapper origin/main did not read matches React only through the table.
         let beyond_main = well_known::beyond_main(&call.callee);
-        match component::callee_of(call)? {
+        match component::callee_of(call, self)? {
             Expression::Identifier(id) => match import_of(id.name.as_str()) {
                 Some(import) if is_react_module(&import.specifier) => {
                     let api = ReactApi::of_export(import.exported_name.as_str())?;
@@ -764,7 +765,7 @@ impl<'src> SourceDataCollector<'src> {
                 // not read (`component::main_peel`), only when the name resolves to React's import (`well_known`).
                 let object = match component::main_peel(&member.object) {
                     Expression::Identifier(object) if !beyond_main => object,
-                    _ => match component::beneath(&member.object) {
+                    _ => match component::beneath_resolved(&member.object, self)? {
                         Expression::Identifier(object)
                             if well_known::matches_well_known(self, object.name.as_str(), &well_known::REACT) =>
                         {
@@ -1358,7 +1359,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn receiver_identifier(&self, object: &Expression<'_>) -> Option<names::Named> {
         match object {
             Expression::Identifier(id) => Some(names::Named::Plain(id.name.as_str().into())),
-            _ => match component::beneath(object) {
+            _ => match component::beneath_resolved(object, self)? {
                 Expression::Identifier(id) => self.bindings.unique(id.name.as_str()).map(names::Named::Peeled),
                 _ => None,
             },

@@ -2444,6 +2444,39 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "UniqueName: another Object member written | peeled",
             "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject['keys'] = Object.keys;\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
         ),
+        // Round 36: names a sealed peel reads, behind a cast.
+        (
+            "sealed: a wrapped mutator writes Object assign (finding 2) | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.defineProperty as typeof Object.defineProperty)(Object, 'assign', { value: (target: unknown) => target });\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "sealed: a wrapped mutator writes Object assign (finding 2) | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\n(Object.defineProperty as typeof Object.defineProperty)(Object, 'assign', { value: (target: unknown) => target });\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "sealed: a new prototype for Object | plain",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.setPrototypeOf(Object, null);\nObject.assign(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "sealed: a new prototype for Object | peeled",
+            "interface ItemProps { tone?: string }\nexport function Root(props: Props) { return <div />; }\nObject.setPrototypeOf(Object, null);\n(Object.assign as typeof Object.assign)(Root, { Item: (p: ItemProps) => <div /> });",
+        ),
+        (
+            "sealed: a factory on another module's receiver (finding 5) | plain",
+            "import * as codec from './codec';\nexport const Button = (props: Props) => codec.createElement('button');",
+        ),
+        (
+            "sealed: a factory on another module's receiver (finding 5) | peeled",
+            "import * as codec from './codec';\nexport const Button = (props: Props) => (codec.createElement as typeof codec.createElement)('button');",
+        ),
+        (
+            "sealed: a factory on React's receiver | plain",
+            "import * as R from 'react';\nexport const Button = (props: Props) => R.createElement('button');",
+        ),
+        (
+            "sealed: a factory on React's receiver | peeled",
+            "import * as R from 'react';\nexport const Button = (props: Props) => (R.createElement as typeof R.createElement)('button');",
+        ),
         (
             "finding: a require's member",
             "export const Button = (props: Props) => require('react').createElement('button');",
@@ -2583,6 +2616,55 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "UniqueName: an identifier alias shadowed by a namespace local (finding 3) | peeled".to_owned(),
         "// ts\nimport React from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nnamespace N { const Root = 123; export const PublicRoot = <typeof Root>Root; }".to_owned(),
     ));
+    // Round 36: names a sealed peel reads, behind a `<T>x` assertion.
+    cases.push((
+        "sealed: a member assigned through an assertion, a parameter of its name (finding 1) | plain".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return null; }\nfunction Item(props: ItemProps) { return null; }\nfunction configure(Item: number) { Root.Item = Item; }".to_owned(),
+    ));
+    cases.push((
+        "sealed: a member assigned through an assertion, a parameter of its name (finding 1) | peeled".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return null; }\nfunction Item(props: ItemProps) { return null; }\nfunction configure(Item: number) { Root.Item = <number>Item; }".to_owned(),
+    ));
+    cases.push((
+        "sealed: a member assigned through an assertion, declared once | plain".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return null; }\nfunction Item(props: ItemProps) { return null; }\nRoot.Item = Item;".to_owned(),
+    ));
+    cases.push((
+        "sealed: a member assigned through an assertion, declared once | peeled".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\ninterface ItemProps { tone?: string }\nexport function Root(props: Props) { return null; }\nfunction Item(props: ItemProps) { return null; }\nRoot.Item = <typeof Item>Item;".to_owned(),
+    ));
+    cases.push((
+        "sealed: a wrapper named by convention, a local of its name (finding 3) | plain".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nconst memo = (_: typeof Root) => Symbol();\nexport const PublicRoot = memo(Root);".to_owned(),
+    ));
+    cases.push((
+        "sealed: a wrapper named by convention, a local of its name (finding 3) | peeled".to_owned(),
+        "// ts\nimport React from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nconst memo = (_: typeof Root) => Symbol();\nexport const PublicRoot = (<typeof memo>memo)(Root);".to_owned(),
+    ));
+    cases.push((
+        "sealed: a wrapper named by convention, React's import | plain".to_owned(),
+        "// ts\nimport { memo } from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nexport const PublicRoot = memo(Root);".to_owned(),
+    ));
+    cases.push((
+        "sealed: a wrapper named by convention, React's import | peeled".to_owned(),
+        "// ts\nimport { memo } from 'react';\ninterface Props { label?: string }\nexport function Root(props: Props) { return null; }\nexport const PublicRoot = (<typeof memo>memo)(Root);".to_owned(),
+    ));
+    cases.push((
+        "sealed: a destructured import shadowed by a namespace local (finding 4) | plain".to_owned(),
+        "// ts\nimport * as Ui from './ui';\nnamespace N { const Ui = { Button: 123 }; export const { Button: PublicButton } = Ui; }".to_owned(),
+    ));
+    cases.push((
+        "sealed: a destructured import shadowed by a namespace local (finding 4) | peeled".to_owned(),
+        "// ts\nimport * as Ui from './ui';\nnamespace N { const Ui = { Button: 123 }; export const { Button: PublicButton } = <typeof Ui>Ui; }".to_owned(),
+    ));
+    cases.push((
+        "sealed: a destructured import declared once | plain".to_owned(),
+        "// ts\nimport * as Ui from './ui';\nexport const { Button: PublicButton } = Ui;".to_owned(),
+    ));
+    cases.push((
+        "sealed: a destructured import declared once | peeled".to_owned(),
+        "// ts\nimport * as Ui from './ui';\nexport const { Button: PublicButton } = <typeof Ui>Ui;".to_owned(),
+    ));
     cases
 }
 
@@ -2696,7 +2778,12 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // (`every_well_known_entry_resolves_before_a_peeled_match`).
     // Round 34 adds two: a peeled `Object.assign` beside a write to another `Object` member, and an identifier alias behind
     // `<T>x` declared once (`a_peeled_candidate_relies_only_on_names_the_binding_pass_vouches_for`).
-    assert_eq!(read_as_the_plain_call, 66);
+    // Round 36 removes 28: an element factory written through a cast and bound to anything but React's or Preact's import
+    // (a destructuring, a `require`, a local function, a relative module, emotion's `jsx`) is read as origin/main read
+    // it, so it is no factory (`a_sealed_peel_reads_a_name_only_as_main_read_it_or_once_it_resolves`).
+    // Round 36 adds three back: a member assigned through `<T>x` declared once, a `memo` imported from React and a
+    // factory on React's receiver behind a cast.
+    assert_eq!(read_as_the_plain_call, 41);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -2756,6 +2843,36 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let peeled = format!("recognition: {row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 36: `peel`'s result is sealed (`peeled::Peeled`): a name beneath a wrapper is read only as origin/main read
+/// it (`as_plain`) or once its root resolves (`resolve`). A member assigned through an assertion, a mutator written
+/// through a cast, a wrapper named by convention, a destructured import and a factory's receiver each follow. Each plain
+/// form is origin/main's; each peeled form reads as the plain form where the name resolves, and as origin/main read it
+/// otherwise.
+#[test]
+fn a_sealed_peel_reads_a_name_only_as_main_read_it_or_once_it_resolves() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, resolves) in [
+        ("sealed: a member assigned through an assertion, a parameter of its name (finding 1)", false),
+        ("sealed: a member assigned through an assertion, declared once", true),
+        ("sealed: a wrapper named by convention, a local of its name (finding 3)", false),
+        ("sealed: a wrapper named by convention, React's import", true),
+        ("sealed: a destructured import shadowed by a namespace local (finding 4)", false),
+        ("sealed: a destructured import declared once", true),
+        ("sealed: a wrapped mutator writes Object assign (finding 2)", false),
+        ("sealed: a new prototype for Object", false),
+        ("sealed: a factory on another module's receiver (finding 5)", false),
+        ("sealed: a factory on React's receiver", true),
+    ] {
+        let plain = format!("{row} | plain");
+        let peeled = format!("{row} | peeled");
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if resolves { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
 }

@@ -38,7 +38,10 @@ pub(super) fn is_element_factory_callee(callee: &Expression<'_>, beyond_main: bo
         }
         Expression::StaticMemberExpression(m) => {
             let receiver = receiver_among(scope, &m.object, beyond_main, &[&REACT, &PREACT]);
-            is_element_factory_name(m.property.name.as_str(), Some(receiver), scope)
+            // A member callee read only through a wrapper names a factory only on a receiver that resolves to React's or
+            // Preact's: `(codec.createElement as …)` is `codec`'s. Read plainly, by name, as origin/main read it.
+            (!beyond_main || !receiver.is_empty())
+                && is_element_factory_name(m.property.name.as_str(), Some(receiver), scope)
         }
         _ => false,
     }
@@ -144,10 +147,11 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         // The call's result is part of the value, and it is an element only while no assertion says it is no element
         // (`(createElement as (t: any) => string)(…)`).
-        let callee = super::component::callee_of(it);
+        let callee = super::component::callee_of(it, self.scope);
         let name = callee.and_then(callee_name);
         let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
-        let beyond_main = super::well_known::beyond_main(&it.callee);
+        // origin/main read this callee as written, so any wrapper above it is beyond main here.
+        let beyond_main = !matches!(&it.callee, Expression::Identifier(_) | Expression::StaticMemberExpression(_));
         if calls_helper || callee.is_some_and(|callee| is_element_factory_callee(callee, beyond_main, self.scope)) {
             self.found = true;
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
@@ -181,7 +185,7 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         // A component invoked directly: `return JoinList({ ... })`. Its result is this function's, which may be a
         // string or a number, so only a cast to a result React cannot render declines it.
         Expression::CallExpression(call)
-            if super::component::callee_of(call).and_then(callee_name).is_some_and(super::is_pascal_case) =>
+            if super::component::called(call).as_plain().and_then(callee_name).is_some_and(super::is_pascal_case) =>
         {
             true
         }
@@ -229,7 +233,11 @@ impl<'a> Visit<'a> for OwnBody<'_> {
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         // Calling a hook is the evidence, whatever an assertion says the hook returns.
-        if self.nested == 0 && callee_name(super::component::beneath(&it.callee)).is_some_and(is_hook_name) {
+        if self.nested == 0
+            && super::component::beneath_resolved(&it.callee, self.scope)
+                .and_then(callee_name)
+                .is_some_and(is_hook_name)
+        {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);

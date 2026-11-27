@@ -102,6 +102,28 @@ pub(super) fn peel_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<
     }
 }
 
+/// Whether `expr` has a wrapper above it that origin/main's `peel_expr` did not read through (`main_peel`): a `<T>x`
+/// assertion or an instantiation. A comparison, not a read of what is beneath.
+pub(super) fn peeled_beyond_main(expr: &Expression<'_>) -> bool {
+    !std::ptr::eq(main_read(expr), beneath(expr))
+}
+
+/// What origin/main read beneath a callee's wrappers: `peel_expr`'s (`main_peel`), and an instantiation, whose type
+/// arguments OXC 0.158 moved onto the call so that main saw the bare callee.
+pub(super) fn main_read<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    let mut expr = main_peel(expr);
+    while let Expression::TSInstantiationExpression(inner) = expr {
+        expr = main_peel(&inner.expression);
+    }
+    expr
+}
+
+/// What a mutating call (`Object.defineProperty(…)`) or its target is, beneath every wrapper, for the write pass only:
+/// reading a write through any wrapper over-approximates the writes, which only declines more.
+pub(super) fn written_through<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    beneath(expr)
+}
+
 /// What the outermost assertion on a callee, or on the namespace it is read from, says about calling it. Only the
 /// outermost one counts: `(e as A) as B` has type `B` whatever `A` is. An assertion declines a candidate only on
 /// affirmative evidence ([`Evidence::NotRenderable`], which only [`never_renders`] gives); every other type leaves the
@@ -123,28 +145,7 @@ pub(super) enum Evidence<'b, 'a> {
     Unknown,
 }
 
-/// An expression beneath every wrapper, instantiations included, the type arguments an instantiation among them gave
-/// it, and what the outermost assertion says about calling it.
-#[derive(Clone, Copy)]
-pub(super) struct Peeled<'b, 'a> {
-    pub(super) expr: &'b Expression<'a>,
-    /// The outermost instantiation's type arguments, unless an assertion above it replaced its type: `(f<T>)` and
-    /// `(f<T>)!` give `T`; `(f<T> as G)` gives none, as the value then has type `G`.
-    pub(super) type_arguments: Option<&'b TSTypeParameterInstantiation<'a>>,
-    pub(super) evidence: Evidence<'b, 'a>,
-}
-
-impl<'b, 'a> Peeled<'b, 'a> {
-    /// `expr`, when what it is called still says what the call is (`forwardRef`, `memo`, `Object.assign`, a HOC, an
-    /// element factory, `map` over elements, a component invoked directly): always, unless the assertion gives the
-    /// call a result on [`never_renders`]'s closed list.
-    pub(super) fn named(&self) -> Option<&'b Expression<'a>> {
-        match self.evidence {
-            Evidence::NotRenderable => None,
-            Evidence::Identity | Evidence::Reference(_) | Evidence::Unknown => Some(self.expr),
-        }
-    }
-}
+pub(super) use super::peeled::Peeled;
 
 /// The value beneath `expr`'s wrappers, the outermost instantiation's type arguments when no assertion is above them,
 /// and the outermost assertion. One pass over the wrappers, so a chain of them costs its length.
@@ -189,6 +190,7 @@ pub(super) enum Signatures {
 /// 0.158 moved its type arguments onto them. A namespace a member is read from is never called itself: the member is
 /// read with the site's signatures, and only for that member.
 pub(super) fn peel<'a, 'b>(expr: &'b Expression<'a>, signatures: Signatures) -> Peeled<'b, 'a> {
+    let original = expr;
     let (expr, type_arguments, outermost) = layers(expr);
     let evidence = match (outermost, expr) {
         (Some(ty), _) => asserted(ty, expr, signatures),
@@ -201,7 +203,7 @@ pub(super) fn peel<'a, 'b>(expr: &'b Expression<'a>, signatures: Signatures) -> 
         },
         (None, _) => Evidence::Identity,
     };
-    Peeled { expr, type_arguments, evidence }
+    Peeled::new(original, expr, type_arguments, evidence)
 }
 
 /// The type a namespace has, as far as the assertions on it and on the namespaces it is read from say.
@@ -531,7 +533,7 @@ fn type_name_names(left: &TSTypeName<'_>, right: &IdentifierName<'_>, expr: &Exp
 }
 
 /// Whether a dotted chain (`createButton`, `React.forwardRef`) names `expr`, read through the namespaces' wrappers.
-fn chain_names(chain: &str, expr: &Expression<'_>) -> bool {
+pub(super) fn chain_names(chain: &str, expr: &Expression<'_>) -> bool {
     match (chain.rsplit_once('.'), expr) {
         (None, Expression::Identifier(id)) => id.name == chain,
         (Some((left, right)), Expression::StaticMemberExpression(member)) => {
@@ -810,14 +812,25 @@ pub(super) mod steps {
 /// A value read only for its name (the namespace a member is read from, a link of a heritage chain, a hook's callee),
 /// beneath every wrapper. No evidence is read: what calling or constructing `ns.member` gives is the member's evidence,
 /// which [`peel`] of the member reads from the namespace's assertion.
-pub(super) fn beneath<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+fn beneath<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
     layers(expr).0
+}
+
+/// [`beneath`] for a site outside the peel: the expression as written when it has no wrapper, origin/main's read;
+/// beneath its wrappers only when its root name resolves to the one declaration it can mean (`Scope::declarations` at
+/// most one), as [`Peeled::resolve`] reads a callee.
+pub(super) fn beneath_resolved<'a, 'b>(expr: &'b Expression<'a>, scope: &dyn Scope) -> Option<&'b Expression<'a>> {
+    if Recognition::of_name(expr) == Recognition::Plain {
+        return Some(expr);
+    }
+    let root = chain_root(expr)?;
+    (scope.declarations(root) <= 1).then(|| beneath(expr))
 }
 
 /// What a call invokes, when its name still describes the call: `(forwardRef as F)(…)` and `(forwardRef<R, P>)(…)`
 /// call `forwardRef`; `(Object as (v: object) => object)(…)` calls nothing by a name. See [`Peeled::named`].
-pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
-    called(call).named()
+pub(super) fn callee_of<'a, 'b>(call: &'b CallExpression<'a>, scope: &dyn Scope) -> Option<&'b Expression<'a>> {
+    called(call).resolve(scope)
 }
 
 /// A call's callee, peeled for its call signatures.
@@ -837,8 +850,7 @@ pub(super) fn call_type_arguments<'a, 'b>(
 /// on it is read for its construct signatures.
 pub(super) fn super_class<'a, 'b>(class: &'b Class<'a>) -> Option<Peeled<'b, 'a>> {
     let heritage = class.heritage.as_ref()?;
-    let peeled = peel(&heritage.expression, Signatures::Construct);
-    Some(Peeled { type_arguments: heritage.type_arguments.as_deref().or(peeled.type_arguments), ..peeled })
+    Some(peel(&heritage.expression, Signatures::Construct).with_type_arguments(heritage.type_arguments.as_deref()))
 }
 
 /// What a call wrapping an aliased component is, as read from the call before the component is known.
@@ -963,14 +975,14 @@ impl<'src> SourceDataCollector<'src> {
     /// else in type space ([`typeof_aliases`]). Any other assertion may hide what the declaration
     /// says (`(wrap as <T>(r: FC<T>) => FC<T>)<P>(…)` drops the props `wrap`'s result adds).
     pub(super) fn describes_call(&self, peeled: &Peeled<'_, '_>) -> bool {
-        match peeled.evidence {
+        match peeled.evidence() {
             Evidence::Identity => true,
             Evidence::Reference(reference) => {
                 let alias = match &reference.type_name {
                     TSTypeName::IdentifierReference(alias) => self.typeof_aliases.get(alias.name.as_str()),
                     TSTypeName::QualifiedName(_) | TSTypeName::ThisExpression(_) => None,
                 };
-                reference.type_arguments.is_none() && alias.is_some_and(|alias| chain_names(&alias.chain, peeled.expr))
+                reference.type_arguments.is_none() && alias.is_some_and(|alias| peeled.is_chain(&alias.chain))
             }
             Evidence::NotRenderable | Evidence::Unknown => false,
         }
@@ -1124,7 +1136,9 @@ impl<'src> SourceDataCollector<'src> {
         };
 
         // `(hoc as (c: unknown) => object)(…)`: the assertion says what the call returns, and it is no component.
-        callee_of(call)?;
+        if matches!(called(call).evidence(), Evidence::NotRenderable) {
+            return None;
+        }
         // First arg should be a function with a typed props param — or a forwardRef() call.
         let first_arg = call.arguments.first()?;
 
@@ -1437,7 +1451,7 @@ impl<'src> SourceDataCollector<'src> {
     /// (bare or `React.`-qualified). Returns the matched bare name for use in
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
-        let super_name = self.receiver_name(super_class(class)?.named()?);
+        let super_name = self.receiver_name(super_class(class)?.resolve(self)?);
         // A base main did not read is React's only when its root is no local declaration: a global, or an import.
         if Recognition::of_name(&class.heritage.as_ref()?.expression) == Recognition::Peeled && {
             let root = super_name.split('.').next()?;
@@ -1461,7 +1475,7 @@ impl<'src> SourceDataCollector<'src> {
     /// contract — callers decide whether and how to surface a diagnostic.
     pub(super) fn try_class_component<'a>(&mut self, class: &Class<'a>, name: &str) -> Option<ComponentMapping> {
         self.super_class_is_component_family(class)?;
-        let type_args = super_class(class)?.type_arguments?;
+        let type_args = super_class(class)?.type_arguments()?;
         let props_type = type_args.params.first()?;
         let (props_name, props_type_args) = self.extract_type_name_from_type(props_type)?;
         let (description, tags) = self.find_jsdoc_with_tags(class.span.start);
@@ -1594,7 +1608,7 @@ impl<'src> SourceDataCollector<'src> {
         // `Object.assign(Impl, { Item })` returns `Impl` itself with the statics attached.
         // An `Object.assign` returns its target only as `assign_roles` reads it: for a call main never read, a target
         // the file declares once, at module level. Otherwise the call is no wrapper, as origin/main judged it.
-        let wrapper = if is_object_assign_call(call) {
+        let wrapper = if is_object_assign_call(call, &*self) {
             self.assign_roles(call, false, None).is_some_and(|roles| {
                 roles.target.as_ref().map(super::names::Named::as_str) == Some(inner.as_str())
                     && roles.aliases.iter().any(|alias| alias.as_str() == inner.as_str())
@@ -1725,9 +1739,14 @@ impl<'src> SourceDataCollector<'src> {
         if !self.imported_names.contains(object.name.as_str()) {
             return;
         }
-        let recognition =
-            if matches!(main_peel(init), Expression::Identifier(_)) { Recognition::Plain } else { Recognition::Peeled };
-        let Some(object) = self.bindings.named(object.name.as_str(), recognition) else { return };
+        // Read only through a peel (`<typeof Ui>Ui`), the name must be the import itself: its one declaration.
+        let object = if matches!(main_peel(init), Expression::Identifier(_)) {
+            super::names::Named::plain(object.name.as_str())
+        } else {
+            let Some(_) = self.bindings.imported(object.name.as_str()) else { return };
+            let Some(object) = self.bindings.named(object.name.as_str(), Recognition::Peeled) else { return };
+            object
+        };
         for property in &pattern.properties {
             let PropertyKey::StaticIdentifier(key) = &property.key else { continue };
             let BindingPattern::BindingIdentifier(local) = &property.value else { continue };
@@ -1771,7 +1790,7 @@ impl<'src> SourceDataCollector<'src> {
         if self.react_api(call) == Some(ReactApi::ForwardRef) {
             return true;
         }
-        let name = match callee_of(call) {
+        let name = match callee_of(call, self) {
             Some(Expression::Identifier(id)) => id.name.as_str(),
             Some(Expression::StaticMemberExpression(member)) => member.property.name.as_str(),
             _ => return false,
@@ -1785,7 +1804,7 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Extract the callee name of a call expression (simple ident or member expr).
     pub(super) fn extract_callee_name<'a>(&self, call: &CallExpression<'a>) -> Option<String> {
-        match callee_of(call)? {
+        match callee_of(call, self)? {
             Expression::Identifier(id) => Some(id.name.as_str().to_owned()),
             Expression::StaticMemberExpression(me) => {
                 Some(format!("{}.{}", self.receiver_name(&me.object), me.property.name.as_str()))
@@ -1798,14 +1817,14 @@ impl<'src> SourceDataCollector<'src> {
 /// Whether a call wrapping a component returns a component: React's `memo` and `forwardRef` as the file binds them,
 /// or the ecosystem's conventions.
 pub(super) fn is_component_wrapper(scope: &dyn Scope, call: &CallExpression<'_>) -> bool {
-    scope.is_react_wrapper(call) || is_component_wrapper_call(call)
+    scope.is_react_wrapper(call) || is_component_wrapper_call(call, scope)
 }
 
 /// Whether a call returns the component it is given, so that what it is bound or exported as is that component: a
 /// component wrapper, or `Object.assign(Impl, { Item })`, which returns `Impl` with the statics attached. The one place
 /// that says which calls make an alias of a component; [`aliased_component`] says which argument it is.
 pub(super) fn is_component_alias_call(scope: &dyn Scope, call: &CallExpression<'_>) -> bool {
-    is_component_wrapper(scope, call) || is_object_assign_call(call)
+    is_component_wrapper(scope, call) || is_object_assign_call(call, scope)
 }
 
 /// The argument of a component alias call that is the component: the first.
@@ -1814,17 +1833,25 @@ pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<
 }
 
 /// Whether the call is `Object.assign(...)`.
-pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
-    matches!(callee_of(call), Some(Expression::StaticMemberExpression(callee))
+pub(super) fn is_object_assign_call(call: &CallExpression<'_>, scope: &dyn Scope) -> bool {
+    matches!(callee_of(call, scope), Some(Expression::StaticMemberExpression(callee))
         if callee.property.name == "assign" && super::well_known::is_named(beneath(&callee.object), &super::well_known::OBJECT))
 }
 
 /// Whether a call wrapping a component returns a component, by the ecosystem's conventions:
 /// `memo`, anything named like `forwardRef`, `withX(...)` higher-order components, `createXComponent(...)` factories,
 /// `observer`, and curried wrappers such as `connect(...)(Component)` or `styled(...)(Component)`.
-fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
-    // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`.
-    let callee = match callee_of(call) {
+fn is_component_wrapper_call(call: &CallExpression<'_>, scope: &dyn Scope) -> bool {
+    // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`. A callee origin/main could not
+    // read follows the naming convention only when its name resolves to an import: a local function named `memo` or
+    // `withX`, written through a wrapper, is no evidence (`Peeled::resolve` alone admits a unique local).
+    if super::well_known::beyond_main(&call.callee)
+        && !chain_root(&call.callee)
+            .is_some_and(|root| scope.declarations(root) == 1 && scope.import_of(root).is_some())
+    {
+        return false;
+    }
+    let callee = match callee_of(call, scope) {
         Some(Expression::Identifier(id)) => id.name.as_str(),
         Some(Expression::StaticMemberExpression(m)) => m.property.name.as_str(),
         Some(Expression::CallExpression(_)) => return true,

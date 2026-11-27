@@ -119,7 +119,7 @@ impl<'src> SourceDataCollector<'src> {
             return None;
         }
         // An `Object.assign` is its target only as `assign_roles` reads it.
-        if super::component::is_object_assign_call(call) {
+        if super::component::is_object_assign_call(call, self) {
             let roles = self.assign_roles(call, false, None)?;
             if let Some(target) = roles.target {
                 return roles.aliases.contains(&target).then_some(target);
@@ -199,7 +199,7 @@ impl<'src> SourceDataCollector<'src> {
         inline: bool,
         parent: Option<&super::names::Named>,
     ) -> Option<AssignRoles<'b, 'a>> {
-        if !super::component::is_object_assign_call(call) {
+        if !super::component::is_object_assign_call(call, self) {
             return None;
         }
         let recognition = super::component::Recognition::of_object_assign(call, inline);
@@ -289,8 +289,16 @@ impl<'src> SourceDataCollector<'src> {
         else {
             return;
         };
+        // The assigned value, read only through a wrapper origin/main did not read (`<number>Item`), only as the one
+        // declaration its name can mean.
+        let recognition = if matches!(super::component::main_peel(&assignment.right), Expression::Identifier(_)) {
+            super::component::Recognition::Plain
+        } else {
+            super::component::Recognition::Peeled
+        };
+        let Some(sub) = self.bindings.named(sub.name.as_str(), recognition) else { return };
         let parent = super::names::Named::plain(parent.name.as_str());
-        self.record_attached(Subject::local(sub.name.as_str()), &parent, target.property.name.as_str());
+        self.record_attached(Subject::local(sub.as_str()), &parent, target.property.name.as_str());
     }
 
     /// How the module exports each of its exported components: the exported locals under their export names, and any
@@ -337,13 +345,13 @@ impl<'src> SourceDataCollector<'src> {
         // A call is a use of the value called, whatever an assertion says it returns: `(Helper as H)(props)` calls
         // `Helper`.
         let peeled = super::component::called(call);
-        if let Expression::Identifier(callee) = peeled.expr {
+        if let Some(Expression::Identifier(callee)) = peeled.resolve_called(&*self) {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
         // An element factory asserted to give a string (`(createElement as (t: any) => string)(Foo)`) builds no
         // element of its argument.
         let renders_argument = super::component::is_component_wrapper(&*self, call)
-            || peeled.named().is_some_and(|callee| {
+            || peeled.resolve(&*self).is_some_and(|callee| {
                 super::evidence::is_element_factory_callee(callee, super::well_known::beyond_main(&call.callee), &*self)
             });
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
