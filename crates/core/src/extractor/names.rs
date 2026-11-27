@@ -1,5 +1,5 @@
 //! The names the per-file binding pass vouches for, as types. A candidate only a peel makes readable
-//! (`component::Recognition::Peeled`) relies on a bare name only through a [`UniqueName`], [`GlobalName`] or
+//! (`component::Recognition::Peeled`) relies on a bare name only through a [`UniqueName`] or
 //! [`ImportedName`], and nothing but [`Bindings`] makes one: a path that would skip the check does not compile.
 
 use compact_str::CompactString;
@@ -19,10 +19,6 @@ pub(crate) struct Bindings {
 /// A name the file declares exactly once: the one declaration a bare use of it can mean.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct UniqueName(CompactString);
-
-/// A name the file never declares: a global.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct GlobalName(CompactString);
 
 /// A name whose one declaration in the file is an import.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,11 +65,6 @@ impl Bindings {
     /// `name`, when the file declares it exactly once.
     pub(super) fn unique(&self, name: &str) -> Option<UniqueName> {
         (self.declarations(name) == 1).then(|| UniqueName(name.into()))
-    }
-
-    /// `name`, when the file never declares it.
-    pub(super) fn global(&self, name: &str) -> Option<GlobalName> {
-        (self.declarations(name) == 0).then(|| GlobalName(name.into()))
     }
 
     /// `name`, when its one declaration is an import.

@@ -388,9 +388,10 @@ impl<'src> SourceDataCollector<'src> {
         // A callee main did not read is looked up by its bare name (`resolver::callee`), so it is kept only when its
         // root can mean one declaration. A member callee's receiver is already read that way (`receiver_identifier`),
         // and named as main named it (`unknown.wrap`) otherwise.
-        if super::component::Recognition::of_name(&call.callee) == super::component::Recognition::Peeled
-            && !matches!(call.callee, Expression::StaticMemberExpression(_))
-            && !super::component::chain_root(&call.callee).is_some_and(|root| self.bindings.unique(root).is_some())
+        let written = super::component::unwrap_transparent(&call.callee);
+        if super::component::Recognition::of_name(written) == super::component::Recognition::Peeled
+            && !matches!(written, Expression::StaticMemberExpression(_))
+            && !super::component::chain_root(written).is_some_and(|root| self.bindings.unique(root).is_some())
         {
             return None;
         }

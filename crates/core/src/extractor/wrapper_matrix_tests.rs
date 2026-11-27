@@ -407,7 +407,25 @@ fn every_detection_form_extracts_the_same_component_through_every_wrapper() {
                 } else {
                     super::component::Signatures::Call
                 };
-                let expect = if source == plain { Expect::Same } else { callee.expect(signatures) };
+                // A base only a cast, `satisfies` or `!` exposes is not read since round 45's cut: a class form through one
+                // is no component, as origin/main read it.
+                let cut_base = form.name.contains("class")
+                    && source != plain
+                    && !matches!(
+                        callee,
+                        Callee::Plain
+                            | Callee::Parenthesized
+                            | Callee::InstantiationInParens
+                            | Callee::InstantiationInDoubleParens
+                            | Callee::ObjectParenthesized
+                    );
+                let expect = if source == plain {
+                    Expect::Same
+                } else if cut_base {
+                    Expect::Declined
+                } else {
+                    callee.expect(signatures)
+                };
                 let expected: Vec<serde_json::Value> = match expect {
                     Expect::Same => unwrapped.clone(),
                     Expect::SameWithoutCallee => unwrapped
@@ -1010,7 +1028,8 @@ fn a_namespace_read_for_its_name_has_no_evidence_of_its_own() {
     };
     let plain_class = class("React");
     assert_eq!(plain_class.len(), 1, "{plain_class:#?}");
-    assert_eq!(class(&shape.replace("{m}", "Component")), plain_class);
+    // A base through a cast is not read (round 46), whatever its shape.
+    assert_eq!(class(&shape.replace("{m}", "Component")), Vec::<serde_json::Value>::new());
     let assign = |receiver: &str| {
         names_of(&format!(
             "function Impl(props: Props) {{ return <div />; }}\n\
@@ -1204,20 +1223,14 @@ fn every_detection_main_did_not_make_is_an_identity_cast_or_a_known_react_wrappe
     }
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
     let summary: Vec<String> = by_reason.iter().map(|(reason, n)| format!("{reason} = {n}")).collect();
+    // Round 46 drops the class categories: a base only a cast exposes is read as main read it (not at all).
     // Round 45 drops the element factory categories: a factory callee only a cast exposes is read as main read it.
     // Round 43 drops every `Object.assign` category: an attachment only a peel exposes is not recorded, so each cast row
     // reads as main read it (`an_attachment_only_a_peel_exposes_is_not_recorded`).
     // Round 40 drops the PascalCase call's 8 identity casts and 93 casts read as main's plain call: the callee is the
     // global `Object`, which has no declaration that renders, so through a cast it is no element evidence and every cast
     // row reads as main read it (`a_peeled_part_relies_on_the_built_in_and_on_render_evidence`).
-    assert_eq!(
-        summary,
-        [
-            "closed list declines the wrapper, so the component it wraps is listed: wrapper call = 11",
-            "identity cast: class = 12",
-            "known React wrapper or API: class = 126",
-        ]
-    );
+    assert_eq!(summary, ["closed list declines the wrapper, so the component it wraps is listed: wrapper call = 11",]);
 }
 
 /// The forms built on React's own API, a class's `React.Component` base or `React.createElement` in a component's
@@ -4811,6 +4824,238 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "cut: createContext, member, import below | peeled".to_owned(),
         "// ts\nexport const ButtonContext = (<typeof React.createContext>React.createContext)<Props | null>(null);\nimport React from 'react';\nimport { createElement } from 'react';\n".to_owned(),
     ));
+    cases.push((
+        "instantiation: forwardRef, a bare callee | plain".to_owned(),
+        "import { forwardRef } from 'react';\nexport const Button = (forwardRef<HTMLButtonElement, Props>)((props, ref) => <div />);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: forwardRef, a member chain | plain".to_owned(),
+        "import * as R from 'react';\nexport const Button = (R.forwardRef<HTMLButtonElement, Props>)((props, ref) => <div />);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: memo, a bare callee | plain".to_owned(),
+        "import { memo } from 'react';\nexport const Button = (memo<Props>)((props: Props) => <div />);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: memo, a member chain | plain".to_owned(),
+        "import * as React from 'react';\nexport const Button = (React.memo<Props>)((props: Props) => <div />);"
+            .to_owned(),
+    ));
+    cases.push((
+        "instantiation: lazy, a bare callee | plain".to_owned(),
+        "import { lazy } from 'react';\nexport const Button = (lazy<typeof Impl>)(() => import('./Impl'));".to_owned(),
+    ));
+    cases.push((
+        "instantiation: createElement, a bare callee | plain".to_owned(),
+        "import { createElement } from 'react';\nexport const Button = (props: Props) => (createElement<Props>)('div');".to_owned(),
+    ));
+    cases.push((
+        "instantiation: createElement, a member chain | plain".to_owned(),
+        "import * as React from 'react';\nexport const Button = (props: Props) => (React.createElement<Props>)('div');"
+            .to_owned(),
+    ));
+    cases.push((
+        "instantiation: h, a bare callee | plain".to_owned(),
+        "import { h } from 'preact';\nexport const Button = (props: Props) => (h<Props>)('div');".to_owned(),
+    ));
+    cases.push((
+        "instantiation: cloneElement, a bare callee | plain".to_owned(),
+        "import { cloneElement } from 'react';\nexport const Button = (props: Props) => (cloneElement<Props>)(<div />);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: Object.assign, an inline member (finding 1) | plain".to_owned(),
+        "interface ItemProps { tone?: string }\ntype Members = {};\nexport function Root(props: Props) { return <div />; }\n(Object.assign<typeof Root, Members>)(Root, { Item: (p: ItemProps) => <span /> });".to_owned(),
+    ));
+    cases.push((
+        "instantiation: Object.assign, a declarator | plain".to_owned(),
+        "interface ItemProps { tone?: string }\nfunction Impl(props: Props) { return <div />; }\nexport const Root = (Object.assign<typeof Impl, {}>)(Impl, { Item: (p: ItemProps) => <span /> });".to_owned(),
+    ));
+    cases.push((
+        "instantiation: Object.assign, a default export | plain".to_owned(),
+        "function Impl(props: Props) { return <div />; }\nexport default (Object.assign<typeof Impl, {}>)(Impl, {});"
+            .to_owned(),
+    ));
+    cases.push((
+        "instantiation: Promise.resolve | plain".to_owned(),
+        "export const Button = (props: Props) => (Promise.resolve<JSX.Element>)(<div />);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: Array.isArray | plain".to_owned(),
+        "export const Button = (props: Props) => (Array.isArray<unknown>)(props) ? null : <div />;".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a map | plain".to_owned(),
+        "interface ListProps { items: string[] }\nexport const Button = (props: ListProps) => (props.items.map<JSX.Element>)((i) => <div />);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a helper (finding 2) | plain".to_owned(),
+        "import * as React from 'react';\nfunction makeElement<P>(): React.ReactElement { return <div />; }\nexport const Button = (props: Props) => { return (makeElement<Props>)(); };".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a factory call | plain".to_owned(),
+        "import * as React from 'react';\ndeclare function createButton<P>(): React.FC<P>;\nexport const Button = (createButton<Props>)();".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a hook | plain".to_owned(),
+        "declare function useLabel<T>(): void;\nexport const Label = (props: Props) => { (useLabel<Props>)(); return props.label; };".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a PascalCase call | plain".to_owned(),
+        "function Inner(props: Props) { return <div />; }\nexport const Button = (props: Props) => (Inner<Props>)(props);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a wrapper | plain".to_owned(),
+        "import * as React from 'react';\ndeclare function withTheme<P>(c: unknown): React.FC<P>;\nfunction Base(props: Props) { return <div />; }\nexport const Button = (withTheme<Props>)(Base);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a class base | plain".to_owned(),
+        "import { Component } from 'react';\nexport class Button extends (Component<Props>) { render() { return <div />; } }".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a member class base | plain".to_owned(),
+        "import * as React from 'react';\nexport class Button extends (React.Component<Props>) { render() { return <div />; } }".to_owned(),
+    ));
+    cases.push((
+        "instantiation: a tag | plain".to_owned(),
+        "function Foo<T>(p: T) { return <div />; }\nexport const Button = (props: Props) => <Foo<Props> {...props} />;"
+            .to_owned(),
+    ));
+    cases.push((
+        "instantiation: a default export | plain".to_owned(),
+        "import { memo } from 'react';\nfunction Impl(props: Props) { return <div />; }\nexport default (memo<Props>)(Impl);".to_owned(),
+    ));
+    cases.push((
+        "instantiation: an argument | plain".to_owned(),
+        "import { memo } from 'react';\nfunction Impl<T>(props: Props) { return <div />; }\nexport const Button = memo(Impl<Props>);".to_owned(),
+    ));
+    cases.push((
+        "bases: a cast Component base, import from react above | plain".to_owned(),
+        "import { Component } from 'react';\nexport class Button extends Component<Props> { render() { return <div />; } }".to_owned(),
+    ));
+    cases.push((
+        "bases: a cast Component base, import from react above | peeled".to_owned(),
+        "import { Component } from 'react';\nexport class Button extends (Component as typeof Component)<Props> { render() { return <div />; } }".to_owned(),
+    ));
+    cases.push((
+        "bases: a cast Component base, import from ./model above | plain".to_owned(),
+        "import { Component } from './model';\nexport class Button extends Component<Props> { render() { return <div />; } }".to_owned(),
+    ));
+    cases.push((
+        "bases: a cast Component base, import from ./model above | peeled".to_owned(),
+        "import { Component } from './model';\nexport class Button extends (Component as typeof Component)<Props> { render() { return <div />; } }".to_owned(),
+    ));
+    cases.push((
+        "bases: a cast Component base, import from react below | plain".to_owned(),
+        "export class Button extends Component<Props> { render() { return <div />; } }\nimport { Component } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "bases: a cast Component base, import from react below | peeled".to_owned(),
+        "export class Button extends (Component as typeof Component)<Props> { render() { return <div />; } }\nimport { Component } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "bases: a cast Component base, import from ./model below (finding 3) | plain".to_owned(),
+        "export class Button extends Component<Props> { render() { return <div />; } }\nimport { Component } from './model';\n".to_owned(),
+    ));
+    cases.push((
+        "bases: a cast Component base, import from ./model below (finding 3) | peeled".to_owned(),
+        "export class Button extends (Component as typeof Component)<Props> { render() { return <div />; } }\nimport { Component } from './model';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: namespace react, import above | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: namespace react, import above | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from 'react';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: namespace ./codec, import above | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from './codec';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: namespace ./codec, import above | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport * as R from './codec';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: default react, import above | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport R from 'react';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: default react, import above | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport R from 'react';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: default ./codec, import above | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport R from './codec';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: default ./codec, import above | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport R from './codec';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: named react, import above | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { forwardRef } from 'react';\nexport const Button = forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: named react, import above | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { forwardRef } from 'react';\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: named ./codec, import above | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { forwardRef } from './codec';\nexport const Button = forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: named ./codec, import above | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nimport { forwardRef } from './codec';\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));".to_owned(),
+    ));
+    cases.push((
+        "hoisted: namespace react, import below (finding 4) | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport * as R from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: namespace react, import below (finding 4) | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport * as R from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: namespace ./codec, import below | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport * as R from './codec';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: namespace ./codec, import below | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport * as R from './codec';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: default react, import below | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport R from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: default react, import below | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport R from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: default ./codec, import below | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = R.forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport R from './codec';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: default ./codec, import below | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (<typeof R.forwardRef>R.forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport R from './codec';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: named react, import below | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport { forwardRef } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: named react, import below | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport { forwardRef } from 'react';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: named ./codec, import below | plain".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = forwardRef<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport { forwardRef } from './codec';\n".to_owned(),
+    ));
+    cases.push((
+        "hoisted: named ./codec, import below | peeled".to_owned(),
+        "// ts\nimport { createElement } from 'react';\nexport const Button = (<typeof forwardRef>forwardRef)<HTMLButtonElement, Props>((props, ref) => createElement('div'));\nimport { forwardRef } from './codec';\n".to_owned(),
+    ));
     cases
 }
 
@@ -4917,7 +5162,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     assert!(failures.is_empty(), "{} rows:\n{}", failures.len(), failures.join("\n"));
     // The rows read as main's plain call: each a closed-list callee (React's `forwardRef`, `memo`, `lazy`) or a component
     // main did not read through a peel. Round 45 cut every other peeled callee (`a_peeled_callee_is_read_only_for_the_closed_list`).
-    assert_eq!(read_as_the_plain_call, 21);
+    // Round 46, net three more: the closed-list callees behind `<T>x` whose React import is written below, less the two
+    // heritage rows a cast base no longer reads (`an_instantiation_is_transparent_and_a_peeled_base_is_cut`).
+    assert_eq!(read_as_the_plain_call, 24);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -4963,8 +5210,8 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
     let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
     for (row, trusted) in [
         ("heritage, a local class (finding 1)", false),
-        ("heritage, an import declared once", true),
-        ("heritage, a global", true),
+        ("heritage, an import declared once", false),
+        ("heritage, a global", false),
         ("Object.assign member, declared twice (finding 2)", false),
         ("Object.assign member, declared once", false),
         ("Object.assign object behind as const, a shadowing local (finding 3)", false),
@@ -4977,6 +5224,49 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let peeled = format!("recognition: {row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 46: an instantiation is no peel. `(f<A>)(…)` is the form OXC 0.158 parsed as type arguments on the call, so at
+/// every site that reads a callee as written (the evidence walker, hooks, PascalCase calls, `Object.assign`, the call
+/// counts, a wrapper's callee) it is transparent, like parentheses (`component::unwrap_transparent`), and every
+/// `instantiation:` row equals origin/main exactly. A class base only a cast exposes is cut, read as main read it; and a
+/// closed-list member behind `<T>x` is React's by the hoisted import alone, wherever the import is written.
+#[test]
+fn an_instantiation_is_transparent_and_a_peeled_base_is_cut() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    let mut rows = 0;
+    for (id, source) in factory_parity_cases() {
+        if id.starts_with("instantiation: ") {
+            assert_eq!(factory_parity_output(&source), base[id.as_str()], "{id}");
+            rows += 1;
+        }
+    }
+    assert_eq!(rows, 25);
+    for (row, closed) in [
+        ("bases: a cast Component base, import from react above", false),
+        ("bases: a cast Component base, import from ./model above", false),
+        ("bases: a cast Component base, import from react below", false),
+        ("bases: a cast Component base, import from ./model below (finding 3)", false),
+        ("hoisted: namespace react, import above", true),
+        ("hoisted: namespace ./codec, import above", false),
+        ("hoisted: default react, import above", true),
+        ("hoisted: default ./codec, import above", false),
+        ("hoisted: named react, import above", true),
+        ("hoisted: named ./codec, import above", false),
+        ("hoisted: namespace react, import below (finding 4)", true),
+        ("hoisted: namespace ./codec, import below", false),
+        ("hoisted: default react, import below", true),
+        ("hoisted: default ./codec, import below", false),
+        ("hoisted: named react, import below", true),
+        ("hoisted: named ./codec, import below", false),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if closed { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
 }
@@ -5639,7 +5929,9 @@ fn every_receiver_read_through_a_cast_is_read_only_when_declared_once() {
             let cast = format!("receiver of a {consumer}, {shadow} | typeof itself");
             assert_eq!(now(&plain), base[plain.as_str()], "{plain}");
             // Declared once, the cast reads as the plain form; otherwise as origin/main read the cast.
-            let expected = if shadow == "declared once" { base[plain.as_str()] } else { base[cast.as_str()] };
+            // A heritage receiver through a cast is not read since round 46: as origin/main read the cast.
+            let reads = shadow == "declared once" && consumer != "heritage";
+            let expected = if reads { base[plain.as_str()] } else { base[cast.as_str()] };
             assert_eq!(now(&cast), expected, "{cast}");
         }
     }
@@ -5769,47 +6061,6 @@ fn an_asserted_wrapper_keeps_the_props_its_type_arguments_name() {
         Some(("PublicProps".to_owned(), None))
     );
     assert_eq!(mapping("(ui as { withContext(View: unknown): object }).withContext"), None);
-}
-
-/// Review round 12: an `extends` target is constructed, so its construct signatures say what it gives; a callee is
-/// called, so its call signatures do; a namespace member is read with the kind its site uses. A signature of the
-/// other kind is no evidence either way.
-#[test]
-fn a_heritage_reads_construct_signatures_and_a_call_reads_call_signatures() {
-    let class = |target: &str| {
-        tsx(&format!("export class Button extends {target}<Props> {{ render() {{ return <div />; }} }}"))
-    };
-    let plain_class = class("React.Component");
-    assert_eq!(plain_class.len(), 1, "{plain_class:#?}");
-    for target in [
-        "(React.Component as unknown as { new <P>(props: P): React.Component<P>; (): void })",
-        "(React.Component as unknown as new <P>(props: P) => React.Component<P>)",
-        "(React.Component as unknown as () => object)",
-        "(React as unknown as { Component: { new <P>(props: P): React.Component<P>; (): void } }).Component",
-        "(React as unknown as { Component(): void }).Component",
-    ] {
-        assert_eq!(class(target), plain_class, "{target}");
-    }
-    for target in [
-        "(React.Component as unknown as { new (props: unknown): object; (): React.FC<Props> })",
-        "(React.Component as unknown as new (props: unknown) => void)",
-        "(React as unknown as { Component: new (props: unknown) => symbol }).Component",
-    ] {
-        assert_eq!(class(target), Vec::<serde_json::Value>::new(), "{target}");
-    }
-    let call = |callee: &str| tsx(&format!("export const Button = {callee}((props: Props) => <div />);"));
-    let plain_call = call("memo");
-    assert_eq!(plain_call.len(), 1, "{plain_call:#?}");
-    for callee in [
-        "(memo as unknown as { new (c: unknown): object; (c: unknown): React.FC<Props> })",
-        "(memo as unknown as new (c: unknown) => object)",
-    ] {
-        assert_eq!(call(callee), plain_call, "{callee}");
-    }
-    assert_eq!(
-        call("(memo as unknown as { new (c: unknown): React.FC<Props>; (c: unknown): object })"),
-        Vec::<serde_json::Value>::new()
-    );
 }
 
 /// Round 13, finding 2: a `typeof` alias of a long dotted chain is named in one pass over its segments.

@@ -974,3 +974,60 @@ cut: createContext, bare, import below | plain	Info SkippedCandidate: 'ButtonCon
 cut: createContext, bare, import below | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 cut: createContext, member, import below | plain	Info SkippedCandidate: 'ButtonContext' is a generic call to 'React.createContext' that creates a context
 cut: createContext, member, import below | peeled	Info SkippedCandidate: 'ButtonContext' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+instantiation: forwardRef, a bare callee | plain	Button:Props"forwardRef" exported as Button
+instantiation: forwardRef, a member chain | plain	Button:Props"forwardRef" exported as Button
+instantiation: memo, a bare callee | plain	Button:Props"hocWrapper" exported as Button via memo
+instantiation: memo, a member chain | plain	Button:Props"hocWrapper" exported as Button via React.memo
+instantiation: lazy, a bare callee | plain	Button:lazy"factoryResult" exported as Button via lazy
+instantiation: createElement, a bare callee | plain	Button:Props"typedFunctionExpression" exported as Button
+instantiation: createElement, a member chain | plain	Button:Props"typedFunctionExpression" exported as Button
+instantiation: h, a bare callee | plain	Button:Props"typedFunctionExpression" exported as Button
+instantiation: cloneElement, a bare callee | plain	Button:Props"typedFunctionExpression" exported as Button
+instantiation: Object.assign, an inline member (finding 1) | plain	Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+instantiation: Object.assign, a declarator | plain	Impl:Props"functionDeclaration" exported as Root | Item:ItemProps"attachedSubComponent" exported as Root.Item | Root:__anon_1"wrapperTypeArgument" exported as Root via Object.assign
+instantiation: Object.assign, a default export | plain	Button:__anon_0"wrapperTypeArgument" exported as default via Object.assign | Impl:Props"functionDeclaration"
+instantiation: Promise.resolve | plain	Button:Props"typedFunctionExpression" exported as Button
+instantiation: Array.isArray | plain	Button:Props"typedFunctionExpression" exported as Button
+instantiation: a map | plain	Button:ListProps"typedFunctionExpression" exported as Button
+instantiation: a helper (finding 2) | plain	Button:Props"typedFunctionExpression" exported as Button
+instantiation: a factory call | plain	Button:createButton"factoryResult" exported as Button via createButton
+instantiation: a hook | plain	Label:Props"typedFunctionExpression" exported as Label
+instantiation: a PascalCase call | plain	Button:Props"typedFunctionExpression" exported as Button | Info SkippedCandidate: 'Inner' is only ever called as a function in this file, never rendered or passed on, so it is a helper, not a component
+instantiation: a wrapper | plain	Base:Props"functionDeclaration" | Button:Props"wrapperTypeArgument" exported as Button via withTheme
+instantiation: a class base | plain	Button:Props"classComponent" exported as Button
+instantiation: a member class base | plain	Button:Props"classComponent" exported as Button
+instantiation: a tag | plain	Button:Props"typedFunctionExpression" exported as Button | Foo:T"functionDeclaration"
+instantiation: a default export | plain	Button:Props"wrapperTypeArgument" exported as default via memo | Impl:Props"functionDeclaration"
+instantiation: an argument | plain	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+bases: a cast Component base, import from react above | plain	Button:Props"classComponent" exported as Button
+bases: a cast Component base, import from react above | peeled	
+bases: a cast Component base, import from ./model above | plain	
+bases: a cast Component base, import from ./model above | peeled	
+bases: a cast Component base, import from react below | plain	Button:Props"classComponent" exported as Button
+bases: a cast Component base, import from react below | peeled	
+bases: a cast Component base, import from ./model below (finding 3) | plain	Button:Props"classComponent" exported as Button
+bases: a cast Component base, import from ./model below (finding 3) | peeled	
+hoisted: namespace react, import above | plain	Button:Props"forwardRef" exported as Button
+hoisted: namespace react, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: namespace ./codec, import above | plain	Button:Props"forwardRef" exported as Button
+hoisted: namespace ./codec, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: default react, import above | plain	Button:Props"forwardRef" exported as Button
+hoisted: default react, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: default ./codec, import above | plain	Button:Props"forwardRef" exported as Button
+hoisted: default ./codec, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: named react, import above | plain	Button:Props"forwardRef" exported as Button
+hoisted: named react, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: named ./codec, import above | plain	Button:Props"forwardRef" exported as Button
+hoisted: named ./codec, import above | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: namespace react, import below (finding 4) | plain	Button:Props"forwardRef" exported as Button
+hoisted: namespace react, import below (finding 4) | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: namespace ./codec, import below | plain	Button:Props"forwardRef" exported as Button
+hoisted: namespace ./codec, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: default react, import below | plain	Button:Props"forwardRef" exported as Button
+hoisted: default react, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: default ./codec, import below | plain	Button:Props"forwardRef" exported as Button
+hoisted: default ./codec, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: named react, import below | plain	Button:Props"forwardRef" exported as Button
+hoisted: named react, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
+hoisted: named ./codec, import below | plain	Button:Props"forwardRef" exported as Button
+hoisted: named ./codec, import below | peeled	Info SkippedCandidate: 'Button' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)

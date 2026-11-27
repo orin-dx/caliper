@@ -3,14 +3,14 @@ cargo/caliper-docgen: patch
 npm/caliper-docgen: patch
 ---
 
-**A component is found when its `forwardRef`, `memo` or base class is wrapped in parentheses, a cast or type arguments.** `export const Button = (React.forwardRef<HTMLButtonElement, Props>)((props, ref) => …)` and `class Button extends (React.Component<Props>) {}` list their props, where they were skipped.
+**A component is found when its `forwardRef` or `memo` is wrapped in parentheses, a cast or type arguments, or its base class in parentheses or type arguments.** `export const Button = (React.forwardRef<HTMLButtonElement, Props>)((props, ref) => …)` and `class Button extends (React.Component<Props>) {}` list their props, where they were skipped.
 
 - Why it matters: libraries write these forms to satisfy their own typing, and a skipped component shows no Controls.
-- Covered: parentheses, `as`, `satisfies`, `!` and type arguments, around the callee or the base class, in `.ts` and `.tsx`.
+- Covered: parentheses, `as`, `satisfies`, `!` and type arguments around the callee, in `.ts` and `.tsx`. Around the base class, parentheses and type arguments.
 - Nothing to adopt: output for components that were already found is unchanged.
 - Limit: a generic component given type arguments where it is aliased, wrapped or exported (`const RowList = List<Row>`, `memo(List<Row>)`, `Object.assign(List<Row>, { Item })`, `export default List<Row>`) is still not listed, as before; a skip diagnostic names the binding.
 - Limit: a cast drops a component only when it says the call returns `object`, `symbol` or `void`, which React cannot render and no component is: `(memo as (c: unknown) => object)(…)` is not listed. Every other cast is read as the plain call, including one whose result is a string, a number, `any[]`, an object type such as `{ type: string; props: {}; key: string | null }`, a union or a type reference.
-  - A base class is constructed, not called, so only its construct signatures count: `extends (React.Component as new (props: P) => object)` is not listed, while a cast that adds an unrelated call signature, such as `{ new <P>(props: P): React.Component<P>; (): void }`, still is.
+  - A base class written through a cast, `satisfies` or `!`, such as `extends (Component as typeof Component)<Props>`, is not read, as before: the class is not listed.
   - For a member such as `(React as SomeType).forwardRef`, only the type the cast gives that member counts, never call signatures of the namespace itself.
 - Limit: a custom wrapper or factory called through a cast that replaces its type, such as `(ui as SomeType).withContext<PublicProps>(Base)`, `(withTheme as Signature)<Public>(Base)` or `(createButton as SomeFactory)()`, is read exactly as before. The cast is not taken into account, so the props are what they were without this change.
   - Reading the props such a cast gives, with one model for wrappers, tagged factories and factories, is planned as a follow-up.
@@ -24,7 +24,6 @@ npm/caliper-docgen: patch
 - Limit: through a cast or assertion that origin/main did not read, only React's `forwardRef`, `memo` and `lazy` are recognised, bare or on React's namespace, with the import that binds them. Nothing else written that way counts: a custom wrapper, a factory, `createElement`, Preact's `h`, `createContext`, a hook, a `map`, a `Promise`, or a PascalCase helper. Those calls are read as before, so a component that relies on one is not listed.
 
 - Limit: a name read only because a wrapper was looked through counts only when it cannot mean another declaration in the file. Names written plainly are read as before.
-  - A base class written through a wrapper, such as `extends (Component as typeof Component)<Props>`, is a React class component only when the file does not declare `Component`, or imports it once. A local `class Component` there is not React's.
   - A member callee written behind a `<T>x` assertion, such as `(<typeof React.forwardRef>React.forwardRef)<R, Props>(…)`, is `forwardRef` only when its receiver resolves to React's import, wherever the import is written in the file.
   - An identifier alias read only through a `<T>x` assertion in a `.ts` file, such as `const PublicRoot = <typeof Root>Root`, counts only when the file declares `Root` exactly once.
   - A receiver written through a wrapper, as in `(Ui as typeof Ui).Button`, is read only when the file declares `Ui` exactly once.

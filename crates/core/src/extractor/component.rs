@@ -96,6 +96,19 @@ fn wrapper<'a, 'b>(expr: &'b Expression<'a>) -> Option<Wrapper<'b, 'a>> {
 /// `extends` target reads through one ([`peel`]), as OXC 0.159 leaves it there where 0.158 moved it onto the call.
 /// Whether `expr` has a wrapper above it that origin/main did not read through (`main_peel`): a `<T>x`
 /// assertion or an instantiation. A comparison, not a read of what is beneath.
+/// A callee, base or argument as written, beneath the nodes that are no peel: parentheses and an instantiation
+/// (`(f<A>)(…)`, which OXC 0.158 parsed as type arguments on the call, so origin/main read the bare `f`). Every site
+/// that reads an expression as origin/main read it as written starts here; a cast, `satisfies` or `!` stays.
+pub(super) fn unwrap_transparent<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    loop {
+        expr = match expr {
+            Expression::ParenthesizedExpression(inner) => &inner.expression,
+            Expression::TSInstantiationExpression(inner) => &inner.expression,
+            _ => return expr,
+        };
+    }
+}
+
 pub(super) fn peeled_beyond_main(expr: &Expression<'_>) -> bool {
     !std::ptr::eq(main_read(expr), beneath(expr))
 }
@@ -630,7 +643,7 @@ impl Recognition {
     /// inline-member scan (`inline`) also only a bare first argument and a bare object literal, while the named-member
     /// read (`record_object_assign_declarator`) read its arguments through parentheses, `as`, `satisfies` and `!`.
     pub(super) fn of_object_assign(call: &CallExpression<'_>, inline: bool) -> Self {
-        let callee = matches!(&call.callee, Expression::StaticMemberExpression(callee)
+        let callee = matches!(unwrap_transparent(&call.callee), Expression::StaticMemberExpression(callee)
             if callee.property.name == "assign" && super::well_known::is_named(&callee.object, &super::well_known::OBJECT));
         let arguments = !inline
             || (matches!(call.arguments.first(), Some(Argument::Identifier(_)))
@@ -1429,14 +1442,13 @@ impl<'src> SourceDataCollector<'src> {
     /// (bare or `React.`-qualified). Returns the matched bare name for use in
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
-        let super_name = self.receiver_name(super_class(class)?.resolve(self)?);
-        // A base main did not read is React's only when its root is no local declaration: a global, or an import.
-        if Recognition::of_name(&class.heritage.as_ref()?.expression) == Recognition::Peeled && {
-            let root = super_name.split('.').next()?;
-            self.bindings.global(root).is_none() && self.bindings.imported(root).is_none()
-        } {
+        // As origin/main read the base: a name, as written beneath an instantiation. A base only a cast, `satisfies` or `!`
+        // exposes is not read: the closed list a peel may expose is React's `forwardRef`, `memo` and `lazy`.
+        let base = unwrap_transparent(&class.heritage.as_ref()?.expression);
+        if Recognition::of_name(base) == Recognition::Peeled {
             return None;
         }
+        let super_name = self.receiver_name(base);
         match self.react_type_export(&super_name)?.as_str() {
             "Component" => Some("Component"),
             "PureComponent" => Some("PureComponent"),

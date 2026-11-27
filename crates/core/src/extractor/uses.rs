@@ -283,11 +283,12 @@ impl<'src> SourceDataCollector<'src> {
 
     pub(super) fn record_call(&mut self, call: &CallExpression<'_>) {
         // As origin/main read the call: a callee only a peel exposes is no use and builds no element.
-        if let Expression::Identifier(callee) = super::component::main_peel(&call.callee) {
+        let callee = super::component::main_peel(super::component::unwrap_transparent(&call.callee));
+        if let Expression::Identifier(callee) = callee {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
         let renders_argument = super::component::is_component_wrapper(&*self, call)
-            || super::evidence::is_element_factory_callee(super::component::main_peel(&call.callee), &*self);
+            || super::evidence::is_element_factory_callee(callee, &*self);
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;
         }

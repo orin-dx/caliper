@@ -813,6 +813,12 @@ impl<'src> SourceDataCollector<'src> {
                 // A receiver only a peel exposes reads only the closed list.
                 let api = ReactApi::of_export(member.property.name.as_str())
                     .filter(|api| !(beyond_main || peeled_receiver) || api.in_closed_list())?;
+                // A member only a peel exposes is React's by the hoisted import that `callee_of` validated, wherever the
+                // import is written; a plain one by the walker's imports, as origin/main read it.
+                if beyond_main || peeled_receiver {
+                    let (exported, module) = evidence::Scope::import_of(self, object.name.as_str())?;
+                    return (is_react_module(module) && matches!(exported, "*" | "default")).then_some(api);
+                }
                 match import_of(object.name.as_str()) {
                     Some(import)
                         if is_react_module(&import.specifier)

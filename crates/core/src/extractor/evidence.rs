@@ -142,7 +142,7 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         // The callee as origin/main read it, as written: a callee only a peel exposes is no evidence (the closed list,
         // React's `forwardRef`, `memo` and `lazy`, makes components, not elements).
-        let callee = Some(&it.callee)
+        let callee = Some(super::component::unwrap_transparent(&it.callee))
             .filter(|callee| matches!(callee, Expression::Identifier(_) | Expression::StaticMemberExpression(_)));
         let name = callee.and_then(callee_name);
         let calls_helper = matches!(callee, Some(Expression::Identifier(id)) if self.scope.is_element_helper(&id.name));
@@ -177,7 +177,11 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         Expression::NullLiteral(_) => true,
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
         // A component invoked directly: `return JoinList({ ... })`.
-        Expression::CallExpression(call) if callee_name(&call.callee).is_some_and(super::is_pascal_case) => true,
+        Expression::CallExpression(call)
+            if callee_name(super::component::unwrap_transparent(&call.callee)).is_some_and(super::is_pascal_case) =>
+        {
+            true
+        }
         e if is_children(e) => true,
         e => value_has_element(e, scope),
     }
@@ -222,7 +226,7 @@ impl<'a> Visit<'a> for OwnBody<'_> {
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         // Calling a hook is the evidence, whatever an assertion says the hook returns.
-        if self.nested == 0 && callee_name(&it.callee).is_some_and(is_hook_name) {
+        if self.nested == 0 && callee_name(super::component::unwrap_transparent(&it.callee)).is_some_and(is_hook_name) {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);
