@@ -56,6 +56,11 @@ pub(super) type ReactBinding<'f> = &'f dyn Scope;
 pub(super) trait Scope {
     /// Whether a type name can be React's: see [`ReactBinding`].
     fn may_be_react(&self, name: &str) -> bool;
+    /// Whether a PascalCase call counts as an element by its spelling (`returns_element`). Off while the module-level
+    /// render table is built (`element_helpers`): an entry holds only structural evidence, never a spelling.
+    fn credits_spelling(&self) -> bool {
+        true
+    }
     /// Whether a call to this name returns an element: a same-file function declared to return one.
     fn is_element_helper(&self, name: &str) -> bool;
     /// Whether this module-level function renders by its own declaration or body: see `element_helpers`.
@@ -216,7 +221,11 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         // A component invoked directly: `return JoinList({ ... })`, by its spelling, for a callee written as origin/main
         // read it. A callee only a peel exposes (`(MakeToken as typeof MakeToken)()`) needs the evidence any call
         // needs: a name declared once whose own declaration or body renders (`Scope::renders_when_called`).
-        Expression::CallExpression(call) if callee_name(&call.callee).is_some_and(super::is_pascal_case) => true,
+        Expression::CallExpression(call)
+            if scope.credits_spelling() && callee_name(&call.callee).is_some_and(super::is_pascal_case) =>
+        {
+            true
+        }
         Expression::CallExpression(call)
             if matches!(super::component::called(call).as_plain().and_then(Callee::of), Some(Callee::Bare(name))
                 if super::is_pascal_case(name) && scope.declarations(name) == 1 && scope.renders_when_called(name)) =>
@@ -454,6 +463,10 @@ struct Foreign<'f>(&'f FxHashSet<String>);
 impl Scope for Foreign<'_> {
     fn may_be_react(&self, name: &str) -> bool {
         !self.0.contains(name)
+    }
+
+    fn credits_spelling(&self) -> bool {
+        false
     }
 
     fn is_preact_h(&self, _receiver: Option<&str>) -> bool {

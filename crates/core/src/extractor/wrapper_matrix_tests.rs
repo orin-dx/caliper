@@ -4684,6 +4684,54 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "attachments: a target literal member a source overwrites (finding 3) | peeled".to_owned(),
         "// ts\nimport { createElement } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport function Root(props: Props) { return createElement('div'); }\nexport const Public = Object.assign({ Item: <any>Item }, { Item: null });".to_owned(),
     ));
+    cases.push((
+        "nested: a cast Object.assign around memo, Object.assign replaced (finding 1) | plain".to_owned(),
+        "import { memo } from 'react';\nfunction Impl(props: Props) { return <div />; }\nObject.assign = (target: object) => ({});\nexport default Object.assign(memo(Impl), {});".to_owned(),
+    ));
+    cases.push((
+        "nested: a cast Object.assign around memo, Object.assign replaced (finding 1) | peeled".to_owned(),
+        "import { memo } from 'react';\nfunction Impl(props: Props) { return <div />; }\nObject.assign = (target: object) => ({});\nexport default (Object.assign as typeof Object.assign)(memo(Impl), {});".to_owned(),
+    ));
+    cases.push((
+        "nested: a cast Object.assign around memo | plain".to_owned(),
+        "import { memo } from 'react';\nfunction Impl(props: Props) { return <div />; }\nexport default Object.assign(memo(Impl), {});".to_owned(),
+    ));
+    cases.push((
+        "nested: a cast Object.assign around memo | peeled".to_owned(),
+        "import { memo } from 'react';\nfunction Impl(props: Props) { return <div />; }\nexport default (Object.assign as typeof Object.assign)(memo(Impl), {});".to_owned(),
+    ));
+    cases.push((
+        "spelling: a helper returning a PascalCase global call (finding 2) | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeToken() { return Symbol(); }\nexport const Button = (props: Props) => MakeToken();".to_owned(),
+    ));
+    cases.push((
+        "spelling: a helper returning a PascalCase global call (finding 2) | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeToken() { return Symbol(); }\nexport const Button = (props: Props) => (MakeToken as typeof MakeToken)();".to_owned(),
+    ));
+    cases.push((
+        "spelling: a helper returning a PascalCase local call | plain".to_owned(),
+        "import * as React from 'react';\nfunction Token() { return 1; }\nfunction MakeToken() { return Token(); }\nexport const Button = (props: Props) => MakeToken();".to_owned(),
+    ));
+    cases.push((
+        "spelling: a helper returning a PascalCase local call | peeled".to_owned(),
+        "import * as React from 'react';\nfunction Token() { return 1; }\nfunction MakeToken() { return Token(); }\nexport const Button = (props: Props) => (MakeToken as typeof MakeToken)();".to_owned(),
+    ));
+    cases.push((
+        "spelling: a helper returning JSX | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard() { return <div />; }\nexport const Button = (props: Props) => MakeCard();".to_owned(),
+    ));
+    cases.push((
+        "spelling: a helper returning JSX | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard() { return <div />; }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
+    ));
+    cases.push((
+        "spelling: a helper returning createElement | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard() { return React.createElement('div'); }\nexport const Button = (props: Props) => MakeCard();".to_owned(),
+    ));
+    cases.push((
+        "spelling: a helper returning createElement | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeCard() { return React.createElement('div'); }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
+    ));
     cases
 }
 
@@ -4791,7 +4839,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // The rows read as main's plain call: each a peeled callee or component main did not read. Round 43 removes every
     // attachment only a peel exposes (`an_attachment_only_a_peel_exposes_is_not_recorded`), so those rows read as main
     // read them and are no longer counted.
-    assert_eq!(read_as_the_plain_call, 54);
+    // Round 44 adds two: a cast call to a helper whose body returns JSX or an element factory call
+    // (`a_rejected_call_returns_nothing_and_the_render_table_holds_no_spelling`).
+    assert_eq!(read_as_the_plain_call, 56);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -4851,6 +4901,31 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let peeled = format!("recognition: {row} | peeled");
         assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
+        assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
+    }
+}
+
+/// Round 44: an `Object.assign` call `assign_roles` rejects (its callee only a peel exposes) returns none of its
+/// arguments, so a default export does not read `memo(Impl)` inside it. And the module-level render table holds only
+/// structural evidence (JSX, an element factory), never a PascalCase spelling: a helper returning `Symbol()` is no
+/// evidence for a call through a cast. Each plain form is origin/main's; a peeled form reads as the plain form only where
+/// the evidence holds, and as origin/main read it otherwise.
+#[test]
+fn a_rejected_call_returns_nothing_and_the_render_table_holds_no_spelling() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    for (row, holds) in [
+        ("nested: a cast Object.assign around memo, Object.assign replaced (finding 1)", false),
+        ("nested: a cast Object.assign around memo", false),
+        ("spelling: a helper returning a PascalCase global call (finding 2)", false),
+        ("spelling: a helper returning a PascalCase local call", false),
+        ("spelling: a helper returning JSX", true),
+        ("spelling: a helper returning createElement", true),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
 }

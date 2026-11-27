@@ -197,14 +197,15 @@ impl<'src> SourceDataCollector<'src> {
         if !super::component::is_object_assign_call(call, self) {
             return Role::NotApplicable;
         }
-        let accepted = self
-            .assign_roles(call, false)
-            .and_then(|roles| roles.target.clone().filter(|target| roles.aliases.contains(target)));
+        // A call `assign_roles` rejects, such as one whose callee only a peel exposes, is no built-in at all: nothing in
+        // its arguments is what it returns.
+        let Some(roles) = self.assign_roles(call, false) else { return Role::Rejected };
         let names =
             call.arguments.first().and_then(Argument::as_expression).is_some_and(super::peeled::names_identifier);
-        match accepted {
+        match roles.target.clone().filter(|target| roles.aliases.contains(target)) {
             Some(target) => Role::Accepted(target),
             None if names => Role::Rejected,
+            // A target that is no name, such as `memo(Impl)`, of an accepted call: its caller reads it.
             None => Role::NotApplicable,
         }
     }

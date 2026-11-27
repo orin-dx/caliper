@@ -914,3 +914,15 @@ attachments: a Reflect['set'] write (finding 2) | plain	Impl:Props"functionDecla
 attachments: a Reflect['set'] write (finding 2) | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
 attachments: a target literal member a source overwrites (finding 3) | plain	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Public' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Public.Item | Root:Props"functionDeclaration" exported as Root
 attachments: a target literal member a source overwrites (finding 3) | peeled	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Public' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+nested: a cast Object.assign around memo, Object.assign replaced (finding 1) | plain	Impl:Props"functionDeclaration" exported as default
+nested: a cast Object.assign around memo, Object.assign replaced (finding 1) | peeled	Impl:Props"functionDeclaration"
+nested: a cast Object.assign around memo | plain	Impl:Props"functionDeclaration" exported as default
+nested: a cast Object.assign around memo | peeled	Impl:Props"functionDeclaration"
+spelling: a helper returning a PascalCase global call (finding 2) | plain	Button:Props"typedFunctionExpression" exported as Button
+spelling: a helper returning a PascalCase global call (finding 2) | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+spelling: a helper returning a PascalCase local call | plain	Button:Props"typedFunctionExpression" exported as Button
+spelling: a helper returning a PascalCase local call | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+spelling: a helper returning JSX | plain	Button:Props"typedFunctionExpression" exported as Button
+spelling: a helper returning JSX | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+spelling: a helper returning createElement | plain	Button:Props"typedFunctionExpression" exported as Button
+spelling: a helper returning createElement | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
