@@ -522,44 +522,6 @@ fn component_props_of_a_member_of_a_value_with_a_mapped_type_bind_the_key() {
     );
 }
 
-/// The same `Primitive` behind a barrel whose first `export *` target could not be read: the walk finds `Primitive.div`
-/// in the next target, and `ComponentProps<typeof Primitive.div>` reads it there, with the warning.
-#[test]
-fn component_props_of_a_member_found_past_an_unreadable_star_target_bind_the_key() {
-    let (_tmp, root) = project(&[
-        ("node_modules/prim-kit/package.json", r#"{ "name": "prim-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/prim-kit/index.d.ts", "export * from './first';\nexport * from './prim';\n"),
-        (
-            "node_modules/prim-kit/prim.d.ts",
-            "import * as React from 'react';\n\
-             declare const NODES: readonly [\"a\", \"div\"];\n\
-             type Primitives = { [E in (typeof NODES)[number]]: PrimitiveForwardRefComponent<E> };\n\
-             type PrimitivePropsWithRef<E extends React.ElementType> = Own<E> & { asChild?: boolean };\n\
-             interface Own<E> { tag?: E }\n\
-             interface PrimitiveForwardRefComponent<E extends React.ElementType> \
-             extends React.ForwardRefExoticComponent<PrimitivePropsWithRef<E>> {}\n\
-             declare const Primitive: Primitives;\n\
-             export { Primitive };\n",
-        ),
-        (
-            "src/Box.tsx",
-            "import { Primitive } from 'prim-kit';\nimport * as React from 'react';\n\
-             export function Box(props: React.ComponentProps<typeof Primitive.div> & { extra?: number }) { return null; }\n",
-        ),
-    ]);
-    let first = root.join("node_modules/prim-kit/first.d.ts");
-    std::fs::write(&first, [0xff; 8]).unwrap();
-
-    let output = extract(&options(&root, true));
-
-    assert_eq!(
-        prop_types(&output, "Box"),
-        [("asChild".into(), "boolean".into()), ("extra".into(), "number".into()), ("tag".into(), "\"div\"".into())]
-    );
-    let io = |d: &&Diagnostic| d.code == DiagnosticCode::IoError && d.file.as_deref() == Some(first.as_str());
-    assert_eq!(output.diagnostics.iter().filter(io).count(), 1, "{:?}", output.diagnostics);
-}
-
 /// antd's `ComponentProps<typeof RcTooltip>`: the package's default export is an imported component re-exported as
 /// the default, declared as `declare const Tooltip: ForwardRefExoticComponent<TooltipProps & RefAttributes<R>>`.
 #[test]
@@ -1816,8 +1778,6 @@ fn answers(layer: &DependencyLayer, root: &Utf8Path, demands: &[Demand]) -> Answ
         layer.chain().flat_map(|layer| layer.files.iter().chain(&layer.react_files).cloned()).collect();
     // What answers read: the provisional augmentations are served, not loaded.
     files.extend(layer.provisional_files().into_iter().map(|file| PathKey::from(file.as_path())));
-    // And what a walk past an unreadable export reached, for that walk's answers; a later load may index it for good.
-    files.extend(layer.chain().flat_map(|layer| layer.transient_files.iter().cloned()));
     files.sort();
     files.dedup();
     let dir = |demand: &Demand| demand.from.parent().unwrap().to_owned();
@@ -1963,9 +1923,9 @@ fn an_export_walk_continues_past_a_target_it_cannot_read_and_keeps_only_what_it_
         let expected = answers(&oracle, &root, &demands);
         assert_eq!(expected.1.len(), TARGETS.len(), "the oracle loads every target: {expected:?}");
         let (_, files, reasons, ..) = answers(&failed, &root, &demands);
-        let kept: Vec<PathKey> =
-            expected.1.iter().filter(|key| **key != PathKey::from(file.as_path())).cloned().collect();
-        assert_eq!(files, kept, "{unreadable}: every target but the unreadable one is loaded");
+        let before: Vec<PathKey> =
+            TARGETS[..unreadable].iter().map(|(t, _)| PathKey::from(target(&root, t).as_path())).collect();
+        assert_eq!(files, before, "{unreadable}: only the targets before the unreadable one are loaded");
         assert_eq!(reasons, [None, None, None], "{unreadable}");
         assert_eq!(failed.missing(&demands), demands[unreadable..], "{unreadable}: the names walked past it");
         let exports: Vec<_> = TARGETS.iter().map(|&target| export(&failed, target)).collect();

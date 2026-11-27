@@ -1189,31 +1189,43 @@ mod read_retry_tests {
         answer.diagnostics.iter().filter(io).map(file).collect()
     }
 
-    /// A walk that passes an unreadable `export *` target and finds the name in a later one gives the resolver that
-    /// barrel's mapping for this layer: the props are in the answer, with the warning. The mapping is kept nowhere a
-    /// complete answer is (`export_of_complete`, which the index writes). Once the file reads and an edit arrives, the
-    /// answer is a cold run's.
+    /// A lookup that would fall through an unreadable `export *` target to a later one is degraded and unresolved:
+    /// nothing past the unreadable file is loaded, so `S` has only its own prop, with the read warning, and no answer
+    /// is kept for the barrel. Once the file reads, an edit or the timed retry follows the walk again from scratch, and
+    /// `S` equals a cold run's.
     #[test]
-    fn an_export_found_past_an_unreadable_star_target_reaches_the_resolver_for_its_layer() {
-        let (_tmp, root) = project();
-        let options = options(&root, true);
-        let first = root.join("node_modules/barrel-kit/first.d.ts");
-        std::fs::write(&first, [0xff; FIRST.len()]).unwrap();
-        let revision = Revision::cold_lazy(&options, 0);
-        set_clock(&revision, Instant::now());
-        let answer = revision.lazy_component(&options, "S").unwrap();
-        assert_eq!(props(&answer), ["own", "second"]);
-        assert_eq!(warned(&answer), [first.to_string()]);
-        let layer = revision.lazy.as_ref().unwrap().engine.load().layer.clone().unwrap();
-        let barrel = root.join("node_modules/barrel-kit/index.d.ts");
-        assert_eq!(layer.export_of_complete(&barrel, "SecondProps"), None, "not kept as a complete answer");
-        assert!(layer.export_for_resolver(&barrel, "SecondProps").is_some());
+    fn a_lookup_past_an_unreadable_star_target_is_unresolved_until_its_retry() {
+        for by_edit in [true, false] {
+            let (_tmp, root) = project();
+            let options = options(&root, true);
+            let first = root.join("node_modules/barrel-kit/first.d.ts");
+            std::fs::write(&first, [0xff; FIRST.len()]).unwrap();
+            let revision = Revision::cold_lazy(&options, 0);
+            let start = Instant::now();
+            set_clock(&revision, start);
+            let answer = revision.lazy_component(&options, "S").unwrap();
+            assert_eq!(props(&answer), ["own"], "by edit: {by_edit}");
+            assert_eq!(warned(&answer), [first.to_string()]);
+            assert!(answer == cold(&root, "S"), "a fresh run over the same unreadable file");
+            let layer = revision.lazy.as_ref().unwrap().engine.load().layer.clone().unwrap();
+            let barrel = root.join("node_modules/barrel-kit/index.d.ts");
+            assert_eq!(layer.export_for_resolver(&barrel, "SecondProps"), None, "no answer kept");
 
-        std::fs::write(&first, FIRST).unwrap();
-        let s = root.join("src/s/S.tsx");
-        std::fs::write(&s, std::fs::read_to_string(&s).unwrap() + "// edited\n").unwrap();
-        let next = revision.next_lazy(&options, &s).unwrap().0;
-        assert_eq!(next.lazy_component(&options, "S").unwrap(), cold(&root, "S"));
+            std::fs::write(&first, FIRST).unwrap();
+            let answer = match by_edit {
+                true => {
+                    let s = root.join("src/s/S.tsx");
+                    std::fs::write(&s, std::fs::read_to_string(&s).unwrap() + "// edited\n").unwrap();
+                    revision.next_lazy(&options, &s).unwrap().0.lazy_component(&options, "S").unwrap()
+                }
+                false => {
+                    set_clock(&revision, start + DEGRADED_RETRY);
+                    revision.lazy_component(&options, "S").unwrap()
+                }
+            };
+            assert!(warned(&answer).is_empty(), "by edit: {by_edit}");
+            assert_eq!(answer, cold(&root, "S"), "by edit: {by_edit}");
+        }
     }
 
     /// A component answered provisionally that also reads a project file: an edit to that file names it in the delta,
@@ -1350,31 +1362,6 @@ mod read_retry_tests {
         drop(revision.lazy_component(&options, "U2"));
         let after = memo_files(&revision);
         assert!(!after.contains("N.tsx") && after.contains("U2.tsx"), "{after:?}");
-    }
-
-    /// `D` loads `second.d.ts`'s declaration directly; then `S`, in the same directory, finds it through the barrel
-    /// past an unreadable `export *` target. That load adds only the barrel's partial mapping, and the resolver reads
-    /// it: `S` has the props a fresh session over the same unreadable file gives.
-    #[test]
-    fn a_barrel_mapping_to_a_declaration_loaded_directly_reaches_the_resolver() {
-        let (_tmp, root) = project();
-        let options = options(&root, true);
-        let first = root.join("node_modules/barrel-kit/first.d.ts");
-        std::fs::write(&first, [0xff; FIRST.len()]).unwrap();
-        let revision = Revision::cold_lazy(&options, 0);
-        let start = Instant::now();
-        set_clock(&revision, start);
-        assert_eq!(props(&revision.lazy_component(&options, "D").unwrap()), ["own", "second"]);
-        let answer = revision.lazy_component(&options, "S").unwrap();
-        let fresh = Revision::cold_lazy(&options, 0);
-        set_clock(&fresh, start);
-        assert_eq!(props(&answer), ["own", "second"]);
-        assert_eq!(answer, fresh.lazy_component(&options, "S").unwrap());
-        // A retry that finds the same mapping again changes nothing the resolver reads: no growth.
-        let growths = revision.layer_growths();
-        set_clock(&revision, start + DEGRADED_RETRY);
-        assert_eq!(cost(&revision, || drop(revision.lazy_component(&options, "S"))), (1, 1));
-        assert_eq!(revision.layer_growths(), growths);
     }
 
     /// A provisional component, then a change that can alter how every import resolves (the rebuild path): its key is
@@ -1624,67 +1611,6 @@ mod read_retry_tests {
         assert!(steps <= 50, "{steps} footprint entries checked by 200 hits");
     }
 
-    /// What a lookup reaches past an export it could not read serves no other answer, and the timed retry follows it
-    /// again: `kit` re-exports `first` (unreadable) and then `fallback`, whose `Target` extends `Base` from `base`,
-    /// which also merges `aria-fb` into React. `Card` is asked, then `Aria`, a reader of `AriaAttributes`; once `first`
-    /// reads and the retry is due, `Card` has `first`'s prop alone. Each answer equals a cold run's, and `Aria` never
-    /// has the attribute.
-    #[test]
-    fn a_fall_through_serves_no_other_answer_and_a_timed_retry_follows_it_again() {
-        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
-        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-        let files = [
-            ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-            ("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
-            (
-                "node_modules/kit/fallback.d.ts",
-                "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
-            ),
-            (
-                "node_modules/kit/base.d.ts",
-                "import type {} from 'react';\n\
-                 declare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
-                 export interface Base { base: string }\n",
-            ),
-            (
-                "src/card/Card.tsx",
-                "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
-            ),
-            (
-                "src/aria/Aria.tsx",
-                "import * as React from 'react';\ninterface AriaOwn extends React.AriaAttributes { own?: boolean }\n\
-                 export const Aria = (props: AriaOwn) => <div />;\n",
-            ),
-        ];
-        for (path, body) in files {
-            let path = root.join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        }
-        let first = root.join("node_modules/kit/first.d.ts");
-        std::fs::write(&first, [0xff; 8]).unwrap();
-        let options = |use_cache| PipelineOptions {
-            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
-            ..options(&root, use_cache)
-        };
-        let cold = |name| Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
-        let revision = Revision::cold_lazy(&options(true), 0);
-        let start = Instant::now();
-        set_clock(&revision, start);
-        let check = |step: &str, card: &[&str]| {
-            let answer = revision.lazy_component(&options(true), "Card").unwrap();
-            assert_eq!(props(&answer), card, "{step}");
-            assert!(answer == cold("Card"), "Card, {step}");
-            let answer = revision.lazy_component(&options(true), "Aria").unwrap();
-            assert!(!props(&answer).contains(&"aria-fb".to_owned()), "{step}");
-            assert!(answer == cold("Aria"), "Aria, {step}");
-        };
-        check("falling through", &["base", "fallback"]);
-        std::fs::write(&first, "export interface Target { first: string }\n").unwrap();
-        set_clock(&revision, start + DEGRADED_RETRY);
-        check("recovered", &["first"]);
-    }
-
     /// A served augmentation's unreadable import is the search's: `aug-kit`'s search passes an unreadable `bad` and
     /// serves `aug`, whose `aria-tone` is typed by `Tone` from an unreadable `tone`. `First`, a reader of
     /// `AriaAttributes`, reports both files; once `tone` reads and the retry is due, it has `Tone`'s members, as a cold
@@ -1744,61 +1670,6 @@ mod read_retry_tests {
         assert!(answer == cold(), "tone reads");
     }
 
-    /// What a walk past an unreadable export reached stays in a flattened layer while the walk is unread: `Card` falls
-    /// through `kit`'s unreadable `first` to `fallback`'s `Target extends Base`, a dozen requests grow the layer past
-    /// its depth limit with the retry not due, and `Card3`, beside `Card` (the same demand, not followed again), has
-    /// `fallback`'s and `Base`'s props, as a cold run does.
-    #[test]
-    fn a_flatten_keeps_what_an_unread_fall_through_reached() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-        let write = |path: &str, body: &str| {
-            let path = root.join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        };
-        write("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#);
-        write("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n");
-        write(
-            "node_modules/kit/fallback.d.ts",
-            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
-        );
-        write("node_modules/kit/base.d.ts", "export interface Base { base: string }\n");
-        std::fs::write(root.join("node_modules/kit/first.d.ts"), [0xff; 8]).unwrap();
-        write(
-            "node_modules/many-kit/package.json",
-            r#"{ "name": "many-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-        );
-        write("node_modules/many-kit/index.d.ts", "export interface ManyProps { many: string }\n");
-        for name in ["Card", "Card3"] {
-            write(
-                &format!("src/card/{name}.tsx"),
-                &format!(
-                    "import type {{ Target }} from 'kit';\nexport function {name}(props: Target) {{ return null; }}\n"
-                ),
-            );
-        }
-        for n in 0..12 {
-            write(
-                &format!("src/c{n}/C{n}.tsx"),
-                &format!(
-                    "import type {{ ManyProps }} from 'many-kit';\n\
-                     export function C{n}(props: ManyProps & {{ own{n}: string }}) {{ return null; }}\n"
-                ),
-            );
-        }
-        let options = options(&root, false);
-        let revision = Revision::cold_lazy(&options, 0);
-        set_clock(&revision, Instant::now());
-        assert_eq!(props(&revision.lazy_component(&options, "Card").unwrap()), ["base", "fallback"]);
-        for n in 0..12 {
-            drop(revision.lazy_component(&options, &format!("C{n}")).unwrap());
-        }
-        let answer = revision.lazy_component(&options, "Card3").unwrap();
-        assert_eq!(props(&answer), ["base", "fallback"]);
-        assert!(answer == Revision::cold_lazy(&options, 0).lazy_component(&options, "Card3").unwrap());
-    }
-
     /// A retry that replaces a walk: `kit` re-exports `first` (unreadable) and then `fallback`, whose `Target` extends
     /// `Base` from an unreadable `base`. Once `first` reads and declares `Target` itself, the retry follows it, and no
     /// live walk reaches `base` any more: `C` and its warnings equal a cold run's, and the carried set is derived
@@ -1834,7 +1705,8 @@ mod read_retry_tests {
         let start = Instant::now();
         set_clock(&revision, start);
         let answer = revision.lazy_component(&options, "C").unwrap();
-        assert_eq!(io(&answer), [Some(base.to_string()), Some(first.to_string())]);
+        // `fallback` lies past the unreadable `first`, so neither it nor `base` is read.
+        assert_eq!(io(&answer), [Some(first.to_string())]);
         write("node_modules/kit/first.d.ts", "export interface Target { first: string }\n");
         set_clock(&revision, start + DEGRADED_RETRY);
         let answer = revision.lazy_component(&options, "C").unwrap();

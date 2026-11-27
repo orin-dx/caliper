@@ -392,45 +392,6 @@ fn a_load_that_meets_many_earlier_claims_asks_the_parent_once() {
     assert!(!later.unread(&[demand(150)]).is_empty(), "a claim met still leads to the unread walk");
 }
 
-/// A barrel walks an `export *` cycle, then an unreadable target, then finds `NameProps` in a later file: a partial
-/// mapping to that file. Once the target reads and declares `NameProps` first, the cycle still keeps the answer out of
-/// `exports`, and the newest walk's outcome supersedes the older layer's mapping: the resolver is not sent to the
-/// later file.
-#[test]
-fn the_newest_walk_of_a_barrel_name_supersedes_an_older_partial_mapping() {
-    let (_tmp, root) = project(&[
-        ("node_modules/cyc-kit/package.json", r#"{ "name": "cyc-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        (
-            "node_modules/cyc-kit/index.d.ts",
-            "export * from './loop';\nexport * from './first';\nexport * from './second';\n",
-        ),
-        ("node_modules/cyc-kit/loop.d.ts", "export * from './index';\n"),
-        ("node_modules/cyc-kit/first.d.ts", "export interface NameProps { first: string }\n"),
-        ("node_modules/cyc-kit/second.d.ts", "export interface NameProps { second: string }\n"),
-    ]);
-    let first = root.join("node_modules/cyc-kit/first.d.ts");
-    let text = std::fs::read_to_string(&first).unwrap();
-    std::fs::write(&first, UNREADABLE).unwrap();
-    let demand = Demand { from: root.join("src/Card.tsx"), specifier: "cyc-kit".into(), name: "NameProps".into() };
-    let (index, second) = (root.join("node_modules/cyc-kit/index.d.ts"), root.join("node_modules/cyc-kit/second.d.ts"));
-    let options = options(&root);
-    let failed = Arc::new(load(vec![demand.clone()], &options, None));
-    assert_eq!(failed.export_for_resolver(&index, "NameProps"), Some(Some((second.clone(), "NameProps".into()))));
-
-    let card = "import type { NameProps } from 'cyc-kit';\ninterface CardProps extends NameProps { own: string }\n\
-                export function Card(props: CardProps) { return null; }\n";
-    write(&root, "src/Card.tsx", card);
-    let session = WatchSession::lazy(options.clone());
-    drop(session.initialize());
-    std::fs::write(&first, text).unwrap();
-    let recovered = load(failed.due_walks(Retry::Always), &options, Some(&failed));
-    assert_ne!(
-        recovered.export_for_resolver(&index, "NameProps"),
-        Some(Some((second, "NameProps".into()))),
-        "the older layer's mapping no longer stands"
-    );
-}
-
 /// A module's augmentation search could not read two files. A retry reads one of them again and still fails on the
 /// other: an answer resolved before the retry no longer holds, though the walk's latest mark (one file, a new retry
 /// time) would say it did. So does an answer whose files were read again and failed again, by any load.
@@ -878,62 +839,6 @@ fn a_served_augmentation_brings_what_it_imports() {
     assert!(recovered == fresh());
 }
 
-/// The partial mappings the resolver reads are compared as a set, not counted per layer. `walk-kit`'s barrel walks
-/// `bad`, `a`, `bad2`, `b`. `AProps` is mapped past `bad` (unreadable), then, once `bad` reads, the retry ends that
-/// mapping: two entries for one name. A flatten then maps `BProps` past `bad2`, with `b.d.ts`, every resolution and
-/// what each file exports already loaded (through `alt`): the flattened layer holds one entry per name, as many as the
-/// chain did, and does not resolve like it.
-#[test]
-fn a_flatten_that_adds_a_partial_mapping_is_a_change() {
-    let (_tmp, root) = project(&[
-        ("node_modules/walk-kit/package.json", r#"{ "name": "walk-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        (
-            "node_modules/walk-kit/index.d.ts",
-            "export * from './bad';\nexport * from './a';\nexport * from './bad2';\nexport * from './b';\n",
-        ),
-        ("node_modules/walk-kit/alt.d.ts", "export * from './bad';\nexport * from './a';\nexport * from './b';\n"),
-        ("node_modules/walk-kit/a.d.ts", "export interface AProps { a: string }\n"),
-        ("node_modules/walk-kit/b.d.ts", "export interface BProps { b: string }\n"),
-        (
-            "node_modules/other-kit/package.json",
-            r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-        ),
-    ]);
-    let other: String = (0..=MAX_CHAIN_DEPTH).map(|n| format!("export interface O{n} {{ o{n}: string }}\n")).collect();
-    write(&root, "node_modules/other-kit/index.d.ts", &other);
-    let (bad, bad2) = (root.join("node_modules/walk-kit/bad.d.ts"), root.join("node_modules/walk-kit/bad2.d.ts"));
-    std::fs::write(&bad, UNREADABLE).unwrap();
-    std::fs::write(&bad2, UNREADABLE).unwrap();
-    let options = PipelineOptions { use_cache: false, ..options(&root) };
-    let demand = |specifier: &str, name: &str| Demand {
-        from: root.join("src/Card.tsx"),
-        specifier: specifier.into(),
-        name: name.into(),
-    };
-    let first = vec![demand("walk-kit", "AProps"), demand("walk-kit", "Missing"), demand("walk-kit/b", "BProps")];
-    let mut layer = Arc::new(load(first.clone(), &options, None));
-    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
-    // `alt` walks the same files but `bad2`, so what each file exports as `BProps` is known before the flatten asks.
-    let mut retry = layer.missing(&first[..1]);
-    retry.push(demand("walk-kit/alt", "BProps"));
-    layer = Arc::new(load(retry, &options, Some(&layer)));
-    let index = root.join("node_modules/walk-kit/index.d.ts");
-    let entries = |layer: &DependencyLayer| -> usize {
-        let key = (PathKey::from(index.as_path()), CompactString::from("AProps"));
-        layer.chain().filter(|layer| layer.partial_exports.contains_key(&key)).count()
-    };
-    assert_eq!(entries(&layer), 2, "a mapping, and the tombstone that ended it");
-    for n in 2..=MAX_CHAIN_DEPTH {
-        layer = Arc::new(load(vec![demand("other-kit", &format!("O{n}"))], &options, Some(&layer)));
-    }
-    let flattened = load(vec![demand("walk-kit", "BProps")], &options, Some(&layer));
-    assert!(flattened.parent.is_none(), "the depth limit flattened the chain");
-    let b = (root.join("node_modules/walk-kit/b.d.ts"), CompactString::from("BProps"));
-    assert_eq!(layer.export_for_resolver(&index, "BProps"), None);
-    assert_eq!(flattened.export_for_resolver(&index, "BProps"), Some(Some(b)));
-    assert!(!flattened.resolves_like(&layer), "a mapping the resolver reads was added");
-}
-
 /// What a layer serves holds each provisional file once: seventy module demands whose searches all read `aug` past an
 /// unreadable `bad` serve one `React.HTMLAttributes` augmentation.
 #[test]
@@ -1074,7 +979,7 @@ fn an_export_walk_past_an_unreadable_file_visits_each_module_once() {
     let failed = Arc::new(load(demands.clone(), &options, None));
     let modules = 2 * DEPTH + 3;
     assert!(failed.export_visits <= 2 * modules, "{} lookups over {modules} modules", failed.export_visits);
-    assert_eq!(failed.export_for_resolver(&index, "Target"), Some(target.clone()), "the cold answer, partially");
+    assert_eq!(failed.export_for_resolver(&index, "Target"), None, "a walk past an unreadable file keeps no answer");
     assert_eq!(failed.export_of_complete(&index, "Target"), None, "nothing incomplete is kept");
     assert_eq!(reported(&failed), [Some(bad.to_string())]);
 
@@ -1122,11 +1027,10 @@ fn a_cyclic_export_walk_past_an_unreadable_file_visits_each_module_once() {
     let options = PipelineOptions { use_cache: false, ..options(&root) };
     let demands = vec![Demand { from: root.join("src/Card.tsx"), specifier: "cyclic".into(), name: "Target".into() }];
     let index = root.join("node_modules/cyclic/index.d.ts");
-    let target = Some((root.join("node_modules/cyclic/target.d.ts"), CompactString::from("Target")));
     let failed = Arc::new(load(demands.clone(), &options, None));
     let modules = 2 * DEPTH + 3;
     assert!(failed.export_visits <= 2 * modules, "{} lookups over {modules} modules", failed.export_visits);
-    assert_eq!(failed.export_for_resolver(&index, "Target"), Some(target.clone()));
+    assert_eq!(failed.export_for_resolver(&index, "Target"), None);
     std::fs::write(&bad, "export interface Bad {}\n").unwrap();
     let recovered = load(failed.missing(&demands), &options, Some(&failed));
     // A cycle's answer depends on where the walk entered it, so a complete one is kept nowhere, as on a cold run.
@@ -1166,47 +1070,7 @@ fn a_chain_of_partial_lookups_holds_each_failed_path_once() {
     let layer = load(vec![demand.clone()], &options, None);
     assert!(layer.failed_path_entries <= 3 * LENGTH, "{} failed-path entries held", layer.failed_path_entries);
     assert_eq!(layer.failed_reads_reached(std::slice::from_ref(&demand)).len(), LENGTH, "every failed read, once");
-    let target = Some((root.join("node_modules/chain/target.d.ts"), CompactString::from("Target")));
-    assert_eq!(layer.export_for_resolver(&root.join("node_modules/chain/b0.d.ts"), "Target"), Some(target));
-}
-
-/// While the first `export *` target is unreadable, a named lookup that falls through is degraded exactly as on `main`:
-/// `kit` re-exports `first` (unreadable) and then `fallback`, whose `Target` extends `Base`. `Card` has `fallback`'s and
-/// `Base`'s props, with the failed read reported, as `main` answers; once `first` reads and an edit makes the walk
-/// due, `Card` equals a fresh run, `first`'s prop alone and no warning.
-#[test]
-fn a_named_lookup_past_an_unreadable_target_is_degraded_as_on_main() {
-    let (_tmp, root) = project(&[
-        ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
-        (
-            "node_modules/kit/fallback.d.ts",
-            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
-        ),
-        ("node_modules/kit/base.d.ts", "export interface Base { base: string }\n"),
-        (
-            "src/card/Card.tsx",
-            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
-        ),
-        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
-    ]);
-    let first = root.join("node_modules/kit/first.d.ts");
-    std::fs::write(&first, UNREADABLE).unwrap();
-    let session = WatchSession::new(options(&root));
-    drop(session.initialize());
-    let io = |output: &crate::types::ExtractionOutput| -> Vec<Option<String>> {
-        let io = |d: &&crate::types::Diagnostic| d.code == DiagnosticCode::IoError;
-        output.diagnostics.iter().filter(io).map(|d| d.file.clone()).collect()
-    };
-    assert_eq!(names(&session.component("Card")), ["base", "fallback"], "what `main` answers");
-    assert_eq!(io(&session.current_output().unwrap()), [Some(first.to_string())], "the failed read is reported");
-    std::fs::write(&first, "export interface Target { first: string }\n").unwrap();
-    edit(&session, &root.join("src/plain/Plain.tsx"));
-    let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..options(&root) });
-    drop(fresh.initialize());
-    assert_eq!(names(&session.component("Card")), ["first"]);
-    assert_eq!(io(&session.current_output().unwrap()), Vec::<Option<String>>::new());
-    assert!(session.component("Card") == fresh.component("Card"));
+    assert_eq!(layer.export_for_resolver(&root.join("node_modules/chain/b0.d.ts"), "Target"), None);
 }
 
 /// A file a direct import indexed stays indexed whatever a search past an unreadable file reaches: `shared.d.ts`
@@ -1364,55 +1228,6 @@ fn a_flatten_keeps_a_provisional_search_it_did_not_make_again() {
         layer = Arc::new(load(vec![many], &options, Some(&layer)));
         assert_eq!(served(&layer), std::slice::from_ref(&aug1), "extension {n}");
     }
-}
-
-/// What a lookup reaches only by falling through an unreadable export serves no other component: `kit` re-exports
-/// `first` (unreadable) and then `fallback`, whose `Target` extends `Base` from `base`, which also merges `aria-fb`
-/// into React. While `first` cannot be read `Card` has `fallback`'s and `Base`'s props, as on `main`, but `Aria` has
-/// no `aria-fb`; once `first` reads and an edit retries the lookup, `Card` has `first`'s prop alone and `Aria` still
-/// no `aria-fb`. Both equal a fresh run at each step.
-#[test]
-fn what_a_fall_through_reaches_serves_no_other_component() {
-    let (_tmp, root) = react_project(&[
-        ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
-        (
-            "node_modules/kit/fallback.d.ts",
-            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
-        ),
-        (
-            "node_modules/kit/base.d.ts",
-            "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
-             export interface Base { base: string }\n",
-        ),
-        (
-            "src/card/Card.tsx",
-            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
-        ),
-        (
-            "src/aria/Aria.tsx",
-            "import * as React from 'react';\ninterface AriaOwn extends React.AriaAttributes { own?: boolean }\n\
-             export const Aria = (props: AriaOwn) => <div />;\n",
-        ),
-        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
-    ]);
-    let first = root.join("node_modules/kit/first.d.ts");
-    std::fs::write(&first, UNREADABLE).unwrap();
-    let session = WatchSession::new(react_options(&root));
-    drop(session.initialize());
-    let check = |step: &str, card: &[&str]| {
-        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
-        drop(fresh.initialize());
-        assert_eq!(names(&session.component("Card")), card, "{step}");
-        assert!(!names(&session.component("Aria")).contains(&"aria-fb".to_owned()), "{step}");
-        for name in ["Card", "Aria"] {
-            assert!(session.component(name) == fresh.component(name), "{name}, {step}");
-        }
-    };
-    check("falling through", &["base", "fallback"]);
-    std::fs::write(&first, "export interface Target { first: string }\n").unwrap();
-    edit(&session, &root.join("src/plain/Plain.tsx"));
-    check("recovered", &["first"]);
 }
 
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
@@ -1993,9 +1808,9 @@ struct Model {
     unreadable: &'static [&'static str],
     react: bool,
     seeds: &'static [u64],
-    /// The package files reached only past a file that can be unreadable, as an answer reads them while it is: with
-    /// nothing merged into React. The oracle that empties the unreadable files, so walks pass them, writes these.
-    past_unreadable: &'static [(&'static str, &'static str)],
+    /// `(component, file, props)`: while `file`, an earlier export of the barrel the component's type is looked up
+    /// in, is unreadable, the lookup is unresolved and the component has only `props`, its own.
+    unresolved_past: &'static [(&'static str, &'static str, &'static [&'static str])],
 }
 
 const PLAIN_MODEL: Model = Model {
@@ -2004,7 +1819,7 @@ const PLAIN_MODEL: Model = Model {
     unreadable: &["index", "a", "stub", "b", "cyc/first", "nest", "deep", "leaf", "prim"],
     react: false,
     seeds: &[1, 2, 3, 5, 8, 13, 21, 34],
-    past_unreadable: &[],
+    unresolved_past: &[],
 };
 
 const REACT_MODEL: Model = Model {
@@ -2015,8 +1830,7 @@ const REACT_MODEL: Model = Model {
     // Seed 63 restarts over the index on disk with an augmentation unreadable, then flattens; seed 655 recovers a served
     // augmentation's import.
     seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 63, 655],
-    // `Base` is reached only by falling through an unreadable `first`.
-    past_unreadable: &[("node_modules/mk/tgt/base.d.ts", "export interface Base { base: string }\n")],
+    unresolved_past: &[("Card", "tgt/first", &["own_card"]), ("Card2", "tgt2/first", &["own_card2"])],
 };
 
 impl Model {
@@ -2055,12 +1869,10 @@ fn set_unreadable(model: &Model, root: &Utf8Path, unreadable: &std::collections:
         let Some(name) = path.strip_prefix("node_modules/mk/").and_then(|name| name.strip_suffix(".d.ts")) else {
             continue;
         };
-        let past = model.past_unreadable.iter().find(|(past, _)| past == path).map(|(_, body)| *body);
         match (unreadable.contains(name), empty) {
             (true, false) => std::fs::write(root.join(path), UNREADABLE).unwrap(),
             (true, true) => std::fs::write(root.join(path), "export {};\n").unwrap(),
-            (false, true) => std::fs::write(root.join(path), past.unwrap_or(body)).unwrap(),
-            (false, false) => std::fs::write(root.join(path), body).unwrap(),
+            (false, _) => std::fs::write(root.join(path), body).unwrap(),
         }
     }
 }
@@ -2153,7 +1965,7 @@ impl ModelRun<'_> {
     }
 
     /// A request, checked against both oracles: the answer is a fresh session's over exactly the files it reports
-    /// unreadable, and its props are what the readable files give.
+    /// unreadable, and it holds no prop the readable files do not give.
     fn request(&mut self, name: &str) -> Vec<String> {
         let before: Vec<String> = match name == MODEL_READER {
             true => self.asked.iter().filter(|asked| *asked != name).cloned().collect(),
@@ -2173,11 +1985,16 @@ impl ModelRun<'_> {
         if comparable(&self.root, &answer) != expected {
             self.fail("fresh session", format!("{name} warned {warned:?}"));
         }
-        // A re-export cycle's answer reaches the resolver only as a partial mapping: with the unreadable target
-        // declaring nothing, a fresh run maps nothing, so that oracle does not say what `Cyc`'s readable files give.
+        // A degraded answer holds no prop the readable files do not give; a lookup past an unreadable file gives none.
         let readable = self.oracle.ask(name, &warned, true, &before);
-        if name != "Cyc" && format!("{:?}", prop_names(&answer)) != readable {
-            self.fail("readable files", format!("{name} {:?}, expected {readable}", prop_names(&answer)));
+        let props = prop_names(&answer);
+        if !props.iter().all(|prop| readable.contains(&format!("{prop:?}"))) {
+            self.fail("readable files", format!("{name} {props:?}, beyond {readable}"));
+        }
+        for (component, past, own) in self.model.unresolved_past {
+            if *component == name && warned.iter().any(|file| file == past) && props != *own {
+                self.fail("unresolved past", format!("{name} {props:?} while {past} is unreadable"));
+            }
         }
         let again = self.session.component(name).unwrap();
         let again_warned = warned_names(&self.root, &again);
@@ -2219,8 +2036,9 @@ type ModelChange = (&'static str, fn(&Utf8Path) -> Utf8PathBuf);
 /// once it reads. After every request:
 ///
 /// 1. the answer equals a fresh session's (cache off) with exactly the files the session reports unreadable made
-///    unreadable, and its props equal a fresh session's with those files declaring nothing: what the readable files
-///    give, through every resolver path (a direct import, a barrel, a qualified `typeof X.y`);
+///    unreadable, and it holds no prop a fresh session with those files declaring nothing lacks (through every
+///    resolver path: a direct import, a barrel, a qualified `typeof X.y`); a lookup that would pass an unreadable
+///    export of a barrel is unresolved (`Model::unresolved_past`);
 /// 2. each file is reported once, and a request made while every file reads, after an edit since a file last changed,
 ///    reports none of the files its own walk reads: the edit made every walk past an unreadable file due, and no
 ///    provisional answer outlives it;
