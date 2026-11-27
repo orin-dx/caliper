@@ -257,30 +257,40 @@ pub trait SemanticProvider: Send + Sync {
     /// [`Self::request`]'s receiver on a thread of its own.
     fn request_at(&self, targets: Vec<SemanticTarget>, priority: SharedPriority, delivery: Delivery) {
         drop(priority);
-        let receiver = self.request(targets);
-        let delivery = Arc::new(Mutex::new(Some(delivery)));
-        let take =
-            |slot: &Mutex<Option<Delivery>>| slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-        let waiter = delivery.clone();
-        let waiting = std::thread::Builder::new().name("caliper-checker-answer".to_string()).spawn(move || {
-            let outcome = receiver.recv().ok();
-            if let Some(delivery) = take(&waiter) {
-                delivery.deliver(outcome);
-            }
+        deliver_from(self.request(targets), delivery, |wait| {
+            std::thread::Builder::new().name("caliper-checker-answer".to_string()).spawn(wait).map(drop)
         });
-        if let Err(error) = waiting
-            && let Some(delivery) = take(&delivery)
-        {
-            delivery.deliver(Some(SemanticOutcome::unavailable(format!(
-                "could not start a thread to wait for it: {error}"
-            ))));
-        }
     }
 
     /// Tells the checker that files changed on disk, before any request that may read them is queued. A checker that
     /// keeps what it read (a warm `tsc` holding a snapshot, ADR 0026) reads them again; one that reads every file
     /// afresh for each request needs nothing, which is the default.
     fn changed(&self, _change: SourceChange) {}
+}
+
+/// Gives `delivery` what `receiver` yields, waiting on the thread `spawn` starts. A thread that cannot be started fails
+/// this request only ([`SemanticOutcome::request_failed`]): the checker accepted it and may answer others.
+pub(crate) fn deliver_from(
+    receiver: std::sync::mpsc::Receiver<SemanticOutcome>,
+    delivery: Delivery,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
+) {
+    let delivery = Arc::new(Mutex::new(Some(delivery)));
+    let take = |slot: &Mutex<Option<Delivery>>| slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    let waiter = delivery.clone();
+    let waiting = spawn(Box::new(move || {
+        let outcome = receiver.recv().ok();
+        if let Some(delivery) = take(&waiter) {
+            delivery.deliver(outcome);
+        }
+    }));
+    if let Err(error) = waiting
+        && let Some(delivery) = take(&delivery)
+    {
+        delivery.deliver(Some(SemanticOutcome::request_failed(format!(
+            "could not start a thread to wait for it: {error}"
+        ))));
+    }
 }
 
 /// Who waits for a request to the checker, which decides what a busy checker answers first. The classes are ordered

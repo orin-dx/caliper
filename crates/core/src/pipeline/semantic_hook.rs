@@ -795,6 +795,61 @@ mod tests {
         assert_eq!(checker.asked().len(), 2, "the failed one is held for its retry");
     }
 
+    /// A checker whose answers are waited for on threads (the default `request_at`), and whose first waiter thread
+    /// cannot be started.
+    #[derive(Default)]
+    struct WaiterFailsOnce {
+        asked: Mutex<Vec<String>>,
+    }
+
+    impl SemanticProvider for WaiterFailsOnce {
+        fn request(&self, targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome> {
+            let key = targets.into_iter().next().unwrap().key;
+            self.asked.lock().unwrap().push(key.clone());
+            let (send, receive) = std::sync::mpsc::channel();
+            let components = vec![(*component(&key, &["label", "size"])).clone()];
+            send.send(SemanticOutcome { components, ..Default::default() }).unwrap();
+            receive
+        }
+
+        fn request_at(&self, targets: Vec<SemanticTarget>, _priority: SharedPriority, delivery: Delivery) {
+            let first = self.asked.lock().unwrap().is_empty();
+            crate::types::semantic::deliver_from(self.request(targets), delivery, |wait| match first {
+                true => Err(std::io::Error::other("no thread for this one")),
+                false => std::thread::Builder::new().spawn(wait).map(drop),
+            });
+        }
+    }
+
+    /// A waiter thread that cannot be started fails its own request, not the checker: the component is degraded with
+    /// the warning, and an unrelated one asked next is asked, not refused for the retry period.
+    #[test]
+    fn a_waiter_thread_that_cannot_start_fails_only_its_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(root.join("Button.tsx"), BUTTON).unwrap();
+        std::fs::write(root.join("Card.tsx"), CARD).unwrap();
+        let options = crate::pipeline::PipelineOptions { src_dirs: vec![root], ..Default::default() };
+        let structural = crate::pipeline::WatchSession::lazy(options.clone());
+        drop(structural.initialize());
+        let cx = CollapseContext::of(&options);
+        let checker = Arc::new(WaiterFailsOnce::default());
+        let hook = SemanticHook::new(checker.clone(), Duration::from_secs(5));
+        let ask = |key: &str| {
+            hook.refine(structural.component(key).unwrap(), options.html_attributes, cx, Priority::Interactive)
+        };
+        let button = ask("Button");
+        let warned = |answer: &crate::pipeline::ComponentAnswer| {
+            let warning = |d: &&Diagnostic| d.severity == DiagnosticSeverity::Warning;
+            answer.diagnostics.iter().filter(warning).any(|d| d.code == DiagnosticCode::SemanticBackend)
+        };
+        assert!(warned(&button), "the failed request carries the warning");
+        let card = ask("Card");
+        assert_eq!(*checker.asked.lock().unwrap(), ["Button", "Card"], "the unrelated component is asked");
+        assert!(!warned(&card), "and answered by the checker: {:?}", card.diagnostics);
+        assert!(card.diagnostics.iter().any(|d| d.message.contains("resolved by the TypeScript checker")));
+    }
+
     /// What [`Replies`] answers while the checker has not recovered.
     #[derive(Clone, Copy, Debug)]
     enum Reply {
