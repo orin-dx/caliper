@@ -96,8 +96,9 @@ impl Partial<()> {
 struct Unkept {
     /// The walk met a module already on it (a re-export cycle), so the answer depends on where it entered.
     cycle: bool,
-    /// The modules the walk passed and could not read, any of which may have declared the name.
-    unread: Vec<PathKey>,
+    /// The modules the walk passed and could not read, any of which may have declared the name: each once, however
+    /// many paths of the walk pass it.
+    unread: FxHashSet<PathKey>,
 }
 
 impl Unkept {
@@ -105,7 +106,19 @@ impl Unkept {
         self.cycle |= other.cycle;
         self.unread.extend(other.unread);
     }
+
+    /// The unread modules, sorted, so the answer is the same in any order.
+    fn unread_sorted(self) -> Vec<PathKey> {
+        let mut unread: Vec<PathKey> = self.unread.into_iter().collect();
+        unread.sort();
+        unread
+    }
 }
+
+/// What one load found for `(module, name)` past a module it could not read, with those modules: the same for the
+/// rest of the load (each file is read once), so a walk that meets the pair again reuses it instead of walking every
+/// path below it again. Never kept beyond the load.
+type IncompleteExport = (Option<(Utf8PathBuf, CompactString)>, Arc<[PathKey]>);
 
 /// What one probe of a directory found, once it has run (`probe_once`).
 type ProbeCell = Arc<OnceLock<bool>>;
@@ -439,6 +452,9 @@ pub(crate) struct DependencyLayer {
     /// How many times this layer's load read a dependency file, for tests.
     #[cfg(test)]
     reads: usize,
+    /// How many `(module, name)` export lookups this layer's load walked, for tests.
+    #[cfg(test)]
+    export_visits: usize,
 }
 
 impl DependencyLayer {
@@ -713,6 +729,11 @@ struct Loader<'a> {
     reads: FxDashMap<PathKey, usize>,
     #[cfg(test)]
     read_pause: std::time::Duration,
+    /// Export lookups this load answered past a module it could not read ([`IncompleteExport`]).
+    incomplete_exports: FxDashMap<(PathKey, CompactString), IncompleteExport>,
+    /// How many `(module, name)` lookups this load walked, for tests.
+    #[cfg(test)]
+    export_visits: std::sync::atomic::AtomicUsize,
 }
 
 impl<'a> Loader<'a> {
@@ -748,6 +769,9 @@ impl<'a> Loader<'a> {
             panics: Mutex::new(Vec::new()),
             #[cfg(test)]
             reads: DashMap::default(),
+            incomplete_exports: DashMap::default(),
+            #[cfg(test)]
+            export_visits: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             read_pause: std::time::Duration::ZERO,
         }
@@ -856,7 +880,7 @@ impl Loader<'_> {
     fn find_export(&self, module: &Utf8Path, name: &str) -> Partial<Option<(Utf8PathBuf, CompactString)>> {
         let mut unkept = Unkept::default();
         let value = self.find_export_in(module, name, &mut FxHashSet::default(), &mut unkept);
-        Partial { value, unread: unkept.unread }
+        Partial { value, unread: unkept.unread_sorted() }
     }
 
     /// `find_export` within one walk. A lookup that met a module already on the walk (a re-export cycle) or passed one
@@ -878,18 +902,34 @@ impl Loader<'_> {
         if let Some(found) = self.parent.and_then(|parent| parent.export_entry(&key)) {
             return found.clone();
         }
+        if let Some(hit) = self.incomplete_exports.get(&key) {
+            let (found, unread) = hit.value().clone();
+            unkept.unread.extend(unread.iter().cloned());
+            return found;
+        }
         if !visited.insert(key.clone()) {
             unkept.cycle = true;
             return None;
         }
+        #[cfg(test)]
+        self.export_visits.fetch_add(1, Ordering::Relaxed);
         let mut own = Unkept::default();
         let found = self.find_export_uncached(module, name, visited, &mut own);
         visited.remove(&key);
-        if !own.cycle && own.unread.is_empty() {
-            if let Some(dir) = module.parent() {
-                self.learn(dir);
+        match (own.cycle, own.unread.is_empty()) {
+            (false, true) => {
+                if let Some(dir) = module.parent() {
+                    self.learn(dir);
+                }
+                self.exports.insert(key, found.clone());
             }
-            self.exports.insert(key, found.clone());
+            // A cycle's answer depends on where the walk entered it; an answer past an unread module does not.
+            (false, false) => {
+                let mut unread: Vec<PathKey> = own.unread.iter().cloned().collect();
+                unread.sort();
+                self.incomplete_exports.insert(key, (found.clone(), Arc::from(unread)));
+            }
+            (true, _) => {}
         }
         unkept.absorb(own);
         found
@@ -905,7 +945,7 @@ impl Loader<'_> {
         let data = match self.parse(module) {
             Ok(data) => data?,
             Err(ReadFailed(file)) => {
-                unkept.unread.push(file);
+                unkept.unread.insert(file);
                 return None;
             }
         };
@@ -1786,6 +1826,8 @@ fn load_with(
         unread_walk_builds: std::sync::atomic::AtomicUsize::new(0),
         #[cfg(test)]
         reads: loader.reads.iter().map(|entry| *entry.value()).sum(),
+        #[cfg(test)]
+        export_visits: loader.export_visits.load(Ordering::Relaxed),
     }
 }
 

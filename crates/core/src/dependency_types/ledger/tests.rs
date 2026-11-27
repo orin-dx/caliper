@@ -1034,6 +1034,57 @@ fn an_augmentation_many_searches_reach_is_served_once() {
     assert_eq!(run(70), one);
 }
 
+/// An `export *` lattice 25 levels deep, two modules a level, each re-exporting both of the next: 2^25 paths to its
+/// shared bottom, which re-exports an unreadable `bad`. `Target` lies past the lattice. While `bad` cannot be read,
+/// each `(module, name)` is walked once in the load, not once a path. The answer is the cold one, held as a partial
+/// mapping and never kept complete, and after `bad` reads the retry's answer equals a cold run's.
+#[test]
+fn an_export_walk_past_an_unreadable_file_visits_each_module_once() {
+    const DEPTH: usize = 25;
+    let mut files: Vec<(String, String)> = vec![
+        (
+            "node_modules/lattice/package.json".into(),
+            r#"{ "name": "lattice", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
+        ),
+        (
+            "node_modules/lattice/index.d.ts".into(),
+            "export * from './l0a';\nexport * from './l0b';\nexport * from './target';\n".into(),
+        ),
+        ("node_modules/lattice/target.d.ts".into(), "export interface Target { t: string }\n".into()),
+        ("node_modules/lattice/bottom.d.ts".into(), "export * from './bad';\n".into()),
+    ];
+    for level in 0..DEPTH {
+        let next = match level + 1 == DEPTH {
+            true => "export * from './bottom';\n".to_owned(),
+            false => format!("export * from './l{0}a';\nexport * from './l{0}b';\n", level + 1),
+        };
+        for side in ["a", "b"] {
+            files.push((format!("node_modules/lattice/l{level}{side}.d.ts"), next.clone()));
+        }
+    }
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = project(&files);
+    let bad = root.join("node_modules/lattice/bad.d.ts");
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    let options = PipelineOptions { use_cache: false, ..options(&root) };
+    let demands = vec![Demand { from: root.join("src/Card.tsx"), specifier: "lattice".into(), name: "Target".into() }];
+    let index = root.join("node_modules/lattice/index.d.ts");
+    let target = Some((root.join("node_modules/lattice/target.d.ts"), CompactString::from("Target")));
+
+    let failed = Arc::new(load(demands.clone(), &options, None));
+    let modules = 2 * DEPTH + 3;
+    assert!(failed.export_visits <= 2 * modules, "{} lookups over {modules} modules", failed.export_visits);
+    assert_eq!(failed.export_for_resolver(&index, "Target"), Some(target.clone()), "the cold answer, partially");
+    assert_eq!(failed.export_of_complete(&index, "Target"), None, "nothing incomplete is kept");
+    assert_eq!(reported(&failed), [Some(bad.to_string())]);
+
+    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
+    let recovered = load(failed.missing(&demands), &options, Some(&failed));
+    let cold = load(demands, &options, None);
+    assert_eq!(recovered.export_of_complete(&index, "Target"), cold.export_of_complete(&index, "Target"));
+    assert_eq!(cold.export_of_complete(&index, "Target"), Some(&target));
+}
+
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
 /// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
 /// augmentation did add one.

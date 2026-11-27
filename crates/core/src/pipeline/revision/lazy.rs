@@ -335,13 +335,23 @@ fn touch(ids: impl Iterator<Item = ComponentId>, touched: &mut FxHashSet<String>
 }
 
 /// The demands every component may read through: React's names and each module a project file imports.
+/// Whether every component's resolution may depend on `demand`: React's own types, or a module imported for what it
+/// merges into React.
+fn is_shared(demand: &Demand) -> bool {
+    &*demand.specifier == "react" || demand.name.is_empty()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread built a shared demand list, for tests.
+    static SHARED_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn shared_demands<'a>(file_demands: impl IntoIterator<Item = &'a [Demand]>) -> Arc<[Demand]> {
-    let mut shared: Vec<Demand> = file_demands
-        .into_iter()
-        .flatten()
-        .filter(|demand| &*demand.specifier == "react" || demand.name.is_empty())
-        .cloned()
-        .collect();
+    #[cfg(test)]
+    SHARED_BUILDS.with(|builds| builds.set(builds.get() + 1));
+    let mut shared: Vec<Demand> =
+        file_demands.into_iter().flatten().filter(|demand| is_shared(demand)).cloned().collect();
     shared.sort();
     shared.dedup();
     Arc::from(shared)
@@ -510,7 +520,16 @@ impl Revision {
         let by_name = group_by_name(&global, options);
         let memo: DashMap<ComponentId, Arc<Resolved>, FxBuildHasher> = DashMap::default();
         // What the edited project serves: a memo that read React's augmentations under other ones is touched.
-        let shared = shared_demands(file_demands.values().map(|demands| demands.as_ref()));
+        // Most edits leave a file's shared demands as they were: then the list is the previous revision's, not rebuilt
+        // from every file.
+        fn shared_of(demands: Option<&Arc<[Demand]>>) -> Vec<&Demand> {
+            demands.into_iter().flat_map(|demands| demands.iter()).filter(|demand| is_shared(demand)).collect()
+        }
+        let file = change.file.as_str();
+        let shared = match shared_of(previous.demands.get(file)) == shared_of(file_demands.get(file)) {
+            true => previous.shared.clone(),
+            false => shared_demands(file_demands.values().map(|demands| demands.as_ref())),
+        };
         let layer = previous.engine.load().layer.clone();
         let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(shared.iter()));
         let mut touched: FxHashSet<String> = FxHashSet::default();
@@ -1412,6 +1431,49 @@ mod read_retry_tests {
             );
         }
         (tmp, root)
+    }
+
+    /// An edit that leaves a file's shared demands as they were (here a comment) keeps the revision's shared demand
+    /// list: over 1000 files each importing a module for its augmentations, nothing is rebuilt, and an edit that drops
+    /// the import builds a list of its own.
+    #[test]
+    fn an_edit_that_keeps_the_shared_demands_rebuilds_none() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write(
+            "node_modules/aug-kit/package.json",
+            r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        );
+        write("node_modules/aug-kit/index.d.ts", "export interface Aug { a: string }\n");
+        for n in 0..1000 {
+            write(
+                &format!("src/c{n}/C{n}.tsx"),
+                &format!(
+                    "import * as Aug from 'aug-kit';\nexport const aug{n} = Aug;\n\
+                     export function C{n}(props: {{ own: string }}) {{ return null; }}\n"
+                ),
+            );
+        }
+        let options = options(&root, false);
+        let first = Revision::cold_lazy(&options, 0);
+        let edited = root.join("src/c0/C0.tsx");
+        let source = std::fs::read_to_string(&edited).unwrap();
+        std::fs::write(&edited, format!("{source}// a comment\n")).unwrap();
+        SHARED_BUILDS.with(|builds| builds.set(0));
+        let second = first.next_lazy(&options, &edited).unwrap().0;
+        assert_eq!(SHARED_BUILDS.with(std::cell::Cell::get), 0, "nothing rebuilt");
+        let shared = |revision: &Revision| revision.lazy.as_ref().unwrap().shared.clone();
+        assert!(Arc::ptr_eq(&shared(&first), &shared(&second)));
+        std::fs::write(&edited, "export function C0(props: { own: string }) { return null; }\n").unwrap();
+        assert!(!shared(&second).is_empty(), "the fixture's imports are shared demands");
+        let third = second.next_lazy(&options, &edited).unwrap().0;
+        assert_eq!(SHARED_BUILDS.with(std::cell::Cell::get), 1, "a changed import rebuilds the list");
+        assert_eq!((shared(&second).len(), shared(&third).len()), (1000, 999), "one shared demand a file");
     }
 
     /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its
