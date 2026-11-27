@@ -197,12 +197,12 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     pub(super) fn record_call(&mut self, call: &CallExpression<'_>) {
-        if let Expression::Identifier(callee) = super::component::peel_expr(super::component::callee(call)) {
+        if let Expression::Identifier(callee) = super::component::peel_expr(super::shape::call(call).function) {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
         let renders_argument = super::component::is_component_wrapper(&*self, call)
             || super::evidence::is_element_factory_callee(
-                super::component::peel_expr(super::component::callee(call)),
+                super::component::peel_expr(super::shape::call(call).function),
                 &*self,
             );
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {

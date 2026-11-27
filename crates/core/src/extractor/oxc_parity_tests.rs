@@ -152,6 +152,66 @@ fn factory_parity_cases() -> Vec<(String, String)> {
             "import * as React from 'react';\nexport class Button extends (React.Component<keyof Props>) { render() { return <div />; } }",
         ),
         (
+            "reader: a factory fallback with a generic return (finding), plain",
+            "import * as React from 'react';\ndeclare function createButton<T>(): React.FC<{ value: T }>;\nexport const Button = createButton<string>();",
+        ),
+        (
+            "reader: a factory fallback with a generic return (finding), instantiation",
+            "import * as React from 'react';\ndeclare function createButton<T>(): React.FC<{ value: T }>;\nexport const Button = (createButton<string>)();",
+        ),
+        (
+            "reader: a factory fallback with a generic return (finding), optional",
+            "import * as React from 'react';\ndeclare function createButton<T>(): React.FC<{ value: T }>;\nexport const Button = (createButton<string>)?.();",
+        ),
+        (
+            "reader: a generic wrapper with arguments, plain",
+            "import * as React from 'react';\ndeclare function wrap<P>(c: React.FC<P>): React.FC<P & { extra?: string }>;\nfunction Base(props: Props) { return <div />; }\nexport const Button = wrap<Props>(Base);",
+        ),
+        (
+            "reader: a generic wrapper with arguments, instantiation",
+            "import * as React from 'react';\ndeclare function wrap<P>(c: React.FC<P>): React.FC<P & { extra?: string }>;\nfunction Base(props: Props) { return <div />; }\nexport const Button = (wrap<Props>)(Base);",
+        ),
+        (
+            "reader: a generic wrapper with arguments, optional",
+            "import * as React from 'react';\ndeclare function wrap<P>(c: React.FC<P>): React.FC<P & { extra?: string }>;\nfunction Base(props: Props) { return <div />; }\nexport const Button = (wrap<Props>)?.(Base);",
+        ),
+        (
+            "reader: a HOC with type arguments, plain",
+            "import { memo } from 'react';\nexport const Button = memo<Props>((props: Props) => <div />);",
+        ),
+        (
+            "reader: a HOC with type arguments, instantiation",
+            "import { memo } from 'react';\nexport const Button = (memo<Props>)((props: Props) => <div />);",
+        ),
+        (
+            "reader: a HOC with type arguments, optional",
+            "import { memo } from 'react';\nexport const Button = (memo<Props>)?.((props: Props) => <div />);",
+        ),
+        (
+            "reader: a hook call, plain",
+            "declare function useLookup<T>(): T;\nexport const Label = (props: Props) => { useLookup<string>(); return props.label; };",
+        ),
+        (
+            "reader: a hook call, instantiation",
+            "declare function useLookup<T>(): T;\nexport const Label = (props: Props) => { (useLookup<string>)(); return props.label; };",
+        ),
+        (
+            "reader: a hook call, optional",
+            "declare function useLookup<T>(): T;\nexport const Label = (props: Props) => { (useLookup<string>)?.(); return props.label; };",
+        ),
+        (
+            "reader: class heritage with type arguments, plain",
+            "import { Component } from 'react';\nexport class Button extends Component<Props> { render() { return <div />; } }",
+        ),
+        (
+            "reader: class heritage with type arguments, instantiation",
+            "import { Component } from 'react';\nexport class Button extends (Component<Props>) { render() { return <div />; } }",
+        ),
+        (
+            "reader: a JSX generic tag",
+            "function Foo<T>(p: T) { return <div />; }\nexport const Button = (props: Props) => <Foo<Props> {...props} />;",
+        ),
+        (
             "normalisation: a function-local enum with a long chain (finding 1)",
             "// ts\nexport function f() { enum E { A = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 } return E.A; }",
         ),
@@ -316,7 +376,11 @@ fn factory_parity_output(source: &str) -> String {
             let exported =
                 if exports.is_empty() { String::new() } else { format!(" exported as {}", exports.join(",")) };
             // The callee whose declared result the resolver reads, if any.
-            let via = m.wrapper_callee.as_ref().map(|callee| format!(" via {}", callee.name)).unwrap_or_default();
+            let via = m
+                .wrapper_callee
+                .as_ref()
+                .map(|callee| format!(" via {}<{}>", callee.name, callee.type_args.len()))
+                .unwrap_or_default();
             // The defaults a static `defaultProps` assignment supplies.
             let mut defaults: Vec<&str> = m.param_defaults.keys().map(String::as_str).collect();
             defaults.sort_unstable();

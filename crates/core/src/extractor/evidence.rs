@@ -139,7 +139,7 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        let callee = super::component::callee(it);
+        let callee = super::shape::call(it).function;
         let name = callee_name(callee);
         let calls_helper = matches!(callee, Expression::Identifier(id) if self.scope.is_element_helper(&id.name));
         if calls_helper || is_element_factory_callee(callee, self.scope) {
@@ -174,7 +174,7 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
         // A component invoked directly: `return JoinList({ ... })`.
         Expression::CallExpression(call)
-            if callee_name(super::component::callee(call)).is_some_and(super::is_pascal_case) =>
+            if callee_name(super::shape::call(call).function).is_some_and(super::is_pascal_case) =>
         {
             true
         }
@@ -221,7 +221,7 @@ impl<'a> Visit<'a> for OwnBody<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if self.nested == 0 && callee_name(super::component::callee(it)).is_some_and(is_hook_name) {
+        if self.nested == 0 && callee_name(super::shape::call(it).function).is_some_and(is_hook_name) {
             self.calls_hook = true;
         }
         walk::walk_call_expression(self, it);
