@@ -3914,6 +3914,94 @@ fn factory_parity_cases() -> Vec<(String, String)> {
         "pascal: a function without a return type | peeled".to_owned(),
         "import * as React from 'react';\nfunction MakeCard() { return <div />; }\nexport const Button = (props: Props) => (MakeCard as typeof MakeCard)();".to_owned(),
     ));
+    cases.push((
+        "tables: a bare callee | plain".to_owned(),
+        "import * as React from 'react';\nfunction MakeToken() { return <div />; }\nexport const Button = (props: Props) => MakeToken();".to_owned(),
+    ));
+    cases.push((
+        "tables: a bare callee | peeled".to_owned(),
+        "import * as React from 'react';\nfunction MakeToken() { return <div />; }\nexport const Button = (props: Props) => (MakeToken as typeof MakeToken)();".to_owned(),
+    ));
+    cases.push((
+        "tables: a member with its own table | plain".to_owned(),
+        "import * as React from 'react';\nnamespace ui { export function MakeToken() { return <span />; } }\nfunction MakeToken() { return <div />; }\nexport const Button = (props: Props) => ui.MakeToken();".to_owned(),
+    ));
+    cases.push((
+        "tables: a member with its own table | peeled".to_owned(),
+        "import * as React from 'react';\nnamespace ui { export function MakeToken() { return <span />; } }\nfunction MakeToken() { return <div />; }\nexport const Button = (props: Props) => (ui.MakeToken as typeof ui.MakeToken)();".to_owned(),
+    ));
+    cases.push((
+        "tables: a member with a foreign table (finding 1) | plain".to_owned(),
+        "import * as React from 'react';\nimport * as codec from './codec';\nfunction MakeToken() { return <div />; }\nexport const Button = (props: Props) => codec.MakeToken();".to_owned(),
+    ));
+    cases.push((
+        "tables: a member with a foreign table (finding 1) | peeled".to_owned(),
+        "import * as React from 'react';\nimport * as codec from './codec';\nfunction MakeToken() { return <div />; }\nexport const Button = (props: Props) => (codec.MakeToken as typeof codec.MakeToken)();".to_owned(),
+    ));
+    cases.push((
+        "roles: assign trusted, export default (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default Object.assign(Impl, {});".to_owned(),
+    ));
+    cases.push((
+        "roles: assign trusted, export default (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default Object.assign(<typeof Impl>Impl, {});".to_owned(),
+    ));
+    cases.push((
+        "roles: assign trusted, export const | plain".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "roles: assign trusted, export const | peeled".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(<typeof Impl>Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "roles: assign trusted, named member | plain".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "roles: assign trusted, named member | peeled".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport const Root = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "roles: assign trusted, nested | plain".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default memo(Object.assign(Impl, {}));".to_owned(),
+    ));
+    cases.push((
+        "roles: assign trusted, nested | peeled".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nexport default memo(Object.assign(<typeof Impl>Impl, {}));".to_owned(),
+    ));
+    cases.push((
+        "roles: assign replaced, export default (finding 2) | plain".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport default Object.assign(Impl, {});".to_owned(),
+    ));
+    cases.push((
+        "roles: assign replaced, export default (finding 2) | peeled".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport default Object.assign(<typeof Impl>Impl, {});".to_owned(),
+    ));
+    cases.push((
+        "roles: assign replaced, export const | plain".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport const Root = Object.assign(Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "roles: assign replaced, export const | peeled".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport const Root = Object.assign(<typeof Impl>Impl, { Item });".to_owned(),
+    ));
+    cases.push((
+        "roles: assign replaced, named member | plain".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport const Root = Object.assign(Impl, { Item: Item });".to_owned(),
+    ));
+    cases.push((
+        "roles: assign replaced, named member | peeled".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport const Root = Object.assign(Impl, { Item: <typeof Item>Item });".to_owned(),
+    ));
+    cases.push((
+        "roles: assign replaced, nested | plain".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport default memo(Object.assign(Impl, {}));".to_owned(),
+    ));
+    cases.push((
+        "roles: assign replaced, nested | peeled".to_owned(),
+        "// ts\nimport { createElement, memo } from 'react';\ninterface ItemProps { tone?: string }\nfunction Item(props: ItemProps) { return createElement('span'); }\nfunction Impl(props: Props) { return createElement('div'); }\nObject.assign = (target: object) => ({});\nexport default memo(Object.assign(<typeof Impl>Impl, {}));".to_owned(),
+    ));
     cases
 }
 
@@ -4001,7 +4089,14 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
                 let components = |output: &str| -> Vec<String> {
                     output.split(" | ").filter(|line| !line.starts_with("Info ")).map(str::to_owned).collect()
                 };
-                components(&now) == components(main) || (main != main_plain && now == main_plain && !loses)
+                // A component main lists and this head does not is allowed only where main's own plain call does not
+                // list it either: `const Root = Object.assign(Impl, { Item })` aliases `Impl` away on main too.
+                let lost_on_main_too = mappings(main)
+                    .iter()
+                    .filter(|mapping| !mappings(&now).contains(mapping))
+                    .all(|mapping| !mappings(main_plain).contains(mapping));
+                components(&now) == components(main)
+                    || (main != main_plain && now == main_plain && (!loses || lost_on_main_too))
             }
         };
         if !holds {
@@ -4044,7 +4139,9 @@ fn a_known_factory_is_recognised_exactly_as_origin_main_recognised_it() {
     // another member (`a_peeled_child_relies_on_the_whole_call_its_key_and_its_receiver`).
     // Round 40 adds six: a cast `Object.assign` part with no write to it in four contexts, and a PascalCase callee behind a
     // cast whose declaration renders by its return type or body (`a_peeled_part_relies_on_the_built_in_and_on_render_evidence`).
-    assert_eq!(read_as_the_plain_call, 80);
+    // Round 41 adds five: a bare callee behind a cast whose declaration renders, and the four trusted `Object.assign`
+    // roles (`a_peeled_part_uses_only_its_own_declaration_and_a_rejection_is_final`).
+    assert_eq!(read_as_the_plain_call, 85);
 }
 
 /// Round 28: a member callee's receiver written through a cast is read through it (`ui.wrap`) only when the file
@@ -4106,6 +4203,41 @@ fn a_peeled_candidate_is_accepted_only_when_its_names_are_trusted() {
         let expected = if trusted { base[plain.as_str()] } else { base[peeled.as_str()] };
         assert_eq!(factory_parity_output(&cases[&peeled]), expected, "{peeled}");
     }
+}
+
+/// Round 41: a part only a peel exposes counts only with the evidence of the declaration its own name resolves to, and a
+/// rejection is final. A member callee borrows no render evidence from a module-level function of its property's name
+/// (`Callee::Bare` alone reads that table), and a first argument `Object.assign` rejects is read by no other reader
+/// (`Role::Rejected`). Each plain form is origin/main's; a peeled form reads as the plain form only where the evidence
+/// holds, and as origin/main read it otherwise.
+#[test]
+fn a_peeled_part_uses_only_its_own_declaration_and_a_rejection_is_final() {
+    let base: FxHashMap<&str, &str> =
+        include_str!("factory_parity_base.tsv").lines().filter_map(|line| line.split_once('\t')).collect();
+    let cases: FxHashMap<String, String> = factory_parity_cases().into_iter().collect();
+    let mut failures = Vec::new();
+    for (row, holds) in [
+        ("tables: a bare callee", true),
+        ("tables: a member with its own table", false),
+        ("tables: a member with a foreign table (finding 1)", false),
+        ("roles: assign trusted, export default (finding 2)", true),
+        ("roles: assign trusted, export const", true),
+        ("roles: assign trusted, named member", true),
+        ("roles: assign trusted, nested", true),
+        ("roles: assign replaced, export default (finding 2)", false),
+        ("roles: assign replaced, export const", false),
+        ("roles: assign replaced, named member", false),
+        ("roles: assign replaced, nested", false),
+    ] {
+        let (plain, peeled) = (format!("{row} | plain"), format!("{row} | peeled"));
+        assert_eq!(factory_parity_output(&cases[&plain]), base[plain.as_str()], "{plain}");
+        let expected = if holds { base[plain.as_str()] } else { base[peeled.as_str()] };
+        let now = factory_parity_output(&cases[&peeled]);
+        if now != expected {
+            failures.push(format!("{peeled}:\n  expected {expected}\n  now      {now}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Round 40: any part of an `Object.assign` call only a peel exposes (the callee, a member, a source) counts only while

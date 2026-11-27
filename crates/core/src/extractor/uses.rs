@@ -81,6 +81,15 @@ fn minimal_object_assign(call: &CallExpression<'_>) -> bool {
     })
 }
 
+/// What an `Object.assign` call says its first argument is, the component it returns. `Rejected` is final: no other
+/// reader may take the argument for the component. Only `NotApplicable` (no `Object.assign`, or a first argument that is
+/// no name, such as a nested call) lets a caller read the argument its own way.
+pub(super) enum Role {
+    Accepted(super::names::Named),
+    Rejected,
+    NotApplicable,
+}
+
 /// The roles of an `Object.assign` call's arguments ([`SourceDataCollector::assign_roles`]).
 pub(super) struct AssignRoles<'b, 'a> {
     /// The first argument's name, the object the call returns.
@@ -121,12 +130,11 @@ impl<'src> SourceDataCollector<'src> {
         if !super::component::is_component_alias_call(self, call) {
             return None;
         }
-        // An `Object.assign` is its target only as `assign_roles` reads it.
-        if super::component::is_object_assign_call(call, self) {
-            let roles = self.assign_roles(call, false, None)?;
-            if let Some(target) = roles.target {
-                return roles.aliases.contains(&target).then_some(target);
-            }
+        // An `Object.assign` is its target only as `assign_roles` reads it, and a target it rejects stays rejected.
+        match self.assign_target(call) {
+            Role::Accepted(target) => return Some(target),
+            Role::Rejected => return None,
+            Role::NotApplicable => {}
         }
         let first = call.arguments.first()?.as_expression()?;
         // The argument's name as `value_name` vouches for it; a call written through a wrapper main did not read makes it
@@ -282,6 +290,23 @@ impl<'src> SourceDataCollector<'src> {
             }
         }
         Some(AssignRoles { target, aliases, objects, minimal })
+    }
+
+    /// The component an `Object.assign` call returns, as `assign_roles` reads its target ([`Role`]).
+    pub(super) fn assign_target(&self, call: &CallExpression<'_>) -> Role {
+        if !super::component::is_object_assign_call(call, self) {
+            return Role::NotApplicable;
+        }
+        let accepted = self
+            .assign_roles(call, false, None)
+            .and_then(|roles| roles.target.clone().filter(|target| roles.aliases.contains(target)));
+        let names =
+            call.arguments.first().and_then(Argument::as_expression).is_some_and(super::peeled::names_identifier);
+        match accepted {
+            Some(target) => Role::Accepted(target),
+            None if names => Role::Rejected,
+            None => Role::NotApplicable,
+        }
     }
 
     /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is

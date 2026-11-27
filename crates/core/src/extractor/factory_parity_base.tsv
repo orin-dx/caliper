@@ -704,3 +704,25 @@ pascal: a helper of a name declared twice | plain	Button:Props"typedFunctionExpr
 pascal: a helper of a name declared twice | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call | Info SkippedCandidate: 'MakeCard' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)
 pascal: a function without a return type | plain	Button:Props"typedFunctionExpression" exported as Button
 pascal: a function without a return type | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+tables: a bare callee | plain	Button:Props"typedFunctionExpression" exported as Button
+tables: a bare callee | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+tables: a member with its own table | plain	Button:Props"typedFunctionExpression" exported as Button
+tables: a member with its own table | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+tables: a member with a foreign table (finding 1) | plain	Button:Props"typedFunctionExpression" exported as Button
+tables: a member with a foreign table (finding 1) | peeled	Info SkippedCandidate: 'Button' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call
+roles: assign trusted, export default (finding 2) | plain	Impl:Props"functionDeclaration" exported as default | Item:ItemProps"functionDeclaration"
+roles: assign trusted, export default (finding 2) | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration"
+roles: assign trusted, export const | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+roles: assign trusted, export const | peeled	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item
+roles: assign trusted, named member | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+roles: assign trusted, named member | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+roles: assign trusted, nested | plain	Impl:Props"functionDeclaration" exported as default | Item:ItemProps"functionDeclaration"
+roles: assign trusted, nested | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration"
+roles: assign replaced, export default (finding 2) | plain	Impl:Props"functionDeclaration" exported as default | Item:ItemProps"functionDeclaration"
+roles: assign replaced, export default (finding 2) | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration"
+roles: assign replaced, export const | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+roles: assign replaced, export const | peeled	Impl:Props"functionDeclaration" | Info SkippedCandidate: 'Root' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias) | Item:ItemProps"functionDeclaration" exported as Root.Item
+roles: assign replaced, named member | plain	Item:ItemProps"functionDeclaration" exported as Root.Item | Root:Props"functionDeclaration" exported as Root
+roles: assign replaced, named member | peeled	Item:ItemProps"functionDeclaration" | Root:Props"functionDeclaration" exported as Root
+roles: assign replaced, nested | plain	Impl:Props"functionDeclaration" exported as default | Item:ItemProps"functionDeclaration"
+roles: assign replaced, nested | peeled	Impl:Props"functionDeclaration" | Item:ItemProps"functionDeclaration"

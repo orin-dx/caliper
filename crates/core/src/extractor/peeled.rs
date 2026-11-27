@@ -121,6 +121,12 @@ pub(super) fn read_value<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a>
     if is_name(all) { super::component::main_peel(expr) } else { all }
 }
 
+/// Whether a value is an identifier beneath its wrappers, whatever reads it: a role an `Object.assign` call rejects for
+/// such a value is final (`SourceDataCollector::assign_target`).
+pub(super) fn names_identifier(expr: &Expression<'_>) -> bool {
+    matches!(peel_all(expr), Expression::Identifier(_))
+}
+
 /// The identifier a value is beneath its wrappers, as a [`Named`]: `Plain` when origin/main read it
 /// (`component::main_peel`), otherwise only when the file declares it exactly once (`Bindings::unique`).
 pub(super) fn value_name(expr: &Expression<'_>, bindings: &Bindings) -> Option<Named> {

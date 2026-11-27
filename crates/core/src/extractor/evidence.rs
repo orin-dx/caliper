@@ -109,12 +109,34 @@ pub(super) fn type_renders(ty: &TSType<'_>, react: ReactBinding<'_>) -> bool {
     }
 }
 
-fn callee_name<'n>(callee: &'n Expression<'_>) -> Option<&'n str> {
-    match callee {
-        Expression::Identifier(id) => Some(id.name.as_str()),
-        Expression::StaticMemberExpression(m) => Some(m.property.name.as_str()),
-        _ => None,
+/// A callee's name as it is written: a bare identifier, or a member's property. A table keyed by a module-level name
+/// (`Scope::renders_when_called`, the element helpers) is looked up only with a `Bare` one: `codec.MakeToken` is not
+/// the file's own `MakeToken`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Callee<'n> {
+    Bare(&'n str),
+    Member(&'n str),
+}
+
+impl<'n> Callee<'n> {
+    fn of(callee: &'n Expression<'_>) -> Option<Self> {
+        match callee {
+            Expression::Identifier(id) => Some(Self::Bare(id.name.as_str())),
+            Expression::StaticMemberExpression(m) => Some(Self::Member(m.property.name.as_str())),
+            _ => None,
+        }
     }
+
+    /// The name alone, for a convention read by spelling (`map`, a hook, a PascalCase call main read as written).
+    fn name(self) -> &'n str {
+        match self {
+            Self::Bare(name) | Self::Member(name) => name,
+        }
+    }
+}
+
+fn callee_name<'n>(callee: &'n Expression<'_>) -> Option<&'n str> {
+    Callee::of(callee).map(Callee::name)
 }
 
 fn is_hook_name(name: &str) -> bool {
@@ -196,9 +218,8 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         // needs: a name declared once whose own declaration or body renders (`Scope::renders_when_called`).
         Expression::CallExpression(call) if callee_name(&call.callee).is_some_and(super::is_pascal_case) => true,
         Expression::CallExpression(call)
-            if super::component::called(call).as_plain().and_then(callee_name).is_some_and(|name| {
-                super::is_pascal_case(name) && scope.declarations(name) == 1 && scope.renders_when_called(name)
-            }) =>
+            if matches!(super::component::called(call).as_plain().and_then(Callee::of), Some(Callee::Bare(name))
+                if super::is_pascal_case(name) && scope.declarations(name) == 1 && scope.renders_when_called(name)) =>
         {
             true
         }
