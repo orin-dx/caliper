@@ -243,6 +243,10 @@ pub(super) struct Lazy {
     engine: ArcSwap<Engine>,
     /// Serializes layer growth, so concurrent requests load a name once.
     growing: Mutex<()>,
+    /// Held while a growth publishes its engine and drops the answers it invalidates, and while a request keeps an
+    /// answer: an answer is kept only if the engine it was resolved against is still the published one, so one
+    /// resolved before a publication cannot be put back after the publication dropped what it would have dropped.
+    publication: Mutex<()>,
     /// The failed reads the project's live demands reach, for the layer they were derived from: every answer read
     /// against that layer reports the same ones, so they are derived once per layer, not once per answer.
     live_warnings: Mutex<Option<LiveWarnings>>,
@@ -288,6 +292,9 @@ pub(super) struct Lazy {
     /// Run once by the next [`Revision::lazy_component`] between its resolution and its diagnostics, for tests.
     #[cfg(test)]
     between: Mutex<Option<Between>>,
+    /// Run once by the next resolution between resolving and keeping its answer, for tests.
+    #[cfg(test)]
+    before_keep: Mutex<Option<Between>>,
 }
 
 /// A layer, and what the shared demands lead to in it ([`Lazy::shared_unread`]).
@@ -499,6 +506,7 @@ impl Revision {
             memo: DashMap::default(),
             engine: ArcSwap::from_pointee(engine),
             growing: Mutex::new(()),
+            publication: Mutex::new(()),
             live_warnings: Mutex::new(None),
             #[cfg(test)]
             live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
@@ -524,6 +532,8 @@ impl Revision {
             shared_walk_visits: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             between: Mutex::new(None),
+            #[cfg(test)]
+            before_keep: Mutex::new(None),
         };
         Revision {
             id,
@@ -687,6 +697,7 @@ impl Revision {
                 memo,
                 engine: ArcSwap::from_pointee(engine),
                 growing: Mutex::new(()),
+                publication: Mutex::new(()),
                 live_warnings: Mutex::new(None),
                 #[cfg(test)]
                 live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
@@ -713,6 +724,8 @@ impl Revision {
                 shared_walk_visits: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 between: Mutex::new(None),
+                #[cfg(test)]
+                before_keep: Mutex::new(None),
             }),
         };
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -844,6 +857,17 @@ impl Revision {
             // A load that left the same names missing answered none of them (a demand whose load panicked stays
             // unanswered, a file that stays unreadable), so asking again would never end.
             if missing.is_empty() || missing == asked_for {
+                #[cfg(test)]
+                if let Some(step) = lazy.before_keep.lock().ok().and_then(|mut step| step.take()) {
+                    step(self);
+                }
+                let _published = lazy.publication.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                // A growth published since this resolution started: what it dropped would include this answer, so it
+                // is resolved again against the new engine, never kept.
+                if !Arc::ptr_eq(&engine, &lazy.engine.load()) {
+                    asked_for = Vec::new();
+                    continue;
+                }
                 let shared = engine.shared;
                 let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, shared, evidence, attributes });
                 // A walk past a file that could not be read answers more once it is followed again: until then the
@@ -966,6 +990,7 @@ impl Revision {
         #[cfg(test)]
         lazy.loads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         lazy.inherit_warnings(layer, &extended);
+        let _published = lazy.publication.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
         // context and its memos stay; only the record of what was asked for moves on. Such a load (a retry of a file
         // that stays unreadable) is no growth either: it brings the background load of every name no nearer.
@@ -1721,6 +1746,74 @@ mod read_retry_tests {
         set_clock(&revision, start);
         assert!(revision.lazy_component(&options, "Box").unwrap() == cold(&["Card", "Box"]), "Box, recovered");
         assert!(revision.lazy_component(&options, "Card").unwrap() == cold(&["Card"]), "Card, recovered");
+    }
+
+    /// An answer resolved before a growth published is not kept after it: `Box` reads React's augmentations while
+    /// `aug-kit`'s search cannot read `bad`, so its answer is provisional. Between `Box`'s resolution and keeping it,
+    /// `Card` loads `card-kit`'s `Base`, whose file merges `aria-card` into React, and publishes. `Box` is resolved again: its
+    /// answer, and the next one, have `aria-card`, as a cold run asked `Card` and then `Box` does.
+    #[test]
+    fn an_answer_resolved_before_a_publication_is_resolved_again() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let files = [
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+            (
+                "node_modules/aug-kit/aug.d.ts",
+                "declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\nexport {};\n",
+            ),
+            (
+                "node_modules/card-kit/package.json",
+                r#"{ "name": "card-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            (
+                "node_modules/card-kit/index.d.ts",
+                "import type { Base } from './base';\nexport interface CardProps extends Base { card: string }\n",
+            ),
+            // Reached by `Card`'s named walk alone: a module search follows re-exports, not imports.
+            (
+                "node_modules/card-kit/base.d.ts",
+                "declare module 'react' { interface AriaAttributes { 'aria-card'?: string } }\n\
+                 export interface Base { base: string }\n",
+            ),
+            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
+            (
+                "src/card/Card.tsx",
+                "import type { CardProps } from 'card-kit';\nexport function Card(props: CardProps) { return null; }\n",
+            ),
+            (
+                "src/box/Box.tsx",
+                "import * as React from 'react';\ninterface BoxProps extends React.AriaAttributes { own?: boolean }\n\
+                 export const Box = (props: BoxProps) => <div />;\n",
+            ),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        std::fs::write(root.join("node_modules/aug-kit/bad.d.ts"), [0xff; 8]).unwrap();
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let cold = {
+            let revision = Revision::cold_lazy(&options, 0);
+            drop(revision.lazy_component(&options, "Card").unwrap());
+            revision.lazy_component(&options, "Box").unwrap()
+        };
+        assert!(props(&cold).contains(&"aria-card".to_owned()));
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, Instant::now());
+        let card_options = options.clone();
+        *revision.lazy.as_ref().unwrap().before_keep.lock().unwrap() = Some(Box::new(move |revision: &Revision| {
+            drop(revision.lazy_component(&card_options, "Card").unwrap());
+        }));
+        let answer = revision.lazy_component(&options, "Box").unwrap();
+        assert!(answer == cold, "the answer Box's request returns");
+        assert!(revision.lazy_component(&options, "Box").unwrap() == cold, "and the one it keeps");
     }
 
     /// A search that could not read every file withholds its augmentations: `setup.ts`, the sole importer of `aug-kit`
