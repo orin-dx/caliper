@@ -52,6 +52,11 @@ pub(crate) enum Named {
 }
 
 impl Named {
+    /// A name as origin/main read it: written plainly, so nothing needs to vouch for it.
+    pub(super) fn plain(name: &str) -> Self {
+        Self::Plain(name.into())
+    }
+
     pub(super) fn as_str(&self) -> &str {
         match self {
             Self::Plain(name) => name,
@@ -101,5 +106,87 @@ impl Bindings {
     pub(super) fn writes_to(&self, global: &GlobalName, member: &str) -> bool {
         let object = CompactString::from(global.as_str());
         self.writes.contains(&(object.clone(), Some(member.into()))) || self.writes.contains(&(object, None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every `pub(super)`/`pub(crate)` function of these modules that takes a bare name (`&str`, `String` or
+    /// `CompactString`) in a parameter named like a name it might look up, clone, attach or record, with the reason it may.
+    /// A name a `Peeled` candidate relies on must arrive as a [`super::Named`]; a new function that takes a bare one fails
+    /// here until it takes `Named` or is listed with its reason.
+    const ALLOWED: &[(&str, &str, &str)] = &[
+        ("component.rs", "try_record_cast_component_alias", "the declarator's own name, a declaration, not a lookup"),
+        ("component.rs", "detect_component", "the declarator's own name"),
+        ("component.rs", "try_fc_annotation", "the declarator's own name"),
+        ("component.rs", "extract_props_from_type_annotation", "the declarator's own name"),
+        ("component.rs", "try_forward_ref", "the declarator's own name"),
+        ("component.rs", "try_typed_function_expression", "the declarator's own name"),
+        ("component.rs", "try_hoc_wrapped", "the declarator's own name"),
+        ("component.rs", "try_exotic_component_decl", "the declarator's own name"),
+        ("component.rs", "try_declared_callable_component", "the declarator's own name"),
+        ("component.rs", "try_class_component", "the class's own name"),
+        ("component.rs", "try_class_expression_wrapped", "the declarator's own name"),
+        ("component.rs", "try_rename_identifier_wrapped_component", "the declarator's own name"),
+        ("component.rs", "try_defer_identifier_alias", "the declarator's own name; the aliased one is a `Named`"),
+        ("component.rs", "try_record_imported_member_alias", "the declarator's own name; the object is a `Named`"),
+        ("evidence.rs", "is_element_factory_name", "a callee's spelling, after the `well_known` gate"),
+        ("interface.rs", "try_collect_variant_bag", "the declarator's own name"),
+        ("mod.rs", "skip_local_component", "the declaration's own name, for a diagnostic"),
+        ("mod.rs", "scoped_key", "builds a type key from a declaration's own name"),
+        ("mod.rs", "may_be_react", "a type name's spelling, Plain-only (types are never peeled)"),
+        ("mod.rs", "classify_extends", "a heritage type name, Plain-only"),
+        ("mod.rs", "is_constant_name", "a predicate on a declaration's own name"),
+        ("uses.rs", "local", "builds `Subject::Local` from a vouched `Named`'s text or a plain binding"),
+        ("uses.rs", "trusted_member", "the vouching function itself: returns a `Named` through `Bindings::named`"),
+        ("wrapper.rs", "try_record_wrapper_call", "the declarator's own name"),
+        ("wrapper.rs", "try_record_tagged_factory", "the declarator's own name"),
+        ("wrapper.rs", "record_bound_function_result", "the declarator's own name"),
+        ("wrapper.rs", "try_record_factory_call", "the declarator's own name; the callee is a `Named`"),
+        ("written.rs", "find", "a written type's member name, Plain-only"),
+    ];
+
+    const MODULES: &[&str] =
+        &["component.rs", "evidence.rs", "interface.rs", "mod.rs", "uses.rs", "visit.rs", "wrapper.rs", "written.rs"];
+
+    #[test]
+    fn no_extractor_function_takes_a_bare_name_a_peeled_candidate_could_pass() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/extractor");
+        let names =
+            ["name", "parent", "callee", "member", "alias", "target", "local", "inner", "root", "sub", "object"];
+        let bare = ["&str", "String", "CompactString", "&CompactString"];
+        let mut used = vec![false; ALLOWED.len()];
+        let mut found = Vec::new();
+        for module in MODULES {
+            let source = std::fs::read_to_string(dir.join(module)).expect("an extractor source");
+            let mut rest = source.as_str();
+            while let Some(at) = rest.find("fn ") {
+                let before = &rest[..at];
+                let public = before.ends_with("pub(super) ") || before.ends_with("pub(crate) ");
+                rest = &rest[at + 3..];
+                let Some(open) = rest.find('(') else { break };
+                let function = rest[..open].split('<').next().unwrap_or_default().trim().to_owned();
+                let Some(close) = rest[open..].find(')') else { break };
+                let params = &rest[open + 1..open + close];
+                if !public || function.is_empty() || function.contains(char::is_whitespace) {
+                    continue;
+                }
+                let takes_bare = params.split(',').any(|param| {
+                    let Some((pname, ty)) = param.split_once(':') else { return false };
+                    let ty = ty.trim().replace("'static ", "").replace("'a ", "").replace("'s ", "");
+                    names.contains(&pname.trim()) && bare.contains(&ty.as_str())
+                });
+                if !takes_bare {
+                    continue;
+                }
+                match ALLOWED.iter().position(|(file, allowed, _)| file == module && *allowed == function) {
+                    Some(index) => used[index] = true,
+                    None => found.push(format!("{module}: fn {function}({params})")),
+                }
+            }
+        }
+        assert!(found.is_empty(), "functions taking a bare name, not a `Named`:\n{}", found.join("\n"));
+        let stale: Vec<_> = ALLOWED.iter().zip(&used).filter(|(_, used)| !**used).map(|(entry, _)| entry).collect();
+        assert!(stale.is_empty(), "allow-list entries that match nothing: {stale:?}");
     }
 }

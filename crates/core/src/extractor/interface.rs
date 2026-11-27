@@ -410,8 +410,7 @@ impl<'src> SourceDataCollector<'src> {
         // record `Root` as the alias this scan attaches the inline members to.
         let Some(roles) = self.assign_roles(call, true, None) else { return };
         let (Some(parent), Some(obj)) = (roles.target.as_ref(), roles.objects.first()) else { return };
-        let parent = parent.as_str();
-        if !is_pascal_case(parent) {
+        if !is_pascal_case(parent.as_str()) {
             return;
         }
         let recognition = roles.recognition;
@@ -478,7 +477,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             _ => return,
         };
-        self.record_attached(Subject::Inline(span_start), parent.name.as_str(), key_name);
+        self.record_attached(Subject::Inline(span_start), &super::names::Named::plain(parent.name.as_str()), key_name);
         self.record_inline_sub_component(key_name.to_owned(), "a property-assigned", params, span_start, span_end);
     }
 

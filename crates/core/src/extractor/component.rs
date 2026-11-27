@@ -1689,12 +1689,11 @@ impl<'src> SourceDataCollector<'src> {
         let target = match peel_expr(init) {
             Expression::StaticMemberExpression(member) => {
                 let Some(object) = self.receiver_identifier(&member.object) else { return false };
-                let object = object.as_str();
                 let property = member.property.name.as_str();
-                if !self.imported_names.contains(object) || !is_pascal_case(property) {
+                if !self.imported_names.contains(object.as_str()) || !is_pascal_case(property) {
                     return false;
                 }
-                format!("{object}.{property}")
+                (object, Some(property))
             }
             // A constant is not a component whatever it is bound to; `const ORIGIN = Thing` says nothing about `Thing`.
             Expression::Identifier(id)
@@ -1702,11 +1701,18 @@ impl<'src> SourceDataCollector<'src> {
                     && is_pascal_case(id.name.as_str())
                     && !super::is_constant_name(name) =>
             {
-                id.name.to_string()
+                // Read only through a peel (`<typeof Imported>Imported`), the binding pass must vouch for it.
+                let recognition = if matches!(main_peel(init), Expression::Identifier(_)) {
+                    Recognition::Plain
+                } else {
+                    Recognition::Peeled
+                };
+                let Some(object) = self.bindings.named(id.name.as_str(), recognition) else { return false };
+                (object, None)
             }
             _ => return false,
         };
-        self.push_imported_alias(name, target, decl.span);
+        self.push_imported_alias(name, &target.0, target.1, decl.span);
         true
     }
 
@@ -1714,10 +1720,14 @@ impl<'src> SourceDataCollector<'src> {
     /// one per PascalCase member, when `Imported` is an import binding.
     pub(super) fn try_record_destructured_imports<'a>(&mut self, declarator: &VariableDeclarator<'a>) {
         let BindingPattern::ObjectPattern(pattern) = &declarator.id else { return };
-        let Some(Expression::Identifier(object)) = declarator.init.as_ref().map(peel_expr) else { return };
+        let Some(init) = declarator.init.as_ref() else { return };
+        let Expression::Identifier(object) = peel_expr(init) else { return };
         if !self.imported_names.contains(object.name.as_str()) {
             return;
         }
+        let recognition =
+            if matches!(main_peel(init), Expression::Identifier(_)) { Recognition::Plain } else { Recognition::Peeled };
+        let Some(object) = self.bindings.named(object.name.as_str(), recognition) else { return };
         for property in &pattern.properties {
             let PropertyKey::StaticIdentifier(key) = &property.key else { continue };
             let BindingPattern::BindingIdentifier(local) = &property.value else { continue };
@@ -1725,11 +1735,21 @@ impl<'src> SourceDataCollector<'src> {
             if !is_pascal_case(key) || !is_pascal_case(local) || super::is_constant_name(local) {
                 continue;
             }
-            self.push_imported_alias(local, format!("{}.{key}", object.name), declarator.span);
+            self.push_imported_alias(local, &object, Some(key), declarator.span);
         }
     }
 
-    fn push_imported_alias(&mut self, name: &str, target: String, span: oxc_span::Span) {
+    fn push_imported_alias(
+        &mut self,
+        name: &str,
+        object: &super::names::Named,
+        member: Option<&str>,
+        span: oxc_span::Span,
+    ) {
+        let target = match member {
+            Some(member) => format!("{}.{member}", object.as_str()),
+            None => object.as_str().to_owned(),
+        };
         let (description, tags) = self.find_jsdoc_with_tags(span.start);
         self.data.component_mappings.push(
             ComponentMapping::new(

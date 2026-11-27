@@ -103,8 +103,8 @@ impl<'src> SourceDataCollector<'src> {
 
     /// A local name the module exports, and the name it exports it under (`export function Name` is `Name` under
     /// `Name`, `export { Name as Other }` under `Other`, `export default Name` under `default`).
-    pub(super) fn record_exported_local(&mut self, local: &str, exported: &str) {
-        let names = self.exported_locals.entry(CompactString::from(local)).or_default();
+    pub(super) fn record_exported_local(&mut self, local: &super::names::Named, exported: &str) {
+        let names = self.exported_locals.entry(CompactString::from(local.as_str())).or_default();
         if !names.iter().any(|name| name == exported) {
             names.push(CompactString::from(exported));
         }
@@ -113,7 +113,7 @@ impl<'src> SourceDataCollector<'src> {
     /// The local component a default export's call wraps: `React.forwardRef(Inner) as T`, `memo(forwardRef(Card))` and
     /// `Object.assign(Root, { Item })` give `Inner`, `Card` and `Root`. `None` for a call that is no component alias, or
     /// whose argument is no name.
-    pub(super) fn component_wrapped_by(&self, expression: &Expression<'_>) -> Option<CompactString> {
+    pub(super) fn component_wrapped_by(&self, expression: &Expression<'_>) -> Option<super::names::Named> {
         let Expression::CallExpression(call) = super::component::peel_expr(expression) else { return None };
         if !super::component::is_component_alias_call(self, call) {
             return None;
@@ -121,13 +121,24 @@ impl<'src> SourceDataCollector<'src> {
         // An `Object.assign` is its target only as `assign_roles` reads it.
         if super::component::is_object_assign_call(call) {
             let roles = self.assign_roles(call, false, None)?;
-            if let Some(target) = &roles.target {
-                return roles.aliases.contains(target).then(|| CompactString::from(target.as_str()));
+            if let Some(target) = roles.target {
+                return roles.aliases.contains(&target).then_some(target);
             }
         }
         let first = super::component::aliased_component(call)?;
         match first {
-            Expression::Identifier(id) => Some(CompactString::from(id.name.as_str())),
+            // Read as origin/main read it (`main_peel` reaches the call and its argument), the name is `Plain`; read
+            // only through a peel, the binding pass must vouch for it.
+            Expression::Identifier(id) => {
+                let plain = matches!(super::component::main_peel(expression), Expression::CallExpression(_))
+                    && matches!(
+                        call.arguments.first().and_then(Argument::as_expression).map(super::component::main_peel),
+                        Some(Expression::Identifier(_))
+                    );
+                let recognition =
+                    if plain { super::component::Recognition::Plain } else { super::component::Recognition::Peeled };
+                self.bindings.named(id.name.as_str(), recognition)
+            }
             _ => self.component_wrapped_by(first),
         }
     }
@@ -145,10 +156,10 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// `Parent.property = Sub` or `Object.assign(Parent, { property: Sub })`.
-    pub(super) fn record_attached(&mut self, sub: Subject, parent: &str, property: &str) {
+    pub(super) fn record_attached(&mut self, sub: Subject, parent: &super::names::Named, property: &str) {
         self.attached_to.push(Attachment {
             sub,
-            parent: CompactString::from(parent),
+            parent: CompactString::from(parent.as_str()),
             property: Some(CompactString::from(property)),
         });
     }
@@ -186,7 +197,7 @@ impl<'src> SourceDataCollector<'src> {
         &self,
         call: &'b CallExpression<'a>,
         inline: bool,
-        parent: Option<&str>,
+        parent: Option<&super::names::Named>,
     ) -> Option<AssignRoles<'b, 'a>> {
         if !super::component::is_object_assign_call(call) {
             return None;
@@ -205,7 +216,7 @@ impl<'src> SourceDataCollector<'src> {
         };
         if peeled {
             let parent = match parent {
-                Some(parent) => self.bindings.named(parent, recognition)?,
+                Some(parent) => self.bindings.named(parent.as_str(), recognition)?,
                 None => target.clone()?,
             };
             if !self.trusts_object_assign(&parent) {
@@ -242,13 +253,17 @@ impl<'src> SourceDataCollector<'src> {
 
     /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is
     /// the root under another name, with `Sub` attached.
-    pub(super) fn record_object_assign_declarator(&mut self, parent: &str, init: Option<&Expression<'_>>) {
+    pub(super) fn record_object_assign_declarator(
+        &mut self,
+        parent: &super::names::Named,
+        init: Option<&Expression<'_>>,
+    ) {
         let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
         let Some(roles) = self.assign_roles(call, false, Some(parent)) else { return };
         for alias in &roles.aliases {
             self.attached_to.push(Attachment {
                 sub: Subject::local(alias.as_str()),
-                parent: CompactString::from(parent),
+                parent: CompactString::from(parent.as_str()),
                 property: None,
             });
         }
@@ -274,7 +289,8 @@ impl<'src> SourceDataCollector<'src> {
         else {
             return;
         };
-        self.record_attached(Subject::local(sub.name.as_str()), parent.name.as_str(), target.property.name.as_str());
+        let parent = super::names::Named::plain(parent.name.as_str());
+        self.record_attached(Subject::local(sub.name.as_str()), &parent, target.property.name.as_str());
     }
 
     /// How the module exports each of its exported components: the exported locals under their export names, and any

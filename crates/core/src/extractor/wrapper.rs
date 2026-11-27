@@ -512,15 +512,13 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let peeled = super::component::called(call);
         let Expression::Identifier(callee) = peeled.expr else { return false };
-        // A callee main's factory rule did not read is looked up by its bare name, so only when it means one declaration.
-        if super::component::Recognition::of_factory_callee(call) == super::component::Recognition::Peeled
-            && self.bindings.unique(callee.name.as_str()).is_none()
-        {
-            return false;
-        }
+        // A callee main's factory rule did not read is looked up by its bare name, so only when the binding pass vouches
+        // for it (`names::Named`).
+        let recognition = super::component::Recognition::of_factory_callee(call);
+        let Some(callee_name) = self.bindings.named(callee.name.as_str(), recognition) else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
-        let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);
+        let element_builder = super::evidence::is_element_factory_name(callee_name.as_str(), None, &*self);
         if super::is_constant_name(name) || explained || element_builder || self.react_api(call).is_some() {
             return false;
         }
@@ -537,7 +535,7 @@ impl<'src> SourceDataCollector<'src> {
         self.try_defer_identifier_alias(name, decl.span);
         self.pending_factory_calls.push(PendingFactoryCall {
             name: name.to_owned(),
-            callee: WrapperCallee { name: callee.name.as_str().into(), type_args },
+            callee: WrapperCallee { name: callee_name.as_str().into(), type_args },
             description,
             tags,
             span: decl.span,
