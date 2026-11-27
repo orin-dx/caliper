@@ -1135,56 +1135,6 @@ fn a_cyclic_export_walk_past_an_unreadable_file_visits_each_module_once() {
     assert!(recovered.failed_reads_reached(&demands).is_empty(), "nothing left unread");
 }
 
-/// What a walk past an unreadable file loads belongs to that walk: `kit` re-exports `first` (unreadable) and then
-/// `fallback`, whose `Target` extends `Base` from `base`, which also augments React's `HTMLAttributes` with `fb`.
-/// While `first` cannot be read, `Card` has `fallback` and `base` and `Box` has `fb`, as a fresh run has. Once `first`
-/// reads and declares `Target` itself, a fresh run never follows `base`: after an edit neither component keeps
-/// anything of it.
-#[test]
-fn what_a_partial_walk_loads_is_not_kept_once_a_complete_walk_replaces_it() {
-    let (_tmp, root) = react_project(&[
-        ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
-        (
-            "node_modules/kit/fallback.d.ts",
-            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
-        ),
-        (
-            "node_modules/kit/base.d.ts",
-            "import type {} from 'react';\n\
-             declare module 'react' { interface HTMLAttributes<T> { fb?: string } }\n\
-             export interface Base { base: string }\n",
-        ),
-        (
-            "src/card/Card.tsx",
-            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
-        ),
-        ("src/box/Box.tsx", BOX),
-        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
-    ]);
-    let first = root.join("node_modules/kit/first.d.ts");
-    std::fs::write(&first, UNREADABLE).unwrap();
-    let session = WatchSession::new(react_options(&root));
-    drop(session.initialize());
-    let fresh = |name: &str| {
-        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
-        drop(fresh.initialize());
-        fresh.component(name)
-    };
-    assert_eq!(names(&session.component("Card")), ["base", "fallback"]);
-    assert!(names(&session.component("Box")).contains(&"fb".to_owned()), "served while `first` cannot be read");
-    for name in ["Card", "Box"] {
-        assert!(session.component(name) == fresh(name), "{name}, partial");
-    }
-    std::fs::write(&first, "export interface Target { first: string }\n").unwrap();
-    edit(&session, &root.join("src/plain/Plain.tsx"));
-    assert_eq!(names(&session.component("Card")), ["first"]);
-    assert!(!names(&session.component("Box")).contains(&"fb".to_owned()), "nothing of `base` is kept");
-    for name in ["Card", "Box"] {
-        assert!(session.component(name) == fresh(name), "{name}, recovered");
-    }
-}
-
 /// A chain of 200 barrels, each trying its own unreadable `export *` target before the next barrel, with `Target`
 /// at the end: every lookup keeps its answer for the load with the failed paths below it by reference, so the load
 /// holds O(200) path entries, not one copy of everything below at each level. The answer still names all 200.
@@ -1220,44 +1170,43 @@ fn a_chain_of_partial_lookups_holds_each_failed_path_once() {
     assert_eq!(layer.export_for_resolver(&root.join("node_modules/chain/b0.d.ts"), "Target"), Some(target));
 }
 
-/// Two walks past unreadable files reach one file that merges into React, in one load: each is served it while live.
-/// `tgt` and `tgt2` each try an unreadable `first` before a fallback whose type extends `Base` in `base`, which augments
-/// React. Once `tgt`'s `first` reads and a load follows only that walk, `tgt2`'s walk, still past its own unreadable
-/// file, is still served `base`; the recovered walk is not.
+/// While the first `export *` target is unreadable, a named lookup that falls through is degraded exactly as on `main`:
+/// `kit` re-exports `first` (unreadable) and then `fallback`, whose `Target` extends `Base`. `Card` has `fallback`'s and
+/// `Base`'s props, with the failed read reported, as `main` answers; once `first` reads and an edit makes the walk
+/// due, `Card` equals a fresh run, `first`'s prop alone and no warning.
 #[test]
-fn a_file_two_partial_walks_reach_is_served_while_either_is_live() {
+fn a_named_lookup_past_an_unreadable_target_is_degraded_as_on_main() {
     let (_tmp, root) = project(&[
-        ("node_modules/tk/package.json", r#"{ "name": "tk", "version": "1.0.0" }"#),
-        ("node_modules/tk/tgt/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
+        ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
         (
-            "node_modules/tk/tgt/fallback.d.ts",
-            "import type { Base } from '../base';\nexport interface Target extends Base { fallback: string }\n",
+            "node_modules/kit/fallback.d.ts",
+            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
         ),
-        ("node_modules/tk/tgt2/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
+        ("node_modules/kit/base.d.ts", "export interface Base { base: string }\n"),
         (
-            "node_modules/tk/tgt2/fallback.d.ts",
-            "import type { Base } from '../base';\nexport interface Target2 extends Base { fallback2: string }\n",
+            "src/card/Card.tsx",
+            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
         ),
-        (
-            "node_modules/tk/base.d.ts",
-            "declare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
-             export interface Base { base: string }\n",
-        ),
+        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
     ]);
-    let (first, first2) = (root.join("node_modules/tk/tgt/first.d.ts"), root.join("node_modules/tk/tgt2/first.d.ts"));
+    let first = root.join("node_modules/kit/first.d.ts");
     std::fs::write(&first, UNREADABLE).unwrap();
-    std::fs::write(&first2, UNREADABLE).unwrap();
-    let options = PipelineOptions { use_cache: false, ..options(&root) };
-    let one = Demand { from: root.join("src/one/Card.tsx"), specifier: "tk/tgt".into(), name: "Target".into() };
-    let two = Demand { from: root.join("src/two/Card2.tsx"), specifier: "tk/tgt2".into(), name: "Target2".into() };
-    let base = root.join("node_modules/tk/base.d.ts");
-    let layer = Arc::new(load(vec![one.clone(), two.clone()], &options, None));
-    assert_eq!(layer.served_files(std::slice::from_ref(&one)), [&base]);
-    assert_eq!(layer.served_files(std::slice::from_ref(&two)), [&base], "both walks reached it");
+    let session = WatchSession::new(options(&root));
+    drop(session.initialize());
+    let io = |output: &crate::types::ExtractionOutput| -> Vec<Option<String>> {
+        let io = |d: &&crate::types::Diagnostic| d.code == DiagnosticCode::IoError;
+        output.diagnostics.iter().filter(io).map(|d| d.file.clone()).collect()
+    };
+    assert_eq!(names(&session.component("Card")), ["base", "fallback"], "what `main` answers");
+    assert_eq!(io(&session.current_output().unwrap()), [Some(first.to_string())], "the failed read is reported");
     std::fs::write(&first, "export interface Target { first: string }\n").unwrap();
-    let next = load(layer.missing(std::slice::from_ref(&one)), &options, Some(&layer));
-    assert_eq!(next.served_files(std::slice::from_ref(&one)), Vec::<&Utf8PathBuf>::new(), "the recovered walk");
-    assert_eq!(next.served_files(std::slice::from_ref(&two)), [&base], "the walk still past `first2`");
+    edit(&session, &root.join("src/plain/Plain.tsx"));
+    let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..options(&root) });
+    drop(fresh.initialize());
+    assert_eq!(names(&session.component("Card")), ["first"]);
+    assert_eq!(io(&session.current_output().unwrap()), Vec::<Option<String>>::new());
+    assert!(session.component("Card") == fresh.component("Card"));
 }
 
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
@@ -1761,7 +1710,9 @@ const MODEL_COMPONENTS: &[(&str, &str, &[&str])] = &[
 ];
 
 /// The React model's package: two barrels whose first `export *` target can be unreadable, each falling through to a
-/// declaration that extends `Base`, from a file that also merges `aria-fb` into React's `AriaAttributes`.
+/// declaration that extends `Base` (named walks, degraded as on `main`), and a module whose augmentation search can pass
+/// an unreadable file before the one that merges `aria-fb` into React's `AriaAttributes` (a shared walk, served
+/// provisionally).
 const REACT_PACKAGE: &[(&str, &str)] = &[
     ("node_modules/mk/package.json", r#"{ "name": "mk", "version": "1.0.0" }"#),
     ("node_modules/mk/tgt/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
@@ -1770,21 +1721,26 @@ const REACT_PACKAGE: &[(&str, &str)] = &[
         "node_modules/mk/tgt/fallback.d.ts",
         "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
     ),
-    (
-        "node_modules/mk/tgt/base.d.ts",
-        "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
-         export interface Base { base: string }\n",
-    ),
+    ("node_modules/mk/tgt/base.d.ts", "export interface Base { base: string }\n"),
     ("node_modules/mk/tgt2/index.d.ts", "export * from './first';\nexport * from './fallback';\n"),
     ("node_modules/mk/tgt2/first.d.ts", "export interface Target2 { first2: string }\n"),
     (
         "node_modules/mk/tgt2/fallback.d.ts",
         "import type { Base } from '../tgt/base';\nexport interface Target2 extends Base { fallback2: string }\n",
     ),
+    // A module imported for what it merges into React (`setup.ts`): its search passes `afirst`, which can be
+    // unreadable, and reads `aug`, which merges `aria-fb` into `AriaAttributes`.
+    ("node_modules/mk/aug/index.d.ts", "export * from './afirst';\nexport * from './aug';\n"),
+    ("node_modules/mk/aug/afirst.d.ts", "export interface AFirst { af: string }\n"),
+    (
+        "node_modules/mk/aug/aug.d.ts",
+        "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
+         export {};\n",
+    ),
 ];
 
 /// The React model's components: two named walks that can fall through to `Base`, and a reader of React's
-/// `AriaAttributes`, which `base` augments.
+/// `AriaAttributes`, which `aug` augments.
 const REACT_COMPONENTS: &[(&str, &str, &[&str])] = &[
     (
         "Card",
@@ -1798,8 +1754,8 @@ const REACT_COMPONENTS: &[(&str, &str, &[&str])] = &[
          export function Card2(props: Card2Own) { return null; }\n",
         &["tgt2/index", "tgt2/first"],
     ),
-    // Reads React's `AriaAttributes`, so what any live walk serves of `base` reaches it: its answer depends on the
-    // walks the session followed, and its oracles follow the same ones first.
+    // Reads React's `AriaAttributes`, so what the shared walk serves of `aug` reaches it; its oracles still follow the
+    // walks the session followed first.
     (
         "Aria",
         "import * as React from 'react';\ninterface AriaOwn extends React.AriaAttributes { own_aria?: boolean }\n\
@@ -1818,6 +1774,7 @@ struct Model {
     components: &'static [(&'static str, &'static str, &'static [&'static str])],
     unreadable: &'static [&'static str],
     react: bool,
+    seeds: &'static [u64],
 }
 
 const PLAIN_MODEL: Model = Model {
@@ -1825,13 +1782,15 @@ const PLAIN_MODEL: Model = Model {
     components: MODEL_COMPONENTS,
     unreadable: &["index", "a", "stub", "b", "cyc/first", "nest", "deep", "leaf", "prim"],
     react: false,
+    seeds: &[1, 2, 3, 5, 8, 13, 21, 34],
 };
 
 const REACT_MODEL: Model = Model {
     package: REACT_PACKAGE,
     components: REACT_COMPONENTS,
-    unreadable: &["tgt/first", "tgt2/first", "tgt/base"],
+    unreadable: &["tgt/first", "tgt2/first", "tgt/base", "aug/afirst", "aug/aug"],
     react: true,
+    seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
 };
 
 impl Model {
@@ -1854,6 +1813,9 @@ fn model_project(model: &Model) -> (tempfile::TempDir, Utf8PathBuf) {
     };
     write(&root, "tsconfig.json", MODEL_TSCONFIG);
     write(&root, "src/plain/Plain.tsx", MODEL_PLAIN);
+    if model.react {
+        write(&root, "src/setup.ts", "import * as Aug from 'mk/aug';\nexport const aug = Aug;\n");
+    }
     for (name, body, _) in model.components {
         write(&root, &format!("src/{name}.tsx"), &model_source(body, 0));
     }
@@ -2043,7 +2005,6 @@ type ModelChange = (&'static str, fn(&Utf8Path) -> Utf8PathBuf);
 /// their own components and by a reader of the augmented interface. The same rules as the plain model, the reader's
 /// oracles asked for the components the session was asked for before it.
 #[test]
-#[ignore = "one shape remains: after an edit to Card2's own file a changed Card2 is not in the delta (seed 8)"]
 fn a_session_over_react_augmentations_that_go_unreadable_answers_as_a_fresh_one() {
     let mut failures: Vec<String> = Vec::new();
     run_model(&REACT_MODEL, &mut failures);
@@ -2054,7 +2015,13 @@ fn a_session_over_react_augmentations_that_go_unreadable_answers_as_a_fresh_one(
 fn run_model(model: &'static Model, failures: &mut Vec<String>) {
     let names: Vec<&str> = model.unreadable.to_vec();
     let mut oracle = ModelOracle::new(model);
-    for seed in [1_u64, 2, 3, 5, 8, 13, 21, 34] {
+    // `MODEL_SEEDS=N` sweeps seeds 1 to N locally, without the pairs; the suite runs the model's own.
+    let sweep: Option<u64> = std::env::var("MODEL_SEEDS").ok().and_then(|seeds| seeds.parse().ok());
+    let seeds: Vec<u64> = match sweep {
+        Some(count) => (1..=count).collect(),
+        None => model.seeds.to_vec(),
+    };
+    for seed in seeds {
         let (tmp, root) = model_project(model);
         let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
         let mut next = |bound: usize| -> usize {
@@ -2148,6 +2115,9 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
                 }
             }
         }
+    }
+    if sweep.is_some() {
+        return;
     }
     // Every ordered pair of requests under each single unreadable file, then the file reads again and a config edit
     // rebuilds the session: an event order the seeds need not hit.

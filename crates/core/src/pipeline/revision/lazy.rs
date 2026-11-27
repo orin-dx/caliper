@@ -105,8 +105,6 @@ pub struct ComponentLocation {
 /// memos (interface chains, member reads) were computed against the old layer and must not outlive it.
 /// A layer, the failed reads the live demands reach in it, and those reads' warnings with the layer's panics.
 type LiveWarnings = (Arc<DependencyLayer>, FxHashSet<PathKey>, Arc<[Diagnostic]>);
-/// Each project file's demands: a lazy revision's live roots.
-type FileDemands = FxHashMap<PathKey, Arc<[Demand]>>;
 
 struct Engine {
     layer: Option<Arc<DependencyLayer>>,
@@ -185,15 +183,15 @@ impl Engine {
         options: &PipelineOptions,
         ambient_global_files: &[Utf8PathBuf],
         named_types: &Arc<NamedTypeIndex>,
-        // The layer, and the revision's live demands: what it serves is what their walks reach, named ones included.
-        (layer, live): (Option<Arc<DependencyLayer>>, &FileDemands),
+        // The layer, and the shared demands: what it serves is what their module searches read.
+        (layer, shared): (Option<Arc<DependencyLayer>>, &[Demand]),
         react_types: &Option<Arc<NamedTypeIndex>>,
     ) -> Engine {
         let named_types = match &layer {
-            Some(layer) => Arc::new(named_types.with_fallback(layer.served_types(live_roots(live)))),
+            Some(layer) => Arc::new(named_types.with_fallback(layer.served_types(shared))),
             None => named_types.clone(),
         };
-        let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(live_roots(live)));
+        let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(shared));
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),
             options,
@@ -336,13 +334,7 @@ impl Lazy {
         }
         #[cfg(test)]
         self.shared_unread_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        // The shared demands' unread walks, and every live walk whose provisional files the layer serves: a reader of
-        // React's augmentations reads those too, so it holds only while they do and follows them again once due.
-        let mut unread: Vec<Demand> = layer.unread(&self.shared);
-        unread.extend(layer.serving_walks(live_roots(&self.demands)));
-        unread.sort();
-        unread.dedup();
-        let unread: Arc<[Demand]> = Arc::from(unread);
+        let unread: Arc<[Demand]> = Arc::from(layer.unread(&self.shared));
         let walks = Arc::new(SharedWalks { footprint: layer.footprint(&unread), unread, bound: Mutex::new(None) });
         *held = Some((layer.clone(), walks.clone()));
         walks
@@ -407,11 +399,6 @@ thread_local! {
     static SHARED_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Every live demand of a lazy revision: the roots whose unread walks decide what a layer serves provisionally.
-fn live_roots(demands: &FileDemands) -> impl Iterator<Item = &Demand> {
-    demands.values().flat_map(|demands| demands.iter())
-}
-
 fn shared_demands<'a>(file_demands: impl IntoIterator<Item = &'a [Demand]>) -> Arc<[Demand]> {
     #[cfg(test)]
     SHARED_BUILDS.with(|builds| builds.set(builds.get() + 1));
@@ -472,8 +459,7 @@ impl Revision {
         });
         let shared = shared_demands(file_demands.iter().map(|(_, demands)| demands.as_slice()));
         let demands = demands_by_file(file_demands);
-        let engine =
-            Engine::new(&global, options, &ambient_global_files, &named_types, (layer, &demands), &react_types);
+        let engine = Engine::new(&global, options, &ambient_global_files, &named_types, (layer, &shared), &react_types);
         lib_diagnostics.extend(engine.ctx.tsconfig_diagnostic.clone());
         let (dts_files_parsed, dts_cache_hits) = cache.counts();
         let tail_diagnostics: Vec<Diagnostic> = match Arc::try_unwrap(cache) {
@@ -600,7 +586,7 @@ impl Revision {
             false => shared_demands(file_demands.values().map(|demands| demands.as_ref())),
         };
         let layer = previous.engine.load().layer.clone();
-        let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(live_roots(&file_demands)));
+        let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(shared.iter()));
         let mut touched: FxHashSet<String> = FxHashSet::default();
         let mut affected_files: Vec<Utf8PathBuf> = Vec::new();
         for entry in previous.memo.iter() {
@@ -635,7 +621,7 @@ impl Revision {
             options,
             &self.ambient_global_files,
             &named_types,
-            (layer, &file_demands),
+            (layer, &shared),
             &self.react_types,
         );
         // A kept answer is decided again against the new call sites, so an edit to a consumer can change its `used`
@@ -961,12 +947,12 @@ impl Revision {
         lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
         // rebuilding them for every growth was most of what a session reading across a project spent.
-        let named_types = Arc::new(self.named_types.with_fallback(extended.served_types(live_roots(&lazy.demands))));
+        let named_types = Arc::new(self.named_types.with_fallback(extended.served_types(lazy.shared.iter())));
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
         // What the load added that declares into React (an augmentation a retry read, React's own types) changes what
         // every resolution that reads React's augmentations sees, whichever files it recorded.
         let augmentations_changed = extended.changes_react_declarations(layer);
-        let served = extended.served_fingerprint(live_roots(&lazy.demands));
+        let served = extended.served_fingerprint(lazy.shared.iter());
         let next = Engine { layer: Some(extended), ctx, served };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them. So does one that
@@ -1652,68 +1638,6 @@ mod read_retry_tests {
         assert!(answer == cold());
     }
 
-    /// A lazy session serves what a walk past an unreadable file loaded for as long as the walk is unread, and keeps
-    /// nothing of it once a retry replaces the walk: `fallback`'s `Base` augments `HTMLAttributes` with `fb` while
-    /// `first` cannot be read; once `first` declares `Target`, neither component has anything of `base`. Both equal a
-    /// cold run at each step.
-    #[test]
-    fn a_lazy_session_keeps_nothing_a_replaced_partial_walk_loaded() {
-        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
-        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-        let write = |path: &str, body: &str| {
-            let path = root.join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        };
-        write("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#);
-        write("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n");
-        write(
-            "node_modules/kit/fallback.d.ts",
-            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
-        );
-        write(
-            "node_modules/kit/base.d.ts",
-            "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
-             export interface Base { base: string }\n",
-        );
-        write(
-            "src/card/Card.tsx",
-            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
-        );
-        write(
-            "src/aria/Aria.tsx",
-            "import * as React from 'react';\ninterface AriaProps extends React.AriaAttributes { own?: boolean }\n\
-             export const Aria = (props: AriaProps) => <div />;\n",
-        );
-        let first = root.join("node_modules/kit/first.d.ts");
-        std::fs::write(&first, [0xff; 8]).unwrap();
-        let options = |use_cache| PipelineOptions {
-            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
-            ..options(&root, use_cache)
-        };
-        let cold = |name: &str| Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
-        let revision = Revision::cold_lazy(&options(true), 0);
-        let start = Instant::now();
-        set_clock(&revision, start);
-        // While `first` cannot be read, `Card` has what a fresh run on the same files gives: `Base`'s props too.
-        // `Aria` then has the attribute `base` merges into React, as a fresh run whose walk reached `base` has.
-        let card = revision.lazy_component(&options(true), "Card").unwrap();
-        assert_eq!(props(&card), ["base", "fallback"], "partial");
-        assert!(card == cold("Card"), "Card, partial");
-        let aria = revision.lazy_component(&options(true), "Aria").unwrap();
-        assert!(props(&aria).contains(&"aria-fb".to_owned()), "partial");
-        write("node_modules/kit/first.d.ts", "export interface Target { first: string }\n");
-        set_clock(&revision, start + DEGRADED_RETRY);
-        for name in ["Card", "Aria"] {
-            let answer = revision.lazy_component(&options(true), name).unwrap();
-            assert!(!props(&answer).contains(&"aria-fb".to_owned()) && !props(&answer).contains(&"base".to_owned()));
-            if name == "Card" {
-                assert_eq!(props(&answer), ["first"], "recovered");
-            }
-            assert!(answer == cold(name), "{name}, recovered: {:?}", props(&answer));
-        }
-    }
-
     /// A provisional answer never keeps a layer alive: 50 components read augmentations past an unreadable shared
     /// module, each asked after the last one's retry deadline, so each answer holds the shared walks of a different
     /// layer. After the depth limit flattens the chain, no more of those layers are alive than one chain holds.
@@ -1758,59 +1682,6 @@ mod read_retry_tests {
         assert!(distinct.len() > 20, "the answers were read against {} layers", distinct.len());
         let alive = layers.iter().filter(|layer| layer.upgrade().is_some()).count();
         assert!(alive <= 10, "{alive} of the {} layers are alive", layers.len());
-    }
-
-    /// A reader of React's augmentations holds by the live walks that serve what it reads: `Card`'s named walk past an
-    /// unreadable `first` serves `base`, which augments `AriaAttributes` with `aria-fb`, so `Aria` has it. Once `first`
-    /// reads and its retry is due, asking for `Aria` alone follows that walk again: `aria-fb` is gone, as in a cold run.
-    #[test]
-    fn a_reader_of_augmentations_holds_by_the_walks_that_serve_them() {
-        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
-        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-        let write = |path: &str, body: &str| {
-            let path = root.join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        };
-        write("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#);
-        write("node_modules/kit/index.d.ts", "export * from './first';\nexport * from './fallback';\n");
-        write(
-            "node_modules/kit/fallback.d.ts",
-            "import type { Base } from './base';\nexport interface Target extends Base { fallback: string }\n",
-        );
-        write(
-            "node_modules/kit/base.d.ts",
-            "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-fb'?: string } }\n\
-             export interface Base { base: string }\n",
-        );
-        write(
-            "src/card/Card.tsx",
-            "import type { Target } from 'kit';\nexport function Card(props: Target) { return null; }\n",
-        );
-        write(
-            "src/aria/Aria.tsx",
-            "import * as React from 'react';\ninterface AriaProps extends React.AriaAttributes { own?: boolean }\n\
-             export const Aria = (props: AriaProps) => <div />;\n",
-        );
-        std::fs::write(root.join("node_modules/kit/first.d.ts"), [0xff; 8]).unwrap();
-        let options = |use_cache| PipelineOptions {
-            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
-            ..options(&root, use_cache)
-        };
-        let cold = |name: &str| Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
-        let revision = Revision::cold_lazy(&options(true), 0);
-        let start = Instant::now();
-        set_clock(&revision, start);
-        drop(revision.lazy_component(&options(true), "Card").unwrap());
-        let aria = revision.lazy_component(&options(true), "Aria").unwrap();
-        assert!(props(&aria).contains(&"aria-fb".to_owned()), "served through `Card`'s walk");
-        write("node_modules/kit/first.d.ts", "export interface Target { first: string }\n");
-        set_clock(&revision, start + DEGRADED_RETRY);
-        let aria = revision.lazy_component(&options(true), "Aria").unwrap();
-        assert!(!props(&aria).contains(&"aria-fb".to_owned()), "asked alone, it follows the serving walk again");
-        assert!(aria == cold("Aria"));
-        let card = revision.lazy_component(&options(true), "Card").unwrap();
-        assert_eq!(props(&card), ["first"]);
     }
 
     /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its

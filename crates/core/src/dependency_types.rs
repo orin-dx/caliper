@@ -623,21 +623,10 @@ impl DependencyLayer {
         files
     }
 
-    /// The walks with provisional files that the unread walks `roots` lead to are: what the layer serves to them.
+    /// The module searches with provisional files that the unread walks `roots` lead to: what the layer serves them.
     fn served_modules<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> FxHashSet<ProvisionalKey> {
-        self.serving(roots).into_iter().map(|(key, _)| key).collect()
-    }
-
-    /// The live unread walks whose provisional files the layer serves to `roots`: what an answer that reads the
-    /// served files holds by and follows again once due.
-    pub(crate) fn serving_walks<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Demand> {
-        self.serving(roots).into_iter().map(|(_, walk)| walk).collect()
-    }
-
-    /// Each unread walk `roots` lead to that has provisional files, with the walk it is keyed by.
-    fn serving<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<(ProvisionalKey, Demand)> {
         if self.provisional.is_empty() {
-            return Vec::new();
+            return FxHashSet::default();
         }
         let key = |demand: &Demand| {
             let dir = demand.from.parent()?;
@@ -647,10 +636,7 @@ impl DependencyLayer {
             }
         };
         let walks = self.unread_from(roots);
-        walks
-            .into_iter()
-            .filter_map(|walk| key(&walk).filter(|key| self.provisional.contains_key(key)).map(|key| (key, walk)))
-            .collect()
+        walks.iter().filter_map(key).filter(|key| self.provisional.contains_key(key)).collect()
     }
 
     pub(crate) fn provisional_files(&self) -> Vec<&Utf8PathBuf> {
@@ -1224,12 +1210,6 @@ impl Loader<'_> {
             };
         }
         let found = self.find_export(&module, &demand.name);
-        let walk = (PathKey::from(module.as_path()), demand.name.clone());
-        let reach = match reach {
-            Reach::Complete if found.incomplete() => Reach::Partial(walk.clone()),
-            reach => reach,
-        };
-        self.walked.insert(walk);
         // The newest walk of `(module, name)` decides the resolver's partial mapping: what it found past a file it
         // could not read, or, over an older layer's mapping, that it found nothing or another file it did not keep
         // (a re-export cycle), so the older mapping no longer stands.
