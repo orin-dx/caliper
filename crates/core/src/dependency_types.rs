@@ -113,27 +113,62 @@ impl Partial<()> {
     }
 }
 
+/// The modules a walk passed and could not read: the ones a lookup met itself, and the lookups below it by reference.
+/// Each lookup that keeps its answer for the load keeps its own part only, so a chain of them holds each module once,
+/// however many lookups above it pass it; the distinct modules are collected once, at the walk's root.
+#[derive(Debug, Default)]
+struct FailedPaths {
+    here: Vec<PathKey>,
+    below: Vec<Arc<FailedPaths>>,
+}
+
+impl FailedPaths {
+    /// Every distinct module, sorted, each shared part visited once.
+    fn collect(&self) -> Vec<PathKey> {
+        let mut modules: FxHashSet<&PathKey> = FxHashSet::default();
+        let mut seen: FxHashSet<*const FailedPaths> = FxHashSet::default();
+        let mut stack: Vec<&FailedPaths> = vec![self];
+        while let Some(part) = stack.pop() {
+            modules.extend(part.here.iter());
+            stack.extend(part.below.iter().filter(|below| seen.insert(Arc::as_ptr(below))).map(|below| &**below));
+        }
+        let mut modules: Vec<PathKey> = modules.into_iter().cloned().collect();
+        modules.sort();
+        modules
+    }
+
+    /// How many entries this part holds itself, for tests.
+    #[cfg(test)]
+    fn entries(&self) -> usize {
+        self.here.len() + self.below.len()
+    }
+}
+
 /// Why an export lookup's answer may not be kept, gathered over one walk.
 #[derive(Debug, Default, Clone)]
 struct Unkept {
     /// The walk met a module already on it (a re-export cycle), so the answer depends on where it entered.
     cycle: bool,
-    /// The modules the walk passed and could not read, any of which may have declared the name: each once, however
-    /// many paths of the walk pass it.
-    unread: FxHashSet<PathKey>,
+    /// The modules the walk passed and could not read, any of which may have declared the name ([`FailedPaths`]).
+    here: Vec<PathKey>,
+    below: Vec<Arc<FailedPaths>>,
 }
 
 impl Unkept {
-    fn absorb(&mut self, other: Unkept) {
-        self.cycle |= other.cycle;
-        self.unread.extend(other.unread);
+    /// The failed paths as one shared part, `None` when the walk read every module.
+    fn freeze(&self) -> Option<Arc<FailedPaths>> {
+        if self.here.is_empty() && self.below.is_empty() {
+            return None;
+        }
+        let mut here = self.here.clone();
+        here.sort();
+        here.dedup();
+        Some(Arc::new(FailedPaths { here, below: self.below.clone() }))
     }
 
-    /// The unread modules, sorted, so the answer is the same in any order.
+    /// The unread modules, distinct and sorted, so the answer is the same in any order.
     fn unread_sorted(self) -> Vec<PathKey> {
-        let mut unread: Vec<PathKey> = self.unread.into_iter().collect();
-        unread.sort();
-        unread
+        FailedPaths { here: self.here, below: self.below }.collect()
     }
 }
 
@@ -144,13 +179,19 @@ impl Unkept {
 #[derive(Default)]
 struct Walk {
     on_path: FxHashSet<(PathKey, CompactString)>,
-    finished: FxHashMap<(PathKey, CompactString), Unkept>,
+    finished: FxHashMap<(PathKey, CompactString), Finished>,
 }
+
+/// A finished lookup's reasons its answer was not kept: whether it met a cycle, and the paths it could not read.
+type Finished = (bool, Option<Arc<FailedPaths>>);
 
 /// What one load found for `(module, name)` past a module it could not read, with those modules: the same for the
 /// rest of the load (each file is read once), so a walk that meets the pair again reuses it instead of walking every
 /// path below it again. Never kept beyond the load.
-type IncompleteExport = (Option<(Utf8PathBuf, CompactString)>, Arc<[PathKey]>);
+type IncompleteExport = (Option<(Utf8PathBuf, CompactString)>, Arc<FailedPaths>);
+
+/// The number the next layer gets ([`DependencyLayer::id`]).
+static NEXT_LAYER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// What one probe of a directory found, once it has run (`probe_once`).
 type ProbeCell = Arc<OnceLock<bool>>;
@@ -487,6 +528,11 @@ pub(crate) struct DependencyLayer {
     /// How many `(module, name)` export lookups this layer's load walked, for tests.
     #[cfg(test)]
     export_visits: usize,
+    /// How many failed-path entries the lookups this layer's load kept for the load held, for tests.
+    #[cfg(test)]
+    failed_path_entries: usize,
+    /// This layer's own number, never reused: what a cache keeps instead of the layer, which it must not keep alive.
+    id: u64,
 }
 
 impl DependencyLayer {
@@ -596,6 +642,11 @@ impl DependencyLayer {
             self.provisional.values().flat_map(|files| files.iter().map(|(file, _)| file)).collect();
         files.sort();
         files
+    }
+
+    /// This layer's own number: equal only for the same layer.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
     }
 
     pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
@@ -948,12 +999,13 @@ impl Loader<'_> {
             return found.clone();
         }
         if let Some(hit) = self.incomplete_exports.get(&key) {
-            let (found, unread) = hit.value().clone();
-            unkept.unread.extend(unread.iter().cloned());
+            let (found, failed) = hit.value().clone();
+            unkept.below.push(failed);
             return found;
         }
-        if let Some(seen) = visited.finished.get(&key) {
-            unkept.absorb(seen.clone());
+        if let Some((cycle, failed)) = visited.finished.get(&key) {
+            unkept.cycle |= *cycle;
+            unkept.below.extend(failed.iter().cloned());
             return None;
         }
         if !visited.on_path.insert(key.clone()) {
@@ -965,25 +1017,23 @@ impl Loader<'_> {
         let mut own = Unkept::default();
         let found = self.find_export_uncached(module, name, visited, &mut own);
         visited.on_path.remove(&key);
+        let failed = own.freeze();
         if found.is_none() {
-            visited.finished.insert(key.clone(), own.clone());
+            visited.finished.insert(key.clone(), (own.cycle, failed.clone()));
         }
-        match (own.cycle, own.unread.is_empty()) {
-            (false, true) => {
+        match (own.cycle, &failed) {
+            (false, None) => {
                 if let Some(dir) = module.parent() {
                     self.learn(dir);
                 }
                 self.exports.insert(key, found.clone());
             }
             // A cycle's answer depends on where the walk entered it; an answer past an unread module does not.
-            (false, false) => {
-                let mut unread: Vec<PathKey> = own.unread.iter().cloned().collect();
-                unread.sort();
-                self.incomplete_exports.insert(key, (found.clone(), Arc::from(unread)));
-            }
+            (false, Some(failed)) => drop(self.incomplete_exports.insert(key, (found.clone(), failed.clone()))),
             (true, _) => {}
         }
-        unkept.absorb(own);
+        unkept.cycle |= own.cycle;
+        unkept.below.extend(failed);
         found
     }
 
@@ -997,7 +1047,7 @@ impl Loader<'_> {
         let data = match self.parse(module) {
             Ok(data) => data?,
             Err(ReadFailed(file)) => {
-                unkept.unread.insert(file);
+                unkept.here.push(file);
                 return None;
             }
         };
@@ -1948,6 +1998,9 @@ fn load_with(
         reads: loader.reads.iter().map(|entry| *entry.value()).sum(),
         #[cfg(test)]
         export_visits: loader.export_visits.load(Ordering::Relaxed),
+        #[cfg(test)]
+        failed_path_entries: loader.incomplete_exports.iter().map(|entry| entry.value().1.entries()).sum(),
+        id: NEXT_LAYER.fetch_add(1, Ordering::Relaxed),
     }
 }
 

@@ -278,8 +278,9 @@ type SharedUnread = (Arc<dependency_types::DependencyLayer>, Arc<SharedWalks>);
 pub(super) struct SharedWalks {
     unread: Arc<[Demand]>,
     footprint: Option<dependency_types::Footprint>,
-    /// Until when `footprint` holds, in the layer it was last checked against: every answer that shares it asks.
-    bound: Mutex<Option<(Arc<DependencyLayer>, Option<dependency_types::FootprintBound>)>>,
+    /// Until when `footprint` holds, in the layer it was last checked against (by its id: an answer that shares the
+    /// walks never keeps a layer alive): every answer that shares it asks.
+    bound: Mutex<Option<(u64, Option<dependency_types::FootprintBound>)>>,
 }
 
 impl SharedWalks {
@@ -288,10 +289,10 @@ impl SharedWalks {
         let Some(footprint) = &self.footprint else { return false };
         let mut held = self.bound.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let bound = match held.as_ref() {
-            Some((at, bound)) if Arc::ptr_eq(at, layer) => *bound,
+            Some((at, bound)) if *at == layer.id() => *bound,
             _ => {
                 let bound = layer.footprint_bound(footprint);
-                *held = Some((layer.clone(), bound));
+                *held = Some((layer.id(), bound));
                 bound
             }
         };
@@ -1690,6 +1691,52 @@ mod read_retry_tests {
             assert!(!props(&answer).contains(&"aria-fb".to_owned()) && !props(&answer).contains(&"base".to_owned()));
             assert!(answer == cold(name), "{name}, recovered: {:?}", props(&answer));
         }
+    }
+
+    /// A provisional answer never keeps a layer alive: 50 components read augmentations past an unreadable shared
+    /// module, each asked after the last one's retry deadline, so each answer holds the shared walks of a different
+    /// layer. After the depth limit flattens the chain, no more of those layers are alive than one chain holds.
+    #[test]
+    fn a_provisional_answer_keeps_no_layer_alive() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write(
+            "node_modules/aug-kit/package.json",
+            r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        );
+        std::fs::write(root.join("node_modules/aug-kit/index.d.ts"), [0xff; 8]).unwrap();
+        write("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n");
+        for n in 0..50 {
+            write(
+                &format!("src/c{n}/C{n}.tsx"),
+                &format!(
+                    "import * as React from 'react';\ninterface C{n}Props extends React.AriaAttributes {{ own?: boolean }}\n\
+                     export const C{n} = (props: C{n}Props) => <div />;\n"
+                ),
+            );
+        }
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        let mut layers: Vec<std::sync::Weak<DependencyLayer>> = Vec::new();
+        for n in 0..50u32 {
+            set_clock(&revision, start + DEGRADED_RETRY * n);
+            drop(revision.lazy_component(&options, &format!("C{n}")).unwrap());
+            let layer = revision.lazy.as_ref().unwrap().engine.load().layer.clone().unwrap();
+            layers.push(Arc::downgrade(&layer));
+        }
+        let lazy = revision.lazy.as_ref().unwrap();
+        assert_eq!(lazy.provisional.len(), 50, "every answer is held provisionally");
+        let distinct: BTreeSet<*const DependencyLayer> = layers.iter().map(std::sync::Weak::as_ptr).collect();
+        assert!(distinct.len() > 20, "the answers were read against {} layers", distinct.len());
+        let alive = layers.iter().filter(|layer| layer.upgrade().is_some()).count();
+        assert!(alive <= 10, "{alive} of the {} layers are alive", layers.len());
     }
 
     /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its

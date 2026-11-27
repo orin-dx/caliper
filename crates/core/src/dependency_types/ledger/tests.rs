@@ -1185,6 +1185,41 @@ fn what_a_partial_walk_loads_is_not_kept_once_a_complete_walk_replaces_it() {
     }
 }
 
+/// A chain of 200 barrels, each trying its own unreadable `export *` target before the next barrel, with `Target`
+/// at the end: every lookup keeps its answer for the load with the failed paths below it by reference, so the load
+/// holds O(200) path entries, not one copy of everything below at each level. The answer still names all 200.
+#[test]
+fn a_chain_of_partial_lookups_holds_each_failed_path_once() {
+    const LENGTH: usize = 200;
+    let mut files: Vec<(String, String)> = vec![(
+        "node_modules/chain/package.json".into(),
+        r#"{ "name": "chain", "version": "1.0.0", "types": "b0.d.ts" }"#.into(),
+    )];
+    for n in 0..LENGTH {
+        let next = match n + 1 == LENGTH {
+            true => "./target".to_owned(),
+            false => format!("./b{}", n + 1),
+        };
+        files.push((
+            format!("node_modules/chain/b{n}.d.ts"),
+            format!("export * from './bad{n}';\nexport * from '{next}';\n"),
+        ));
+    }
+    files.push(("node_modules/chain/target.d.ts".into(), "export interface Target { t: string }\n".into()));
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = project(&files);
+    for n in 0..LENGTH {
+        std::fs::write(root.join(format!("node_modules/chain/bad{n}.d.ts")), UNREADABLE).unwrap();
+    }
+    let options = PipelineOptions { use_cache: false, ..options(&root) };
+    let demand = Demand { from: root.join("src/Card.tsx"), specifier: "chain".into(), name: "Target".into() };
+    let layer = load(vec![demand.clone()], &options, None);
+    assert!(layer.failed_path_entries <= 3 * LENGTH, "{} failed-path entries held", layer.failed_path_entries);
+    assert_eq!(layer.failed_reads_reached(std::slice::from_ref(&demand)).len(), LENGTH, "every failed read, once");
+    let target = Some((root.join("node_modules/chain/target.d.ts"), CompactString::from("Target")));
+    assert_eq!(layer.export_for_resolver(&root.join("node_modules/chain/b0.d.ts"), "Target"), Some(target));
+}
+
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
 /// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
 /// augmentation did add one.
