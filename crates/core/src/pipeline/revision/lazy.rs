@@ -103,11 +103,33 @@ pub struct ComponentLocation {
 
 /// The dependency layer a context was built over, and the context. Replaced whole when the layer grows: the context's
 /// memos (interface chains, member reads) were computed against the old layer and must not outlive it.
+/// A layer, and the diagnostics of its failed reads and contained panics that the live demands reach.
+type LiveWarnings = (Arc<DependencyLayer>, Arc<[Diagnostic]>);
+
 struct Engine {
     layer: Option<Arc<DependencyLayer>>,
     ctx: Arc<ResolutionContext>,
     /// The fingerprint of the provisional augmentations `ctx` serves ([`Resolved::holds_under`]).
     served: u64,
+}
+
+impl Lazy {
+    /// The diagnostics every answer read against `layer` carries: derived from the revision's live demands once for
+    /// each layer, as the revision's demands do not change and a layer never does.
+    fn live_warnings(&self, layer: &Arc<DependencyLayer>) -> Arc<[Diagnostic]> {
+        let mut cached = self.live_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((at, warnings)) = cached.as_ref()
+            && Arc::ptr_eq(at, layer)
+        {
+            return warnings.clone();
+        }
+        #[cfg(test)]
+        self.live_warning_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let roots = self.demands.values().flat_map(|demands| demands.iter());
+        let warnings: Arc<[Diagnostic]> = Arc::from(layer.panic_diagnostics_reached(roots));
+        *cached = Some((layer.clone(), warnings.clone()));
+        warnings
+    }
 }
 
 impl Engine {
@@ -159,6 +181,11 @@ pub(super) struct Lazy {
     engine: ArcSwap<Engine>,
     /// Serializes layer growth, so concurrent requests load a name once.
     growing: Mutex<()>,
+    /// The failed reads the project's live demands reach, for the layer they were derived from: every answer read
+    /// against that layer reports the same ones, so they are derived once per layer, not once per answer.
+    live_warnings: Mutex<Option<LiveWarnings>>,
+    #[cfg(test)]
+    live_warning_builds: std::sync::atomic::AtomicUsize,
     /// Whether the background load of every name the project takes from a package has started.
     whole_demand_started: std::sync::atomic::AtomicBool,
     /// The thread loading them, until [`Revision::wait_for_dependency_load`] joins it.
@@ -353,6 +380,9 @@ impl Revision {
             memo: DashMap::default(),
             engine: ArcSwap::from_pointee(engine),
             growing: Mutex::new(()),
+            live_warnings: Mutex::new(None),
+            #[cfg(test)]
+            live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
             whole_demand_started: std::sync::atomic::AtomicBool::new(false),
             whole_demand_thread: Mutex::new(None),
             growths: std::sync::atomic::AtomicUsize::new(0),
@@ -522,6 +552,9 @@ impl Revision {
                 memo,
                 engine: ArcSwap::from_pointee(engine),
                 growing: Mutex::new(()),
+                live_warnings: Mutex::new(None),
+                #[cfg(test)]
+                live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
                 whole_demand_started: std::sync::atomic::AtomicBool::new(false),
                 whole_demand_thread: Mutex::new(None),
                 growths: std::sync::atomic::AtomicUsize::new(0),
@@ -978,8 +1011,7 @@ impl Revision {
         if let Some(lazy) = &self.lazy {
             let layer = read_against.or_else(|| lazy.engine.load_full().layer.clone());
             if let Some(layer) = layer {
-                let roots = lazy.demands.values().flat_map(|demands| demands.iter());
-                diagnostics.extend(layer.panic_diagnostics_reached(roots), None);
+                diagnostics.extend(lazy.live_warnings(&layer).iter().cloned(), None);
             }
         }
         Some(ComponentAnswer { key: key.to_owned(), entry, diagnostics: diagnostics.finish() })
@@ -1314,6 +1346,49 @@ mod read_retry_tests {
                 assert!(answer == cold, "step {step}, {name}");
             }
         }
+    }
+
+    /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its
+    /// own file importing `many-kit` past one unreadable file, asked for together and then again, all carry the
+    /// warning, and the live warnings are derived once for each layer the answers were read against.
+    #[test]
+    fn the_live_warnings_are_derived_once_per_layer() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write(
+            "node_modules/many-kit/package.json",
+            r#"{ "name": "many-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        );
+        write("node_modules/many-kit/index.d.ts", "export * from './bad';\nexport * from './props';\n");
+        write("node_modules/many-kit/props.d.ts", "export interface ManyProps { many: string }\n");
+        std::fs::write(root.join("node_modules/many-kit/bad.d.ts"), [0xff; 8]).unwrap();
+        for n in 0..200 {
+            write(
+                &format!("src/c{n}/C{n}.tsx"),
+                &format!(
+                    "import type {{ ManyProps }} from 'many-kit';\n\
+                     export function C{n}(props: ManyProps & {{ own{n}: string }}) {{ return null; }}\n"
+                ),
+            );
+        }
+        let options = options(&root, false);
+        let revision = Revision::cold_lazy(&options, 0);
+        let keys: Vec<String> = (0..200).map(|n| format!("C{n}")).collect();
+        let warned = |answer: &Option<ComponentAnswer>| {
+            answer.as_ref().unwrap().diagnostics.iter().any(|d| d.code == crate::types::DiagnosticCode::IoError)
+        };
+        assert!(revision.lazy_components(&options, &keys).iter().all(warned));
+        let lazy = revision.lazy.as_ref().unwrap();
+        let builds = lazy.live_warning_builds.load(Relaxed);
+        let layers = lazy.growths.load(Relaxed) + 1;
+        assert!(builds <= layers, "{builds} derivations over {layers} layers");
+        assert!(revision.lazy_components(&options, &keys).iter().all(warned));
+        assert_eq!(lazy.live_warning_builds.load(Relaxed), builds, "asking again derives nothing");
     }
 
     /// An answer that read React's augmentations holds only for the augmentations served when it was resolved:
