@@ -1209,6 +1209,98 @@ fn a_named_lookup_past_an_unreadable_target_is_degraded_as_on_main() {
     assert!(session.component("Card") == fresh.component("Card"));
 }
 
+/// A file a direct import indexed stays indexed whatever a search past an unreadable file reaches: `shared.d.ts`
+/// declares `Shared` and merges `aria-sh` into React. `Direct` imports `Shared` directly; `setup.ts` imports `kit`, whose
+/// augmentation search passes an unreadable `bad` and reads `shared`. Loads grow the eager layer past the depth limit,
+/// then `bad` reads: `Direct` and `Aria` equal a fresh run at each step, `Direct`'s `s` and `Aria`'s `aria-sh` kept.
+#[test]
+fn a_directly_imported_file_stays_indexed_across_a_flatten_and_a_recovery() {
+    let other: String = (0..12).map(|n| format!("export interface O{n} {{ o{n}: string }}\n")).collect();
+    let (_tmp, root) = react_project(&[
+        ("node_modules/kit/package.json", r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/kit/index.d.ts", "export * from './bad';\nexport * from './shared';\n"),
+        (
+            "node_modules/kit/shared.d.ts",
+            "import type {} from 'react';\ndeclare module 'react' { interface AriaAttributes { 'aria-sh'?: string } }\n\
+             export interface Shared { s: string }\n",
+        ),
+        (
+            "node_modules/other-kit/package.json",
+            r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/other-kit/index.d.ts", &other),
+        ("src/setup.ts", "import * as Kit from 'kit';\nexport const kit = Kit;\n"),
+        (
+            "src/direct/Direct.tsx",
+            "import type { Shared } from 'kit/shared';\nexport function Direct(props: Shared) { return null; }\n",
+        ),
+        (
+            "src/aria/Aria.tsx",
+            "import * as React from 'react';\ninterface AriaOwn extends React.AriaAttributes { own?: boolean }\n\
+             export const Aria = (props: AriaOwn) => <div />;\n",
+        ),
+        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+    ]);
+    let bad = root.join("node_modules/kit/bad.d.ts");
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    let session = WatchSession::new(react_options(&root));
+    drop(session.initialize());
+    let check = |step: &str| {
+        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
+        drop(fresh.initialize());
+        assert_eq!(names(&session.component("Direct")), ["s"], "{step}");
+        assert!(names(&session.component("Aria")).contains(&"aria-sh".to_owned()), "{step}");
+        for name in ["Direct", "Aria"] {
+            assert!(session.component(name) == fresh.component(name), "{name}, {step}");
+        }
+    };
+    check("partial");
+    let plain = root.join("src/plain/Plain.tsx");
+    for n in 0..12 {
+        std::fs::write(
+            &plain,
+            format!(
+                "import type {{ O{n} }} from 'other-kit';\nexport function Plain(props: O{n}) {{ return null; }}\n"
+            ),
+        )
+        .unwrap();
+        drop(session.update_file(&plain));
+    }
+    check("past the depth limit");
+    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
+    edit(&session, &plain);
+    check("recovered");
+}
+
+/// A search past an unreadable file loads what its augmentation imports as any import, so the import's own walk is
+/// marked and retried as any walk: `kit2`'s search passes an unreadable `bad` and reads `aug`, whose augmentation
+/// types a prop with `Tone` from `tone.d.ts`, unreadable too. Once `tone` reads, the load that follows it again leaves
+/// only the search's own walk unread, and the next one asks for nothing more of `tone`.
+#[test]
+fn a_recovered_import_of_a_served_augmentation_is_not_followed_again() {
+    let (_tmp, root) = project(&[
+        ("node_modules/kit2/package.json", r#"{ "name": "kit2", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/kit2/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+        (
+            "node_modules/kit2/aug.d.ts",
+            "import type { Tone } from './tone';\n\
+             declare module 'react' { interface AriaAttributes { 'aria-tone'?: Tone } }\nexport {};\n",
+        ),
+    ]);
+    let (bad, tone) = (root.join("node_modules/kit2/bad.d.ts"), root.join("node_modules/kit2/tone.d.ts"));
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    std::fs::write(&tone, UNREADABLE).unwrap();
+    let options = PipelineOptions { use_cache: false, ..options(&root) };
+    let setup = Demand { from: root.join("src/setup.ts"), specifier: "kit2".into(), name: "".into() };
+    let first = Arc::new(load(vec![setup.clone()], &options, None));
+    std::fs::write(&tone, "export type Tone = 'warm' | 'cool';\n").unwrap();
+    let second = Arc::new(load(first.missing(std::slice::from_ref(&setup)), &options, Some(&first)));
+    let unread = second.unread(std::slice::from_ref(&setup));
+    assert_eq!(unread.iter().map(|demand| demand.name.clone()).collect::<Vec<_>>(), [CompactString::default()]);
+    let failed: Vec<PathKey> = second.failed_reads_reached(std::slice::from_ref(&setup)).into_iter().collect();
+    assert_eq!(failed, [PathKey::from(bad.as_path())], "only `bad` is still unread");
+}
+
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
 /// adds no React declaration, so nothing that read React's augmentations is dropped. The load that first read the
 /// augmentation did add one.

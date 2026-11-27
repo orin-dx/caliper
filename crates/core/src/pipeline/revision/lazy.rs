@@ -114,6 +114,24 @@ struct Engine {
 }
 
 impl Lazy {
+    /// What `extended`, grown from `previous`, serves to the shared demands: `previous`'s when the growth searched no
+    /// module (the only follow that changes it), else derived once for the layer.
+    fn served_files(&self, previous: &DependencyLayer, extended: &DependencyLayer) -> Arc<[Utf8PathBuf]> {
+        let mut cached = self.served.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((at, files)) = cached.as_ref()
+            && (*at == extended.id() || (*at == previous.id() && !extended.searched_modules()))
+        {
+            let files = files.clone();
+            *cached = Some((extended.id(), files.clone()));
+            return files;
+        }
+        #[cfg(test)]
+        self.served_derivations.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let files: Arc<[Utf8PathBuf]> = extended.served_files(self.shared.iter()).into_iter().cloned().collect();
+        *cached = Some((extended.id(), files.clone()));
+        files
+    }
+
     /// The diagnostics every answer read against `layer` carries: derived from the revision's live demands once for
     /// each layer, as the revision's demands do not change and a layer never does.
     fn live_warnings(&self, layer: &Arc<DependencyLayer>) -> Arc<[Diagnostic]> {
@@ -229,6 +247,11 @@ pub(super) struct Lazy {
     /// The failed reads the project's live demands reach, for the layer they were derived from: every answer read
     /// against that layer reports the same ones, so they are derived once per layer, not once per answer.
     live_warnings: Mutex<Option<LiveWarnings>>,
+    /// What a layer serves provisionally to the shared demands, for the layer (by id) it was derived for: a growth
+    /// that searched no module serves the same, so it is carried, not derived again.
+    served: Mutex<Option<(u64, Arc<[Utf8PathBuf]>)>>,
+    #[cfg(test)]
+    served_derivations: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     live_warning_builds: std::sync::atomic::AtomicUsize,
     /// How many files a growth asked about to carry memos, for tests.
@@ -477,6 +500,9 @@ impl Revision {
             engine: ArcSwap::from_pointee(engine),
             growing: Mutex::new(()),
             live_warnings: Mutex::new(None),
+            served: Mutex::new(None),
+            #[cfg(test)]
+            served_derivations: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -662,6 +688,9 @@ impl Revision {
                 engine: ArcSwap::from_pointee(engine),
                 growing: Mutex::new(()),
                 live_warnings: Mutex::new(None),
+                served: Mutex::new(None),
+                #[cfg(test)]
+                served_derivations: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
@@ -947,12 +976,13 @@ impl Revision {
         lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
         // rebuilding them for every growth was most of what a session reading across a project spent.
-        let named_types = Arc::new(self.named_types.with_fallback(extended.served_types(lazy.shared.iter())));
+        let served_files = lazy.served_files(layer, &extended);
+        let named_types = Arc::new(self.named_types.with_fallback(extended.served_types_of(&served_files)));
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
         // What the load added that declares into React (an augmentation a retry read, React's own types) changes what
         // every resolution that reads React's augmentations sees, whichever files it recorded.
         let augmentations_changed = extended.changes_react_declarations(layer);
-        let served = extended.served_fingerprint(lazy.shared.iter());
+        let served = dependency_types::served_fingerprint_of(&served_files);
         let next = Engine { layer: Some(extended), ctx, served };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them. So does one that
@@ -1682,6 +1712,55 @@ mod read_retry_tests {
         assert!(distinct.len() > 20, "the answers were read against {} layers", distinct.len());
         let alive = layers.iter().filter(|layer| layer.upgrade().is_some()).count();
         assert!(alive <= 10, "{alive} of the {} layers are alive", layers.len());
+    }
+
+    /// What a layer serves is derived once and carried across growths that search no module: with a shared
+    /// augmentation served past an unreadable file, 200 components asked for one at a time each grow the layer, and the
+    /// served set is derived a handful of times, not once a growth.
+    #[test]
+    fn the_served_set_is_carried_across_growths_that_search_no_module() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write(
+            "node_modules/aug-kit/package.json",
+            r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        );
+        write("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n");
+        write(
+            "node_modules/aug-kit/aug.d.ts",
+            "declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\nexport {};\n",
+        );
+        std::fs::write(root.join("node_modules/aug-kit/bad.d.ts"), [0xff; 8]).unwrap();
+        write(
+            "node_modules/many-kit/package.json",
+            r#"{ "name": "many-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        );
+        write("node_modules/many-kit/index.d.ts", "export interface ManyProps { many: string }\n");
+        write("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n");
+        for n in 0..200 {
+            write(
+                &format!("src/c{n}/C{n}.tsx"),
+                &format!(
+                    "import type {{ ManyProps }} from 'many-kit';\n\
+                     export function C{n}(props: ManyProps & {{ own{n}: string }}) {{ return null; }}\n"
+                ),
+            );
+        }
+        let options = options(&root, false);
+        let revision = Revision::cold_lazy(&options, 0);
+        for n in 0..200 {
+            drop(revision.lazy_component(&options, &format!("C{n}")).unwrap());
+        }
+        let lazy = revision.lazy.as_ref().unwrap();
+        let growths = lazy.growths.load(Relaxed);
+        assert!(growths >= 100, "each request grows the layer: {growths}");
+        let derived = lazy.served_derivations.load(Relaxed);
+        assert!(derived <= 3, "the served set derived {derived} times over {growths} growths");
     }
 
     /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its
