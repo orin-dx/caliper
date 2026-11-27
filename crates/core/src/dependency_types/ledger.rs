@@ -241,6 +241,9 @@ struct Unreadable {
 pub(super) struct ReadLedger {
     reads: FxHashMap<PathKey, Read>,
     marks: FxHashMap<Node, Mark>,
+    /// The reads this layer's load made itself, each with whether it failed: what a growth changed, a flatten's
+    /// included (its `reads` are the chain's too).
+    fresh: Vec<(PathKey, bool)>,
     /// How many reverse traversals of earlier marks `finish` made (one for a flatten, none over a parent), for tests.
     #[cfg(test)]
     traversals: usize,
@@ -327,24 +330,31 @@ impl DependencyLayer {
 
     /// [`Self::read_warnings`], only for the files the unread walks `roots` lead to could not read: what a revision
     /// whose live demands are `roots` reports.
+    #[cfg(test)]
     pub(crate) fn read_warnings_reached<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Diagnostic> {
-        // A healthy layer, the common case, recovered ones included, neither walks nor allocates: the files whose
-        // latest read failed are kept once per layer, and `roots` is not iterated.
+        self.warnings_of(&self.failed_reads_reached(roots))
+    }
+
+    /// The files whose latest read failed that the unread walks `roots` lead to could not read: what a revision whose
+    /// live demands are `roots` reports. A healthy layer, the common case, recovered ones included, neither walks nor
+    /// allocates: the files whose latest read failed are kept once per layer, and `roots` is not iterated.
+    pub(crate) fn failed_reads_reached<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> FxHashSet<PathKey> {
         let walks = self.unread_walks();
         if walks.failed.is_empty() {
-            return Vec::new();
+            return FxHashSet::default();
         }
-        let warnings = self.warnings_of(&walks.failed);
-        let mut reached: FxHashSet<&str> = FxHashSet::default();
+        let mut reached: FxHashSet<PathKey> = FxHashSet::default();
         for walk in self.unread_from(roots) {
             if let Some(mark) = self.mark(&Node::Demand(walk.key())) {
-                reached.extend(mark.suspects.iter().map(std::borrow::Borrow::<str>::borrow));
+                reached.extend(mark.suspects.iter().filter(|file| walks.failed.contains(*file)).cloned());
             }
         }
-        warnings
-            .into_iter()
-            .filter(|warning| warning.file.as_deref().is_some_and(|file| reached.contains(file)))
-            .collect()
+        reached
+    }
+
+    /// The reads this layer's load made itself, each with whether it failed.
+    pub(crate) fn fresh_reads(&self) -> &[(PathKey, bool)] {
+        &self.ledger.fresh
     }
 
     /// One warning for each file whose latest read in the chain failed, sorted by message, for tests.
@@ -353,7 +363,8 @@ impl DependencyLayer {
         self.warnings_of(&self.unread_walks().failed)
     }
 
-    fn warnings_of(&self, failed: &FxHashSet<PathKey>) -> Vec<Diagnostic> {
+    /// A warning for each of `failed` whose latest read in the chain failed, sorted by message.
+    pub(crate) fn warnings_of(&self, failed: &FxHashSet<PathKey>) -> Vec<Diagnostic> {
         let mut warnings: Vec<Diagnostic> = failed
             .iter()
             .filter_map(|path| {
@@ -667,6 +678,8 @@ impl<'a> LedgerBuilder<'a> {
             suspect_lists: _,
         } = self;
         let reads: FxHashMap<PathKey, Read> = reads.into_iter().collect();
+        let fresh: Vec<(PathKey, bool)> =
+            reads.iter().map(|(path, read)| (path.clone(), matches!(read, Read::Failed(_)))).collect();
         let unread: FxHashMap<Node, (Demand, Arc<[PathKey]>)> =
             unread.into_iter().map(|(key, walk)| (Node::Demand(key), walk)).collect();
         let mut marks: FxHashMap<Node, Mark> = FxHashMap::default();
@@ -728,6 +741,7 @@ impl<'a> LedgerBuilder<'a> {
             return ReadLedger {
                 reads,
                 marks,
+                fresh,
                 #[cfg(test)]
                 traversals: traversals.get(),
             };
@@ -736,6 +750,7 @@ impl<'a> LedgerBuilder<'a> {
         merged.absorb(&ReadLedger {
             reads,
             marks,
+            fresh: Vec::new(),
             #[cfg(test)]
             traversals: 0,
         });
@@ -743,6 +758,7 @@ impl<'a> LedgerBuilder<'a> {
         {
             merged.traversals = traversals.get();
         }
+        merged.fresh = fresh;
         merged.reads.retain(|_, read| matches!(read, Read::Failed(_)));
         merged.marks.retain(|_, mark| !mark.is_clean());
         merged

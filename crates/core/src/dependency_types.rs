@@ -445,8 +445,13 @@ impl DependencyLayer {
     /// [`Self::panic_diagnostics`], with only the failed reads a walk from `roots` reaches: a file no live demand
     /// leads to any more is not reported, though the ledger keeps its failure for a demand that returns.
     pub(crate) fn panic_diagnostics_reached<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Vec<Diagnostic> {
+        self.panic_diagnostics_of(&self.failed_reads_reached(roots))
+    }
+
+    /// The contained panics of the chain, and a warning for each of `failed`, in message order.
+    pub(crate) fn panic_diagnostics_of(&self, failed: &FxHashSet<PathKey>) -> Vec<Diagnostic> {
         let mut all: Vec<Diagnostic> = self.chain().flat_map(|layer| layer.panics.iter().cloned()).collect();
-        all.extend(self.read_warnings_reached(roots));
+        all.extend(self.warnings_of(failed));
         all.sort_by(|a, b| a.message.cmp(&b.message));
         all
     }
