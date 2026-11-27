@@ -961,6 +961,39 @@ fn the_served_index_holds_each_provisional_file_once() {
     assert_eq!(served.react_augmentations(&root.join("react.d.ts"), "React.HTMLAttributes").len(), 1);
 }
 
+/// However many provisional files are served, they sit in one layer over the index: 200 modules whose searches each
+/// read a distinct augmentation past an unreadable `bad` add one fallback step to every lookup, and serve all 200.
+#[test]
+fn provisional_files_are_served_in_one_layer() {
+    let mut files: Vec<(String, String)> =
+        vec![("node_modules/many-aug/package.json".into(), r#"{ "name": "many-aug", "version": "1.0.0" }"#.into())];
+    for n in 0..200 {
+        files.push((
+            format!("node_modules/many-aug/m{n}.d.ts"),
+            format!("export * from './bad';\nexport * from './a{n}';\n"),
+        ));
+        files.push((
+            format!("node_modules/many-aug/a{n}.d.ts"),
+            format!("import type {{}} from 'react';\ndeclare module 'react' {{ interface HTMLAttributes<T> {{ a{n}?: string }} }}\n"),
+        ));
+    }
+    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let (_tmp, root) = project(&files);
+    std::fs::write(root.join("node_modules/many-aug/bad.d.ts"), UNREADABLE).unwrap();
+    let demands: Vec<Demand> = (0..200)
+        .map(|n| Demand {
+            from: root.join(format!("src/c{n}/Card.tsx")),
+            specifier: format!("many-aug/m{n}").into(),
+            name: "".into(),
+        })
+        .collect();
+    let layer = load(demands.clone(), &PipelineOptions { use_cache: false, ..options(&root) }, None);
+    let depth = |index: &NamedTypeIndex| std::iter::successors(Some(index), |index| index.fallback.as_deref()).count();
+    let served = layer.served_types(&demands);
+    assert_eq!(depth(&served), depth(&layer.named_types) + 1, "one layer, however many files");
+    assert_eq!(served.react_augmentations(&root.join("react.d.ts"), "React.HTMLAttributes").len(), 200);
+}
+
 /// Seventy entry points of one package each search past the same unreadable file and reach the same augmentation,
 /// whose `HTMLAttributes` extends a chain of its own: it is served once, so no copy spends the attribute traversal's
 /// bounded steps, and `Box`'s props equal a run that imports one entry point.

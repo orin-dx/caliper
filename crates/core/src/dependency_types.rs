@@ -419,9 +419,9 @@ pub(crate) struct DependencyLayer {
     /// to the answers whose live demands reach the module ([`DependencyLayer::served_types`]), never indexed, never
     /// written, so nothing they hold outlives the module's next search, complete or not.
     provisional: FxHashMap<PathKey, ProvisionalFiles>,
-    /// The declarations of each provisional file the layer does not index, [`serve`]d once as an indexed file is,
-    /// however many modules' searches read it; their imports are in `import_map`.
-    provisional_types: FxHashMap<PathKey, Arc<NamedTypeIndex>>,
+    /// Each provisional file the layer does not index, once however many modules' searches read it: its imports are
+    /// [`serve`]d into `import_map`, its declarations into the one overlay [`DependencyLayer::served_types`] builds.
+    provisional_data: FxHashMap<PathKey, Arc<SourceData>>,
     demands: FxHashSet<DemandKey>,
     unresolved: FxHashMap<DemandKey, Unresolved>,
     /// The `(file, name)` declarations whose references were followed.
@@ -453,7 +453,8 @@ impl DependencyLayer {
 
     /// The contained panics of this layer and the ones it extends, and a warning for each file whose latest read in
     /// the chain failed ([`DependencyLayer::read_warnings`]), in message order: a session whose next load read the file
-    /// answers as a fresh one.
+    /// answers as a fresh one. Answers report [`Self::panic_diagnostics_reached`]; this is every one, for tests.
+    #[cfg(test)]
     pub(crate) fn panic_diagnostics(&self) -> Vec<Diagnostic> {
         let mut all: Vec<Diagnostic> = self.chain().flat_map(|layer| layer.panics.iter().cloned()).collect();
         all.extend(self.read_warnings());
@@ -487,13 +488,28 @@ impl DependencyLayer {
     /// augmentations of each module those demands reach over it. A module no live demand reaches is not served, as a
     /// fresh run would not search it.
     pub(crate) fn served_types<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> Arc<NamedTypeIndex> {
-        let mut served = self.named_types.clone();
-        for file in self.served_files(roots) {
-            if let Some(types) = self.provisional_types.get(file.as_str()) {
-                served = Arc::new(types.with_fallback(served));
-            }
+        let served: Vec<&Arc<SourceData>> =
+            self.served_files(roots).into_iter().filter_map(|file| self.provisional_data.get(file.as_str())).collect();
+        if served.is_empty() {
+            return self.named_types.clone();
         }
-        served
+        // One layer over the index however many files are served, so a lookup that misses them all costs one step.
+        let mut over = NamedTypeIndex::default();
+        over.fallback = Some(self.named_types.clone());
+        for data in served {
+            serve_declarations(&mut over, data);
+        }
+        Arc::new(over)
+    }
+
+    /// An order-free fingerprint of what [`Self::served_types`] serves to `roots`: an answer that read React's
+    /// augmentations holds only while it is the same.
+    pub(crate) fn served_fingerprint<'r>(&self, roots: impl IntoIterator<Item = &'r Demand>) -> u64 {
+        let mut fingerprint = Fingerprint::default();
+        for file in self.served_files(roots) {
+            fingerprint.add(file);
+        }
+        fingerprint.hash
     }
 
     /// The provisional files [`Self::served_types`] serves to `roots`, each once, sorted.
@@ -1679,16 +1695,15 @@ fn load_with(
     provisional.extend(std::mem::take(&mut loader.provisional));
     // Each provisional file, served as an indexed file is, once however many searches read it and not at all when the
     // layer indexes it: which are served depends on the live demands of the revision that reads the layer.
-    let mut provisional_types: FxHashMap<PathKey, Arc<NamedTypeIndex>> = FxHashMap::default();
+    let mut provisional_data: FxHashMap<PathKey, Arc<SourceData>> = FxHashMap::default();
     for (file, data) in provisional.values().flat_map(|files| files.iter()) {
         let indexed = loader.declaring.contains(file.as_str())
             || parent.as_ref().is_some_and(|layer| layer.is_dependency_file(file));
-        if indexed || provisional_types.contains_key(file.as_str()) {
+        if indexed || provisional_data.contains_key(file.as_str()) {
             continue;
         }
-        let mut types = NamedTypeIndex::default();
-        serve(&mut types, &mut imports, file, data);
-        provisional_types.insert(PathKey::from(file.as_path()), Arc::new(types));
+        serve_imports(&mut imports, file, data);
+        provisional_data.insert(PathKey::from(file.as_path()), data.clone());
     }
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
     // declarations stay out of `named_types`.
@@ -1751,7 +1766,7 @@ fn load_with(
         react_files,
         augmenters: loader.augmenters.into_iter().collect(),
         provisional,
-        provisional_types,
+        provisional_data,
         partial_exports,
         // A demand that met a file it could not read is here too; the ledger marks it, so a load over this layer
         // follows it again.
@@ -1772,7 +1787,17 @@ fn load_with(
 /// What a dependency file gives the answers that read it, whether the layer indexes it or serves it provisionally:
 /// its declarations, into `named`, and its imports and re-exports, so the names it references resolve.
 fn serve(named: &mut NamedTypeIndex, imports: &mut GlobalSourceData, path: &Utf8Path, data: &SourceData) {
+    serve_declarations(named, data);
+    serve_imports(imports, path, data);
+}
+
+/// [`serve`]'s declarations: what a provisional file gives the overlay its revision builds.
+fn serve_declarations(named: &mut NamedTypeIndex, data: &SourceData) {
     named.merge_file(data);
+}
+
+/// [`serve`]'s imports and re-exports: what a provisional file gives the layer's import map.
+fn serve_imports(imports: &mut GlobalSourceData, path: &Utf8Path, data: &SourceData) {
     imports.import_map.insert(path.to_owned(), data.imports.clone());
     imports.re_export_map.insert(path.to_owned(), data.exports.clone());
 }

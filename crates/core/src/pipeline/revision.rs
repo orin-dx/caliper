@@ -106,12 +106,20 @@ pub(crate) struct Resolved {
     entry: ComponentEntry,
     diagnostics: ResolvedDiagnostics,
     depends_on: Dependencies,
+    /// The fingerprint of the provisional augmentations served when it was resolved: an answer that read React's
+    /// augmentations holds only while the served ones are the same.
+    served: u64,
     evidence: Option<Arc<crate::relevance::Inputs>>,
     /// React's attributes the answer holds apart until relevance decides which it lists.
     attributes: crate::relevance::Attributes,
 }
 
 impl Resolved {
+    /// Whether the answer still holds where `served` is the fingerprint of the provisional augmentations served.
+    fn holds_under(&self, served: u64) -> bool {
+        !self.depends_on.reads_augmentations || self.served == served
+    }
+
     /// The entry as output, with the `used` lists relevance decides from its evidence and `sites`, the call sites of
     /// the revision it is published in. The one place an answer becomes output: a kept resolution is decided again
     /// against each revision's call sites, so an edit to a consumer reaches it without resolving it again.
@@ -320,7 +328,7 @@ fn resolve_all(
         .into_iter()
         .zip(mappings)
         .map(|((entry, diagnostics, depends_on, evidence, attributes), (id, _))| {
-            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes }))
+            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, served: 0, evidence, attributes }))
         })
         .collect()
 }

@@ -106,6 +106,8 @@ pub struct ComponentLocation {
 struct Engine {
     layer: Option<Arc<DependencyLayer>>,
     ctx: Arc<ResolutionContext>,
+    /// The fingerprint of the provisional augmentations `ctx` serves ([`Resolved::holds_under`]).
+    served: u64,
 }
 
 impl Engine {
@@ -122,6 +124,7 @@ impl Engine {
             Some(layer) => Arc::new(named_types.with_fallback(layer.served_types(shared))),
             None => named_types.clone(),
         };
+        let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(shared));
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),
             options,
@@ -130,7 +133,7 @@ impl Engine {
         )
         .with_dependencies(layer.clone())
         .with_react_types(react_types.clone());
-        Engine { layer, ctx: Arc::new(ctx) }
+        Engine { layer, ctx: Arc::new(ctx), served }
     }
 }
 
@@ -441,12 +444,17 @@ impl Revision {
         };
         let by_name = group_by_name(&global, options);
         let memo: DashMap<ComponentId, Arc<Resolved>, FxBuildHasher> = DashMap::default();
+        // What the edited project serves: a memo that read React's augmentations under other ones is touched.
+        let shared = shared_demands(file_demands.values().map(|demands| demands.as_ref()));
+        let layer = previous.engine.load().layer.clone();
+        let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(shared.iter()));
         let mut touched: FxHashSet<String> = FxHashSet::default();
         let mut affected_files: Vec<Utf8PathBuf> = Vec::new();
         for entry in previous.memo.iter() {
             let (id, resolved) = (entry.key(), entry.value());
             let kept = id.file != change.file
                 && !resolved.affected_by(&change)
+                && resolved.holds_under(served)
                 && by_name.get(&id.name).is_some_and(|group| group.iter().any(|(candidate, _)| candidate == id));
             if kept {
                 memo.insert(id.clone(), resolved.clone());
@@ -469,8 +477,6 @@ impl Revision {
         affected_files.sort();
         affected_files.dedup();
 
-        let layer = previous.engine.load().layer.clone();
-        let shared = shared_demands(file_demands.values().map(|demands| demands.as_ref()));
         let engine = Engine::new(
             &global,
             options,
@@ -604,8 +610,12 @@ impl Revision {
         index: usize,
     ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
         let lazy = self.lazy.as_ref()?;
-        if let Some(hit) = lazy.memo.get(id) {
-            return Some((hit.clone(), None));
+        let served = lazy.engine.load().served;
+        if let Some(hit) = lazy.memo.get(id).map(|hit| hit.clone()) {
+            if hit.holds_under(served) {
+                return Some((hit, None));
+            }
+            lazy.memo.remove(id);
         }
         if let Some(hit) = self.provisional_hit(lazy, id) {
             return Some(hit);
@@ -658,7 +668,8 @@ impl Revision {
             // A load that left the same names missing answered none of them (a demand whose load panicked stays
             // unanswered, a file that stays unreadable), so asking again would never end.
             if missing.is_empty() || missing == asked_for {
-                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes });
+                let served = engine.served;
+                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, served, evidence, attributes });
                 // A walk past a file that could not be read answers more once it is followed again: until then the
                 // answer holds only provisionally, and never in the memo an edit carries over.
                 // With no footprint, a file one of the walks could not read was read since in this same layer, so the
@@ -688,8 +699,10 @@ impl Revision {
         id: &ComponentId,
     ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
         let (resolved, footprint) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
-        let layer = lazy.engine.load().layer.clone();
-        let holds = layer.as_ref().is_some_and(|layer| layer.footprint_holds(&footprint, lazy.moment()));
+        let engine = lazy.engine.load();
+        let layer = engine.layer.clone();
+        let holds = resolved.holds_under(engine.served)
+            && layer.as_ref().is_some_and(|layer| layer.footprint_holds(&footprint, lazy.moment()));
         if holds {
             return Some((resolved, layer));
         }
@@ -773,7 +786,11 @@ impl Revision {
         // context and its memos stay; only the record of what was asked for moves on. Such a load (a retry of a file
         // that stays unreadable) is no growth either: it brings the background load of every name no nearer.
         if extended.resolves_like(layer) {
-            lazy.engine.store(Arc::new(Engine { layer: Some(extended), ctx: engine.ctx.clone() }));
+            lazy.engine.store(Arc::new(Engine {
+                layer: Some(extended),
+                ctx: engine.ctx.clone(),
+                served: engine.served,
+            }));
             return;
         }
         lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -784,7 +801,8 @@ impl Revision {
         // What the load added that declares into React (an augmentation a retry read, React's own types) changes what
         // every resolution that reads React's augmentations sees, whichever files it recorded.
         let augmentations_changed = extended.changes_react_declarations(layer);
-        let next = Engine { layer: Some(extended), ctx };
+        let served = extended.served_fingerprint(lazy.shared.iter());
+        let next = Engine { layer: Some(extended), ctx, served };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them. So does one that
         // read a file whose walk reached an unread one (the old layer's ledger): a project file whose demands did, or a
@@ -955,10 +973,14 @@ impl Revision {
         }
         // A panic in the dependency loader may have left any component's types unexpanded, so every answer carries it.
         // A provisional answer carries the read warnings of the layer it was read against: a later load that read the
-        // file again ends the warning in the newest layer, not the gap in this answer.
-        let layer = read_against.or_else(|| self.lazy.as_ref().and_then(|lazy| lazy.engine.load_full().layer.clone()));
-        if let Some(layer) = layer {
-            diagnostics.extend(layer.panic_diagnostics(), None);
+        // file again ends the warning in the newest layer, not the gap in this answer. Either way only the failed reads
+        // the project's live demands reach are reported, as a cold run of the same files reports them.
+        if let Some(lazy) = &self.lazy {
+            let layer = read_against.or_else(|| lazy.engine.load_full().layer.clone());
+            if let Some(layer) = layer {
+                let roots = lazy.demands.values().flat_map(|demands| demands.iter());
+                diagnostics.extend(layer.panic_diagnostics_reached(roots), None);
+            }
         }
         Some(ComponentAnswer { key: key.to_owned(), entry, diagnostics: diagnostics.finish() })
     }
@@ -1291,6 +1313,59 @@ mod read_retry_tests {
                 assert_eq!(served(&cold), served(&answer), "step {step}, {name}");
                 assert!(answer == cold, "step {step}, {name}");
             }
+        }
+    }
+
+    /// An answer that read React's augmentations holds only for the augmentations served when it was resolved:
+    /// `setup.ts`, the sole importer of `aug-kit` (an unreadable `bad` and the augmentation `aug`), drops the import,
+    /// `First` is asked, then the import is restored. `First` reads no file the edits touch, yet equals a cold run at
+    /// each step: with the attribute, without it, and with it again.
+    #[test]
+    fn an_answer_that_read_augmentations_holds_only_for_what_was_served() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let setup = "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n";
+        let files = [
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+            (
+                "node_modules/aug-kit/aug.d.ts",
+                "import type {} from 'react';\n\
+                 declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\n",
+            ),
+            ("src/setup.ts", setup),
+            (
+                "src/first/First.tsx",
+                "import * as React from 'react';\ninterface FirstProps extends React.AriaAttributes { own?: boolean }\n\
+                 export const First = (props: FirstProps) => <div />;\n",
+            ),
+        ];
+        for (path, body) in files {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        std::fs::write(root.join("node_modules/aug-kit/bad.d.ts"), [0xff; 8]).unwrap();
+        let options = |use_cache| PipelineOptions {
+            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
+            ..options(&root, use_cache)
+        };
+        let cold = || Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), "First").unwrap();
+        let tw = |answer: &ComponentAnswer| props(answer).contains(&"aria-tw".to_owned());
+        let mut revision = Revision::cold_lazy(&options(true), 0);
+        let answer = revision.lazy_component(&options(true), "First").unwrap();
+        assert!(tw(&answer), "served while `bad` cannot be read");
+        assert!(answer == cold());
+        let setup_file = root.join("src/setup.ts");
+        for (step, body, served) in [("dropped", "export const aug = 1;\n", false), ("restored", setup, true)] {
+            std::fs::write(&setup_file, body).unwrap();
+            revision = revision.next_lazy(&options(true), &setup_file).unwrap().0;
+            let answer = revision.lazy_component(&options(true), "First").unwrap();
+            assert_eq!(tw(&answer), served, "{step}");
+            assert!(answer == cold(), "{step}");
         }
     }
 

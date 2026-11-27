@@ -347,7 +347,8 @@ impl DependencyLayer {
             .collect()
     }
 
-    /// One warning for each file whose latest read in the chain failed, sorted by message.
+    /// One warning for each file whose latest read in the chain failed, sorted by message, for tests.
+    #[cfg(test)]
     pub(crate) fn read_warnings(&self) -> Vec<Diagnostic> {
         self.warnings_of(&self.unread_walks().failed)
     }
