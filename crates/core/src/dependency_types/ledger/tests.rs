@@ -1301,6 +1301,68 @@ fn a_recovered_import_of_a_served_augmentation_is_not_followed_again() {
     assert_eq!(failed, [PathKey::from(bad.as_path())], "only `bad` is still unread");
 }
 
+/// What a served augmentation's import could not read is the search's: `kit2`'s search passes an unreadable `bad` and
+/// reads `aug`, whose augmentation types a prop with `Tone` from an unreadable `tone`. The answers the search serves
+/// lack `Tone`, so the walk from `setup` reports `tone` as well as `bad`.
+#[test]
+fn what_a_served_augmentation_could_not_import_is_reported_by_its_search() {
+    let (_tmp, root) = project(&[
+        ("node_modules/kit2/package.json", r#"{ "name": "kit2", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/kit2/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+        (
+            "node_modules/kit2/aug.d.ts",
+            "import type { Tone } from './tone';\n\
+             declare module 'react' { interface AriaAttributes { 'aria-tone'?: Tone } }\nexport {};\n",
+        ),
+    ]);
+    let (bad, tone) = (root.join("node_modules/kit2/bad.d.ts"), root.join("node_modules/kit2/tone.d.ts"));
+    std::fs::write(&bad, UNREADABLE).unwrap();
+    std::fs::write(&tone, UNREADABLE).unwrap();
+    let options = PipelineOptions { use_cache: false, ..options(&root) };
+    let setup = Demand { from: root.join("src/setup.ts"), specifier: "kit2".into(), name: "".into() };
+    let layer = load(vec![setup.clone()], &options, None);
+    let mut failed: Vec<PathKey> = layer.failed_reads_reached(std::slice::from_ref(&setup)).into_iter().collect();
+    failed.sort();
+    assert_eq!(failed, [PathKey::from(bad.as_path()), PathKey::from(tone.as_path())]);
+}
+
+/// A provisional search answer is replaced only by a search this load made: the index on disk remembers that `kit3`
+/// leads to `aug1` and `aug2`, both augmenting React; with `aug2` unreadable a cold load over that index serves `aug1`
+/// provisionally, and a dozen unrelated extensions, past the depth limit's flatten, still serve it to `setup`.
+#[test]
+fn a_flatten_keeps_a_provisional_search_it_did_not_make_again() {
+    let (_tmp, root) = project(&[
+        ("node_modules/kit3/package.json", r#"{ "name": "kit3", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/kit3/index.d.ts", "export * from './aug1';\nexport * from './aug2';\n"),
+        (
+            "node_modules/kit3/aug1.d.ts",
+            "declare module 'react' { interface AriaAttributes { 'aria-one'?: string } }\nexport {};\n",
+        ),
+        (
+            "node_modules/kit3/aug2.d.ts",
+            "declare module 'react' { interface AriaAttributes { 'aria-two'?: string } }\nexport {};\n",
+        ),
+        ("node_modules/many/package.json", r#"{ "name": "many", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/many/index.d.ts", "export interface ManyProps { many: string }\n"),
+    ]);
+    let options = options(&root);
+    let setup = Demand { from: root.join("src/setup.ts"), specifier: "kit3".into(), name: "".into() };
+    drop(load(vec![setup.clone()], &options, None));
+    let (aug1, aug2) = (root.join("node_modules/kit3/aug1.d.ts"), root.join("node_modules/kit3/aug2.d.ts"));
+    std::fs::write(&aug2, UNREADABLE).unwrap();
+    let mut layer = Arc::new(load(vec![setup.clone()], &options, None));
+    let served = |layer: &DependencyLayer| -> Vec<Utf8PathBuf> {
+        layer.served_files(std::slice::from_ref(&setup)).into_iter().cloned().collect()
+    };
+    assert_eq!(served(&layer), std::slice::from_ref(&aug1), "served over the index on disk");
+    for n in 0..12 {
+        let many =
+            Demand { from: root.join(format!("src/c{n}/C.tsx")), specifier: "many".into(), name: "ManyProps".into() };
+        layer = Arc::new(load(vec![many], &options, Some(&layer)));
+        assert_eq!(served(&layer), std::slice::from_ref(&aug1), "extension {n}");
+    }
+}
+
 /// What a lookup reaches only by falling through an unreadable export serves no other component: `kit` re-exports
 /// `first` (unreadable) and then `fallback`, whose `Target` extends `Base` from `base`, which also merges `aria-fb`
 /// into React. While `first` cannot be read `Card` has `fallback`'s and `Base`'s props, as on `main`, but `Aria` has
@@ -1875,8 +1937,15 @@ const REACT_PACKAGE: &[(&str, &str)] = &[
         "import type { Base } from '../tgt/base';\nexport interface Target2 extends Base { fallback2: string }\n",
     ),
     // A module imported for what it merges into React (`setup.ts`): its search passes `afirst`, which can be
-    // unreadable, and reads `aug`, which merges `aria-fb` into `AriaAttributes`.
-    ("node_modules/mk/aug/index.d.ts", "export * from './afirst';\nexport * from './aug';\n"),
+    // unreadable, and reads `aug`, which merges `aria-fb` into `AriaAttributes`, and `aug2`, which merges `aria-tone`
+    // typed by `tone`, a file the search does not lead to.
+    ("node_modules/mk/aug/index.d.ts", "export * from './afirst';\nexport * from './aug';\nexport * from './aug2';\n"),
+    (
+        "node_modules/mk/aug/aug2.d.ts",
+        "import type { Tone } from './tone';\n\
+         declare module 'react' { interface AriaAttributes { 'aria-tone'?: Tone } }\nexport {};\n",
+    ),
+    ("node_modules/mk/aug/tone.d.ts", "export type Tone = 'warm' | 'cool';\n"),
     ("node_modules/mk/aug/afirst.d.ts", "export interface AFirst { af: string }\n"),
     (
         "node_modules/mk/aug/aug.d.ts",
@@ -1938,9 +2007,10 @@ const PLAIN_MODEL: Model = Model {
 const REACT_MODEL: Model = Model {
     package: REACT_PACKAGE,
     components: REACT_COMPONENTS,
-    unreadable: &["tgt/first", "tgt2/first", "tgt/base", "aug/afirst", "aug/aug"],
+    unreadable: &["tgt/first", "tgt2/first", "tgt/base", "aug/afirst", "aug/aug", "aug/aug2", "aug/tone"],
     react: true,
-    seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    // Seed 63 restarts over the index on disk with an augmentation unreadable, then flattens.
+    seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 63],
     // `Base` is reached only by falling through an unreadable `first`.
     past_unreadable: &[("node_modules/mk/tgt/base.d.ts", "export interface Base { base: string }\n")],
 };
@@ -2176,6 +2246,9 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
         None => model.seeds.to_vec(),
     };
     for seed in seeds {
+        // Odd seeds flatten the chain at every load, which must not change an answer.
+        let depth = if seed % 2 == 1 { 0 } else { crate::dependency_types::MAX_CHAIN_DEPTH };
+        crate::dependency_types::CHAIN_DEPTH.store(depth, std::sync::atomic::Ordering::Relaxed);
         let (tmp, root) = model_project(model);
         let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
         let mut next = |bound: usize| -> usize {
@@ -2207,7 +2280,7 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
         };
         let mut edited_since_change = true;
         for step in 0..40 {
-            match next(5) {
+            match next(6) {
                 0 => {
                     let name = names[next(names.len())];
                     if !unreadable.remove(name) {
@@ -2227,6 +2300,14 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
                     let file = run.root.join("tsconfig.json");
                     run.edit(&file, &format!("{MODEL_TSCONFIG}{}", "\n".repeat(step + 1)));
                     edited_since_change = true;
+                }
+                // A new session over the same cache: a cold start from the index on disk.
+                5 => {
+                    run.session = WatchSession::lazy(model.options(&run.root));
+                    drop(run.session.initialize());
+                    run.asked.clear();
+                    edited_since_change = true;
+                    run.log.push("restart over the index on disk".to_owned());
                 }
                 _ => {
                     let (name, _, reads) = model.components[next(model.components.len())];
@@ -2270,6 +2351,8 @@ fn run_model(model: &'static Model, failures: &mut Vec<String>) {
             }
         }
     }
+    crate::dependency_types::CHAIN_DEPTH
+        .store(crate::dependency_types::MAX_CHAIN_DEPTH, std::sync::atomic::Ordering::Relaxed);
     if sweep.is_some() {
         return;
     }

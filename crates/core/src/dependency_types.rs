@@ -412,7 +412,18 @@ const AUGMENTATION_SCAN_FILES: usize = 64;
 /// An extension adds only the files it loaded, as a layer over the one it extends, so a growth costs what it loads and
 /// not what the session already holds. Lookups walk the chain, so it is kept short: a flatten copies everything once
 /// and the chain starts again.
-const MAX_CHAIN_DEPTH: usize = 8;
+pub(crate) const MAX_CHAIN_DEPTH: usize = 8;
+
+/// The depth limit a test sets: the model flattens at every load.
+#[cfg(test)]
+pub(crate) static CHAIN_DEPTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(MAX_CHAIN_DEPTH);
+
+fn chain_depth() -> usize {
+    #[cfg(test)]
+    return CHAIN_DEPTH.load(Ordering::Relaxed);
+    #[cfg(not(test))]
+    MAX_CHAIN_DEPTH
+}
 
 /// A set of facts as its size and an order-free hash of its members, kept as facts are added and removed.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -1576,8 +1587,12 @@ impl Loader<'_> {
                 } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
                     stack.push((qualified, node.clone()));
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
-                    if keep == Keep::Indexed {
-                        self.ledger.reached(&node, Node::Demand(demand.key()));
+                    // A served augmentation claims nothing, so what it imports goes with the search that served it: the
+                    // search's walk reaches the import's, and so do its warnings.
+                    match keep {
+                        Keep::Indexed => self.ledger.reached(&node, Node::Demand(demand.key())),
+                        Keep::Served => self.ledger.reached(from, Node::Demand(demand.key())),
+                        Keep::Transient(_) => {}
                     }
                     let past = match keep {
                         Keep::Transient(root) => Some(root.clone()),
@@ -1776,7 +1791,7 @@ fn load_with(
     let resolvers = &ModuleResolvers::new(options);
     let project_dirs: Vec<Utf8PathBuf> =
         options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
-    let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
+    let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < chain_depth()).cloned();
     let flatten = previous.filter(|_| parent.is_none());
     let mut loader = Loader::new(resolvers, &project_dirs, parent.as_deref());
     loader.ledger.retry = retry;
@@ -1898,10 +1913,11 @@ fn load_with(
     }
     let named_types = Arc::new(named);
     // The provisional augmentations: this load's incomplete searches, and `previous`'s for the modules this load did
-    // not search again. A module's newest search replaces what an older one read.
+    // not search again. A module's newest search replaces what an older one read; only `search_module` records one, as
+    // a flatten or the index on disk copies an answer without searching.
     let mut provisional: FxHashMap<PathKey, ProvisionalFiles> = previous
         .map(|layer| {
-            let searched = |walk: &PathKey| loader.walked.contains(walk) || loader.augmenters.contains_key(walk);
+            let searched = |walk: &PathKey| loader.walked.contains(walk);
             layer.provisional.iter().filter(|(walk, _)| !searched(walk)).map(|(k, v)| (k.clone(), v.clone())).collect()
         })
         .unwrap_or_default();
