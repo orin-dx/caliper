@@ -106,18 +106,19 @@ pub(crate) struct Resolved {
     entry: ComponentEntry,
     diagnostics: ResolvedDiagnostics,
     depends_on: Dependencies,
-    /// The fingerprint of the provisional augmentations served when it was resolved: an answer that read React's
-    /// augmentations holds only while the served ones are the same.
-    served: u64,
+    /// The fingerprint of the demands whose module searches gave React's augmentations when it was resolved: an answer
+    /// that read them holds only while those demands are the same, so a search an edit adds or drops resolves it again.
+    shared: u64,
     evidence: Option<Arc<crate::relevance::Inputs>>,
     /// React's attributes the answer holds apart until relevance decides which it lists.
     attributes: crate::relevance::Attributes,
 }
 
 impl Resolved {
-    /// Whether the answer still holds where `served` is the fingerprint of the provisional augmentations served.
-    fn holds_under(&self, served: u64) -> bool {
-        !self.depends_on.reads_augmentations || self.served == served
+    /// Whether the answer still holds where `shared` is the fingerprint of the demands whose searches give React's
+    /// augmentations.
+    fn holds_under(&self, shared: u64) -> bool {
+        !self.depends_on.reads_augmentations || self.shared == shared
     }
 
     /// The entry as output, with the `used` lists relevance decides from its evidence and `sites`, the call sites of
@@ -328,7 +329,7 @@ fn resolve_all(
         .into_iter()
         .zip(mappings)
         .map(|((entry, diagnostics, depends_on, evidence, attributes), (id, _))| {
-            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, served: 0, evidence, attributes }))
+            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, shared: 0, evidence, attributes }))
         })
         .collect()
 }
@@ -533,12 +534,8 @@ impl Revision {
                 dependencies = Some(Arc::new(extended));
             }
         }
-        // What a layer serves provisionally follows the live demands, so an edit that drops or restores the last import
-        // of a module changes it with no load at all.
-        if let (true, Some(old), Some(new)) = (extend_dependencies, &self.dependencies, &dependencies) {
-            let (before, after) = (self.demands.values().flat_map(|d| d.iter()), live.values().flat_map(|d| d.iter()));
-            react_namespace |= old.served_files(before) != new.served_files(after);
-            named_types.fallback = Some(new.served_types(live.values().flat_map(|demands| demands.iter())));
+        if let (true, Some(new)) = (extend_dependencies, &dependencies) {
+            named_types.fallback = Some(new.named_types.clone());
         }
         Applied {
             global,
@@ -617,8 +614,7 @@ impl Revision {
         let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
         let global = Arc::new(global);
         let mut named_types = NamedTypeIndex::build(&global);
-        named_types.fallback =
-            dependencies.as_ref().map(|layer| layer.served_types(live.values().flat_map(|demands| demands.iter())));
+        named_types.fallback = dependencies.as_ref().map(|layer| layer.named_types.clone());
         let named_types = Arc::new(named_types);
         let ambient_global_files = crate::resolver::compute_ambient_global_files(options);
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(

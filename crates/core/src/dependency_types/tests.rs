@@ -1730,8 +1730,8 @@ enum ReadPath {
     ReExportScan,
     /// A file the search parses because it may declare into React.
     AugmentingScan,
-    /// The module declares into React and re-exports two files that do too, the first of which cannot be read: the
-    /// module's own augmentation and the second file's are still loaded.
+    /// The module declares into React and re-exports two files that do too, the first of which cannot be read: neither
+    /// the module's own augmentation nor the second file's is loaded until the search reads every file.
     PartialAugmentation,
 }
 
@@ -1791,8 +1791,6 @@ type Answers = (
 fn answers(layer: &DependencyLayer, root: &Utf8Path, demands: &[Demand]) -> Answers {
     let mut files: Vec<PathKey> =
         layer.chain().flat_map(|layer| layer.files.iter().chain(&layer.react_files).cloned()).collect();
-    // What answers read: the provisional augmentations are served, not loaded.
-    files.extend(layer.provisional_files().into_iter().map(|file| PathKey::from(file.as_path())));
     files.sort();
     files.dedup();
     let dir = |demand: &Demand| demand.from.parent().unwrap().to_owned();
@@ -1861,9 +1859,15 @@ fn a_file_that_could_not_be_read_is_read_again_by_the_next_load_on_every_path() 
                 let inner = "node_modules/inner/index.d.ts";
                 (inner, module_only("reexp"), false, &[inner])
             }
+            // A search that could not read a file loads none of the augmentations it found.
             ReadPath::PartialAugmentation => {
                 let more = "node_modules/aug-kit/more.d.ts";
-                (more, module_only("aug-kit"), false, &[more])
+                (
+                    more,
+                    module_only("aug-kit"),
+                    false,
+                    &[more, "node_modules/aug-kit/index.d.ts", "node_modules/aug-kit/extra.d.ts"],
+                )
             }
         };
         let file = root.join(unreadable);

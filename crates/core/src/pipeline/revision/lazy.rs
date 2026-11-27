@@ -109,29 +109,20 @@ type LiveWarnings = (Arc<DependencyLayer>, FxHashSet<PathKey>, Arc<[Diagnostic]>
 struct Engine {
     layer: Option<Arc<DependencyLayer>>,
     ctx: Arc<ResolutionContext>,
-    /// The fingerprint of the provisional augmentations `ctx` serves ([`Resolved::holds_under`]).
-    served: u64,
+    /// The fingerprint of the shared demands, whose module searches give React's augmentations
+    /// ([`Resolved::holds_under`]).
+    shared: u64,
+}
+
+/// An order-free fingerprint of `shared`, the demands whose module searches give React's augmentations.
+fn shared_fingerprint(shared: &[Demand]) -> u64 {
+    use std::hash::BuildHasher;
+    let mut sorted: Vec<&Demand> = shared.iter().collect();
+    sorted.sort();
+    rustc_hash::FxBuildHasher.hash_one(&sorted)
 }
 
 impl Lazy {
-    /// What `extended`, grown from `previous`, serves to the shared demands: `previous`'s when the growth searched no
-    /// module (the only follow that changes it), else derived once for the layer.
-    fn served_files(&self, previous: &DependencyLayer, extended: &DependencyLayer) -> Arc<[Utf8PathBuf]> {
-        let mut cached = self.served.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some((at, files)) = cached.as_ref()
-            && (*at == extended.id() || (*at == previous.id() && !extended.searched_modules()))
-        {
-            let files = files.clone();
-            *cached = Some((extended.id(), files.clone()));
-            return files;
-        }
-        #[cfg(test)]
-        self.served_derivations.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let files: Arc<[Utf8PathBuf]> = extended.served_files(self.shared.iter()).into_iter().cloned().collect();
-        *cached = Some((extended.id(), files.clone()));
-        files
-    }
-
     /// The diagnostics every answer read against `layer` carries: derived from the revision's live demands once for
     /// each layer, as the revision's demands do not change and a layer never does.
     fn live_warnings(&self, layer: &Arc<DependencyLayer>) -> Arc<[Diagnostic]> {
@@ -201,15 +192,15 @@ impl Engine {
         options: &PipelineOptions,
         ambient_global_files: &[Utf8PathBuf],
         named_types: &Arc<NamedTypeIndex>,
-        // The layer, and the shared demands: what it serves is what their module searches read.
+        // The layer, and the shared demands, whose module searches give React's augmentations.
         (layer, shared): (Option<Arc<DependencyLayer>>, &[Demand]),
         react_types: &Option<Arc<NamedTypeIndex>>,
     ) -> Engine {
         let named_types = match &layer {
-            Some(layer) => Arc::new(named_types.with_fallback(layer.served_types(shared))),
+            Some(layer) => Arc::new(named_types.with_fallback(layer.named_types.clone())),
             None => named_types.clone(),
         };
-        let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(shared));
+        let shared = shared_fingerprint(shared);
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),
             options,
@@ -218,7 +209,7 @@ impl Engine {
         )
         .with_dependencies(layer.clone())
         .with_react_types(react_types.clone());
-        Engine { layer, ctx: Arc::new(ctx), served }
+        Engine { layer, ctx: Arc::new(ctx), shared }
     }
 }
 
@@ -247,11 +238,6 @@ pub(super) struct Lazy {
     /// The failed reads the project's live demands reach, for the layer they were derived from: every answer read
     /// against that layer reports the same ones, so they are derived once per layer, not once per answer.
     live_warnings: Mutex<Option<LiveWarnings>>,
-    /// What a layer serves provisionally to the shared demands, for the layer (by id) it was derived for: a growth
-    /// that searched no module serves the same, so it is carried, not derived again.
-    served: Mutex<Option<(u64, Arc<[Utf8PathBuf]>)>>,
-    #[cfg(test)]
-    served_derivations: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     live_warning_builds: std::sync::atomic::AtomicUsize,
     /// How many files a growth asked about to carry memos, for tests.
@@ -500,9 +486,6 @@ impl Revision {
             engine: ArcSwap::from_pointee(engine),
             growing: Mutex::new(()),
             live_warnings: Mutex::new(None),
-            served: Mutex::new(None),
-            #[cfg(test)]
-            served_derivations: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -612,14 +595,14 @@ impl Revision {
             false => shared_demands(file_demands.values().map(|demands| demands.as_ref())),
         };
         let layer = previous.engine.load().layer.clone();
-        let served = layer.as_ref().map_or(0, |layer| layer.served_fingerprint(shared.iter()));
+        let shared_now = shared_fingerprint(&shared);
         let mut touched: FxHashSet<String> = FxHashSet::default();
         let mut affected_files: Vec<Utf8PathBuf> = Vec::new();
         for entry in previous.memo.iter() {
             let (id, resolved) = (entry.key(), entry.value());
             let kept = id.file != change.file
                 && !resolved.affected_by(&change)
-                && resolved.holds_under(served)
+                && resolved.holds_under(shared_now)
                 && by_name.get(&id.name).is_some_and(|group| group.iter().any(|(candidate, _)| candidate == id));
             if kept {
                 memo.insert(id.clone(), resolved.clone());
@@ -688,9 +671,6 @@ impl Revision {
                 engine: ArcSwap::from_pointee(engine),
                 growing: Mutex::new(()),
                 live_warnings: Mutex::new(None),
-                served: Mutex::new(None),
-                #[cfg(test)]
-                served_derivations: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
                 live_warning_builds: std::sync::atomic::AtomicUsize::new(0),
                 #[cfg(test)]
@@ -785,9 +765,9 @@ impl Revision {
         index: usize,
     ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
         let lazy = self.lazy.as_ref()?;
-        let served = lazy.engine.load().served;
+        let shared = lazy.engine.load().shared;
         if let Some(hit) = lazy.memo.get(id).map(|hit| hit.clone()) {
-            if hit.holds_under(served) {
+            if hit.holds_under(shared) {
                 return Some((hit, None));
             }
             lazy.memo.remove(id);
@@ -843,8 +823,8 @@ impl Revision {
             // A load that left the same names missing answered none of them (a demand whose load panicked stays
             // unanswered, a file that stays unreadable), so asking again would never end.
             if missing.is_empty() || missing == asked_for {
-                let served = engine.served;
-                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, served, evidence, attributes });
+                let shared = engine.shared;
+                let resolved = Arc::new(Resolved { entry, diagnostics, depends_on, shared, evidence, attributes });
                 // A walk past a file that could not be read answers more once it is followed again: until then the
                 // answer holds only provisionally, and never in the memo an edit carries over.
                 // With no footprint, a file one of the walks could not read was read since in this same layer, so the
@@ -881,7 +861,7 @@ impl Revision {
         let engine = lazy.engine.load();
         let layer = engine.layer.clone();
         let holds =
-            resolved.holds_under(engine.served) && layer.as_ref().is_some_and(|layer| held.holds(layer, lazy.moment()));
+            resolved.holds_under(engine.shared) && layer.as_ref().is_some_and(|layer| held.holds(layer, lazy.moment()));
         if holds {
             return Some((resolved, layer));
         }
@@ -969,21 +949,19 @@ impl Revision {
             lazy.engine.store(Arc::new(Engine {
                 layer: Some(extended),
                 ctx: engine.ctx.clone(),
-                served: engine.served,
+                shared: engine.shared,
             }));
             return;
         }
         lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
         // rebuilding them for every growth was most of what a session reading across a project spent.
-        let served_files = lazy.served_files(layer, &extended);
-        let named_types = Arc::new(self.named_types.with_fallback(extended.served_types_of(&served_files)));
+        let named_types = Arc::new(self.named_types.with_fallback(extended.named_types.clone()));
         let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
         // What the load added that declares into React (an augmentation a retry read, React's own types) changes what
         // every resolution that reads React's augmentations sees, whichever files it recorded.
         let augmentations_changed = extended.changes_react_declarations(layer);
-        let served = dependency_types::served_fingerprint_of(&served_files);
-        let next = Engine { layer: Some(extended), ctx, served };
+        let next = Engine { layer: Some(extended), ctx, shared: engine.shared };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them. So does one that
         // read a file whose walk reached an unread one (the old layer's ledger): a project file whose demands did, or a
@@ -1389,96 +1367,6 @@ mod read_retry_tests {
         shared_augmentation_scenario();
     }
 
-    /// A retry that serves other provisional augmentations while the layer's counts stay as they were: `aug-kit`
-    /// re-exports `one`, `two` and `three`, each augmenting `AriaAttributes`. While `one` and `two` cannot be read,
-    /// `three` is served; once `one` reads, `one` and `three` are, still provisionally (`two` does not), so nothing is
-    /// indexed; once `two` reads, all three are indexed. Each component equals a cold run at each step.
-    #[test]
-    fn a_retry_that_serves_other_provisional_augmentations_is_a_change() {
-        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
-        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-        let augmentation = |attribute: &str| {
-            format!(
-                "import type {{}} from 'react';\n\
-                 declare module 'react' {{ interface AriaAttributes {{ '{attribute}'?: string }} }}\n"
-            )
-        };
-        let aria = |name: &str| {
-            format!(
-                "import * as React from 'react';\ninterface {name}Props extends React.AriaAttributes {{ own?: boolean }}\n\
-                 export const {name} = (props: {name}Props) => <div />;\n"
-            )
-        };
-        let first = aria("First");
-        // `Second` also reads a package `First` does not, so asking for it grows the layer.
-        let second = "import * as React from 'react';\nimport type { OtherProps } from 'other-kit';\n\
-                      interface SecondProps extends React.AriaAttributes, OtherProps { own?: boolean }\n\
-                      export const Second = (props: SecondProps) => <div />;\n"
-            .to_owned();
-        let bodies = ["one", "two", "three"].map(|name| augmentation(&format!("aria-{name}")));
-        let files = [
-            (
-                "node_modules/aug-kit/package.json",
-                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-            ),
-            (
-                "node_modules/aug-kit/index.d.ts",
-                "export * from './one';\nexport * from './two';\nexport * from './three';\n",
-            ),
-            ("node_modules/aug-kit/one.d.ts", bodies[0].as_str()),
-            ("node_modules/aug-kit/two.d.ts", bodies[1].as_str()),
-            ("node_modules/aug-kit/three.d.ts", bodies[2].as_str()),
-            (
-                "node_modules/other-kit/package.json",
-                r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-            ),
-            ("node_modules/other-kit/index.d.ts", "export interface OtherProps { other?: string }\n"),
-            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
-            ("src/first/First.tsx", first.as_str()),
-            ("src/second/Second.tsx", second.as_str()),
-        ];
-        for (path, body) in files {
-            let path = root.join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        }
-        let options = |use_cache| PipelineOptions {
-            html_attributes: crate::pipeline::HtmlAttributeMode::Full,
-            ..options(&root, use_cache)
-        };
-        let (one, two) = (root.join("node_modules/aug-kit/one.d.ts"), root.join("node_modules/aug-kit/two.d.ts"));
-        let cold = |name: &str| Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), name).unwrap();
-        let served = |answer: &ComponentAnswer| -> Vec<String> {
-            let names = ["aria-one", "aria-two", "aria-three"];
-            props(answer).into_iter().filter(|prop| names.contains(&prop.as_str())).collect()
-        };
-        std::fs::write(&one, [0xff; 8]).unwrap();
-        std::fs::write(&two, [0xff; 8]).unwrap();
-        let revision = Revision::cold_lazy(&options(true), 0);
-        let start = Instant::now();
-        set_clock(&revision, start);
-        for name in ["First", "Second"] {
-            // `Second` grows the layer before any retry is due: what `First`'s load served is served still.
-            let answer = revision.lazy_component(&options(true), name).unwrap();
-            assert_eq!(served(&answer), ["aria-three"], "{name}");
-            assert!(answer == cold(name), "{name}");
-        }
-        let steps = [(&one, &bodies[0], ["aria-one", "aria-three"].as_slice()), (&two, &bodies[1], &[])];
-        for (step, (file, body, expected)) in steps.into_iter().enumerate() {
-            std::fs::write(file, body).unwrap();
-            set_clock(&revision, start + DEGRADED_RETRY * (step as u32 + 1));
-            for name in ["First", "Second"] {
-                let answer = revision.lazy_component(&options(true), name).unwrap();
-                let cold = cold(name);
-                if !expected.is_empty() {
-                    assert_eq!(served(&answer), expected, "step {step}, {name}");
-                }
-                assert_eq!(served(&cold), served(&answer), "step {step}, {name}");
-                assert!(answer == cold, "step {step}, {name}");
-            }
-        }
-    }
-
     /// 200 components, each in its own file importing `many-kit` past one unreadable file.
     fn many_kit_project() -> (tempfile::TempDir, Utf8PathBuf) {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -1611,65 +1499,6 @@ mod read_retry_tests {
         assert!(steps <= 50, "{steps} footprint entries checked by 200 hits");
     }
 
-    /// A served augmentation's unreadable import is the search's: `aug-kit`'s search passes an unreadable `bad` and
-    /// serves `aug`, whose `aria-tone` is typed by `Tone` from an unreadable `tone`. `First`, a reader of
-    /// `AriaAttributes`, reports both files; once `tone` reads and the retry is due, it has `Tone`'s members, as a cold
-    /// run does.
-    #[test]
-    fn a_served_augmentation_s_import_is_reported_and_retried_with_its_search() {
-        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
-        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-        let files = [
-            (
-                "node_modules/aug-kit/package.json",
-                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-            ),
-            ("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
-            (
-                "node_modules/aug-kit/aug.d.ts",
-                "import type { Tone } from './tone';\n\
-                 declare module 'react' { interface AriaAttributes { 'aria-tone'?: Tone } }\nexport {};\n",
-            ),
-            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
-            (
-                "src/first/First.tsx",
-                "import * as React from 'react';\ninterface FirstProps extends React.AriaAttributes { own?: boolean }\n\
-                 export const First = (props: FirstProps) => <div />;\n",
-            ),
-        ];
-        for (path, body) in files {
-            let path = root.join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        }
-        let (bad, tone) = (root.join("node_modules/aug-kit/bad.d.ts"), root.join("node_modules/aug-kit/tone.d.ts"));
-        std::fs::write(&bad, [0xff; 8]).unwrap();
-        std::fs::write(&tone, [0xff; 8]).unwrap();
-        let options =
-            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
-        let io = |answer: &ComponentAnswer| -> Vec<Option<String>> {
-            let io = |d: &&Diagnostic| d.code == crate::types::DiagnosticCode::IoError;
-            let mut files: Vec<Option<String>> = answer.diagnostics.iter().filter(io).map(|d| d.file.clone()).collect();
-            files.sort();
-            files
-        };
-        let cold = || Revision::cold_lazy(&options, 0).lazy_component(&options, "First").unwrap();
-        let revision = Revision::cold_lazy(&options, 0);
-        let start = Instant::now();
-        set_clock(&revision, start);
-        let answer = revision.lazy_component(&options, "First").unwrap();
-        assert_eq!(io(&answer), [Some(bad.to_string()), Some(tone.to_string())]);
-        assert!(answer == cold(), "both unreadable");
-        std::fs::write(&tone, "export type Tone = 'warm' | 'cool';\n").unwrap();
-        set_clock(&revision, start + DEGRADED_RETRY);
-        let answer = revision.lazy_component(&options, "First").unwrap();
-        assert_eq!(io(&answer), [Some(bad.to_string())]);
-        let tone_of =
-            |answer: &ComponentAnswer| format!("{:?}", answer.entry.props.get("aria-tone").map(|p| &p.prop_type));
-        assert_eq!(tone_of(&answer), tone_of(&cold()), "tone reads");
-        assert!(answer == cold(), "tone reads");
-    }
-
     /// A retry that replaces a walk: `kit` re-exports `first` (unreadable) and then `fallback`, whose `Target` extends
     /// `Base` from an unreadable `base`. Once `first` reads and declares `Target` itself, the retry follows it, and no
     /// live walk reaches `base` any more: `C` and its warnings equal a cold run's, and the carried set is derived
@@ -1761,55 +1590,6 @@ mod read_retry_tests {
         assert!(alive <= 10, "{alive} of the {} layers are alive", layers.len());
     }
 
-    /// What a layer serves is derived once and carried across growths that search no module: with a shared
-    /// augmentation served past an unreadable file, 200 components asked for one at a time each grow the layer, and the
-    /// served set is derived a handful of times, not once a growth.
-    #[test]
-    fn the_served_set_is_carried_across_growths_that_search_no_module() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
-        let write = |path: &str, body: &str| {
-            let path = root.join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        };
-        write(
-            "node_modules/aug-kit/package.json",
-            r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-        );
-        write("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n");
-        write(
-            "node_modules/aug-kit/aug.d.ts",
-            "declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\nexport {};\n",
-        );
-        std::fs::write(root.join("node_modules/aug-kit/bad.d.ts"), [0xff; 8]).unwrap();
-        write(
-            "node_modules/many-kit/package.json",
-            r#"{ "name": "many-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-        );
-        write("node_modules/many-kit/index.d.ts", "export interface ManyProps { many: string }\n");
-        write("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n");
-        for n in 0..200 {
-            write(
-                &format!("src/c{n}/C{n}.tsx"),
-                &format!(
-                    "import type {{ ManyProps }} from 'many-kit';\n\
-                     export function C{n}(props: ManyProps & {{ own{n}: string }}) {{ return null; }}\n"
-                ),
-            );
-        }
-        let options = options(&root, false);
-        let revision = Revision::cold_lazy(&options, 0);
-        for n in 0..200 {
-            drop(revision.lazy_component(&options, &format!("C{n}")).unwrap());
-        }
-        let lazy = revision.lazy.as_ref().unwrap();
-        let growths = lazy.growths.load(Relaxed);
-        assert!(growths >= 100, "each request grows the layer: {growths}");
-        let derived = lazy.served_derivations.load(Relaxed);
-        assert!(derived <= 3, "the served set derived {derived} times over {growths} growths");
-    }
-
     /// Reporting a failed read costs a lazy session once per layer, not once per answer: 200 components, each in its
     /// own file importing `many-kit` past one unreadable file, asked for together and then again, all carry the
     /// warning, and the live warnings are derived once for each layer the answers were read against.
@@ -1852,12 +1632,12 @@ mod read_retry_tests {
         assert!(checks <= 20 * 200, "{checks} files asked about over {growths} growths");
     }
 
-    /// An answer that read React's augmentations holds only for the augmentations served when it was resolved:
-    /// `setup.ts`, the sole importer of `aug-kit` (an unreadable `bad` and the augmentation `aug`), drops the import,
-    /// `First` is asked, then the import is restored. `First` reads no file the edits touch, yet equals a cold run at
-    /// each step: with the attribute, without it, and with it again.
+    /// A search that could not read every file withholds its augmentations: `setup.ts`, the sole importer of `aug-kit`
+    /// (an unreadable `bad` and the augmentation `aug`), drops the import, `First` is asked, the import is restored,
+    /// and then `bad` reads. `First` reads no file the edits touch, yet equals a cold run at each step: without the
+    /// attribute (with `bad`'s warning while the import is live), and with it once the timed retry searches again.
     #[test]
-    fn an_answer_that_read_augmentations_holds_only_for_what_was_served() {
+    fn a_search_that_could_not_read_a_file_withholds_its_augmentations_until_the_retry() {
         let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
         let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
         let setup = "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n";
@@ -1891,18 +1671,30 @@ mod read_retry_tests {
         };
         let cold = || Revision::cold_lazy(&options(false), 0).lazy_component(&options(false), "First").unwrap();
         let tw = |answer: &ComponentAnswer| props(answer).contains(&"aria-tw".to_owned());
+        let bad_file = root.join("node_modules/aug-kit/bad.d.ts");
         let mut revision = Revision::cold_lazy(&options(true), 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
         let answer = revision.lazy_component(&options(true), "First").unwrap();
-        assert!(tw(&answer), "served while `bad` cannot be read");
+        assert!(!tw(&answer), "withheld while `bad` cannot be read");
+        assert_eq!(warned(&answer), [bad_file.to_string()]);
         assert!(answer == cold());
         let setup_file = root.join("src/setup.ts");
-        for (step, body, served) in [("dropped", "export const aug = 1;\n", false), ("restored", setup, true)] {
+        for (step, body, warns) in [("dropped", "export const aug = 1;\n", false), ("restored", setup, true)] {
             std::fs::write(&setup_file, body).unwrap();
             revision = revision.next_lazy(&options(true), &setup_file).unwrap().0;
+            set_clock(&revision, start);
             let answer = revision.lazy_component(&options(true), "First").unwrap();
-            assert_eq!(tw(&answer), served, "{step}");
+            assert!(!tw(&answer), "{step}");
+            assert_eq!(!warned(&answer).is_empty(), warns, "{step}");
             assert!(answer == cold(), "{step}");
         }
+        std::fs::write(&bad_file, "export {};\n").unwrap();
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let answer = revision.lazy_component(&options(true), "First").unwrap();
+        assert!(tw(&answer), "served once the retry reads every file");
+        assert!(warned(&answer).is_empty());
+        assert!(answer == cold(), "recovered");
     }
 
     /// Full HTML mode: two props interfaces extend `React.AriaAttributes`, whose augmentation (imported only by

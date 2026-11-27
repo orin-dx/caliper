@@ -21,7 +21,7 @@ npm/caliper-docgen: patch
 - A generic component (`as` props) whose request the checker rejected is asked again instead of being kept without its props.
 - A rejected lookup of a component's module says what the checker rejected, instead of "not part of the checker's program".
 - A dependency file that cannot be read is reported once in each answer it affects.
-- The answer keeps every type the other files gave, including one a later `export *` target declares and a package type's own props.
+- The answer keeps every type the other files gave, including a package type's own props.
 - Once the file reads, the component has its full props, including a prop a package type inherits from that file, and the warning is gone.
 - A file that stays unreadable does not slow the session down, and components that never reach it are not affected.
 - A run that cannot read one dependency file still remembers every other package lookup, so the next run is as fast as before.
@@ -29,5 +29,7 @@ npm/caliper-docgen: patch
 **Limits**
 
 - A dependency file fixed on disk (a `chmod`, a finished install) is picked up 30 seconds after the failed read or at the next source-file change, not at once.
+- While an `export *` target of a barrel cannot be read, a type that would resolve through a later target of that barrel is reported unresolved, with the read warning. It resolves on the retry.
+- React augmentations from a module whose search could not read every file are withheld, with the read warning, until the retry. That includes the augmentations in the files it did read.
 
 **Breaking:** for Rust users of `caliper-docgen-core`, `SemanticOutcome` has a new field `unavailable` (set only by `SemanticOutcome::unavailable` for every target and by `SemanticOutcome::leave_unasked` for the keys a run did not ask about; `Unavailable::covers` tells which) and `SemanticFallback` a new field `transient`. A struct literal that names every field no longer compiles: add `unavailable: None` and `transient: false`, or build the outcome with `..Default::default()`. Put two outcomes together with `SemanticOutcome::merge`, which keeps the mark.

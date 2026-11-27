@@ -429,7 +429,6 @@ fn an_answer_holds_only_while_every_file_it_could_not_read_is_unchanged() {
     let clock: Clock = Arc::new(move || retry.at);
     let recovered = load_timed(vec![demand.clone()], &options, Some(&first), Retry::Due(retry), stamp(retry, 3), clock);
     assert!(!recovered.is_dependency_file(&one), "a search that could not read `two` loads nothing");
-    assert_eq!(recovered.provisional_files(), [&one], "it serves the file it read again");
     let latest = recovered.footprint(&recovered.unread(std::slice::from_ref(&demand))).unwrap();
     assert!(recovered.footprint_holds(&latest, retry), "the walk's latest mark alone still looks unexpired");
     assert!(!recovered.footprint_holds(&footprint, retry), "the earlier answer does not hold: one of its files reads");
@@ -658,7 +657,7 @@ fn an_augmentation_a_partial_search_reached_past_its_bound_is_not_kept() {
     std::fs::write(&bad, UNREADABLE).unwrap();
     let session = WatchSession::new(react_options(&root));
     drop(session.initialize());
-    assert!(names(&session.component("Box")).contains(&"tw".to_owned()), "what the partial search read, for now");
+    assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "withheld while `bad` cannot be read");
     std::fs::write(&bad, &fillers).unwrap();
     edit(&session, &root.join("src/plain/Plain.tsx"));
 
@@ -667,276 +666,6 @@ fn an_augmentation_a_partial_search_reached_past_its_bound_is_not_kept() {
     assert!(!names(&fresh.component("Box")).contains(&"tw".to_owned()), "a fresh run's search stops before `late`");
     assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "the partial search's `late` is not kept");
     assert!(session.component("Box") == fresh.component("Box"));
-}
-
-/// A search that cannot read one file keeps every augmentation it can read: the barrel re-exports `bad`, unreadable,
-/// and `mid`, which re-exports `late`, an augmentation of React. `Box` has `tw` while `bad` cannot be read, and once
-/// it reads (re-exporting nothing) and an edit follows, `Box` equals a fresh run, `tw` and nothing else added.
-#[test]
-fn an_augmentation_past_an_unreadable_file_is_kept() {
-    let (_tmp, root) = react_project(&[
-        ("node_modules/scan-kit/package.json", r#"{ "name": "scan-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/scan-kit/index.d.ts", "export * from './bad';\nexport * from './mid';\n"),
-        ("node_modules/scan-kit/mid.d.ts", "export * from './late';\n"),
-        ("node_modules/scan-kit/late.d.ts", AUGMENTATION),
-        ("src/setup.ts", "import * as Scan from 'scan-kit';\nexport const scan = Scan;\n"),
-        ("src/box/Box.tsx", BOX),
-        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
-    ]);
-    let bad = root.join("node_modules/scan-kit/bad.d.ts");
-    std::fs::write(&bad, UNREADABLE).unwrap();
-    let session = WatchSession::new(react_options(&root));
-    drop(session.initialize());
-    let while_unread = names(&session.component("Box"));
-    assert!(while_unread.contains(&"tw".to_owned()), "`late` reads though `bad` does not");
-    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
-    edit(&session, &root.join("src/plain/Plain.tsx"));
-
-    let fresh = WatchSession::new(react_options(&root));
-    drop(fresh.initialize());
-    assert!(names(&fresh.component("Box")).contains(&"tw".to_owned()));
-    assert_eq!(names(&session.component("Box")), names(&fresh.component("Box")));
-    assert_eq!(names(&session.component("Box")), while_unread, "the complete search adds nothing stale");
-    assert!(session.component("Box") == fresh.component("Box"));
-}
-
-/// Two unreadable re-exports ahead of `mid`, which re-exports `late`, an augmentation of React. With both unreadable
-/// the search serves `late`; once `bad1` reads, its 64 files fill the search's bound first, and once `bad2` reads the
-/// search is complete without `late`. After each recovery and an edit, `Box` equals a fresh run: what an earlier
-/// search served is never kept, since nothing it served was indexed.
-#[test]
-fn each_search_of_a_module_serves_only_what_it_read() {
-    let fillers: String = (0..64).map(|n| format!("export * from './f{n}';\n")).collect();
-    let mut files: Vec<(String, String)> = vec![
-        (
-            "node_modules/scan-kit/package.json".into(),
-            r#"{ "name": "scan-kit", "version": "1.0.0", "types": "index.d.ts" }"#.into(),
-        ),
-        (
-            "node_modules/scan-kit/index.d.ts".into(),
-            "export * from './bad1';\nexport * from './bad2';\nexport * from './mid';\n".into(),
-        ),
-        ("node_modules/scan-kit/mid.d.ts".into(), "export * from './late';\n".into()),
-        ("node_modules/scan-kit/late.d.ts".into(), AUGMENTATION.into()),
-        ("src/setup.ts".into(), "import * as Scan from 'scan-kit';\nexport const scan = Scan;\n".into()),
-        ("src/box/Box.tsx".into(), BOX.into()),
-        ("src/plain/Plain.tsx".into(), "export function Plain(props: { title: string }) { return null; }\n".into()),
-    ];
-    files
-        .extend((0..64).map(|n| (format!("node_modules/scan-kit/f{n}.d.ts"), format!("export interface F{n} {{}}\n"))));
-    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
-    let (_tmp, root) = react_project(&files);
-    let (bad1, bad2) = (root.join("node_modules/scan-kit/bad1.d.ts"), root.join("node_modules/scan-kit/bad2.d.ts"));
-    std::fs::write(&bad1, UNREADABLE).unwrap();
-    std::fs::write(&bad2, UNREADABLE).unwrap();
-    let session = WatchSession::new(react_options(&root));
-    drop(session.initialize());
-    let fresh = || {
-        let fresh = WatchSession::new(react_options(&root));
-        drop(fresh.initialize());
-        fresh.component("Box")
-    };
-    assert!(names(&session.component("Box")).contains(&"tw".to_owned()), "both unreadable: `late` is served");
-    assert!(session.component("Box") == fresh());
-    std::fs::write(&bad1, &fillers).unwrap();
-    edit(&session, &root.join("src/plain/Plain.tsx"));
-    assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "`bad1`'s files come first: no `late`");
-    assert!(session.component("Box") == fresh());
-    std::fs::write(&bad2, "export interface Bad2 {}\n").unwrap();
-    edit(&session, &root.join("src/plain/Plain.tsx"));
-    assert!(!names(&session.component("Box")).contains(&"tw".to_owned()), "complete: no `late`");
-    assert!(session.component("Box") == fresh());
-}
-
-/// The served augmentations follow the live demands: `setup.ts`, the sole importer of `scan-kit` (an unreadable `bad`
-/// and the augmentation `late`), drops the import, then `Plain` loads an unrelated package, then `setup.ts` imports
-/// it again. At each step `Box` and the reported failed reads equal a fresh run: no `tw` and no warning once nothing
-/// imports the package, `tw` and the warning again once something does.
-#[test]
-fn what_is_served_follows_the_live_demands() {
-    let setup = "import * as Scan from 'scan-kit';\nexport const scan = Scan;\n";
-    let (_tmp, root) = react_project(&[
-        ("node_modules/scan-kit/package.json", r#"{ "name": "scan-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/scan-kit/index.d.ts", "export * from './bad';\nexport * from './late';\n"),
-        ("node_modules/scan-kit/late.d.ts", AUGMENTATION),
-        (
-            "node_modules/other-kit/package.json",
-            r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-        ),
-        ("node_modules/other-kit/index.d.ts", "export interface OtherProps { other?: string }\n"),
-        ("src/setup.ts", setup),
-        ("src/box/Box.tsx", BOX),
-        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
-    ]);
-    std::fs::write(root.join("node_modules/scan-kit/bad.d.ts"), UNREADABLE).unwrap();
-    let session = WatchSession::new(react_options(&root));
-    drop(session.initialize());
-    let io = |output: &crate::types::ExtractionOutput| -> Vec<Option<String>> {
-        let io = |d: &&crate::types::Diagnostic| d.code == DiagnosticCode::IoError;
-        output.diagnostics.iter().filter(io).map(|d| d.file.clone()).collect()
-    };
-    let check = |step: &str, tw: bool| {
-        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
-        let fresh_output = fresh.initialize();
-        assert_eq!(names(&session.component("Box")).contains(&"tw".to_owned()), tw, "{step}");
-        assert_eq!(io(&session.current_output().unwrap()), io(&fresh_output), "{step}: the reported failed reads");
-        assert_eq!(io(&fresh_output).is_empty(), !tw, "{step}: the fixture warns while something imports `scan-kit`");
-        assert!(session.component("Box") == fresh.component("Box"), "{step}");
-    };
-    check("imported", true);
-    let setup_file = root.join("src/setup.ts");
-    std::fs::write(&setup_file, "export const scan = 1;\n").unwrap();
-    drop(session.update_file(&setup_file));
-    check("the sole importer drops it", false);
-    let plain = root.join("src/plain/Plain.tsx");
-    std::fs::write(
-        &plain,
-        "import type { OtherProps } from 'other-kit';\nexport function Plain(props: OtherProps) { return null; }\n",
-    )
-    .unwrap();
-    drop(session.update_file(&plain));
-    check("an unrelated package loads", false);
-    std::fs::write(&setup_file, setup).unwrap();
-    drop(session.update_file(&setup_file));
-    check("imported again", true);
-}
-
-/// A served augmentation brings what it imports, as an indexed one does: `aug` declares `tone?: Tone` with `Tone`
-/// imported from `./tone`, beside an unreadable `bad`. `Box`'s `tone` is the union while `bad` cannot be read, and
-/// equals a fresh run before and after `bad` reads.
-#[test]
-fn a_served_augmentation_brings_what_it_imports() {
-    let (_tmp, root) = react_project(&[
-        ("node_modules/tone-kit/package.json", r#"{ "name": "tone-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/tone-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
-        (
-            "node_modules/tone-kit/aug.d.ts",
-            "import type { Tone } from './tone';\n\
-             declare module 'react' { interface HTMLAttributes<T> { tone?: Tone } }\nexport {};\n",
-        ),
-        ("node_modules/tone-kit/tone.d.ts", "export type Tone = 'warm' | 'cool';\n"),
-        ("src/setup.ts", "import * as Tones from 'tone-kit';\nexport const tones = Tones;\n"),
-        ("src/box/Box.tsx", BOX),
-        ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
-    ]);
-    let bad = root.join("node_modules/tone-kit/bad.d.ts");
-    std::fs::write(&bad, UNREADABLE).unwrap();
-    let session = WatchSession::new(react_options(&root));
-    drop(session.initialize());
-    let fresh = || {
-        let fresh = WatchSession::new(PipelineOptions { use_cache: false, ..react_options(&root) });
-        drop(fresh.initialize());
-        fresh.component("Box")
-    };
-    let tone = |answer: &Option<ComponentAnswer>| format!("{:?}", answer.as_ref().unwrap().entry.props.get("tone"));
-    let served = session.component("Box");
-    assert!(tone(&served).contains("warm") && tone(&served).contains("cool"), "the union: {}", tone(&served));
-    assert!(served == fresh());
-    std::fs::write(&bad, "export interface Bad {}\n").unwrap();
-    edit(&session, &root.join("src/plain/Plain.tsx"));
-    let recovered = session.component("Box");
-    assert_eq!(tone(&recovered), tone(&served));
-    assert!(recovered == fresh());
-}
-
-/// What a layer serves holds each provisional file once: seventy module demands whose searches all read `aug` past an
-/// unreadable `bad` serve one `React.HTMLAttributes` augmentation.
-#[test]
-fn the_served_index_holds_each_provisional_file_once() {
-    let mut files: Vec<(String, String)> = vec![
-        ("node_modules/multi-kit/package.json".into(), r#"{ "name": "multi-kit", "version": "1.0.0" }"#.into()),
-        ("node_modules/multi-kit/aug.d.ts".into(), AUGMENTATION.into()),
-    ];
-    files.extend((0..70).map(|n| {
-        (format!("node_modules/multi-kit/e{n}.d.ts"), "export * from './bad';\nexport * from './aug';\n".into())
-    }));
-    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
-    let (_tmp, root) = project(&files);
-    std::fs::write(root.join("node_modules/multi-kit/bad.d.ts"), UNREADABLE).unwrap();
-    let demands: Vec<Demand> = (0..70)
-        .map(|n| Demand {
-            from: root.join(format!("src/c{n}/Card.tsx")),
-            specifier: format!("multi-kit/e{n}").into(),
-            name: "".into(),
-        })
-        .collect();
-    let layer = load(demands.clone(), &PipelineOptions { use_cache: false, ..options(&root) }, None);
-    assert_eq!(layer.served_files(&demands), [&root.join("node_modules/multi-kit/aug.d.ts")]);
-    let served = layer.served_types(&demands);
-    assert_eq!(served.react_augmentations(&root.join("react.d.ts"), "React.HTMLAttributes").len(), 1);
-}
-
-/// However many provisional files are served, they sit in one layer over the index: 200 modules whose searches each
-/// read a distinct augmentation past an unreadable `bad` add one fallback step to every lookup, and serve all 200.
-#[test]
-fn provisional_files_are_served_in_one_layer() {
-    let mut files: Vec<(String, String)> =
-        vec![("node_modules/many-aug/package.json".into(), r#"{ "name": "many-aug", "version": "1.0.0" }"#.into())];
-    for n in 0..200 {
-        files.push((
-            format!("node_modules/many-aug/m{n}.d.ts"),
-            format!("export * from './bad';\nexport * from './a{n}';\n"),
-        ));
-        files.push((
-            format!("node_modules/many-aug/a{n}.d.ts"),
-            format!("import type {{}} from 'react';\ndeclare module 'react' {{ interface HTMLAttributes<T> {{ a{n}?: string }} }}\n"),
-        ));
-    }
-    let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
-    let (_tmp, root) = project(&files);
-    std::fs::write(root.join("node_modules/many-aug/bad.d.ts"), UNREADABLE).unwrap();
-    let demands: Vec<Demand> = (0..200)
-        .map(|n| Demand {
-            from: root.join(format!("src/c{n}/Card.tsx")),
-            specifier: format!("many-aug/m{n}").into(),
-            name: "".into(),
-        })
-        .collect();
-    let layer = load(demands.clone(), &PipelineOptions { use_cache: false, ..options(&root) }, None);
-    let depth = |index: &NamedTypeIndex| std::iter::successors(Some(index), |index| index.fallback.as_deref()).count();
-    let served = layer.served_types(&demands);
-    assert_eq!(depth(&served), depth(&layer.named_types) + 1, "one layer, however many files");
-    assert_eq!(served.react_augmentations(&root.join("react.d.ts"), "React.HTMLAttributes").len(), 200);
-}
-
-/// Seventy entry points of one package each search past the same unreadable file and reach the same augmentation,
-/// whose `HTMLAttributes` extends a chain of its own: it is served once, so no copy spends the attribute traversal's
-/// bounded steps, and `Box`'s props equal a run that imports one entry point.
-#[test]
-fn an_augmentation_many_searches_reach_is_served_once() {
-    let augmentation = "import type {} from 'react';\ndeclare module 'react' {\n\
-                        interface HTMLAttributes<T> extends Extra { tw?: string }\n\
-                        interface Extra extends Deeper { extra?: string }\n\
-                        interface Deeper { deeper?: string }\n}\n";
-    let run = |entries: usize| {
-        let mut files: Vec<(String, String)> = vec![
-            (
-                "node_modules/multi-kit/package.json".into(),
-                r#"{ "name": "multi-kit", "version": "1.0.0", "types": "e0.d.ts" }"#.into(),
-            ),
-            ("node_modules/multi-kit/aug.d.ts".into(), augmentation.into()),
-            ("src/box/Box.tsx".into(), BOX.into()),
-        ];
-        files.extend((0..70).map(|n| {
-            (format!("node_modules/multi-kit/e{n}.d.ts"), "export * from './bad';\nexport * from './aug';\n".into())
-        }));
-        let imports: String = (0..entries)
-            .map(|n| format!("import * as E{n} from 'multi-kit/e{n}';\nexport const e{n} = E{n};\n"))
-            .collect();
-        files.push(("src/setup.ts".into(), imports));
-        let files: Vec<(&str, &str)> = files.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
-        let (tmp, root) = react_project(&files);
-        std::fs::write(root.join("node_modules/multi-kit/bad.d.ts"), UNREADABLE).unwrap();
-        let session = WatchSession::new(react_options(&root));
-        drop(session.initialize());
-        let props = names(&session.component("Box"));
-        drop(tmp);
-        props
-    };
-    let one = run(1);
-    let has = |name: &str| one.contains(&name.to_owned());
-    assert!(has("tw") && has("extra") && has("deeper"), "{one:?}");
-    assert_eq!(run(70), one);
 }
 
 /// An `export *` lattice 25 levels deep, two modules a level, each re-exporting both of the next: 2^25 paths to its
@@ -1134,100 +863,6 @@ fn a_directly_imported_file_stays_indexed_across_a_flatten_and_a_recovery() {
     std::fs::write(&bad, "export interface Bad {}\n").unwrap();
     edit(&session, &plain);
     check("recovered");
-}
-
-/// A search past an unreadable file loads what its augmentation imports as any import, so the import's own walk is
-/// marked and retried as any walk: `kit2`'s search passes an unreadable `bad` and reads `aug`, whose augmentation
-/// types a prop with `Tone` from `tone.d.ts`, unreadable too. Once `tone` reads, the load that follows it again leaves
-/// only the search's own walk unread, and the next one asks for nothing more of `tone`.
-#[test]
-fn a_recovered_import_of_a_served_augmentation_is_not_followed_again() {
-    let (_tmp, root) = project(&[
-        ("node_modules/kit2/package.json", r#"{ "name": "kit2", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/kit2/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
-        (
-            "node_modules/kit2/aug.d.ts",
-            "import type { Tone } from './tone';\n\
-             declare module 'react' { interface AriaAttributes { 'aria-tone'?: Tone } }\nexport {};\n",
-        ),
-    ]);
-    let (bad, tone) = (root.join("node_modules/kit2/bad.d.ts"), root.join("node_modules/kit2/tone.d.ts"));
-    std::fs::write(&bad, UNREADABLE).unwrap();
-    std::fs::write(&tone, UNREADABLE).unwrap();
-    let options = PipelineOptions { use_cache: false, ..options(&root) };
-    let setup = Demand { from: root.join("src/setup.ts"), specifier: "kit2".into(), name: "".into() };
-    let first = Arc::new(load(vec![setup.clone()], &options, None));
-    std::fs::write(&tone, "export type Tone = 'warm' | 'cool';\n").unwrap();
-    let second = Arc::new(load(first.missing(std::slice::from_ref(&setup)), &options, Some(&first)));
-    let unread = second.unread(std::slice::from_ref(&setup));
-    assert_eq!(unread.iter().map(|demand| demand.name.clone()).collect::<Vec<_>>(), [CompactString::default()]);
-    let failed: Vec<PathKey> = second.failed_reads_reached(std::slice::from_ref(&setup)).into_iter().collect();
-    assert_eq!(failed, [PathKey::from(bad.as_path())], "only `bad` is still unread");
-    assert!(second.named_types.lookup_type_alias_exact(&tone, "Tone").is_some(), "the retry indexes `Tone`");
-    let served = second.served_types(std::slice::from_ref(&setup));
-    assert!(served.lookup_type_alias_exact(&tone, "Tone").is_some(), "and serves it");
-}
-
-/// What a served augmentation's import could not read is the search's: `kit2`'s search passes an unreadable `bad` and
-/// reads `aug`, whose augmentation types a prop with `Tone` from an unreadable `tone`. The answers the search serves
-/// lack `Tone`, so the walk from `setup` reports `tone` as well as `bad`.
-#[test]
-fn what_a_served_augmentation_could_not_import_is_reported_by_its_search() {
-    let (_tmp, root) = project(&[
-        ("node_modules/kit2/package.json", r#"{ "name": "kit2", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/kit2/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
-        (
-            "node_modules/kit2/aug.d.ts",
-            "import type { Tone } from './tone';\n\
-             declare module 'react' { interface AriaAttributes { 'aria-tone'?: Tone } }\nexport {};\n",
-        ),
-    ]);
-    let (bad, tone) = (root.join("node_modules/kit2/bad.d.ts"), root.join("node_modules/kit2/tone.d.ts"));
-    std::fs::write(&bad, UNREADABLE).unwrap();
-    std::fs::write(&tone, UNREADABLE).unwrap();
-    let options = PipelineOptions { use_cache: false, ..options(&root) };
-    let setup = Demand { from: root.join("src/setup.ts"), specifier: "kit2".into(), name: "".into() };
-    let layer = load(vec![setup.clone()], &options, None);
-    let mut failed: Vec<PathKey> = layer.failed_reads_reached(std::slice::from_ref(&setup)).into_iter().collect();
-    failed.sort();
-    assert_eq!(failed, [PathKey::from(bad.as_path()), PathKey::from(tone.as_path())]);
-}
-
-/// A provisional search answer is replaced only by a search this load made: the index on disk remembers that `kit3`
-/// leads to `aug1` and `aug2`, both augmenting React; with `aug2` unreadable a cold load over that index serves `aug1`
-/// provisionally, and a dozen unrelated extensions, past the depth limit's flatten, still serve it to `setup`.
-#[test]
-fn a_flatten_keeps_a_provisional_search_it_did_not_make_again() {
-    let (_tmp, root) = project(&[
-        ("node_modules/kit3/package.json", r#"{ "name": "kit3", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/kit3/index.d.ts", "export * from './aug1';\nexport * from './aug2';\n"),
-        (
-            "node_modules/kit3/aug1.d.ts",
-            "declare module 'react' { interface AriaAttributes { 'aria-one'?: string } }\nexport {};\n",
-        ),
-        (
-            "node_modules/kit3/aug2.d.ts",
-            "declare module 'react' { interface AriaAttributes { 'aria-two'?: string } }\nexport {};\n",
-        ),
-        ("node_modules/many/package.json", r#"{ "name": "many", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/many/index.d.ts", "export interface ManyProps { many: string }\n"),
-    ]);
-    let options = options(&root);
-    let setup = Demand { from: root.join("src/setup.ts"), specifier: "kit3".into(), name: "".into() };
-    drop(load(vec![setup.clone()], &options, None));
-    let (aug1, aug2) = (root.join("node_modules/kit3/aug1.d.ts"), root.join("node_modules/kit3/aug2.d.ts"));
-    std::fs::write(&aug2, UNREADABLE).unwrap();
-    let mut layer = Arc::new(load(vec![setup.clone()], &options, None));
-    let served = |layer: &DependencyLayer| -> Vec<Utf8PathBuf> {
-        layer.served_files(std::slice::from_ref(&setup)).into_iter().cloned().collect()
-    };
-    assert_eq!(served(&layer), std::slice::from_ref(&aug1), "served over the index on disk");
-    for n in 0..12 {
-        let many =
-            Demand { from: root.join(format!("src/c{n}/C.tsx")), specifier: "many".into(), name: "ManyProps".into() };
-        layer = Arc::new(load(vec![many], &options, Some(&layer)));
-        assert_eq!(served(&layer), std::slice::from_ref(&aug1), "extension {n}");
-    }
 }
 
 /// A flatten copies the chain's files, an augmentation of React among them; a load that adds only an unrelated type
@@ -1811,6 +1446,9 @@ struct Model {
     /// `(component, file, props)`: while `file`, an earlier export of the barrel the component's type is looked up
     /// in, is unreadable, the lookup is unresolved and the component has only `props`, its own.
     unresolved_past: &'static [(&'static str, &'static str, &'static [&'static str])],
+    /// `(component, files, props)`: while one of `files`, which a module search reads, is unreadable, the component has
+    /// none of `props`, the augmentations that search gives.
+    withheld_while: &'static [(&'static str, &'static [&'static str], &'static [&'static str])],
 }
 
 const PLAIN_MODEL: Model = Model {
@@ -1820,6 +1458,7 @@ const PLAIN_MODEL: Model = Model {
     react: false,
     seeds: &[1, 2, 3, 5, 8, 13, 21, 34],
     unresolved_past: &[],
+    withheld_while: &[],
 };
 
 const REACT_MODEL: Model = Model {
@@ -1831,6 +1470,7 @@ const REACT_MODEL: Model = Model {
     // augmentation's import.
     seeds: &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 63, 655],
     unresolved_past: &[("Card", "tgt/first", &["own_card"]), ("Card2", "tgt2/first", &["own_card2"])],
+    withheld_while: &[("Aria", &["aug/afirst", "aug/aug", "aug/aug2"], &["aria-fb", "aria-tone"])],
 };
 
 impl Model {
@@ -1991,6 +1631,12 @@ impl ModelRun<'_> {
         if !props.iter().all(|prop| readable.contains(&format!("{prop:?}"))) {
             self.fail("readable files", format!("{name} {props:?}, beyond {readable}"));
         }
+        for (component, files, withheld) in self.model.withheld_while {
+            let unread = warned.iter().any(|file| files.contains(&file.as_str()));
+            if *component == name && unread && props.iter().any(|prop| withheld.contains(&prop.as_str())) {
+                self.fail("withheld", format!("{name} {props:?} while {warned:?} is unreadable"));
+            }
+        }
         for (component, past, own) in self.model.unresolved_past {
             if *component == name && warned.iter().any(|file| file == past) && props != *own {
                 self.fail("unresolved past", format!("{name} {props:?} while {past} is unreadable"));
@@ -2038,7 +1684,8 @@ type ModelChange = (&'static str, fn(&Utf8Path) -> Utf8PathBuf);
 /// 1. the answer equals a fresh session's (cache off) with exactly the files the session reports unreadable made
 ///    unreadable, and it holds no prop a fresh session with those files declaring nothing lacks (through every
 ///    resolver path: a direct import, a barrel, a qualified `typeof X.y`); a lookup that would pass an unreadable
-///    export of a barrel is unresolved (`Model::unresolved_past`);
+///    export of a barrel is unresolved (`Model::unresolved_past`), and a module search that could not read a file
+///    gives no augmentation (`Model::withheld_while`);
 /// 2. each file is reported once, and a request made while every file reads, after an edit since a file last changed,
 ///    reports none of the files its own walk reads: the edit made every walk past an unreadable file due, and no
 ///    provisional answer outlives it;
