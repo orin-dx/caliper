@@ -106,11 +106,84 @@ fn a_file_whose_scan_failed_and_parse_read_in_one_load_is_not_kept_parsed() {
     assert!(loader.augmentation_scan(&props, false).is_err(), "the scan's read fails");
     std::fs::write(&props, &text).unwrap();
     assert!(matches!(loader.parse(&props), Ok(Some(_))), "the parse's read succeeds");
-    let Loader { parsed, ledger, .. } = loader;
+    let Loader { parsed, backing, ledger, .. } = loader;
     let ledger = ledger.finish();
     assert!(ledger.failed(props.as_str()), "the failure stands for this load");
-    let kept = retained_parses(parsed, &ledger);
+    let (kept, backing) = retained_parses(parsed, backing, &ledger);
     assert!(!kept.contains_key(props.as_str()), "no layer holds the file both failed and parsed");
+    assert!(backing.contains_key(props.as_str()), "the parse backs the claims made from it");
+}
+
+/// A claim never outlives the parse it was made from: `aug.d.ts` both merges into React and declares `Target`. In one
+/// load its augmentation scan cannot read it while `Target`'s parse can, so the layer keeps the failure and serves no
+/// later load that parse. A flatten that cannot read the file again still indexes `Target` from the parse the claim was
+/// made from, and once the file reads, a retry declares it as a cold load does.
+#[test]
+fn a_flatten_keeps_the_declarations_a_claim_was_made_from() {
+    let (_tmp, root) = project(&[
+        ("node_modules/aug-pkg/package.json", r#"{ "name": "aug-pkg", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/aug-pkg/index.d.ts", "export * from './aug';\n"),
+        (
+            "node_modules/aug-pkg/aug.d.ts",
+            "declare module 'react' { interface AriaAttributes { 'aria-x'?: string } }\n\
+             export interface Target { t: string }\n",
+        ),
+        (
+            "node_modules/other-kit/package.json",
+            r#"{ "name": "other-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/other-kit/index.d.ts", "export interface O { o: string }\n"),
+        ("src/Card.tsx", "export {};\n"),
+    ]);
+    let aug = root.join("node_modules/aug-pkg/aug.d.ts");
+    // 0: the scan's read fails and the parse's, once the scan has failed, succeeds; 1: every read fails; 2: none.
+    let phase = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let scanned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (rule_phase, rule_scanned) = (phase.clone(), scanned.clone());
+    let fault: crate::dependency_types::tests::ReadFault =
+        Arc::new(move |scan: bool| match rule_phase.load(std::sync::atomic::Ordering::Relaxed) {
+            0 if scan => {
+                rule_scanned.store(true, std::sync::atomic::Ordering::Relaxed);
+                true
+            }
+            0 => {
+                let waited = std::time::Instant::now();
+                while !rule_scanned.load(std::sync::atomic::Ordering::Relaxed)
+                    && waited.elapsed() < std::time::Duration::from_secs(10)
+                {
+                    std::thread::yield_now();
+                }
+                false
+            }
+            1 => true,
+            _ => false,
+        });
+    crate::dependency_types::tests::set_read_fault(&aug, Some(fault));
+    let demand = |specifier: &str, name: &str| Demand {
+        from: root.join("src/Card.tsx"),
+        specifier: specifier.into(),
+        name: name.into(),
+    };
+    let options = PipelineOptions { chain_depth: 0, ..options(&root) };
+    let start = std::time::Instant::now();
+    let now = Moment { at: start, edits: Edits::default() };
+    let both = || vec![demand("aug-pkg", ""), demand("aug-pkg", "Target")];
+    let first = Arc::new(load_at(both(), &options, None, Retry::Due(now), Stamp { moment: now, load: Load(1) }));
+    let target = |layer: &DependencyLayer| layer.named_types.lookup_interface(&aug, "Target").map(|i| format!("{i:?}"));
+    assert!(scanned.load(std::sync::atomic::Ordering::Relaxed) && first.ledger.failed(aug.as_str()));
+    assert!(target(&first).is_some(), "the parse declared `Target`");
+    phase.store(1, std::sync::atomic::Ordering::Relaxed);
+    let stamp = Stamp { moment: now, load: Load(2) };
+    let flat = Arc::new(load_at(vec![demand("other-kit", "O")], &options, Some(&first), Retry::Due(now), stamp));
+    let flat_target = target(&flat);
+    phase.store(2, std::sync::atomic::Ordering::Relaxed);
+    let later = Moment { at: start + DEGRADED_RETRY * 2, edits: Edits::default() };
+    let stamp = Stamp { moment: later, load: Load(3) };
+    let recovered = load_at(both(), &options, Some(&flat), Retry::Due(later), stamp);
+    crate::dependency_types::tests::set_read_fault(&aug, None);
+    assert!(flat.parent.is_none(), "the second load flattened the chain");
+    assert!(flat_target.is_some(), "the flatten kept `Target`");
+    assert_eq!(target(&recovered), target(&load(both(), &options, None)), "as a cold load declares it");
 }
 
 /// A cold load with one unreadable file writes the index for every walk that read all it needed, and leaves out only

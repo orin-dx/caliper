@@ -136,6 +136,16 @@ struct Mark {
 }
 
 impl Mark {
+    /// Whether `other` records the same follow: the same own walk unread past the same files, reaching the same nodes.
+    fn same_as(&self, other: &Mark) -> bool {
+        fn set<T: Eq + std::hash::Hash>(items: &[T]) -> FxHashSet<&T> {
+            items.iter().collect()
+        }
+        self.unread == other.unread
+            && set(&self.suspects) == set(&other.suspects)
+            && set(&self.reaches) == set(&other.reaches)
+    }
+
     fn is_clean(&self) -> bool {
         self.unread.is_none() && self.reaches.is_empty()
     }
@@ -261,7 +271,8 @@ pub(super) struct ReadLedger {
     /// The reads this layer's load made itself, each with whether it failed: what a growth changed, a flatten's
     /// included (its `reads` are the chain's too).
     fresh: Vec<(PathKey, bool)>,
-    /// Whether this layer's load followed again a walk the chain had followed: what it reaches may have changed.
+    /// Whether this layer's load followed again a walk the chain had followed and left a node it followed marked
+    /// otherwise than before: what the live demands reach may have changed.
     followed_again: bool,
     /// How many reverse traversals of earlier marks `finish` made (one for a flatten, none over a parent), for tests.
     #[cfg(test)]
@@ -376,7 +387,7 @@ impl DependencyLayer {
         &self.ledger.fresh
     }
 
-    /// Whether this layer's load followed again a walk the chain had followed, which can change what reaches what.
+    /// Whether this layer's load followed again a walk the chain had followed and found it reaching otherwise.
     pub(crate) fn followed_again(&self) -> bool {
         self.ledger.followed_again
     }
@@ -722,7 +733,6 @@ impl<'a> LedgerBuilder<'a> {
         let reads: FxHashMap<PathKey, Read> = reads.into_iter().collect();
         let fresh: Vec<(PathKey, bool)> =
             reads.iter().map(|(path, read)| (path.clone(), matches!(read, Read::Failed(_)))).collect();
-        let followed_again = !retried.is_empty();
         let unread: FxHashMap<Node, (Demand, Arc<[PathKey]>)> =
             unread.into_iter().map(|(key, walk)| (Node::Demand(key), walk)).collect();
         let mut marks: FxHashMap<Node, Mark> = FxHashMap::default();
@@ -776,10 +786,17 @@ impl<'a> LedgerBuilder<'a> {
                 };
                 marks.insert(node.clone(), Mark { unread: own, suspects, reaches });
             }
-            for key in retried {
-                marks.entry(Node::Demand(key)).or_default();
+            for key in retried.iter() {
+                marks.entry(Node::Demand(key.clone())).or_default();
             }
         }
+        // A retry that left every node it marked marked as before (its walks unread past the same files, reaching the
+        // same nodes) changed nothing the live demands reach: what was derived from the layer below still holds.
+        let followed_again = !retried.is_empty()
+            && marks.iter().any(|(node, mark)| {
+                let earlier = inherited.marks.get(node).or_else(|| parent.and_then(|parent| parent.mark(node)));
+                !earlier.is_some_and(|earlier| earlier.same_as(mark))
+            });
         if parent.is_some() {
             return ReadLedger {
                 reads,

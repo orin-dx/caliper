@@ -466,6 +466,10 @@ pub(crate) struct DependencyLayer {
     claimed: FxHashSet<(PathKey, CompactString)>,
     /// Every parsed file's data (stubs included), so an extension reuses them.
     parsed: FxHashMap<PathKey, Option<Arc<SourceData>>>,
+    /// The parses kept out of `parsed` because another read of the same file failed in the same load: what the claims
+    /// on them were made from. A flatten rebuilds its index from them when it cannot read the file again; no load
+    /// answers a read from them, so the failure's retry still reads the file. A claim never outlives its data.
+    backing: FxHashMap<PathKey, Arc<SourceData>>,
     /// The panics this layer's own demands hit, contained; the demands they covered stay unanswered.
     panics: Vec<Diagnostic>,
     /// The dependency files this layer's load could not read or read again, and what those reads left unfollowed.
@@ -586,8 +590,12 @@ impl DependencyLayer {
         self.chain().any(|layer| layer.demands.contains(key))
     }
 
+    /// Whether the chain claimed `key` and holds the parse the claim was made from: only then is it indexed.
     fn has_claimed(&self, key: &(PathKey, CompactString)) -> bool {
+        let file: &str = std::borrow::Borrow::borrow(&key.0);
         self.chain().any(|layer| layer.claimed.contains(key))
+            && (matches!(self.parsed_data(file), Some(Some(_)))
+                || self.chain().any(|layer| layer.backing.contains_key(file)))
     }
 
     /// A dependency component by its declaring `(file, name)`.
@@ -658,6 +666,8 @@ struct Loader<'a> {
     /// The layer being extended, consulted before the maps below so an extension holds only its own additions.
     parent: Option<&'a DependencyLayer>,
     parsed: FxDashMap<PathKey, ParseCell>,
+    /// The chain's [`DependencyLayer::backing`] parses, taken in by a flatten.
+    backing: FxDashMap<PathKey, Arc<SourceData>>,
     resolutions: FxDashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
     claimed: FxDashSet<(PathKey, CompactString)>,
@@ -709,6 +719,7 @@ impl<'a> Loader<'a> {
             project_dirs,
             parent,
             parsed: DashMap::default(),
+            backing: DashMap::default(),
             resolutions: DashMap::default(),
             exports: DashMap::default(),
             claimed: DashSet::default(),
@@ -748,7 +759,13 @@ impl Loader<'_> {
             *self.reads.entry(PathKey::from(file)).or_default() += 1;
             std::thread::sleep(self.read_pause);
         }
-        match std::fs::read_to_string(file) {
+        let read = std::fs::read_to_string(file);
+        #[cfg(test)]
+        let read = match tests::read_fault(file) {
+            true => Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            false => read,
+        };
+        match read {
             Ok(source) => {
                 self.ledger.read_done(file);
                 Ok(Some(source))
@@ -764,6 +781,16 @@ impl Loader<'_> {
                 self.ledger.read_failed(file, diagnostic);
                 Err(ReadFailed(PathKey::from(file)))
             }
+        }
+    }
+
+    /// The declarations the index takes from `file`: read now, or the parse a claim was made from when the file cannot
+    /// be read again.
+    fn declarations(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
+        match self.parse(file) {
+            Ok(Some(data)) => Some(data),
+            Ok(None) => None,
+            Err(_) => self.backing.get(file.as_str()).map(|data| data.clone()),
         }
     }
 
@@ -1255,7 +1282,11 @@ impl Loader<'_> {
         }
         let cell = self.scans.entry(PathKey::from(file)).or_default().clone();
         cell.get_or_init(|| {
+            #[cfg(test)]
+            let _scanning = tests::Scanning::start();
             let Some(source) = self.read(file)? else { return Ok(None) };
+            #[cfg(test)]
+            drop(_scanning);
             if entry || may_declare_into_react(&source) {
                 return Ok(self.parse_source(file, Some(source))?.map(|data| scan_of(&data, file)));
             }
@@ -1512,19 +1543,30 @@ fn declaration_refs(data: &SourceData, file: &Utf8Path, name: &str, out: &mut Fx
     }
 }
 
+/// Each parsed file's data, `None` for one that is missing.
+type Parses = FxHashMap<PathKey, Option<Arc<SourceData>>>;
+
 /// The parses a load's layer keeps: each file that read, except one whose read also failed in the same load (an
 /// augmentation scan and a parse each read it while it changed on disk). The layer keeps that failure, and a load over
 /// it reads the file again; a parse kept beside it would answer that load without the read that ends the failure, and
 /// the file would be reported unreadable for good. So no layer holds a file both failed and parsed.
+/// The parses of such files go to `backing` instead, with the chain's a flatten took in: claims were made from them.
 fn retained_parses(
     parsed: FxDashMap<PathKey, ParseCell>,
+    backing: FxDashMap<PathKey, Arc<SourceData>>,
     ledger: &ReadLedger,
-) -> FxHashMap<PathKey, Option<Arc<SourceData>>> {
-    parsed
-        .into_iter()
-        .filter(|(key, _)| !ledger.failed(std::borrow::Borrow::borrow(key)))
-        .filter_map(|(key, cell)| Some((key, cell.get()?.clone().ok()?)))
-        .collect()
+) -> (Parses, FxHashMap<PathKey, Arc<SourceData>>) {
+    let mut kept = FxHashMap::default();
+    let mut backing: FxHashMap<PathKey, Arc<SourceData>> = backing.into_iter().collect();
+    for (key, cell) in parsed {
+        let Some(Ok(data)) = cell.get().cloned() else { continue };
+        match (ledger.failed(std::borrow::Borrow::borrow(&key)), data) {
+            (true, Some(data)) => drop(backing.insert(key, data)),
+            (true, None) => {}
+            (false, data) => drop(kept.insert(key, data)),
+        }
+    }
+    (kept, backing)
 }
 
 /// Load what `demands` reference: from scratch for a cold run, or on top of `previous` when a watch revision or a lazy
@@ -1606,6 +1648,9 @@ fn load_with(
                 for (key, data) in &layer.parsed {
                     loader.parsed.insert(key.clone(), Arc::new(OnceLock::from(Ok(data.clone()))));
                 }
+                for (key, data) in &layer.backing {
+                    loader.backing.insert(key.clone(), data.clone());
+                }
                 for key in &layer.demands {
                     loader.demands.insert(key.clone());
                 }
@@ -1632,6 +1677,11 @@ fn load_with(
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .extend(layer.panics.iter().cloned());
             }
+            // A claim stands only with the parse it was made from, or the flattened index would skip it for good.
+            loader.claimed.retain(|(file, _)| {
+                let parsed = loader.parsed.get(file).is_some_and(|cell| matches!(cell.get(), Some(Ok(Some(_)))));
+                parsed || loader.backing.contains_key(file)
+            });
         }
         (Some(_), None) => {}
     }
@@ -1662,7 +1712,7 @@ fn load_with(
     // read claimed nothing.
     for file in &files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
-        if let Ok(Some(data)) = loader.parse(path) {
+        if let Some(data) = loader.declarations(path) {
             serve(&mut named, &mut imports, path, &data);
             component_mappings.extend(data.component_mappings.iter().cloned());
         }
@@ -1678,7 +1728,7 @@ fn load_with(
     let react_files: FxHashSet<PathKey> = loader.react_files.iter().map(|file| file.clone()).collect();
     for file in &react_files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
-        if let Ok(Some(data)) = loader.parse(path) {
+        if let Some(data) = loader.declarations(path) {
             imports.import_map.insert(path.to_owned(), data.imports.clone());
             imports.re_export_map.insert(path.to_owned(), Vec::new());
         }
@@ -1692,6 +1742,7 @@ fn load_with(
     let demands: FxHashSet<DemandKey> = loader.demands.into_iter().collect();
     let files: FxHashSet<PathKey> = files.into_iter().collect();
     let ledger = loader.ledger.finish();
+    let (parsed, backing) = retained_parses(loader.parsed, loader.backing, &ledger);
     let below = parent.as_ref().map(|layer| layer.totals).unwrap_or_default();
     let totals = Totals {
         files: below.files + files.len(),
@@ -1718,7 +1769,8 @@ fn load_with(
         demands,
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
-        parsed: retained_parses(loader.parsed, &ledger),
+        parsed,
+        backing,
         panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
         ledger,
         unread_walks: OnceLock::new(),
@@ -2002,7 +2054,7 @@ fn temp_path(path: &Utf8Path) -> Utf8PathBuf {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 mod augmentation_tests;

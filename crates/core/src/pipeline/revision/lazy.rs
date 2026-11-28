@@ -141,6 +141,9 @@ mod kept {
 
     use super::{ComponentId, Held, Resolved};
 
+    /// A provisional answer and what it holds by.
+    pub(super) type Provisional = (Arc<Resolved>, Held);
+
     #[derive(Default)]
     pub(super) struct Kept {
         /// Clean answers: no walk they read through was left unread.
@@ -179,14 +182,6 @@ mod kept {
         pub(super) fn publish(&self) -> Publication<'_> {
             let readers = self.publication.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             Publication { kept: self, readers }
-        }
-
-        pub(super) fn clean(&self, id: &ComponentId) -> Option<Arc<Resolved>> {
-            self.memo.get(id).map(|hit| hit.clone())
-        }
-
-        pub(super) fn provisional(&self, id: &ComponentId) -> Option<(Arc<Resolved>, Held)> {
-            self.provisional.get(id).map(|entry| entry.value().clone())
         }
 
         pub(super) fn clean_count(&self) -> usize {
@@ -250,6 +245,12 @@ mod kept {
             self.kept.provisional.insert(id.clone(), (resolved, held));
         }
 
+        /// The clean and the provisional answer kept for `id`: read under the lock, with the engine it publishes.
+        pub(super) fn answers_for(&self, id: &ComponentId) -> (Option<Arc<Resolved>>, Option<Provisional>) {
+            let clean = self.kept.memo.get(id).map(|hit| hit.clone());
+            (clean, self.kept.provisional.get(id).map(|entry| entry.value().clone()))
+        }
+
         /// Records an answer given out and held nowhere.
         pub(super) fn held_nowhere(&mut self, id: &ComponentId) {
             self.kept.dropped.insert(id.clone(), ());
@@ -268,6 +269,15 @@ mod kept {
 }
 
 use kept::Kept;
+
+/// What a cache hit serves: the answers kept for one component and the engine published with them, read under one
+/// lock. A hit is snapshot, then validate against the snapshot, then serve the snapshot: nothing after the snapshot
+/// reads the engine again, so an answer kept over one layer is never checked or reported against a later one.
+struct Hit {
+    clean: Option<Arc<Resolved>>,
+    provisional: Option<kept::Provisional>,
+    engine: Arc<Engine>,
+}
 
 impl Lazy {
     /// The revision's shared demands `layer` has not followed, once per layer.
@@ -446,6 +456,9 @@ pub(super) struct Lazy {
     /// Run once by the next edit's revision just before it reads this one's layer and answers, for tests.
     #[cfg(test)]
     before_snapshot: Mutex<Option<Between>>,
+    /// Run once by the next request between taking its hit's snapshot and validating it, for tests.
+    #[cfg(test)]
+    before_validate: Mutex<Option<Between>>,
 }
 
 /// A layer, and what the shared demands lead to in it ([`Lazy::shared_unread`]).
@@ -498,6 +511,13 @@ impl Held {
 type Between = Box<dyn FnOnce(&Revision) + Send>;
 
 impl Lazy {
+    /// The snapshot a hit for `id` is answered from ([`Hit`]).
+    fn hit(&self, id: &ComponentId) -> Hit {
+        let published = self.kept.publish();
+        let (clean, provisional) = published.answers_for(id);
+        Hit { clean, provisional, engine: self.engine.load_full() }
+    }
+
     /// When this revision follows again a walk that passed a file it could not read: once it is due.
     fn retry(&self) -> dependency_types::Retry {
         dependency_types::Retry::Due(self.moment())
@@ -687,6 +707,8 @@ impl Revision {
             before_keep: Mutex::new(None),
             #[cfg(test)]
             before_snapshot: Mutex::new(None),
+            #[cfg(test)]
+            before_validate: Mutex::new(None),
         };
         Revision {
             id,
@@ -884,6 +906,8 @@ impl Revision {
                 before_keep: Mutex::new(None),
                 #[cfg(test)]
                 before_snapshot: Mutex::new(None),
+                #[cfg(test)]
+                before_validate: Mutex::new(None),
             }),
         };
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -946,25 +970,34 @@ impl Revision {
         self.lazy_resolved_at(options, id, index).map(|(resolved, _)| resolved)
     }
 
-    /// [`Self::lazy_resolved`], with the layer a provisional answer was read against: its read warnings are the ones
-    /// that answer carries, whatever a later load recovered since. `None` for a memoized answer, which no unread walk
-    /// reached.
+    /// [`Self::lazy_resolved`], with the engine the answer was read against or kept under: the layer whose read
+    /// warnings it carries and the context its call sites are counted with, whatever a later load published since.
     fn lazy_resolved_at(
         &self,
         options: &PipelineOptions,
         id: &ComponentId,
         index: usize,
-    ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
+    ) -> Option<(Arc<Resolved>, Arc<Engine>)> {
         let lazy = self.lazy.as_ref()?;
-        let shared = lazy.engine.load().shared;
-        if let Some(hit) = lazy.kept.clean(id) {
-            if hit.holds_under(shared) {
-                return Some((hit, None));
+        let hit = lazy.hit(id);
+        #[cfg(test)]
+        if let Some(step) = lazy.before_validate.lock().ok().and_then(|mut step| step.take()) {
+            step(self);
+        }
+        if let Some(clean) = hit.clean {
+            if clean.holds_under(hit.engine.shared) {
+                return Some((clean, hit.engine));
             }
             lazy.kept.evict(id);
         }
-        if let Some(hit) = self.provisional_hit(lazy, id) {
-            return Some(hit);
+        // A provisional answer holds while none of the unread walks it reached is due: no retry has passed, no edit
+        // arrived, and no later load followed one of them again or read one of their files.
+        if let Some((resolved, held)) = hit.provisional {
+            let layer = hit.engine.layer.as_ref();
+            if resolved.holds_under(hit.engine.shared) && layer.is_some_and(|layer| held.holds(layer, lazy.moment())) {
+                return Some((resolved, hit.engine));
+            }
+            lazy.kept.evict(id);
         }
         let mapping = self.global.component_mappings.get(index)?;
         // The component's own file almost always reaches its own names; loading them first saves a resolution.
@@ -1051,32 +1084,13 @@ impl Revision {
                         (Some(own), true) => published.keep_provisional(id, resolved.clone(), Held { own, shared }),
                         _ => published.held_nowhere(id),
                     }
-                    return Some((resolved, engine.layer.clone()));
+                    return Some((resolved, engine));
                 }
-                return Some((published.keep_clean(id, resolved), None));
+                return Some((published.keep_clean(id, resolved), engine));
             }
             self.grow(options, lazy, &missing);
             asked_for = missing;
         }
-    }
-
-    /// The provisional answer for `id` while none of the unread walks it reached is due ([`kept::Kept::provisional`]):
-    /// no retry has passed, no edit arrived, and no later load followed one of them again or read one of their files.
-    fn provisional_hit(
-        &self,
-        lazy: &Lazy,
-        id: &ComponentId,
-    ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
-        let (resolved, held) = lazy.kept.provisional(id)?;
-        let engine = lazy.engine.load();
-        let layer = engine.layer.clone();
-        let holds =
-            resolved.holds_under(engine.shared) && layer.as_ref().is_some_and(|layer| held.holds(layer, lazy.moment()));
-        if holds {
-            return Some((resolved, layer));
-        }
-        lazy.kept.evict(id);
-        None
     }
 
     /// Once the layer has grown [`WHOLE_DEMAND_AFTER_GROWTHS`] times, load every name the project's files take from a
@@ -1329,28 +1343,24 @@ impl Revision {
     /// diagnostics. `None` for a key the project has no component under.
     pub(crate) fn lazy_component(&self, options: &PipelineOptions, key: &str) -> Option<ComponentAnswer> {
         let (id, index) = self.lazy_target(options, key)?;
-        let (resolved, read_against) = self.lazy_resolved_at(options, id, index)?;
+        let (resolved, engine) = self.lazy_resolved_at(options, id, index)?;
         #[cfg(test)]
         if let Some(between) = self.lazy.as_ref().and_then(|lazy| lazy.between.lock().ok()?.take()) {
             between(self);
         }
         // A lazy revision counts call sites with its context, on the first answer that needs them.
-        let sites = self.lazy.as_ref().map(|lazy| relevance_inputs::project_sites(&lazy.engine.load_full().ctx));
-        let entry = resolved.answer(&sites.unwrap_or_default());
+        let entry = resolved.answer(&relevance_inputs::project_sites(&engine.ctx));
         let mut diagnostics = DiagnosticSet::default();
         diagnostics.extend(resolved.diagnostics.own.iter().cloned(), Some(key));
         for chunk in &resolved.diagnostics.shared {
             diagnostics.extend_shared(chunk, key);
         }
         // A panic in the dependency loader may have left any component's types unexpanded, so every answer carries it.
-        // A provisional answer carries the read warnings of the layer it was read against: a later load that read the
-        // file again ends the warning in the newest layer, not the gap in this answer. Either way only the failed reads
-        // the project's live demands reach are reported, as a cold run of the same files reports them.
-        if let Some(lazy) = &self.lazy {
-            let layer = read_against.or_else(|| lazy.engine.load_full().layer.clone());
-            if let Some(layer) = layer {
-                diagnostics.extend(lazy.live_warnings(&layer).iter().cloned(), None);
-            }
+        // An answer carries the read warnings of the layer it was read against or kept under: a later load that read
+        // the file again ends the warning in the newest layer, not the gap in this answer. Only the failed reads the
+        // project's live demands reach are reported, as a cold run of the same files reports them.
+        if let (Some(lazy), Some(layer)) = (&self.lazy, &engine.layer) {
+            diagnostics.extend(lazy.live_warnings(layer).iter().cloned(), None);
         }
         Some(ComponentAnswer { key: key.to_owned(), entry, diagnostics: diagnostics.finish() })
     }
@@ -2181,6 +2191,121 @@ mod read_retry_tests {
         assert_eq!(lazy.kept.clean_count(), 500, "the readers were dropped, the plain answers kept");
         let checks = lazy.kept.reader_checks.load(Relaxed);
         assert!(checks <= 200 + 5, "{checks} answers examined by the sweeps");
+    }
+
+    /// A due retry that fails on the same files and changes no walk keeps the live warnings derived for the layer
+    /// below: 200 components each read their own package past an unreadable file and are asked again once due. The
+    /// 200 retries walk the live demands at most once in all, not once each, and the answers equal a session that never
+    /// retried.
+    #[test]
+    fn a_retry_that_changes_no_walk_keeps_the_live_warnings() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        for n in 0..200 {
+            write(
+                &format!("node_modules/pkg{n}/package.json"),
+                &format!(r#"{{ "name": "pkg{n}", "version": "1.0.0", "types": "index.d.ts" }}"#),
+            );
+            write(
+                &format!("node_modules/pkg{n}/index.d.ts"),
+                &format!("import type {{ Base }} from './base';\nexport interface T{n} extends Base {{ t: string }}\n"),
+            );
+            std::fs::write(root.join(format!("node_modules/pkg{n}/base.d.ts")), [0xff; 8]).unwrap();
+            write(
+                &format!("src/f{n}/F{n}.tsx"),
+                &format!(
+                    "import type {{ T{n} }} from 'pkg{n}';\nexport function F{n}(props: T{n}) {{ return null; }}\n"
+                ),
+            );
+        }
+        let options = options(&root, false);
+        let (revision, fresh) = (Revision::cold_lazy(&options, 0), Revision::cold_lazy(&options, 0));
+        let start = Instant::now();
+        set_clock(&revision, start);
+        set_clock(&fresh, start);
+        for n in 0..200 {
+            drop(revision.lazy_component(&options, &format!("F{n}")).unwrap());
+            drop(fresh.lazy_component(&options, &format!("F{n}")).unwrap());
+        }
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let lazy = revision.lazy.as_ref().unwrap();
+        let (roots, loads) = (lazy.live_warning_roots.load(Relaxed), lazy.loads.load(Relaxed));
+        for n in 0..200 {
+            drop(revision.lazy_component(&options, &format!("F{n}")).unwrap());
+        }
+        assert!(lazy.loads.load(Relaxed) - loads >= 200, "each due walk was retried");
+        let walked = lazy.live_warning_roots.load(Relaxed) - roots;
+        let demands: usize = lazy.demands.values().map(|demands| demands.len()).sum();
+        assert!(walked <= demands, "the retries walked {walked} live demands, of {demands}");
+        for name in ["F0", "F199"] {
+            let answer = revision.lazy_component(&options, name).unwrap();
+            assert!(answer == fresh.lazy_component(&options, name).unwrap(), "{name}: {:?}", answer.diagnostics);
+        }
+    }
+
+    /// A hit is served from one snapshot: `Box`'s provisional answer is taken, then `Card`'s request publishes
+    /// `card-kit`'s `base.d.ts`, which merges `aria-card` into React (no module search reaches it) and whose walk could
+    /// not read `broken.d.ts`, leaving `bad.d.ts` failed as before. The hit is validated and served as of its snapshot
+    /// (the answer it gave before), or resolved again as a fresh session asked `Card` first would: never the old props
+    /// with the new layer's warnings.
+    #[test]
+    fn a_hit_is_validated_and_served_from_one_snapshot() {
+        let (_tmp, root) = react_fixture(&[
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+            (
+                "node_modules/aug-kit/aug.d.ts",
+                "declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\nexport {};\n",
+            ),
+            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
+            (
+                "node_modules/card-kit/package.json",
+                r#"{ "name": "card-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            (
+                "node_modules/card-kit/index.d.ts",
+                "import type { Base } from './base';\nexport interface CardProps extends Base { card: string }\n",
+            ),
+            (
+                "node_modules/card-kit/base.d.ts",
+                "import type { Broken } from './broken';\n\
+                 declare module 'react' { interface AriaAttributes { 'aria-card'?: string } }\n\
+                 export interface Base extends Broken { b: string }\n",
+            ),
+            (
+                "src/card/Card.tsx",
+                "import type { CardProps } from 'card-kit';\nexport function Card(props: CardProps) { return null; }\n",
+            ),
+            BOX,
+        ]);
+        std::fs::write(root.join("node_modules/aug-kit/bad.d.ts"), [0xff; 8]).unwrap();
+        std::fs::write(root.join("node_modules/card-kit/broken.d.ts"), [0xff; 8]).unwrap();
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let start = Instant::now();
+        let fresh = Revision::cold_lazy(&options, 0);
+        set_clock(&fresh, start);
+        drop(fresh.lazy_component(&options, "Card").unwrap());
+        let after = fresh.lazy_component(&options, "Box").unwrap();
+        let revision = Revision::cold_lazy(&options, 0);
+        set_clock(&revision, start);
+        let before = revision.lazy_component(&options, "Box").unwrap();
+        assert!(props(&after).contains(&"aria-card".to_owned()) && !props(&before).contains(&"aria-card".to_owned()));
+        assert!(after.diagnostics != before.diagnostics, "the publication adds `broken`'s warning");
+        let card_options = options.clone();
+        *revision.lazy.as_ref().unwrap().before_validate.lock().unwrap() =
+            Some(Box::new(move |revision: &Revision| drop(revision.lazy_component(&card_options, "Card").unwrap())));
+        let answer = revision.lazy_component(&options, "Box").unwrap();
+        assert!(revision.lazy.as_ref().unwrap().before_validate.lock().unwrap().is_none(), "the hook ran");
+        assert!(answer == before || answer == after, "{:?} with {:?}", props(&answer), answer.diagnostics);
     }
 
     /// Retries follow the current revision's live demands: `setup.ts`, the only importer of `aug-kit`, whose search

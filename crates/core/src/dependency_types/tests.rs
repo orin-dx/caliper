@@ -2100,3 +2100,46 @@ mod live_walks {
         }
     }
 }
+
+/// Whether a read fails, given whether it is an augmentation scan's.
+pub(crate) type ReadFault = std::sync::Arc<dyn Fn(bool) -> bool + Send + Sync>;
+
+/// The files whose reads a test makes fail, each with its rule. Keyed by path, so tests in their own directories do not
+/// meet each other's.
+static READ_FAULTS: std::sync::Mutex<Vec<(Utf8PathBuf, ReadFault)>> = std::sync::Mutex::new(Vec::new());
+
+thread_local! {
+    static SCANNING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks this thread's reads as an augmentation scan's while it lives.
+pub(super) struct Scanning;
+
+impl Scanning {
+    pub(super) fn start() -> Self {
+        SCANNING.with(|scanning| scanning.set(true));
+        Scanning
+    }
+}
+
+impl Drop for Scanning {
+    fn drop(&mut self) {
+        SCANNING.with(|scanning| scanning.set(false));
+    }
+}
+
+pub(super) fn read_fault(file: &Utf8Path) -> bool {
+    let faults = READ_FAULTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let fault = faults.iter().find(|(path, _)| path == file).map(|(_, fault)| fault.clone());
+    drop(faults);
+    fault.is_some_and(|fault| fault(SCANNING.with(std::cell::Cell::get)))
+}
+
+/// Makes reads of `file` fail by `fault`, or stops failing them.
+pub(crate) fn set_read_fault(file: &Utf8Path, fault: Option<ReadFault>) {
+    let mut faults = READ_FAULTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    faults.retain(|(path, _)| path != file);
+    if let Some(fault) = fault {
+        faults.push((file.to_owned(), fault));
+    }
+}
