@@ -110,9 +110,9 @@ pub(super) fn follow_reexports(
         return (file, declared);
     }
     // A package's re-export stubs are not in the layer; the loader's answer for them stands in (the persisted index).
-    if let Some(answer) = ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&file, &name)) {
+    if let Some(answer) = ctx.dependencies.as_ref().and_then(|layer| layer.export_for_resolver(&file, &name)) {
         return match answer {
-            Some((declaring_file, declared_name)) => (declaring_file.clone(), declared_name.to_string()),
+            Some((declaring_file, declared_name)) => (declaring_file, declared_name.to_string()),
             None => (file, name),
         };
     }

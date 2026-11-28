@@ -90,6 +90,7 @@ fn outcome(target: &SemanticTarget, names: &[&str], diagnostics: Vec<Diagnostic>
         )],
         fallbacks: Vec::new(),
         diagnostics,
+        unavailable: None,
     }
 }
 
@@ -244,8 +245,10 @@ fn a_request_after_an_edit_does_not_join_the_request_asked_before_it() {
     }
 }
 
+/// The story that joined the request and every later story carry the warning: an unavailable checker is reported on
+/// every answer it affects, not once per session, and a later component is refused without asking it again.
 #[test]
-fn an_unavailable_checker_is_reported_once_to_the_story_that_joined_the_request() {
+fn an_unavailable_checker_is_reported_to_the_story_that_joined_the_request_and_to_every_later_one() {
     let project = project(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
     let checker = Arc::new(Queued::default());
     let session = session(&project, &checker, Duration::from_secs(60));
@@ -255,20 +258,21 @@ fn an_unavailable_checker_is_reported_once_to_the_story_that_joined_the_request(
 
     checker.answer(0, Some(down));
     let joined = story.join().unwrap();
-    let card = open_story(&session, "Card");
-    checker.wait_until(|asked| asked.len() == 2);
-    checker.answer(1, Some(down));
-    let card = card.join().unwrap();
+    let card = open_story(&session, "Card").join().unwrap();
+    assert_eq!(checker.asked().len(), 1, "the outage holds for every component");
 
     let warnings = |answer: &ComponentAnswer| {
         answer.diagnostics.iter().filter(|d| d.severity == DiagnosticSeverity::Warning).count()
     };
-    assert_eq!((warnings(&joined), warnings(&card)), (1, 0));
+    assert_eq!((warnings(&joined), warnings(&card)), (1, 1));
     assert_eq!(names(&joined), ["label"]);
 }
 
+/// A checker that stops mid-request is held like one that answered nothing: the next story says so again without
+/// asking it, and an edit asks again.
 #[test]
-fn a_joined_request_the_checker_drops_says_so_and_is_asked_again_next_time() {
+fn a_joined_request_the_checker_drops_says_so_and_is_asked_again_after_an_edit() {
+    const STOPPED: &str = "the TypeScript checker stopped without answering; the structural props are used";
     let project = project(&[("Button.tsx", BUTTON)]);
     let checker = Arc::new(Queued::default());
     let session = session(&project, &checker, Duration::from_secs(60));
@@ -280,7 +284,13 @@ fn a_joined_request_the_checker_drops_says_so_and_is_asked_again_next_time() {
     let answer = story.join().unwrap();
 
     assert_eq!(names(&answer), ["label"]);
-    assert_eq!(messages(&answer), ["the TypeScript checker stopped without answering; the structural props are used"]);
+    assert_eq!(messages(&answer), [STOPPED]);
+    let held = open_story(&session, "Button").join().unwrap();
+    assert_eq!(messages(&held), [STOPPED]);
+    assert_eq!(checker.asked().len(), 1, "not asked again within the retry");
+    let file = project.root.join("Button.tsx");
+    std::fs::write(&file, format!("{BUTTON}\n// edited\n")).unwrap();
+    session.update_file(&file);
     let next = open_story(&session, "Button");
     checker.wait_until(|asked| asked.len() == 2);
     checker.answer(1, Some(finds_size));

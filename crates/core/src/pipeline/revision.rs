@@ -106,12 +106,21 @@ pub(crate) struct Resolved {
     entry: ComponentEntry,
     diagnostics: ResolvedDiagnostics,
     depends_on: Dependencies,
+    /// The fingerprint of the demands whose module searches gave React's augmentations when it was resolved: an answer
+    /// that read them holds only while those demands are the same, so a search an edit adds or drops resolves it again.
+    shared: u64,
     evidence: Option<Arc<crate::relevance::Inputs>>,
     /// React's attributes the answer holds apart until relevance decides which it lists.
     attributes: crate::relevance::Attributes,
 }
 
 impl Resolved {
+    /// Whether the answer still holds where `shared` is the fingerprint of the demands whose searches give React's
+    /// augmentations.
+    fn holds_under(&self, shared: u64) -> bool {
+        !self.depends_on.reads_augmentations || self.shared == shared
+    }
+
     /// The entry as output, with the `used` lists relevance decides from its evidence and `sites`, the call sites of
     /// the revision it is published in. The one place an answer becomes output: a kept resolution is decided again
     /// against each revision's call sites, so an edit to a consumer reaches it without resolving it again.
@@ -194,6 +203,17 @@ struct Change<'c> {
     react_namespace: bool,
 }
 
+/// Each project file's dependency demands in an eager revision, the live set every retry is drawn from; files that
+/// demand nothing are absent, and a lazy revision keeps its own ([`Lazy`]).
+type LiveDemands = FxHashMap<Utf8PathBuf, Arc<[Demand]>>;
+
+/// The walks to follow again: every unread walk a live demand of the current revision leads to, a project file's own
+/// and every package walk below it (React's included). A walk no live demand reaches is not followed and not reported;
+/// its mark stays, so a demand that returns finds it again. Derived from the current files' demands, nothing retired.
+fn live_due_walks(layer: &DependencyLayer, live: &LiveDemands) -> Vec<Demand> {
+    layer.unread_from(live.values().flat_map(|demands| demands.iter()))
+}
+
 /// The bare names `file` declares in an enum or const-array map keyed `file:name`.
 fn bare_names_declared<V>(file: &Utf8Path, map: &FxHashMap<String, V>) -> Vec<String> {
     let prefix = format!("{file}:");
@@ -220,6 +240,8 @@ pub(crate) struct Revision {
     resolved: FxHashMap<ComponentId, Arc<Resolved>>,
     /// Every component's call sites in this revision, which its answers are decided against when they become output.
     sites: Arc<ProjectSites>,
+    /// Each project file's dependency demands, in an eager revision with `load_dependencies`.
+    demands: Arc<LiveDemands>,
     /// The project's source files.
     files: Arc<FxHashSet<Utf8PathBuf>>,
     /// `.d.ts` files the cold run parsed or loaded from the parse cache, and how many the cache answered.
@@ -307,7 +329,7 @@ fn resolve_all(
         .into_iter()
         .zip(mappings)
         .map(|((entry, diagnostics, depends_on, evidence, attributes), (id, _))| {
-            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, evidence, attributes }))
+            (id.clone(), Arc::new(Resolved { entry, diagnostics, depends_on, shared: 0, evidence, attributes }))
         })
         .collect()
 }
@@ -427,6 +449,8 @@ struct Applied<'c> {
     change: Change<'c>,
     /// The changed file's dependency demands after the change; empty when it was deleted or demands are not loaded.
     demands: Vec<Demand>,
+    /// Every project file's demands after the change, in an eager revision.
+    live: Arc<LiveDemands>,
 }
 
 impl Revision {
@@ -475,21 +499,44 @@ impl Revision {
                 if options.load_dependencies {
                     demands = dependency_types::project_demands(changed, &data);
                 }
-                // Only names no earlier revision loaded cost a load; the new layer keeps everything the old one had.
-                if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
-                    let missing = layer.missing(&demands);
-                    if !missing.is_empty() {
-                        let extended = dependency_types::load(missing, options, Some(layer));
-                        named_types.fallback = Some(extended.named_types.clone());
-                        dependencies = Some(Arc::new(extended));
-                    }
-                }
                 named_types.merge_file(&data);
                 react_namespace |= named_types.declares_react_namespace(changed);
                 global.merge(changed, data);
                 files.insert(changed.to_owned())
             }
         };
+        // Every change, an edit or a deletion, makes every walk past a file that could not be read due, whichever file
+        // it was: each is followed again, as a lazy session follows it on its next request. Only names no earlier
+        // revision loaded cost a load; the new layer keeps everything the old one had. A deleted file demands nothing.
+        let mut live = self.demands.clone();
+        // Most edits leave a file's imports as they were: then the revisions share one map, nothing copied.
+        let unchanged = self.demands.get(changed).map_or(demands.is_empty(), |old| **old == *demands);
+        if extend_dependencies && !unchanged {
+            let map = Arc::make_mut(&mut live);
+            match demands.is_empty() {
+                true => drop(map.remove(changed)),
+                false => drop(map.insert(changed.to_owned(), Arc::from(demands.as_slice()))),
+            }
+        }
+        if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
+            let mut missing = layer.missing(&demands);
+            // Only a walk some project file still demands is followed again, under that file's demand (the loader
+            // keeps one per directory, recorded under whichever file made it first, which may have dropped it); the
+            // walk of a demand no file makes any more ends, as a fresh run would never follow it.
+            missing.extend(live_due_walks(layer, &live));
+            missing.sort();
+            missing.dedup();
+            if !missing.is_empty() {
+                let extended = dependency_types::load(missing, options, Some(layer));
+                // What the load added that declares into React (a retry that read an augmentation) can change every
+                // answer that reads React's augmentations, whichever file it was.
+                react_namespace |= extended.changes_react_declarations(layer);
+                dependencies = Some(Arc::new(extended));
+            }
+        }
+        if let (true, Some(new)) = (extend_dependencies, &dependencies) {
+            named_types.fallback = Some(new.named_types.clone());
+        }
         Applied {
             global,
             named_types,
@@ -498,6 +545,7 @@ impl Revision {
             dependencies,
             change: Change { file: changed, created, bare_names, react_namespace },
             demands,
+            live,
         }
     }
 }
@@ -553,6 +601,14 @@ impl Revision {
         if let Some(on_roots) = on_roots {
             on_roots(predicted_root_files(&global, options));
         }
+        let live: LiveDemands = match options.load_dependencies {
+            true => file_demands
+                .iter()
+                .filter(|(_, demands)| !demands.is_empty())
+                .map(|(file, demands)| (file.clone(), Arc::from(demands.as_slice())))
+                .collect(),
+            false => LiveDemands::default(),
+        };
         let demands: Vec<Demand> = file_demands.into_iter().flat_map(|(_, demands)| demands).collect();
 
         let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
@@ -599,6 +655,7 @@ impl Revision {
             tail_diagnostics,
             resolved,
             sites,
+            demands: Arc::new(live),
             files,
             dts_files_parsed,
             dts_cache_hits,
@@ -620,15 +677,30 @@ impl Revision {
         }
         let start = Instant::now();
 
-        let Applied { global, named_types, file_diagnostics, files, dependencies, change, .. } =
+        let Applied { global, named_types, file_diagnostics, files, dependencies, change, live, .. } =
             self.apply_change(options, changed, true);
 
         let global = Arc::new(global);
         let named_types = Arc::new(named_types);
         let ids = component_ids(&global, options);
+        // A layer this edit extended followed again the walks that could not read a file: an answer read through one
+        // may differ though the edit did not touch it, so it is resolved again (the old layer's ledger names them).
+        let unread = match (&self.dependencies, &dependencies) {
+            (Some(old), Some(new)) if !Arc::ptr_eq(old, new) => old.unread_walks(),
+            _ => Arc::default(),
+        };
         let (stale, kept): (Vec<_>, Vec<_>) = ids.into_iter().partition(|(id, _)| match self.resolved.get(id) {
             None => true,
-            Some(previous) => id.file == changed || previous.affected_by(&change),
+            Some(previous) => {
+                id.file == changed
+                    || previous.affected_by(&change)
+                    || (!unread.is_empty()
+                        && previous
+                            .depends_on
+                            .files
+                            .iter()
+                            .any(|file| unread.touches(std::borrow::Borrow::borrow(file))))
+            }
         });
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),
@@ -659,6 +731,7 @@ impl Revision {
             tail_diagnostics: self.tail_diagnostics.clone(),
             resolved,
             sites,
+            demands: live,
             files: Arc::new(files),
             dts_files_parsed: self.dts_files_parsed,
             dts_cache_hits: self.dts_cache_hits,
@@ -749,7 +822,11 @@ impl Revision {
         }
         diagnostics.extend(self.lib_diagnostics.iter().cloned(), None);
         if let Some(layer) = &self.dependencies {
-            diagnostics.extend(layer.panic_diagnostics(), None);
+            // A failed read is reported while a walk some project file makes now reaches it.
+            diagnostics.extend(
+                layer.panic_diagnostics_reached(self.demands.values().flat_map(|demands| demands.iter())),
+                None,
+            );
         }
 
         let mut components = BTreeMap::new();
@@ -990,5 +1067,47 @@ pub(crate) fn empty_output() -> ExtractionOutput {
         enums: BTreeMap::new(),
         diagnostics: Vec::new(),
         stats: ExtractionStats::default(),
+    }
+}
+
+#[cfg(test)]
+mod live_demand_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    /// An eager edit that leaves the file's imports as they were shares the live-demand map with the revision
+    /// before it, over 1000 importing files: nothing is copied. An edit that changes them gets a map of its own.
+    #[test]
+    fn an_edit_with_unchanged_imports_copies_no_live_demand() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let kit = root.join("node_modules/kit");
+        std::fs::create_dir_all(&kit).unwrap();
+        std::fs::write(kit.join("package.json"), r#"{ "name": "kit", "version": "1.0.0", "types": "index.d.ts" }"#)
+            .unwrap();
+        std::fs::write(kit.join("index.d.ts"), "export interface KitProps { kit: string }\n").unwrap();
+        let source = |n: usize, extra: &str| {
+            format!(
+                "import type {{ KitProps }} from 'kit';\ninterface C{n}Props extends KitProps {{ own: string{extra} }}\n\
+                 export function C{n}(props: C{n}Props) {{ return null; }}\n"
+            )
+        };
+        for n in 0..1000 {
+            let file = root.join(format!("src/c{n}/C{n}.tsx"));
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, source(n, "")).unwrap();
+        }
+        let options =
+            PipelineOptions { src_dirs: vec![root.join("src")], load_dependencies: true, ..Default::default() };
+        let first = Revision::cold(&options, 0);
+        assert_eq!(first.demands.len(), 1000);
+        let edited = root.join("src/c0/C0.tsx");
+        std::fs::write(&edited, source(0, "; more: string")).unwrap();
+        let (second, _) = first.next(&options, &edited).unwrap();
+        assert!(Arc::ptr_eq(&first.demands, &second.demands), "unchanged imports: the map is shared");
+        std::fs::write(&edited, "export function C0(props: { own: string }) { return null; }\n").unwrap();
+        let (third, _) = second.next(&options, &edited).unwrap();
+        assert!(!Arc::ptr_eq(&second.demands, &third.demands), "changed imports: a map of its own");
+        assert_eq!(third.demands.len(), 999);
     }
 }

@@ -40,6 +40,9 @@ fn merged_interfaces<'a>(key: &str, react_file: &Utf8Path, ctx: &'a ResolutionCo
     let mut layers: Vec<&CollectedInterface> =
         ctx.react_index().lookup_interface_exact(react_file, key).into_iter().collect();
     layers.extend(ctx.named_types.react_augmentations(react_file, key));
+    // A file's declaration once, however many indexes hold it: a copy would spend the traversals' bounded steps again.
+    let mut seen = rustc_hash::FxHashSet::default();
+    layers.retain(|iface| seen.insert(&iface.file_path));
     layers
 }
 

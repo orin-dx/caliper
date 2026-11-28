@@ -344,8 +344,13 @@ fn provenance_names_the_resolved_components_and_each_fallback_reason() {
     let mut out = output();
     let outcome = SemanticOutcome {
         components: vec![button(vec![])],
-        fallbacks: vec![SemanticFallback { key: "Card".to_string(), reason: "not exported".to_string() }],
+        fallbacks: vec![SemanticFallback {
+            key: "Card".to_string(),
+            reason: "not exported".to_string(),
+            transient: false,
+        }],
         diagnostics: vec![],
+        unavailable: None,
     };
 
     merge_semantic(&mut out, outcome);
@@ -361,6 +366,32 @@ fn provenance_names_the_resolved_components_and_each_fallback_reason() {
                 "1 component(s) kept their structural result: not exported",
                 vec!["Card".to_string()]
             ),
+        ]
+    );
+}
+
+/// A fallback the checker gave because it failed (transient) is a warning, which hosts count as degrading the answer;
+/// the same reason as a verdict stays info. Storybook's `degradedBy` reads only warnings and errors.
+#[test]
+fn a_transient_fallback_is_a_warning_and_a_verdict_is_info() {
+    let mut out = output();
+    let fallback =
+        |key: &str, transient| SemanticFallback { key: key.to_string(), reason: "why".to_string(), transient };
+    let outcome = SemanticOutcome {
+        components: vec![],
+        fallbacks: vec![fallback("Button", true), fallback("Card", false)],
+        diagnostics: vec![],
+        unavailable: None,
+    };
+
+    merge_semantic(&mut out, outcome);
+
+    let summary: Vec<_> = out.diagnostics.iter().map(|d| (d.severity.clone(), d.affects.clone())).collect();
+    assert_eq!(
+        summary,
+        [
+            (DiagnosticSeverity::Info, vec!["Card".to_string()]),
+            (DiagnosticSeverity::Warning, vec!["Button".to_string()])
         ]
     );
 }
@@ -543,7 +574,7 @@ fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_fil
         composes: Some(Vec::new()),
         whole: Vec::new(),
     };
-    let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string() };
+    let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string(), transient: false };
     merge_semantic(
         &mut out,
         SemanticOutcome { components: vec![answer], fallbacks: vec![fallback], ..Default::default() },

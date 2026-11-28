@@ -185,6 +185,10 @@ pub struct PipelineOptions {
     /// `extract` ignores it: the checker backend lives in `caliper-docgen-semantic`, which depends on this crate, so
     /// the embedding (the CLI) runs it and calls [`crate::types::semantic::merge_semantic`].
     pub checker: bool,
+    /// How many layers a dependency chain holds before the next extension flattens it; a test lowers it so a session
+    /// flattens at every load. Per run, so tests running at once do not share it.
+    #[cfg(test)]
+    pub(crate) chain_depth: usize,
 }
 
 impl Default for PipelineOptions {
@@ -201,6 +205,8 @@ impl Default for PipelineOptions {
             load_dependencies: true,
             collapse_inherited_props: CollapseInheritedProps::default(),
             checker: true,
+            #[cfg(test)]
+            chain_depth: crate::dependency_types::MAX_CHAIN_DEPTH,
         }
     }
 }

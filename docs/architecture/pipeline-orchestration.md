@@ -123,6 +123,12 @@ Pipeline-specific findings — fixed vs. still open (see also `docs/edge-cases.m
 
 **Still open** (deliberately deferred, not oversights):
 
+- **A dependency walk that could not read a file loads nothing past it until its retry.**
+  - While an `export *` target of a barrel is unreadable, a type that would resolve through a later target is reported unresolved, with the read warning.
+  - A module search that could not read every file withholds all its React augmentations, including those of the files it read.
+  - The ledger retries the walk from its root 30 s after the failure or at the next edit. After that, the answer equals a cold run's.
+  - Serving what the readable files gave made each degraded result a second index with its own invariants, and each one it missed was a bug (PR #527, rounds 33–40).
+
 - **A lazy answer depends on every project file's demands, not on a type checker.** A name a component's resolution reads that no project file's `project_demands` mentions (a type used only inside a function body, say) is loaded by a batch run when some other file mentions it, and by a lazy session only if the component's own closure does. `lazy_parity` found two such cases (React's imports, and memos computed before a name loaded) and fixed them; it checks every component of the fixtures and five corpora, in both orders.
 
 - **The dependency layer only grows during a watch session.** A demand an edit removes leaves its declarations loaded; they change no output (a name nothing references is never looked up), and a rebuild (a configuration change below, or `rebuild()`) starts from a fresh layer.

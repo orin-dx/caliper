@@ -147,6 +147,11 @@ pub struct SemanticFallback {
     /// Why the checker did not answer, for example that the component is not exported by its module. The merge groups
     /// components by this text into one warning.
     pub reason: String,
+    /// The checker failed while it answered (it rejected a request, panicked or stopped), so the structural result
+    /// stands for this request only: a session asks again, and nothing keeps it as the component's answer
+    /// ([`SemanticOutcome::is_degraded`]). `false` is a verdict about the component (it is not exported, not a
+    /// component), the same on every request until a file changes.
+    pub transient: bool,
 }
 
 /// The backend's answer for a run. A backend that could not start returns no components and one diagnostic, never an
@@ -159,6 +164,55 @@ pub struct SemanticOutcome {
     pub fallbacks: Vec<SemanticFallback>,
     /// What the backend itself reports (it could not start, it timed out); merged into the output's diagnostics.
     pub diagnostics: Vec<Diagnostic>,
+    /// Set where the checker was not asked: about every target when it answered nothing (it was not running, could not
+    /// start, timed out or crashed: [`SemanticOutcome::unavailable`]), or about the keys a run left unasked once the
+    /// heap passed its budget ([`SemanticOutcome::leave_unasked`]), and by nothing else. A target with no entry and no
+    /// mark is the checker's answer: absence is not unavailability.
+    pub unavailable: Option<Unavailable>,
+}
+
+/// The mark of the targets the checker was not asked about: every one, or the keys listed. Only
+/// [`SemanticOutcome::unavailable`], [`SemanticOutcome::request_failed`] and [`SemanticOutcome::leave_unasked`] make
+/// one, so no other outcome can claim it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unavailable(Unasked);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Unasked {
+    /// Every target: the backend cannot serve any request.
+    Backend,
+    /// Every target of this request: answering it failed.
+    Request,
+    /// These keys: the run stopped asking once the heap passed its budget.
+    Keys(Box<[String]>),
+}
+
+/// What a failure that left targets unasked says about the next request, decided where the failure is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnavailableScope {
+    /// The backend cannot serve any request: it is missing, unsupported, could not start, or stopped for the session.
+    Backend,
+    /// Only this request failed (it timed out, the checker crashed while answering it, the heap passed its budget):
+    /// another request may be answered.
+    Request,
+}
+
+impl Unavailable {
+    /// Whether the checker was not asked about `key`.
+    pub fn covers(&self, key: &str) -> bool {
+        match &self.0 {
+            Unasked::Backend | Unasked::Request => true,
+            Unasked::Keys(keys) => keys.iter().any(|unasked| unasked == key),
+        }
+    }
+
+    /// Whether the next request can be answered at all.
+    pub fn scope(&self) -> UnavailableScope {
+        match &self.0 {
+            Unasked::Backend => UnavailableScope::Backend,
+            Unasked::Request | Unasked::Keys(_) => UnavailableScope::Request,
+        }
+    }
 }
 
 /// A component the checker may be asked about.
@@ -203,30 +257,40 @@ pub trait SemanticProvider: Send + Sync {
     /// [`Self::request`]'s receiver on a thread of its own.
     fn request_at(&self, targets: Vec<SemanticTarget>, priority: SharedPriority, delivery: Delivery) {
         drop(priority);
-        let receiver = self.request(targets);
-        let delivery = Arc::new(Mutex::new(Some(delivery)));
-        let take =
-            |slot: &Mutex<Option<Delivery>>| slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-        let waiter = delivery.clone();
-        let waiting = std::thread::Builder::new().name("caliper-checker-answer".to_string()).spawn(move || {
-            let outcome = receiver.recv().ok();
-            if let Some(delivery) = take(&waiter) {
-                delivery.deliver(outcome);
-            }
+        deliver_from(self.request(targets), delivery, |wait| {
+            std::thread::Builder::new().name("caliper-checker-answer".to_string()).spawn(wait).map(drop)
         });
-        if let Err(error) = waiting
-            && let Some(delivery) = take(&delivery)
-        {
-            delivery.deliver(Some(SemanticOutcome::unavailable(format!(
-                "could not start a thread to wait for it: {error}"
-            ))));
-        }
     }
 
     /// Tells the checker that files changed on disk, before any request that may read them is queued. A checker that
     /// keeps what it read (a warm `tsc` holding a snapshot, ADR 0026) reads them again; one that reads every file
     /// afresh for each request needs nothing, which is the default.
     fn changed(&self, _change: SourceChange) {}
+}
+
+/// Gives `delivery` what `receiver` yields, waiting on the thread `spawn` starts. A thread that cannot be started fails
+/// this request only ([`SemanticOutcome::request_failed`]): the checker accepted it and may answer others.
+pub(crate) fn deliver_from(
+    receiver: std::sync::mpsc::Receiver<SemanticOutcome>,
+    delivery: Delivery,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
+) {
+    let delivery = Arc::new(Mutex::new(Some(delivery)));
+    let take = |slot: &Mutex<Option<Delivery>>| slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    let waiter = delivery.clone();
+    let waiting = spawn(Box::new(move || {
+        let outcome = receiver.recv().ok();
+        if let Some(delivery) = take(&waiter) {
+            delivery.deliver(outcome);
+        }
+    }));
+    if let Err(error) = waiting
+        && let Some(delivery) = take(&delivery)
+    {
+        delivery.deliver(Some(SemanticOutcome::request_failed(format!(
+            "could not start a thread to wait for it: {error}"
+        ))));
+    }
 }
 
 /// Who waits for a request to the checker, which decides what a busy checker answers first. The classes are ordered
@@ -362,15 +426,68 @@ pub enum SourceChange {
 }
 
 impl SemanticOutcome {
-    /// An outcome for a backend that did nothing: the structural result stands, for this reason.
+    /// An outcome for a backend that cannot serve any request: the structural result stands, for this reason.
     pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self::unasked(Unasked::Backend, reason.into())
+    }
+
+    /// An outcome for one request that failed (it timed out, the checker crashed while answering it): the structural
+    /// result stands for its targets, for this reason, and the next request may be answered.
+    pub fn request_failed(reason: impl Into<String>) -> Self {
+        Self::unasked(Unasked::Request, reason.into())
+    }
+
+    fn unasked(unasked: Unasked, reason: String) -> Self {
         let diagnostic = Diagnostic::new(
             DiagnosticSeverity::Warning,
             DiagnosticCode::SemanticBackend,
-            format!("TypeScript checker backend unavailable: {}", reason.into()),
+            format!("TypeScript checker backend unavailable: {reason}"),
         )
         .with_help("The structural result is used instead.");
-        Self { diagnostics: vec![diagnostic], ..Self::default() }
+        Self { diagnostics: vec![diagnostic], unavailable: Some(Unavailable(unasked)), ..Self::default() }
+    }
+
+    /// Mark `keys` as not asked: the run stopped asking once the heap passed its budget, which says nothing about them,
+    /// so the outcome is degraded for them ([`SemanticOutcome::is_degraded`]). An outcome the checker gave nothing
+    /// stays marked for every target.
+    pub fn leave_unasked(&mut self, keys: impl IntoIterator<Item = String>) {
+        let mut keys: Vec<String> = keys.into_iter().collect();
+        match &mut self.unavailable {
+            Some(Unavailable(Unasked::Backend | Unasked::Request)) => return,
+            Some(Unavailable(Unasked::Keys(listed))) => keys.extend(listed.iter().cloned()),
+            None => {}
+        }
+        if keys.is_empty() {
+            return;
+        }
+        keys.sort();
+        keys.dedup();
+        self.unavailable = Some(Unavailable(Unasked::Keys(keys.into_boxed_slice())));
+    }
+
+    /// Add `other`'s answers, fallbacks, diagnostics and its mark of the targets not asked to this outcome's: the one
+    /// way two parts of a run are put together, so no part's mark is lost.
+    pub fn merge(&mut self, mut other: SemanticOutcome) {
+        self.components.append(&mut other.components);
+        self.fallbacks.append(&mut other.fallbacks);
+        self.diagnostics.append(&mut other.diagnostics);
+        // Every target outweighs listed keys, and a backend that cannot serve outweighs one failed request.
+        match (other.unavailable, &self.unavailable) {
+            (Some(Unavailable(Unasked::Backend)), _) => self.unavailable = Some(Unavailable(Unasked::Backend)),
+            (Some(Unavailable(Unasked::Request)), Some(Unavailable(Unasked::Backend))) => {}
+            (Some(Unavailable(Unasked::Request)), Some(Unavailable(Unasked::Request | Unasked::Keys(_))) | None) => {
+                self.unavailable = Some(Unavailable(Unasked::Request))
+            }
+            (Some(Unavailable(Unasked::Keys(keys))), _) => self.leave_unasked(keys.into_vec()),
+            (None, _) => {}
+        }
+    }
+
+    /// Whether this outcome answers only for this request: the checker was unavailable or not asked about a target
+    /// ([`Unavailable`]), or failed while it answered a component ([`SemanticFallback::transient`]). Nothing keeps such
+    /// an outcome (a session's answers, the kept answer on disk); the next request asks the checker again.
+    pub fn is_degraded(&self) -> bool {
+        self.unavailable.is_some() || self.fallbacks.iter().any(|fallback| fallback.transient)
     }
 }
 
@@ -1175,6 +1292,15 @@ fn replace_props<'a>(
     MergedProps { kept, unread, diagnostics: Vec::new() }
 }
 
+/// The severity of the diagnostic a fallback gives: a warning when the checker failed on the component (transient), so
+/// a host that counts warnings as degrading the answer (Storybook's `degradedBy`) does; info for the checker's verdict.
+pub(crate) fn fallback_severity(transient: bool) -> DiagnosticSeverity {
+    match transient {
+        true => DiagnosticSeverity::Warning,
+        false => DiagnosticSeverity::Info,
+    }
+}
+
 /// Merge the checker's props over `output`, component by component.
 ///
 /// Per `docs/type-checker-integration.md`: the checker decides which props exist, their types, whether they are
@@ -1205,7 +1331,8 @@ pub fn merge_semantic_in(
     resolver: ResolverFacts,
     cx: CollapseContext,
 ) {
-    let SemanticOutcome { components, fallbacks, diagnostics } = outcome;
+    // A whole-project run merges what it got once and keeps nothing, so a degraded outcome merges like any other.
+    let SemanticOutcome { components, fallbacks, diagnostics, unavailable: _ } = outcome;
     let syntax = SourceSyntax::read(
         components
             .iter()
@@ -1252,16 +1379,16 @@ pub fn merge_semantic_in(
         });
     }
 
-    let mut by_reason: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for SemanticFallback { key, reason } in fallbacks {
+    let mut by_reason: BTreeMap<(bool, String), Vec<String>> = BTreeMap::new();
+    for SemanticFallback { key, reason, transient } in fallbacks {
         if output.components.contains_key(&key) {
-            by_reason.entry(reason).or_default().push(key);
+            by_reason.entry((transient, reason)).or_default().push(key);
         }
     }
-    for (reason, mut keys) in by_reason {
+    for ((transient, reason), mut keys) in by_reason {
         keys.sort();
         let mut diagnostic = Diagnostic::new(
-            DiagnosticSeverity::Info,
+            fallback_severity(transient),
             DiagnosticCode::SemanticBackend,
             format!("{} component(s) kept their structural result: {reason}", keys.len()),
         );

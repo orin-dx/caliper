@@ -804,8 +804,8 @@ fn a_wildcard_export_does_not_answer_for_a_failed_explicit_re_export_of_the_same
     let layer = load(demands, &options(&root, true), None);
 
     let index = root.join("node_modules/shadow-kit/index.d.ts");
-    assert_eq!(layer.export_of(&index, "Props"), Some(&None));
-    assert_eq!(layer.export_of(&index, "Ns.x"), Some(&None));
+    assert_eq!(layer.export_of_complete(&index, "Props"), Some(&None));
+    assert_eq!(layer.export_of_complete(&index, "Ns.x"), Some(&None));
     let src = root.join("src");
     assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Props"), Some(Unresolved::Unresolvable));
     assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Ns.x"), Some(Unresolved::Unresolvable));
@@ -870,11 +870,17 @@ fn the_loader_flattens_star_exports_and_cycles_and_records_why_a_demand_failed()
 
     let dist = root.join("node_modules/ui-kit/dist");
     let index = dist.join("index.d.ts");
-    assert_eq!(layer.export_of(&index, "B"), Some(&Some((dist.join("cycle-b.d.ts"), "B".into()))));
-    assert_eq!(layer.export_of(&dist.join("cycle-a.d.ts"), "B"), Some(&Some((dist.join("cycle-b.d.ts"), "B".into()))));
-    assert_eq!(layer.export_of(&index, "ButtonProps"), Some(&Some((dist.join("button.d.ts"), "ButtonProps".into()))));
+    assert_eq!(layer.export_of_complete(&index, "B"), Some(&Some((dist.join("cycle-b.d.ts"), "B".into()))));
+    assert_eq!(
+        layer.export_of_complete(&dist.join("cycle-a.d.ts"), "B"),
+        Some(&Some((dist.join("cycle-b.d.ts"), "B".into())))
+    );
+    assert_eq!(
+        layer.export_of_complete(&index, "ButtonProps"),
+        Some(&Some((dist.join("button.d.ts"), "ButtonProps".into())))
+    );
     // `Missing` was looked for around the cycle, so its answer depended on the walk and was not kept.
-    assert_eq!(layer.export_of(&index, "Missing"), None);
+    assert_eq!(layer.export_of_complete(&index, "Missing"), None);
     let mut files: Vec<&str> = layer.files.iter().map(std::borrow::Borrow::<str>::borrow).collect();
     files.sort_unstable();
     assert_eq!(
@@ -946,6 +952,21 @@ fn flattening_a_chain_keeps_the_panics_an_earlier_layer_contained() {
     assert_eq!(messages, ["dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic"]);
 }
 
+/// The depth limit is the run's own: with `chain_depth` 0 every extension flattens, and a run with the default limit
+/// alongside it keeps its chain.
+#[test]
+fn the_depth_limit_is_each_run_s_own() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let default = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let flat = PipelineOptions { chain_depth: 0, ..default.clone() };
+    let extend = |options: &PipelineOptions| {
+        let first = Arc::new(load(vec![demand(&root, "ui-kit", "B")], options, None));
+        load(vec![demand(&root, "ui-kit", "Tone")], options, Some(&first))
+    };
+    assert_eq!(extend(&flat).depth, 0, "flattened at once");
+    assert_eq!(extend(&default).depth, 1, "a chain of two");
+}
+
 #[test]
 fn chained_layer_and_flatten_resolve_like_one_cold_load() {
     let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
@@ -978,7 +999,10 @@ fn chained_layer_and_flatten_resolve_like_one_cold_load() {
     assert_eq!(chained.missing(&demands), Vec::<Demand>::new());
     let dist = root.join("node_modules/ui-kit/dist");
     for name in names {
-        assert_eq!(chained.export_of(&dist.join("index.d.ts"), name), cold.export_of(&dist.join("index.d.ts"), name));
+        assert_eq!(
+            chained.export_of_complete(&dist.join("index.d.ts"), name),
+            cold.export_of_complete(&dist.join("index.d.ts"), name)
+        );
     }
     for name in names.iter().filter(|name| name.starts_with("Missing")) {
         assert_eq!(chained.unresolved_reason(&root.join("src"), "ui-kit", name), Some(Unresolved::NotExported));
@@ -1636,4 +1660,486 @@ fn a_deep_tree_and_a_path_with_no_mark_get_the_plain_walk_s_answer() {
     // With no mark anywhere above it, a directory is its own scope.
     let loader = Loader::new(&resolvers, &[], None);
     assert_eq!(&*loader.resolution_scope("/"), plain_scope(Utf8Path::new("/")).as_ref());
+}
+
+/// Makes `file` fail to read with an error other than "not found", for any user, root included: its bytes are not
+/// UTF-8. Returns its text, to write back.
+fn make_unreadable(file: &Utf8Path) -> String {
+    let text = std::fs::read_to_string(file).unwrap();
+    std::fs::write(file, [0xff_u8, 0xfe, 0xfd]).unwrap();
+    text
+}
+
+/// A dependency file that could not be read is unknown, not empty: the run reports it, and the next run, with the file
+/// readable again, finds what it exports, as a run with the cache off does.
+#[test]
+fn an_export_in_a_file_that_could_not_be_read_is_found_on_the_next_run() {
+    let (_tmp, root) = project(&[
+        ("node_modules/solo-kit/package.json", r#"{ "name": "solo-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/solo-kit/index.d.ts", "export * from './props';\n"),
+        ("node_modules/solo-kit/props.d.ts", "export interface SoloProps { tone: string }\n"),
+    ]);
+    let props = root.join("node_modules/solo-kit/props.d.ts");
+    let demands = || vec![demand(&root, "solo-kit", "SoloProps")];
+    let reason = |layer: &DependencyLayer| layer.unresolved_reason(&root.join("src"), "solo-kit", "SoloProps");
+    let declares = |layer: &DependencyLayer| layer.files.contains(&PathKey::from(props.as_path()));
+
+    let text = make_unreadable(&props);
+    let unreadable = load(demands(), &options(&root, true), None);
+    std::fs::write(&props, text).unwrap();
+    assert_eq!(
+        unreadable
+            .read_warnings()
+            .iter()
+            .map(|d| (d.file.as_deref(), d.severity == crate::types::DiagnosticSeverity::Warning))
+            .collect::<Vec<_>>(),
+        [(Some(props.as_str()), true)]
+    );
+    assert!(!declares(&unreadable));
+
+    // A session extends the layer: a demand from another directory looks the export up again, past the parent.
+    let unreadable = Arc::new(unreadable);
+    let elsewhere =
+        Demand { from: root.join("src/other/Tag.tsx"), specifier: "solo-kit".into(), name: "SoloProps".into() };
+    let extended = load(vec![elsewhere], &options(&root, true), Some(&unreadable));
+    assert!(declares(&extended), "the session's next revision finds the export");
+
+    let next = load(demands(), &options(&root, true), None);
+    let oracle = load(demands(), &PipelineOptions { use_cache: false, ..options(&root, true) }, None);
+    assert_eq!((declares(&oracle), reason(&oracle)), (true, None), "the oracle finds the export");
+    assert_eq!((declares(&next), reason(&next)), (true, None), "the next run finds the export");
+}
+
+/// The paths that read a dependency file, each made to fail in its own project.
+#[derive(Debug, Clone, Copy)]
+enum ReadPath {
+    /// An export lookup walks an `export *` into a file it cannot read.
+    ExportWalk,
+    /// An explicit re-export of the name leads into a file that cannot be read: a later `export *` declaring the name
+    /// is shadowed, so it must not answer.
+    NamedHop,
+    /// The index answered that the module does not export the name, and the search for why reads a file it cannot.
+    Cause,
+    /// The index answered the export, and its declaring file cannot be read when it is claimed.
+    Claim,
+    /// React's own types, read for a name they declare inside `namespace React`.
+    ReactModule,
+    /// The module an augmentation search starts from.
+    EntryScan,
+    /// A stub the search only scans for its re-exports (it names neither React nor "react").
+    ReExportScan,
+    /// A file the search parses because it may declare into React.
+    AugmentingScan,
+    /// The module declares into React and re-exports two files that do too, the first of which cannot be read: neither
+    /// the module's own augmentation nor the second file's is loaded until the search reads every file.
+    PartialAugmentation,
+}
+
+/// A package whose `SoloProps` is declared behind an `export *`; one whose `NamedProps` is re-exported by name ahead of
+/// an `export *` that declares another; React's types; one whose React augmentation is two hops away; and one that
+/// augments React itself and through a re-export.
+const READ_PATHS: &[(&str, &str)] = &[
+    ("node_modules/solo-kit/package.json", r#"{ "name": "solo-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+    ("node_modules/solo-kit/index.d.ts", "export * from './props';\n"),
+    ("node_modules/solo-kit/props.d.ts", "export interface SoloProps { tone: string }\n"),
+    ("node_modules/named-kit/package.json", r#"{ "name": "named-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+    ("node_modules/named-kit/index.d.ts", "export { NamedProps } from './named';\nexport * from './fallback';\n"),
+    ("node_modules/named-kit/named.d.ts", "export interface NamedProps { right: string }\n"),
+    ("node_modules/named-kit/fallback.d.ts", "export interface NamedProps { wrong: string }\n"),
+    (
+        "node_modules/@types/react/package.json",
+        r#"{ "name": "@types/react", "version": "18.0.0", "types": "index.d.ts" }"#,
+    ),
+    (
+        "node_modules/@types/react/index.d.ts",
+        "export = React;\nexport as namespace React;\ndeclare namespace React {\n    interface CSSProperties { color?: string }\n}\n",
+    ),
+    ("node_modules/reexp/package.json", r#"{ "name": "reexp", "version": "1.0.0", "types": "index.d.ts" }"#),
+    ("node_modules/reexp/index.d.ts", "export * from './mid';\n"),
+    ("node_modules/reexp/mid.d.ts", "export * from 'inner';\n"),
+    ("node_modules/inner/package.json", r#"{ "name": "inner", "version": "1.0.0", "types": "index.d.ts" }"#),
+    (
+        "node_modules/inner/index.d.ts",
+        "export interface Inner {}\ndeclare module 'react' { interface HTMLAttributes<T> { tw?: string } }\n",
+    ),
+    ("node_modules/aug-kit/package.json", r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+    (
+        "node_modules/aug-kit/index.d.ts",
+        "export * from './more';\nexport * from './extra';\n\
+         declare module 'react' { interface HTMLAttributes<T> { tw?: string } }\n",
+    ),
+    (
+        "node_modules/aug-kit/more.d.ts",
+        "export interface More {}\ndeclare module 'react' { interface AriaAttributes { more?: string } }\n",
+    ),
+    (
+        "node_modules/aug-kit/extra.d.ts",
+        "export interface Extra {}\ndeclare module 'react' { interface DOMAttributes<T> { extra?: string } }\n",
+    ),
+];
+
+/// What a layer answers for `demands`: whether it followed them, the files it loaded (declaring and React's), why each
+/// name was not found, each resolution, and the files `reexp` and `aug-kit` lead to that augment React.
+type Answers = (
+    bool,
+    Vec<PathKey>,
+    Vec<Option<Unresolved>>,
+    Vec<Option<Result<Utf8PathBuf, Unresolved>>>,
+    [Option<Vec<Utf8PathBuf>>; 2],
+);
+
+fn answers(layer: &DependencyLayer, root: &Utf8Path, demands: &[Demand]) -> Answers {
+    let mut files: Vec<PathKey> =
+        layer.chain().flat_map(|layer| layer.files.iter().chain(&layer.react_files).cloned()).collect();
+    files.sort();
+    files.dedup();
+    let dir = |demand: &Demand| demand.from.parent().unwrap().to_owned();
+    let augmenters = |module: &str| layer.augmenters_of(&PathKey::from(root.join(module).as_path())).cloned();
+    (
+        layer.covers(demands),
+        files,
+        demands.iter().map(|d| layer.unresolved_reason(&dir(d), &d.specifier, &d.name)).collect(),
+        demands
+            .iter()
+            .map(|d| layer.resolution(&(Box::from(dir(d).as_str()), Box::from(&*d.specifier))).cloned())
+            .collect(),
+        [augmenters("node_modules/reexp/index.d.ts"), augmenters("node_modules/aug-kit/index.d.ts")],
+    )
+}
+
+/// Every path that reads a dependency file, made to fail one at a time with the cache on. The run reports the file and
+/// keeps what it read: its layer loads exactly the oracle's files minus those only the unreadable file led to, holds no
+/// reason for a name it could not look up, and does not count the demand as followed. A session's next load over the
+/// layer (the demands `missing` gives, as a session asks) and the next cold run answer as a run that never failed (the
+/// oracle: cache off, every file readable).
+#[test]
+fn a_file_that_could_not_be_read_is_read_again_by_the_next_load_on_every_path() {
+    let paths = [
+        ReadPath::ExportWalk,
+        ReadPath::NamedHop,
+        ReadPath::Cause,
+        ReadPath::Claim,
+        ReadPath::ReactModule,
+        ReadPath::EntryScan,
+        ReadPath::ReExportScan,
+        ReadPath::AugmentingScan,
+        ReadPath::PartialAugmentation,
+    ];
+    for path in paths {
+        let (_tmp, root) = project(READ_PATHS);
+        let named = |specifier: &str, name: &str| vec![demand(&root, specifier, name)];
+        let module_only = |specifier: &str| {
+            vec![Demand { from: root.join("src/App.tsx"), specifier: specifier.into(), name: CompactString::default() }]
+        };
+        let (unreadable, demands, warm, lost): (&str, Vec<Demand>, bool, &[&str]) = match path {
+            ReadPath::ExportWalk => {
+                let props = "node_modules/solo-kit/props.d.ts";
+                (props, named("solo-kit", "SoloProps"), false, &[props])
+            }
+            ReadPath::NamedHop => {
+                let named_file = "node_modules/named-kit/named.d.ts";
+                (named_file, named("named-kit", "NamedProps"), false, &[named_file])
+            }
+            ReadPath::Cause => ("node_modules/solo-kit/props.d.ts", named("solo-kit", "Missing"), true, &[]),
+            ReadPath::Claim => {
+                let props = "node_modules/solo-kit/props.d.ts";
+                (props, named("solo-kit", "SoloProps"), true, &[props])
+            }
+            ReadPath::ReactModule => {
+                let react = "node_modules/@types/react/index.d.ts";
+                (react, named("react", "CSSProperties"), false, &[react])
+            }
+            ReadPath::EntryScan => {
+                ("node_modules/reexp/index.d.ts", module_only("reexp"), false, &["node_modules/inner/index.d.ts"])
+            }
+            ReadPath::ReExportScan => {
+                ("node_modules/reexp/mid.d.ts", module_only("reexp"), false, &["node_modules/inner/index.d.ts"])
+            }
+            ReadPath::AugmentingScan => {
+                let inner = "node_modules/inner/index.d.ts";
+                (inner, module_only("reexp"), false, &[inner])
+            }
+            // A search that could not read a file loads none of the augmentations it found.
+            ReadPath::PartialAugmentation => {
+                let more = "node_modules/aug-kit/more.d.ts";
+                (
+                    more,
+                    module_only("aug-kit"),
+                    false,
+                    &[more, "node_modules/aug-kit/index.d.ts", "node_modules/aug-kit/extra.d.ts"],
+                )
+            }
+        };
+        let file = root.join(unreadable);
+        let cached = options(&root, true);
+        if warm {
+            drop(load(demands.clone(), &cached, None));
+        }
+
+        let text = make_unreadable(&file);
+        let failed = load(demands.clone(), &cached, None);
+        std::fs::write(&file, text).unwrap();
+        let failed = Arc::new(failed);
+        let session = load(failed.missing(&demands), &cached, Some(&failed));
+        let next = load(demands.clone(), &cached, None);
+        let oracle = load(demands.clone(), &PipelineOptions { use_cache: false, ..options(&root, true) }, None);
+
+        let warnings = failed.read_warnings();
+        let reported: Vec<Option<&str>> = warnings.iter().map(|d| d.file.as_deref()).collect();
+        assert_eq!(reported, [Some(file.as_str())], "{path:?}: the failed read is reported");
+        let expected = answers(&oracle, &root, &demands);
+        let lost: Vec<PathKey> = lost.iter().map(|lost| PathKey::from(root.join(lost).as_path())).collect();
+        assert!(expected.0, "{path:?}: the oracle follows the demand: {expected:?}");
+        assert!(lost.iter().all(|lost| expected.1.contains(lost)), "{path:?}: the oracle loads {lost:?}: {expected:?}");
+        let (covered, files, reasons, ..) = answers(&failed, &root, &demands);
+        let kept: Vec<PathKey> = expected.1.iter().filter(|file| !lost.contains(file)).cloned().collect();
+        assert_eq!(files, kept, "{path:?}: what was read is served, and only that");
+        assert!(!covered, "{path:?}: the demand is not counted as followed");
+        assert_eq!(reasons, vec![None; demands.len()], "{path:?}: no reason for a name not looked up");
+        assert_eq!(answers(&session, &root, &demands), expected, "{path:?}: the session's next load");
+        assert_eq!(answers(&next, &root, &demands), expected, "{path:?}: the next run");
+    }
+}
+
+/// The barrel `walk/index.d.ts`: `export *` from each of `TARGETS`, in order, each declaring its own name.
+const WALK: &[(&str, &str)] = &[
+    ("node_modules/walk/package.json", r#"{ "name": "walk", "version": "1.0.0", "types": "index.d.ts" }"#),
+    ("node_modules/walk/index.d.ts", "export * from './a';\nexport * from './b';\nexport * from './c';\n"),
+    ("node_modules/walk/a.d.ts", "export interface AProps { a: string }\n"),
+    ("node_modules/walk/b.d.ts", "export interface BProps { b: string }\n"),
+    ("node_modules/walk/c.d.ts", "export interface CProps { c: string }\n"),
+];
+
+/// A differential test of the export walk over a barrel of `export *` targets, each unreadable in turn. The layer
+/// equals the all-readable one minus exactly what the unreadable target declared: every other target's name is loaded,
+/// a name found before the walk reached the unreadable target is answered and kept, and a name the walk looked for past
+/// it (found later or not at all) is used for this load only: neither kept as an export nor counted as followed, since
+/// the unreadable target may have declared it first. With the target readable again, the session's next load and the
+/// next cold run equal the cold answer.
+#[test]
+fn an_export_walk_continues_past_a_target_it_cannot_read_and_keeps_only_what_it_answered_in_full() {
+    const TARGETS: [(&str, &str); 3] = [("a", "AProps"), ("b", "BProps"), ("c", "CProps")];
+    let target = |root: &Utf8Path, file: &str| root.join(format!("node_modules/walk/{file}.d.ts"));
+    for (unreadable, _) in TARGETS.iter().enumerate() {
+        let (_tmp, root) = project(WALK);
+        let barrel = root.join("node_modules/walk/index.d.ts");
+        let demands: Vec<Demand> = TARGETS.iter().map(|(_, name)| demand(&root, "walk", name)).collect();
+        let export = |layer: &DependencyLayer, (_, name): (&str, &str)| -> Option<Option<(Utf8PathBuf, String)>> {
+            let found = layer.export_of_complete(&barrel, name)?;
+            Some(found.as_ref().map(|(declaring, name)| (declaring.clone(), name.to_string())))
+        };
+        let declared = |(file, name): (&str, &str)| Some(Some((target(&root, file), name.to_owned())));
+        let cached = options(&root, true);
+        let oracle = load(demands.clone(), &PipelineOptions { use_cache: false, ..options(&root, true) }, None);
+
+        let file = target(&root, TARGETS[unreadable].0);
+        let text = make_unreadable(&file);
+        let failed = Arc::new(load(demands.clone(), &cached, None));
+        std::fs::write(&file, text).unwrap();
+        let session = load(failed.missing(&demands), &cached, Some(&failed));
+        let next = load(demands.clone(), &cached, None);
+
+        let expected = answers(&oracle, &root, &demands);
+        assert_eq!(expected.1.len(), TARGETS.len(), "the oracle loads every target: {expected:?}");
+        let (_, files, reasons, ..) = answers(&failed, &root, &demands);
+        let before: Vec<PathKey> =
+            TARGETS[..unreadable].iter().map(|(t, _)| PathKey::from(target(&root, t).as_path())).collect();
+        assert_eq!(files, before, "{unreadable}: only the targets before the unreadable one are loaded");
+        assert_eq!(reasons, [None, None, None], "{unreadable}");
+        assert_eq!(failed.missing(&demands), demands[unreadable..], "{unreadable}: the names walked past it");
+        let exports: Vec<_> = TARGETS.iter().map(|&target| export(&failed, target)).collect();
+        let kept_exports: Vec<_> =
+            TARGETS.iter().enumerate().map(|(at, &t)| if at < unreadable { declared(t) } else { None }).collect();
+        assert_eq!(exports, kept_exports, "{unreadable}: only the answers found before it are kept");
+        let reported: Vec<Option<String>> = failed.read_warnings().into_iter().map(|d| d.file).collect();
+        assert_eq!(reported, [Some(file.to_string())], "{unreadable}: the failed read is reported");
+
+        let all: Vec<_> = TARGETS.iter().map(|&t| declared(t)).collect();
+        assert_eq!(TARGETS.iter().map(|&t| export(&oracle, t)).collect::<Vec<_>>(), all, "the oracle");
+        assert_eq!(answers(&session, &root, &demands), expected, "{unreadable}: the session's next load");
+        assert_eq!(TARGETS.iter().map(|&t| export(&session, t)).collect::<Vec<_>>(), all, "{unreadable}: session");
+        assert_eq!(answers(&next, &root, &demands), expected, "{unreadable}: the next run");
+    }
+}
+
+/// Which reader of a dependency file a test asks.
+#[derive(Debug, Clone, Copy)]
+enum Reader {
+    Parse,
+    Scan,
+}
+
+/// Readers that ask for one file at once read it once and all get its one result, a failed read included, through
+/// either reader.
+#[test]
+fn readers_that_meet_read_a_file_once_and_share_its_result() {
+    const READERS: usize = 8;
+    const TEXT: &str = "export * from './more';\n";
+    let (_tmp, root) = project(&[("node_modules/kit/props.d.ts", TEXT)]);
+    let file = root.join("node_modules/kit/props.d.ts");
+    let options = options(&root, true);
+    let resolvers = ModuleResolvers::new(&options);
+    for reader in [Reader::Parse, Reader::Scan] {
+        for readable in [true, false] {
+            if !readable {
+                make_unreadable(&file);
+            }
+            let mut loader = Loader::new(&resolvers, &[], None);
+            loader.read_pause = std::time::Duration::from_millis(50);
+            let barrier = std::sync::Barrier::new(READERS);
+            let read = || -> Result<Option<Vec<String>>, ReadFailed> {
+                barrier.wait();
+                Ok(match reader {
+                    Reader::Parse => loader.parse(&file)?.map(|data| scan_of(&data, &file).1.to_vec()),
+                    Reader::Scan => loader.augmentation_scan(&file, false)?.map(|(_, re_exports)| re_exports.to_vec()),
+                })
+            };
+            let results: Vec<_> = std::thread::scope(|scope| {
+                let readers: Vec<_> = (0..READERS).map(|_| scope.spawn(read)).collect();
+                readers.into_iter().map(|reader| reader.join().unwrap()).collect()
+            });
+            std::fs::write(&file, TEXT).unwrap();
+
+            let expected = match readable {
+                true => Ok(Some(vec!["./more".to_string()])),
+                false => Err(ReadFailed(PathKey::from(file.as_path()))),
+            };
+            assert_eq!(results, vec![expected; READERS], "{reader:?}, readable: {readable}");
+            let reads = *loader.reads.get(&PathKey::from(file.as_path())).unwrap();
+            assert_eq!(reads, 1, "{reader:?}, readable: {readable}");
+        }
+    }
+}
+
+/// The live-walk rule in an eager session: the retry set, the demand set and the reported warnings all follow the
+/// demands project files make now.
+mod live_walks {
+    use super::*;
+    use crate::pipeline::WatchSession;
+
+    const SOLO_KIT: [(&str, &str); 3] = [
+        ("node_modules/solo-kit/package.json", r#"{ "name": "solo-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/solo-kit/index.d.ts", "export * from './props';\n"),
+        ("node_modules/solo-kit/props.d.ts", "export interface SoloProps { tone: string }\n"),
+    ];
+    const CARD: &str = "import type { SoloProps } from 'solo-kit';\ninterface CardProps extends SoloProps { own: string }\n\
+                        export function Card(props: CardProps) { return null; }\n";
+    const DROPPED: &str = "export function Card(props: { own: string }) { return null; }\n";
+    const PLAIN: &str = "export function Plain(props: { title: string }) { return null; }\n";
+
+    fn session(root: &Utf8Path) -> WatchSession {
+        let session = WatchSession::new(options(root, true));
+        drop(session.initialize());
+        session
+    }
+
+    fn write(root: &Utf8Path, path: &str, body: &[u8]) -> Utf8PathBuf {
+        let path = root.join(path);
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn io_warnings(session: &WatchSession) -> Vec<String> {
+        let output = session.current_output().unwrap();
+        let io = |d: &&Diagnostic| d.code == DiagnosticCode::IoError;
+        output.diagnostics.iter().filter(io).filter_map(|d| d.file.clone()).collect()
+    }
+
+    /// React's own declarations follow their `csstype` import, which could not be read. It reads on disk and an
+    /// unrelated file is edited: the walk from React's file is followed again, and `Box`'s CSS props equal a fresh run.
+    #[test]
+    fn a_walk_from_react_declarations_is_followed_again() {
+        let box_source = "import * as React from 'react';\n\
+            export function Box(props: { z?: React.CSSProperties['zIndex'] }) { return null; }\n";
+        let mut files = REACT_WITH_CSSTYPE.to_vec();
+        files.extend([("src/box/Box.tsx", box_source), ("src/plain/Plain.tsx", PLAIN)]);
+        let (_tmp, root) = project(&files);
+        let csstype = root.join("node_modules/csstype/index.d.ts");
+        let text = std::fs::read_to_string(&csstype).unwrap();
+        std::fs::write(&csstype, [0xff; 8]).unwrap();
+        let session = session(&root);
+        std::fs::write(&csstype, text).unwrap();
+        let plain = write(&root, "src/plain/Plain.tsx", format!("{PLAIN}// edited\n").as_bytes());
+        drop(session.update_file(&plain));
+        assert_eq!(session.component("Box"), self::session(&root).component("Box"));
+    }
+
+    /// The only importer drops an import whose file could not be read, then restores it once the file reads: the
+    /// restored import starts a fresh walk, and `Card` equals a fresh run.
+    #[test]
+    fn a_dropped_then_restored_import_is_walked_again() {
+        let (_tmp, root) = project(&[&SOLO_KIT[..], &[("src/card/Card.tsx", CARD)]].concat());
+        let props = root.join("node_modules/solo-kit/props.d.ts");
+        let text = std::fs::read_to_string(&props).unwrap();
+        std::fs::write(&props, [0xff; 8]).unwrap();
+        let session = session(&root);
+        let card = write(&root, "src/card/Card.tsx", DROPPED.as_bytes());
+        drop(session.update_file(&card));
+        std::fs::write(&props, text).unwrap();
+        write(&root, "src/card/Card.tsx", CARD.as_bytes());
+        drop(session.update_file(&card));
+        assert_eq!(session.component("Card"), self::session(&root).component("Card"));
+    }
+
+    /// The only importer of a file that could not be read drops its import: no live walk reaches the file, so it is
+    /// not reported; with a second importer it still is.
+    #[test]
+    fn a_failed_read_no_live_walk_reaches_is_not_reported() {
+        let tag = CARD.replace("Card", "Tag");
+        for (second, reported) in [(None, false), (Some(tag.as_str()), true)] {
+            let mut files: Vec<(&str, &str)> = [&SOLO_KIT[..], &[("src/card/Card.tsx", CARD)]].concat();
+            files.extend(second.map(|tag| ("src/tag/Tag.tsx", tag)));
+            let (_tmp, root) = project(&files);
+            let props = root.join("node_modules/solo-kit/props.d.ts");
+            std::fs::write(&props, [0xff; 8]).unwrap();
+            let session = session(&root);
+            assert_eq!(io_warnings(&session), [props.to_string()]);
+            let card = write(&root, "src/card/Card.tsx", DROPPED.as_bytes());
+            drop(session.update_file(&card));
+            assert_eq!(!io_warnings(&session).is_empty(), reported, "second importer: {}", second.is_some());
+        }
+    }
+}
+
+/// Whether a read fails, given whether it is an augmentation scan's.
+pub(crate) type ReadFault = std::sync::Arc<dyn Fn(bool) -> bool + Send + Sync>;
+
+/// The files whose reads a test makes fail, each with its rule. Keyed by path, so tests in their own directories do not
+/// meet each other's.
+static READ_FAULTS: std::sync::Mutex<Vec<(Utf8PathBuf, ReadFault)>> = std::sync::Mutex::new(Vec::new());
+
+thread_local! {
+    static SCANNING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks this thread's reads as an augmentation scan's while it lives.
+pub(super) struct Scanning;
+
+impl Scanning {
+    pub(super) fn start() -> Self {
+        SCANNING.with(|scanning| scanning.set(true));
+        Scanning
+    }
+}
+
+impl Drop for Scanning {
+    fn drop(&mut self) {
+        SCANNING.with(|scanning| scanning.set(false));
+    }
+}
+
+pub(super) fn read_fault(file: &Utf8Path) -> bool {
+    let faults = READ_FAULTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let fault = faults.iter().find(|(path, _)| path == file).map(|(_, fault)| fault.clone());
+    drop(faults);
+    fault.is_some_and(|fault| fault(SCANNING.with(std::cell::Cell::get)))
+}
+
+/// Makes reads of `file` fail by `fault`, or stops failing them.
+pub(crate) fn set_read_fault(file: &Utf8Path, fault: Option<ReadFault>) {
+    let mut faults = READ_FAULTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    faults.retain(|(path, _)| path != file);
+    if let Some(fault) = fault {
+        faults.push((file.to_owned(), fault));
+    }
 }
