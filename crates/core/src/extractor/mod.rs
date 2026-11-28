@@ -1545,7 +1545,7 @@ impl evidence::Scope for SourceDataCollector<'_> {
     }
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
-        matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
+        matches!(self.react_api(shape::call(call).function), Some(ReactApi::Memo | ReactApi::ForwardRef))
     }
 
     fn is_preact_h(&self, receiver: Option<&str>) -> bool {
@@ -1560,3 +1560,7 @@ impl evidence::Scope for SourceDataCollector<'_> {
         })
     }
 }
+
+#[cfg(test)]
+mod oxc_parity_tests;
+mod shape;

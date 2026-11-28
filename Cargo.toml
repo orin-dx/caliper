@@ -42,14 +42,14 @@ let_underscore_must_use = "deny"
 
 [workspace.dependencies]
 # OXC — all main crates move in lockstep; resolver has separate versioning
-oxc_allocator     = "0.158"
-oxc_parser        = "0.158"
-oxc_semantic      = "0.158"
-oxc_ast           = "0.158"
-oxc_ast_visit     = "0.158"
-oxc_span          = "0.158"
-oxc_str           = "0.158"
-oxc_syntax        = "0.158"
+oxc_allocator     = "0.159"
+oxc_parser        = "0.159"
+oxc_semantic      = "0.159"
+oxc_ast           = "0.159"
+oxc_ast_visit     = "0.159"
+oxc_span          = "0.159"
+oxc_str           = "0.159"
+oxc_syntax        = "0.159"
 oxc_resolver      = "11"
 
 # The TypeScript checker the semantic backend links (ADR 0026). Exact pins: a bump is a parity check against the Go

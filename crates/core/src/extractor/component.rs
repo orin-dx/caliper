@@ -213,7 +213,7 @@ impl<'src> SourceDataCollector<'src> {
         }
 
         // forwardRef<RefType, PropsType>(fn) — PropsType is the second type parameter
-        let type_params = call.type_arguments.as_ref()?;
+        let type_params = super::shape::call(call).type_args?;
         if type_params.params.len() < 2 {
             return None;
         }
@@ -299,7 +299,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             // `forwardRef<Ref, Props>(…)` names the props in its second type argument; otherwise the render function's
             // first parameter does. A call with one type argument and no function (`forwardRef<Ref>()`) names neither.
-            let props_type = inner.type_arguments.as_ref().and_then(|type_params| type_params.params.get(1));
+            let props_type = super::shape::call(inner).type_args.and_then(|type_params| type_params.params.get(1));
             let Some(props_type) = props_type else {
                 let render = inner.arguments.first()?;
                 return self.mapping_from_typed_function(decl, name, call, render, DetectionRule::ForwardRef);
@@ -601,7 +601,7 @@ impl<'src> SourceDataCollector<'src> {
     /// (bare or `React.`-qualified). Returns the matched bare name for use in
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
-        let super_name = self.expression_to_ident_name(&class.heritage.as_ref()?.expression);
+        let super_name = self.expression_to_ident_name(super::shape::base(class)?.base);
         match self.react_type_export(&super_name)?.as_str() {
             "Component" => Some("Component"),
             "PureComponent" => Some("PureComponent"),
@@ -618,7 +618,7 @@ impl<'src> SourceDataCollector<'src> {
     /// contract — callers decide whether and how to surface a diagnostic.
     pub(super) fn try_class_component<'a>(&mut self, class: &Class<'a>, name: &str) -> Option<ComponentMapping> {
         self.super_class_is_component_family(class)?;
-        let type_args = class.heritage.as_ref()?.type_arguments.as_ref()?;
+        let type_args = super::shape::base(class)?.type_args?;
         let props_type = type_args.params.first()?;
         let (props_name, props_type_args) = self.extract_type_name_from_type(props_type)?;
         let (description, tags) = self.find_jsdoc_with_tags(class.span.start);
@@ -880,20 +880,20 @@ impl<'src> SourceDataCollector<'src> {
     /// Whether `call` makes a component that takes a `ref` whatever its props type declares: React's `forwardRef` however
     /// it is imported or spelled, or another module's own `forwardRef` (React Aria's).
     fn is_forward_ref_call(&self, call: &CallExpression<'_>) -> bool {
-        if self.react_api(&call.callee) == Some(ReactApi::ForwardRef) {
+        if self.react_api(super::shape::call(call).function) == Some(ReactApi::ForwardRef) {
             return true;
         }
-        let name = match peel_expr(&call.callee) {
+        let name = match peel_expr(super::shape::call(call).function) {
             Expression::Identifier(id) => id.name.as_str(),
             Expression::StaticMemberExpression(member) => member.property.name.as_str(),
             _ => return false,
         };
-        name == "forwardRef" && self.react_api(&call.callee).is_none()
+        name == "forwardRef" && self.react_api(super::shape::call(call).function).is_none()
     }
 
     /// Extract the callee name of a call expression (simple ident or member expr).
     pub(super) fn extract_callee_name<'a>(&self, call: &CallExpression<'a>) -> Option<String> {
-        match &call.callee {
+        match super::shape::call(call).function {
             Expression::Identifier(id) => Some(id.name.as_str().to_owned()),
             Expression::StaticMemberExpression(me) => {
                 Some(format!("{}.{}", self.expression_to_ident_name(&me.object), me.property.name.as_str()))
@@ -923,7 +923,7 @@ pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<
 
 /// Whether the call is `Object.assign(...)`.
 pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
-    matches!(&call.callee, Expression::StaticMemberExpression(callee)
+    matches!(super::shape::call(call).function, Expression::StaticMemberExpression(callee)
         if callee.property.name == "assign"
             && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"))
 }
@@ -933,7 +933,7 @@ pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
 /// `observer`, and curried wrappers such as `connect(...)(Component)` or `styled(...)(Component)`.
 fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
     // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`.
-    let callee = match peel_expr(&call.callee) {
+    let callee = match peel_expr(super::shape::call(call).function) {
         Expression::Identifier(id) => id.name.as_str(),
         Expression::StaticMemberExpression(m) => m.property.name.as_str(),
         Expression::CallExpression(_) => return true,
