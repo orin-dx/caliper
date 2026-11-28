@@ -43,19 +43,40 @@ pub(super) fn base<'a, 'b>(class: &'b Class<'a>) -> Option<BaseShape<'b, 'a>> {
 
 #[cfg(test)]
 mod tests {
-    /// The reads the source scan allows, each by file and by a receiver it recognises: a bare identifier bound to
-    /// something that is no call and no class (a type node, a field of our own, a span identity check).
-    const ALLOWED: &[(&str, &str, &str)] = &[
-        ("extractor/body_facts.rs", "call.callee", "a span identity: whether a child is the callee node"),
-        ("extractor/body_facts.rs", "new.callee", "a span identity: whether a child is the `new` callee node"),
-        ("extractor/wrapper.rs", "pending.callee", "our `WrapperCallee` field, not the AST"),
-        ("extractor/alias.rs", "tr.type_arguments", "a `TSTypeReference`, a type"),
-        ("extractor/evidence.rs", "r.type_arguments", "a `TSTypeReference`, a type"),
-        ("extractor/mod.rs", "tr.type_arguments", "a `TSTypeReference`, a type"),
-        ("extractor/mod.rs", "ext.type_arguments", "a `TSInterfaceHeritage`, a type"),
-        ("extractor/written.rs", "reference.type_arguments", "a `TSTypeReference`, a type"),
-        ("extractor/component.rs", "reference.type_arguments", "a `TSTypeReference`, a type"),
-        ("extractor/component.rs", "tr.type_arguments", "a `TSTypeReference`, a type"),
+    /// The reads the scan allows, each scoped to one occurrence: its file, the function that holds it, the read
+    /// (`receiver.field`, the receiver a bare identifier) and how many times that function makes it. Each receiver is
+    /// no call and no class: a type node, a field of our own, or a span identity check.
+    const ALLOWED: &[(&str, &str, &str, usize, &str)] = &[
+        ("extractor/alias.rs", "classify_type_alias", "tr.type_arguments", 6, "a `TSTypeReference`, a type"),
+        ("extractor/body_facts.rs", "is_read", "call.callee", 1, "a span identity: whether a child is the callee node"),
+        ("extractor/body_facts.rs", "is_read", "new.callee", 1, "a span identity: whether a child is the `new` callee"),
+        ("extractor/component.rs", "extract_props_from_type_annotation", "tr.type_arguments", 1, "a `TSTypeReference`"),
+        (
+            "extractor/component.rs",
+            "try_record_cast_component_alias",
+            "reference.type_arguments",
+            1,
+            "a `TSTypeReference`",
+        ),
+        ("extractor/evidence.rs", "type_renders", "r.type_arguments", 1, "a `TSTypeReference`, a type"),
+        ("extractor/mod.rs", "collect_extends", "ext.type_arguments", 1, "a `TSInterfaceHeritage`, a type"),
+        ("extractor/mod.rs", "extract_type_name_from_type", "tr.type_arguments", 1, "a `TSTypeReference`, a type"),
+        ("extractor/mod.rs", "ts_type_to_collected_at_depth", "tr.type_arguments", 1, "a `TSTypeReference`, a type"),
+        ("extractor/written.rs", "push_members", "reference.type_arguments", 1, "a `TSTypeReference`, a type"),
+        (
+            "extractor/wrapper.rs",
+            "promote_factory_calls",
+            "pending.callee",
+            2,
+            "our `WrapperCallee` field, not the AST",
+        ),
+        (
+            "extractor/wrapper.rs",
+            "promote_wrapper_calls",
+            "pending.callee",
+            1,
+            "our `WrapperCallee` field, not the AST",
+        ),
     ];
 
     /// The fields only `call` and `base` read. A call has no `type_parameters`; the extractor's reads of that name are
@@ -166,12 +187,38 @@ mod tests {
         out
     }
 
-    /// Every read of a protected field: `receiver.field` with its receiver when the receiver is a bare identifier
-    /// (`call.callee`), and `None` for any other receiver (`x()?.callee`, `(*call).callee`, `a.b.callee`) or for a
-    /// destructuring of an AST type (`CallExpression { callee, .. }`), which the allow-list never matches.
-    fn reads(source: &str) -> Vec<(Option<String>, String)> {
+    /// Every read of a protected field, with the function that holds it: `receiver.field` with its receiver when the
+    /// receiver is a bare identifier (`call.callee`), and `None` for any other receiver (`x()?.callee`,
+    /// `(*call).callee`, `a.b.callee`) or for a destructuring of an AST type (`CallExpression { callee, .. }`), which
+    /// the allow-list never matches.
+    fn reads(source: &str) -> Vec<(String, Option<String>, String)> {
         let tokens = tokens(source);
         let is_ident = |t: &str| t.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_');
+        // The innermost `fn` each token is in, by brace depth (a closure is part of its function).
+        let mut owner = Vec::with_capacity(tokens.len());
+        let mut functions: Vec<(String, usize)> = Vec::new();
+        let mut pending: Option<String> = None;
+        let mut depth = 0usize;
+        for (index, token) in tokens.iter().enumerate() {
+            match token.as_str() {
+                "fn" => pending = tokens.get(index + 1).filter(|name| is_ident(name)).cloned(),
+                ";" => pending = None,
+                "{" => {
+                    depth += 1;
+                    if let Some(name) = pending.take() {
+                        functions.push((name, depth));
+                    }
+                }
+                "}" => {
+                    if functions.last().is_some_and(|(_, at)| *at == depth) {
+                        functions.pop();
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+            owner.push(functions.last().map_or_else(|| "<module>".to_owned(), |(name, _)| name.clone()));
+        }
         let mut reads = Vec::new();
         for (index, token) in tokens.iter().enumerate() {
             if !FIELDS.contains(&token.as_str()) || index == 0 {
@@ -182,7 +229,7 @@ mod tests {
                 let receiver = index.checked_sub(2).map(|r| tokens[r].as_str());
                 let chained = index.checked_sub(3).is_some_and(|r| tokens[r] == "." || tokens[r] == "?");
                 let receiver = receiver.filter(|r| is_ident(r) && !chained).map(str::to_owned);
-                reads.push((receiver, token.clone()));
+                reads.push((owner[index].clone(), receiver, token.clone()));
             } else if matches!(before, "{" | "," | "ref" | "mut") {
                 // A field in a struct pattern or literal: find the brace that opens it.
                 let mut depth = 0usize;
@@ -201,39 +248,44 @@ mod tests {
                     }
                 }
                 if opener.and_then(|o| o.checked_sub(1)).is_some_and(|o| AST_TYPES.contains(&tokens[o].as_str())) {
-                    reads.push((None, token.clone()));
+                    reads.push((owner[index].clone(), None, token.clone()));
                 }
             }
         }
         reads
     }
 
-    /// The reads of `source`, as `file` holds it, that the allow-list does not cover.
-    fn failures(
-        file: &str,
-        source: &str,
-        used: &mut std::collections::BTreeSet<(&'static str, &'static str)>,
-    ) -> Vec<String> {
-        reads(source)
-            .into_iter()
-            .filter_map(|(receiver, field)| {
-                let read = receiver.map(|receiver| format!("{receiver}.{field}"));
-                let allowed =
-                    read.as_deref().and_then(|read| ALLOWED.iter().find(|(f, r, _)| *f == file && *r == read));
-                match allowed {
-                    Some((f, r, _)) => {
-                        used.insert((*f, *r));
-                        None
-                    }
-                    None => Some(format!("{file}: {}", read.unwrap_or_else(|| format!("<unrecognised>.{field}")))),
+    /// The reads of `source`, as `file` holds it, that the allow-list does not cover: an unrecognised receiver, a read
+    /// no exception names, or a function making an allowed read a different number of times than its exception says.
+    /// `used` collects the exceptions that matched.
+    fn failures(file: &str, source: &str, used: &mut std::collections::BTreeSet<usize>) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut counts: std::collections::BTreeMap<(String, String), usize> = std::collections::BTreeMap::new();
+        for (function, receiver, field) in reads(source) {
+            match receiver {
+                Some(receiver) => *counts.entry((function, format!("{receiver}.{field}"))).or_default() += 1,
+                None => found.push(format!("{file}: {function}: <unrecognised>.{field}")),
+            }
+        }
+        for ((function, read), count) in counts {
+            let exception = ALLOWED.iter().position(|(f, func, r, _, _)| *f == file && *func == function && *r == read);
+            match exception {
+                Some(at) if ALLOWED[at].3 == count => {
+                    used.insert(at);
                 }
-            })
-            .collect()
+                Some(at) => found.push(format!("{file}: {function}: {read} x{count}, allowed x{}", ALLOWED[at].3)),
+                None => found.push(format!("(\"{file}\", \"{function}\", \"{read}\", {count}),")),
+            }
+        }
+        found
     }
 
     /// No extractor or resolver source reads a callee, a call's type arguments or a class base itself: each goes
     /// through `call` or `base`, which read OXC 0.159's parenthesised instantiation as 0.158 shaped it. A read with a
     /// receiver the scan does not recognise, or a destructuring of an AST type, always fails.
+    ///
+    /// A token scan cannot follow aliases or data flow: `let reference = call;` followed by a read in a function whose
+    /// exception allows one more is caught only by the count. This is a tripwire for the common bypasses, not a proof.
     #[test]
     fn every_callee_and_base_read_goes_through_the_shape_accessor() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -250,11 +302,12 @@ mod tests {
             }
         }
         assert!(found.is_empty(), "reads outside `shape`:\n{}", found.join("\n"));
-        // Each exception must match a read in its own file, and none may repeat.
-        let stale: Vec<_> = ALLOWED.iter().filter(|(file, read, _)| !used.contains(&(*file, *read))).collect();
-        assert!(stale.is_empty(), "allow-list entries that match nothing in their own file: {stale:?}");
+        // Each exception must match its occurrence, in its own file and function, and none may repeat.
+        let stale: Vec<_> = (0..ALLOWED.len()).filter(|at| !used.contains(at)).map(|at| ALLOWED[at]).collect();
+        assert!(stale.is_empty(), "allow-list entries that match no occurrence: {stale:?}");
         let mut seen = std::collections::BTreeSet::new();
-        let duplicates: Vec<_> = ALLOWED.iter().filter(|(file, read, _)| !seen.insert((*file, *read))).collect();
+        let duplicates: Vec<_> =
+            ALLOWED.iter().filter(|(file, function, read, _, _)| !seen.insert((*file, *function, *read))).collect();
         assert!(duplicates.is_empty(), "allow-list entries listed twice: {duplicates:?}");
     }
 
@@ -279,13 +332,26 @@ mod tests {
             let mut used = std::collections::BTreeSet::new();
             assert!(!failures("extractor/evidence.rs", snippet, &mut used).is_empty(), "not flagged: {snippet}");
         }
+        // An allowed read made one more time in its function, through a receiver spelled like the exempt one.
+        let aliased = "fn try_record_cast_component_alias() { let a = &reference.type_arguments; let reference = call; let b = &reference.type_arguments; }";
+        let mut used = std::collections::BTreeSet::new();
+        assert!(!failures("extractor/component.rs", aliased, &mut used).is_empty(), "not flagged: {aliased}");
+        // The same read in another function of the file.
+        let elsewhere = "fn another_reader() { let a = &reference.type_arguments; }";
+        assert!(!failures("extractor/component.rs", elsewhere, &mut used).is_empty(), "not flagged: {elsewhere}");
         let passing = [
             ("extractor/evidence.rs", "// call.callee in a comment\n/* and (*call).callee /* nested */ here */"),
             ("extractor/evidence.rs", "let s = \"call.callee\"; let r = r#\"x()?.callee\"#; let b = b\"a.callee\";"),
             ("extractor/evidence.rs", "fn f<'a>(c: &'a Call) -> char { let _ = shape::call(c).function; '.' }"),
             ("extractor/evidence.rs", "let callee = shape::call(call).function; callee.span()"),
-            ("extractor/wrapper.rs", "if let Some(callee) = pending.callee { PendingWrapper { callee, name } }"),
-            ("extractor/body_facts.rs", "AstKind::CallExpression(call) => call.callee.span() != child,"),
+            (
+                "extractor/wrapper.rs",
+                "fn promote_wrapper_calls() { if let Some(callee) = pending.callee { PendingWrapper { callee, name } } }",
+            ),
+            (
+                "extractor/body_facts.rs",
+                "fn is_read() { match k { AstKind::CallExpression(call) => call.callee.span() != child, AstKind::NewExpression(new) => new.callee.span() != child } }",
+            ),
         ];
         for (file, snippet) in passing {
             let mut used = std::collections::BTreeSet::new();
