@@ -389,3 +389,40 @@ fn component_props_type(
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use camino::Utf8Path;
+
+    use crate::types::GlobalSourceData;
+    use crate::types::options::PipelineOptions;
+
+    /// A factory call's type argument reaches the props it builds, written plainly or parenthesised, which OXC 0.159
+    /// parses as an instantiation on the callee (`extractor::shape`): `value` is the type each call passes.
+    #[test]
+    fn a_factory_call_resolves_the_type_argument_it_passes() {
+        for (call, kind) in [
+            ("createButton<string>()", "string"),
+            ("(createButton<string>)()", "string"),
+            ("createButton<number>()", "number"),
+            ("(createButton<number>)()", "number"),
+        ] {
+            let path = Utf8Path::new("/test/Button.ts");
+            let source = format!(
+                "import * as React from 'react';\n\
+                 declare function createButton<T>(): React.FC<{{ value: T }}>;\n\
+                 export const Button = {call};\n"
+            );
+            let mut global = GlobalSourceData::default();
+            global.merge(path, crate::extractor::parse_file(path, &source));
+            let ctx = super::ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+            let mapping =
+                ctx.global.component_mappings.iter().find(|m| m.component_name == "Button").expect("a Button").clone();
+            let (entry, _) = super::super::resolve_component(&mapping, &ctx);
+            let value = serde_json::to_value(entry.props.get("value").expect("a value prop")).expect("a prop as JSON");
+            assert_eq!(value["type"]["kind"], kind, "{call}");
+        }
+    }
+}

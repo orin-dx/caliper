@@ -209,7 +209,11 @@ mod tests {
     }
 
     /// The reads of `source`, as `file` holds it, that the allow-list does not cover.
-    fn failures(file: &str, source: &str, used: &mut std::collections::BTreeSet<&'static str>) -> Vec<String> {
+    fn failures(
+        file: &str,
+        source: &str,
+        used: &mut std::collections::BTreeSet<(&'static str, &'static str)>,
+    ) -> Vec<String> {
         reads(source)
             .into_iter()
             .filter_map(|(receiver, field)| {
@@ -217,8 +221,8 @@ mod tests {
                 let allowed =
                     read.as_deref().and_then(|read| ALLOWED.iter().find(|(f, r, _)| *f == file && *r == read));
                 match allowed {
-                    Some((_, r, _)) => {
-                        used.insert(r);
+                    Some((f, r, _)) => {
+                        used.insert((*f, *r));
                         None
                     }
                     None => Some(format!("{file}: {}", read.unwrap_or_else(|| format!("<unrecognised>.{field}")))),
@@ -246,8 +250,12 @@ mod tests {
             }
         }
         assert!(found.is_empty(), "reads outside `shape`:\n{}", found.join("\n"));
-        let stale: Vec<_> = ALLOWED.iter().filter(|(_, read, _)| !used.contains(read)).collect();
-        assert!(stale.is_empty(), "allow-list entries that match nothing: {stale:?}");
+        // Each exception must match a read in its own file, and none may repeat.
+        let stale: Vec<_> = ALLOWED.iter().filter(|(file, read, _)| !used.contains(&(*file, *read))).collect();
+        assert!(stale.is_empty(), "allow-list entries that match nothing in their own file: {stale:?}");
+        let mut seen = std::collections::BTreeSet::new();
+        let duplicates: Vec<_> = ALLOWED.iter().filter(|(file, read, _)| !seen.insert((*file, *read))).collect();
+        assert!(duplicates.is_empty(), "allow-list entries listed twice: {duplicates:?}");
     }
 
     /// The scan itself: each bypass is flagged, and comments, strings, our own fields and allowed reads pass.

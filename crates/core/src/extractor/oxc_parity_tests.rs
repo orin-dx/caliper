@@ -379,14 +379,19 @@ fn factory_parity_output(source: &str) -> String {
             let via = m
                 .wrapper_callee
                 .as_ref()
-                .map(|callee| format!(" via {}<{}>", callee.name, callee.type_args.len()))
+                .map(|callee| format!(" via {}{:?}", callee.name, callee.type_args))
                 .unwrap_or_default();
             // The defaults a static `defaultProps` assignment supplies.
             let mut defaults: Vec<&str> = m.param_defaults.keys().map(String::as_str).collect();
             defaults.sort_unstable();
             let defaults =
                 if defaults.is_empty() { String::new() } else { format!(" defaults {}", defaults.join(",")) };
-            format!("{}:{}{rule}{exported}{via}{defaults}", m.component_name, m.props_type_name)
+            format!(
+                "{}:{}{}{rule}{exported}{via}{defaults}",
+                m.component_name,
+                m.props_type_name,
+                if m.props_type_args.is_empty() { String::new() } else { format!("{:?}", m.props_type_args) }
+            )
         })
         .chain(data.diagnostics.iter().map(|d| format!("{:?} {:?}: {}", d.severity, d.code, d.message)))
         .collect();
