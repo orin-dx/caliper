@@ -130,6 +130,145 @@ impl std::ops::Deref for SharedDemands {
     }
 }
 
+/// The answers a lazy revision keeps, and the lock every change to them takes. Its maps are private to this module,
+/// and only [`Publication`], the held lock, changes them or reads them all: an answer leaves and its key is recorded
+/// for the next delta in one step that an edit's snapshot, which takes the same lock, never sees half done.
+mod kept {
+    use std::sync::{Arc, Mutex, MutexGuard};
+
+    use dashmap::DashMap;
+    use rustc_hash::{FxBuildHasher, FxHashSet};
+
+    use super::{ComponentId, Held, Resolved};
+
+    #[derive(Default)]
+    pub(super) struct Kept {
+        /// Clean answers: no walk they read through was left unread.
+        memo: DashMap<ComponentId, Arc<Resolved>, FxBuildHasher>,
+        /// Components resolved through a walk that passed a file it could not read, with the unread walks they
+        /// reached: answered until one of those is due, then resolved again. Never carried to the next revision.
+        provisional: DashMap<ComponentId, (Arc<Resolved>, Held), FxBuildHasher>,
+        /// Components whose answer this revision gave out and does not keep: evicted, or answered past a file that
+        /// could not be read and held nowhere (its walk was due). The next revision names each in its delta.
+        dropped: DashMap<ComponentId, (), FxBuildHasher>,
+        /// The lock, guarding the keys of the clean answers that read React's augmentations: a growth that leaves a
+        /// walk unread drops those, and sweeps them alone, not every clean answer.
+        publication: Mutex<FxHashSet<ComponentId>>,
+        /// How many answers the sweeps of augmentation readers examined, for tests.
+        #[cfg(test)]
+        pub(super) reader_checks: std::sync::atomic::AtomicUsize,
+        /// Run once by the next eviction between dropping the answer and recording its key, for tests.
+        #[cfg(test)]
+        pub(super) mid_evict: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    }
+
+    /// The held lock of a [`Kept`]: what every change to the kept answers, and every read of them all, goes through.
+    pub(super) struct Publication<'a> {
+        kept: &'a Kept,
+        readers: MutexGuard<'a, FxHashSet<ComponentId>>,
+    }
+
+    impl Kept {
+        /// The kept answers of a revision that carries `memo` over from the previous one.
+        pub(super) fn carrying(memo: DashMap<ComponentId, Arc<Resolved>, FxBuildHasher>) -> Self {
+            let readers = memo.iter().filter(|entry| entry.value().depends_on.reads_augmentations);
+            let readers = readers.map(|entry| entry.key().clone()).collect();
+            Self { memo, publication: Mutex::new(readers), ..Self::default() }
+        }
+
+        pub(super) fn publish(&self) -> Publication<'_> {
+            let readers = self.publication.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            Publication { kept: self, readers }
+        }
+
+        pub(super) fn clean(&self, id: &ComponentId) -> Option<Arc<Resolved>> {
+            self.memo.get(id).map(|hit| hit.clone())
+        }
+
+        pub(super) fn provisional(&self, id: &ComponentId) -> Option<(Arc<Resolved>, Held)> {
+            self.provisional.get(id).map(|entry| entry.value().clone())
+        }
+
+        pub(super) fn clean_count(&self) -> usize {
+            self.memo.len()
+        }
+
+        /// Drops `id`'s kept answer and records it for the next revision's delta, under the lock.
+        pub(super) fn evict(&self, id: &ComponentId) {
+            self.publish().evict(id);
+        }
+
+        #[cfg(test)]
+        pub(super) fn provisional_held(&self) -> Vec<Held> {
+            self.provisional.iter().map(|entry| entry.value().1.clone()).collect()
+        }
+    }
+
+    impl Publication<'_> {
+        /// Drops `id`'s kept answer and records it for the next revision's delta: the one way an answer leaves.
+        pub(super) fn evict(&mut self, id: &ComponentId) {
+            self.kept.memo.remove(id);
+            self.kept.provisional.remove(id);
+            self.readers.remove(id);
+            #[cfg(test)]
+            if let Some(step) = self.kept.mid_evict.lock().ok().and_then(|mut step| step.take()) {
+                step();
+            }
+            self.kept.dropped.insert(id.clone(), ());
+        }
+
+        /// Evicts every clean answer that read React's augmentations, and every provisional one too when
+        /// `provisional`.
+        pub(super) fn evict_readers(&mut self, provisional: bool) {
+            for id in std::mem::take(&mut *self.readers) {
+                #[cfg(test)]
+                self.kept.reader_checks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.kept.memo.remove(&id);
+                self.kept.dropped.insert(id, ());
+            }
+            if provisional {
+                self.kept.provisional.retain(|id, (resolved, _)| {
+                    let gone = resolved.depends_on.reads_augmentations;
+                    if gone {
+                        self.kept.dropped.insert(id.clone(), ());
+                    }
+                    !gone
+                });
+            }
+        }
+
+        /// Keeps a clean answer for `id`, or the one already kept: what the request returns.
+        pub(super) fn keep_clean(&mut self, id: &ComponentId, resolved: Arc<Resolved>) -> Arc<Resolved> {
+            let entry = self.kept.memo.entry(id.clone()).or_insert(resolved).clone();
+            if entry.depends_on.reads_augmentations {
+                self.readers.insert(id.clone());
+            }
+            entry
+        }
+
+        pub(super) fn keep_provisional(&mut self, id: &ComponentId, resolved: Arc<Resolved>, held: Held) {
+            self.kept.provisional.insert(id.clone(), (resolved, held));
+        }
+
+        /// Records an answer given out and held nowhere.
+        pub(super) fn held_nowhere(&mut self, id: &ComponentId) {
+            self.kept.dropped.insert(id.clone(), ());
+        }
+
+        pub(super) fn clean_answers(&self) -> impl Iterator<Item = (ComponentId, Arc<Resolved>)> + '_ {
+            self.kept.memo.iter().map(|entry| (entry.key().clone(), entry.value().clone()))
+        }
+
+        /// Every key given out and not kept clean: the provisional answers and the dropped ones.
+        pub(super) fn given_out(&self) -> impl Iterator<Item = ComponentId> + '_ {
+            let provisional = self.kept.provisional.iter().map(|entry| entry.key().clone());
+            provisional.chain(self.kept.dropped.iter().map(|entry| entry.key().clone()))
+        }
+    }
+}
+
+use kept::Kept;
+
 impl Lazy {
     /// The revision's shared demands `layer` has not followed, once per layer.
     fn shared_unfollowed(&self, layer: &DependencyLayer) -> Arc<[Demand]> {
@@ -142,29 +281,6 @@ impl Lazy {
         let list: Arc<[Demand]> = Arc::from(list);
         *held = Some((layer.id(), list.clone()));
         list
-    }
-
-    /// Drops `id`'s kept answer and records it for the next revision's delta: the one way an answer leaves.
-    fn evict(&self, id: &ComponentId) {
-        self.memo.remove(id);
-        self.provisional.remove(id);
-        self.dropped.insert(id.clone(), ());
-    }
-
-    /// [`Self::evict`] for every kept answer `stale` says no longer holds: the clean ones, and the provisional ones too
-    /// when `provisional`.
-    fn evict_where(&self, provisional: bool, stale: impl Fn(&Resolved) -> bool) {
-        let gone = |id: &ComponentId, resolved: &Resolved| {
-            let gone = stale(resolved);
-            if gone {
-                self.dropped.insert(id.clone(), ());
-            }
-            !gone
-        };
-        self.memo.retain(|id, resolved| gone(id, resolved));
-        if provisional {
-            self.provisional.retain(|id, (resolved, _)| gone(id, resolved));
-        }
     }
 
     /// The diagnostics every answer read against `layer` carries: derived from the revision's live demands once for
@@ -275,14 +391,13 @@ pub(super) struct Lazy {
     shared_unread: Mutex<Option<SharedUnread>>,
     /// Components by name, in output order, with their position in `GlobalSourceData::component_mappings`.
     by_name: FxHashMap<String, Vec<(ComponentId, usize)>>,
-    memo: DashMap<ComponentId, Arc<Resolved>, FxBuildHasher>,
+    /// The answers it keeps and the lock that publishes them: held while a growth publishes its engine and drops the
+    /// answers it invalidates, and while a request keeps an answer, which it keeps only if the engine it was resolved
+    /// against is still the published one.
+    kept: Kept,
     engine: ArcSwap<Engine>,
     /// Serializes layer growth, so concurrent requests load a name once.
     growing: Mutex<()>,
-    /// Held while a growth publishes its engine and drops the answers it invalidates, and while a request keeps an
-    /// answer: an answer is kept only if the engine it was resolved against is still the published one, so one
-    /// resolved before a publication cannot be put back after the publication dropped what it would have dropped.
-    publication: Mutex<()>,
     /// The shared demands the layer (by id) has not followed. A layer only grows within a revision, so the next
     /// layer's list is filtered from the last one's, not from every shared demand.
     shared_unfollowed: Mutex<Option<(u64, Arc<[Demand]>)>>,
@@ -303,12 +418,6 @@ pub(super) struct Lazy {
     whole_demand_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// How many times the layer grew (and the context was rebuilt or kept), for tests and stats.
     growths: std::sync::atomic::AtomicUsize,
-    /// Components resolved through a walk that passed a file it could not read, with the unread walks they reached:
-    /// answered until one of those is due, then resolved again. Never carried to the next revision, never persisted.
-    provisional: DashMap<ComponentId, (Arc<Resolved>, Held), FxBuildHasher>,
-    /// Components whose answer this revision gave out and does not keep: evicted ([`Lazy::evict`]), or answered past
-    /// a file that could not be read and held nowhere (its walk was due). The next revision names each in its delta.
-    dropped: DashMap<ComponentId, (), FxBuildHasher>,
     /// The id of the session's next dependency load, shared by its revisions: a footprint tells one load's failed read
     /// from a later one's.
     load_ids: Arc<dependency_types::LoadIds>,
@@ -547,10 +656,9 @@ impl Revision {
             shared_unread: Mutex::new(None),
             demands,
             by_name: group_by_name(&global, options),
-            memo: DashMap::default(),
+            kept: Kept::default(),
             engine: ArcSwap::from_pointee(engine),
             growing: Mutex::new(()),
-            publication: Mutex::new(()),
             shared_unfollowed: Mutex::new(None),
             live_warnings: Mutex::new(None),
             #[cfg(test)]
@@ -562,8 +670,6 @@ impl Revision {
             whole_demand_started: std::sync::atomic::AtomicBool::new(false),
             whole_demand_thread: Mutex::new(None),
             growths: std::sync::atomic::AtomicUsize::new(0),
-            provisional: DashMap::default(),
-            dropped: DashMap::default(),
             clock,
             edits,
             load_ids,
@@ -628,7 +734,7 @@ impl Revision {
     pub(crate) fn lazy_counts(&self) -> Option<(usize, usize, usize)> {
         let lazy = self.lazy.as_ref()?;
         let loaded = lazy.engine.load().layer.as_ref().map_or(0, |layer| layer.file_count());
-        Some((lazy.by_name.values().map(Vec::len).sum(), lazy.memo.len(), loaded))
+        Some((lazy.by_name.values().map(Vec::len).sum(), lazy.kept.clean_count(), loaded))
     }
 
     /// The revision after `changed` was edited, created or deleted, and the keys whose answers may differ. The memo
@@ -672,19 +778,18 @@ impl Revision {
         }
         // The layer and the answers kept over it are read together, as one publication left them: a request that
         // publishes between two separate reads would carry an answer resolved against a layer the revision lacks.
-        let published = previous.publication.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let published = previous.kept.publish();
         let layer = previous.engine.load().layer.clone();
         let shared_now = shared.fingerprint;
         let mut touched: FxHashSet<String> = FxHashSet::default();
         let mut affected_files: Vec<Utf8PathBuf> = Vec::new();
-        for entry in previous.memo.iter() {
-            let (id, resolved) = (entry.key(), entry.value());
+        for (id, resolved) in published.clean_answers() {
             let kept = id.file != change.file
                 && !resolved.affected_by(&change)
                 && resolved.holds_under(shared_now)
-                && by_name.get(&id.name).is_some_and(|group| group.iter().any(|(candidate, _)| candidate == id));
+                && by_name.get(&id.name).is_some_and(|group| group.iter().any(|(candidate, _)| *candidate == id));
             if kept {
-                memo.insert(id.clone(), resolved.clone());
+                memo.insert(id, resolved);
             } else {
                 touched.insert(id.name.clone());
                 affected_files.push(id.file.clone());
@@ -692,9 +797,7 @@ impl Revision {
         }
         // A provisional answer is never carried over: the edit makes every walk past an unreadable file due, so each
         // may answer differently, whatever file it read.
-        let held = previous.provisional.iter().map(|entry| entry.key().clone());
-        let dropped = previous.dropped.iter().map(|entry| entry.key().clone());
-        touch(held.chain(dropped), &mut touched, &mut affected_files);
+        touch(published.given_out(), &mut touched, &mut affected_files);
         drop(published);
         // A name the changed file declared before or after keeps no memo, but its keys can still move.
         for groups in [&previous.by_name, &by_name] {
@@ -749,10 +852,10 @@ impl Revision {
                 shared_unread: Mutex::new(None),
                 demands: file_demands,
                 by_name,
-                memo,
+                // An edit makes every walk past an unreadable file due: no provisional answer carries over.
+                kept: Kept::carrying(memo),
                 engine: ArcSwap::from_pointee(engine),
                 growing: Mutex::new(()),
-                publication: Mutex::new(()),
                 shared_unfollowed: Mutex::new(None),
                 live_warnings: Mutex::new(None),
                 #[cfg(test)]
@@ -764,9 +867,6 @@ impl Revision {
                 whole_demand_started: std::sync::atomic::AtomicBool::new(false),
                 whole_demand_thread: Mutex::new(None),
                 growths: std::sync::atomic::AtomicUsize::new(0),
-                // An edit makes every walk past an unreadable file due: no provisional answer carries over.
-                provisional: DashMap::default(),
-                dropped: DashMap::default(),
                 clock: previous.clock.clone(),
                 edits: previous.edits.next(),
                 load_ids: previous.load_ids.clone(),
@@ -798,11 +898,10 @@ impl Revision {
         let next = Revision::cold_lazy(options, self.id + 1);
         let (mut touched, mut affected_files) = (FxHashSet::default(), Vec::new());
         // Every answer given out so far, read in one go so none kept meanwhile is missed.
-        let _published = previous.publication.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let memo = previous.memo.iter().map(|entry| entry.key().clone());
-        let provisional = previous.provisional.iter().map(|entry| entry.key().clone());
-        let provisional = provisional.chain(previous.dropped.iter().map(|entry| entry.key().clone()));
-        touch(memo.chain(provisional), &mut touched, &mut affected_files);
+        let published = previous.kept.publish();
+        let memo = published.clean_answers().map(|(id, _)| id);
+        touch(memo.chain(published.given_out()), &mut touched, &mut affected_files);
+        drop(published);
         affected_files.sort();
         affected_files.dedup();
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -858,11 +957,11 @@ impl Revision {
     ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
         let lazy = self.lazy.as_ref()?;
         let shared = lazy.engine.load().shared;
-        if let Some(hit) = lazy.memo.get(id).map(|hit| hit.clone()) {
+        if let Some(hit) = lazy.kept.clean(id) {
             if hit.holds_under(shared) {
                 return Some((hit, None));
             }
-            lazy.evict(id);
+            lazy.kept.evict(id);
         }
         if let Some(hit) = self.provisional_hit(lazy, id) {
             return Some(hit);
@@ -926,7 +1025,7 @@ impl Revision {
                 if let Some(step) = lazy.before_keep.lock().ok().and_then(|mut step| step.take()) {
                     step(self);
                 }
-                let _published = lazy.publication.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut published = lazy.kept.publish();
                 // A growth published since this resolution started: what it dropped would include this answer, so it
                 // is resolved again against the new engine, never kept.
                 if !Arc::ptr_eq(&engine, &lazy.engine.load()) {
@@ -949,28 +1048,26 @@ impl Revision {
                     };
                     let shared_held = shared.as_ref().is_none_or(|walks| walks.footprint.is_some());
                     match (own, shared_held) {
-                        (Some(own), true) => {
-                            drop(lazy.provisional.insert(id.clone(), (resolved.clone(), Held { own, shared })))
-                        }
-                        _ => drop(lazy.dropped.insert(id.clone(), ())),
+                        (Some(own), true) => published.keep_provisional(id, resolved.clone(), Held { own, shared }),
+                        _ => published.held_nowhere(id),
                     }
                     return Some((resolved, engine.layer.clone()));
                 }
-                return Some((lazy.memo.entry(id.clone()).or_insert(resolved).clone(), None));
+                return Some((published.keep_clean(id, resolved), None));
             }
             self.grow(options, lazy, &missing);
             asked_for = missing;
         }
     }
 
-    /// The provisional answer for `id` while none of the unread walks it reached is due ([`Lazy::provisional`]): no
-    /// retry has passed, no edit arrived, and no later load followed one of them again or read one of their files.
+    /// The provisional answer for `id` while none of the unread walks it reached is due ([`kept::Kept::provisional`]):
+    /// no retry has passed, no edit arrived, and no later load followed one of them again or read one of their files.
     fn provisional_hit(
         &self,
         lazy: &Lazy,
         id: &ComponentId,
     ) -> Option<(Arc<Resolved>, Option<Arc<dependency_types::DependencyLayer>>)> {
-        let (resolved, held) = lazy.provisional.get(id).map(|entry| entry.value().clone())?;
+        let (resolved, held) = lazy.kept.provisional(id)?;
         let engine = lazy.engine.load();
         let layer = engine.layer.clone();
         let holds =
@@ -978,7 +1075,7 @@ impl Revision {
         if holds {
             return Some((resolved, layer));
         }
-        lazy.evict(id);
+        lazy.kept.evict(id);
         None
     }
 
@@ -1055,14 +1152,14 @@ impl Revision {
         #[cfg(test)]
         lazy.loads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         lazy.inherit_warnings(layer, &extended);
-        let _published = lazy.publication.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut published = lazy.kept.publish();
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
         // context and its memos stay; only the record of what was asked for moves on. Such a load (a retry of a file
         // that stays unreadable) is no growth either: it brings the background load of every name no nearer.
         // A clean answer that read React's augmentations was read with no walk unread; once one is, any of those
         // walks may load a file that declares into React, so the answer holds only by them, provisionally.
         if !extended.unread_walks().is_empty() {
-            lazy.evict_where(false, |resolved| resolved.depends_on.reads_augmentations);
+            published.evict_readers(false);
         }
         if extended.resolves_like(layer) {
             lazy.engine.store(Arc::new(Engine {
@@ -1104,9 +1201,10 @@ impl Revision {
         };
         next.ctx.inherit_memos(&engine.ctx, still_valid);
         if augmentations_changed {
-            lazy.evict_where(true, |resolved| resolved.depends_on.reads_augmentations);
+            published.evict_readers(true);
         }
         lazy.engine.store(Arc::new(next));
+        drop(published);
     }
 
     /// The keys a batch run publishes the components named `name` under, with each key's position in the group.
@@ -1598,8 +1696,8 @@ mod read_retry_tests {
         let lazy = revision.lazy.as_ref().unwrap();
         let mut shared: Vec<*const SharedWalks> = Vec::new();
         let mut retained = 0;
-        for entry in lazy.provisional.iter() {
-            let (_, held) = entry.value();
+        let held_all = lazy.kept.provisional_held();
+        for held in &held_all {
             retained += held.own.as_ref().map_or(0, dependency_types::Footprint::len);
             if let Some(walks) = &held.shared
                 && !shared.contains(&Arc::as_ptr(walks))
@@ -1608,7 +1706,7 @@ mod read_retry_tests {
                 retained += walks.footprint.as_ref().map_or(0, dependency_types::Footprint::len);
             }
         }
-        assert_eq!(lazy.provisional.len(), 200, "every answer is provisional");
+        assert_eq!(held_all.len(), 200, "every answer is provisional");
         assert!(retained <= 200 + 50, "{retained} failed reads retained");
         crate::dependency_types::FOOTPRINT_STEPS.with(|steps| steps.set(0));
         for n in 0..200 {
@@ -1702,7 +1800,7 @@ mod read_retry_tests {
             layers.push(Arc::downgrade(&layer));
         }
         let lazy = revision.lazy.as_ref().unwrap();
-        assert_eq!(lazy.provisional.len(), 50, "every answer is held provisionally");
+        assert_eq!(lazy.kept.provisional_held().len(), 50, "every answer is held provisionally");
         let distinct: BTreeSet<*const DependencyLayer> = layers.iter().map(std::sync::Weak::as_ptr).collect();
         assert!(distinct.len() > 20, "the answers were read against {} layers", distinct.len());
         let alive = layers.iter().filter(|layer| layer.upgrade().is_some()).count();
@@ -1962,6 +2060,127 @@ mod read_retry_tests {
             .unwrap();
         let (_next, update) = revision.next_lazy(&options, &plain).unwrap();
         assert!(update.updated_keys.contains(&"Box".to_owned()), "{:?}", update.updated_keys);
+    }
+
+    /// An edit never sees an eviction half done: `Box`'s provisional answer expires, and while the request evicts it,
+    /// between dropping the answer and recording its key, an unrelated edit starts on another thread. It snapshots
+    /// once the eviction is complete, so `Box` is among its updated keys though it is in neither map by then.
+    #[test]
+    fn an_edit_never_snapshots_an_eviction_half_done() {
+        let (_tmp, root) = react_fixture(&[
+            (
+                "node_modules/aug-kit/package.json",
+                r#"{ "name": "aug-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+            ),
+            ("node_modules/aug-kit/index.d.ts", "export * from './bad';\nexport * from './aug';\n"),
+            (
+                "node_modules/aug-kit/aug.d.ts",
+                "declare module 'react' { interface AriaAttributes { 'aria-tw'?: string } }\nexport {};\n",
+            ),
+            ("src/setup.ts", "import * as Aug from 'aug-kit';\nexport const aug = Aug;\n"),
+            ("src/plain/Plain.tsx", "export function Plain(props: { title: string }) { return null; }\n"),
+            BOX,
+        ]);
+        std::fs::write(root.join("node_modules/aug-kit/bad.d.ts"), [0xff; 8]).unwrap();
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let revision = Arc::new(Revision::cold_lazy(&options, 0));
+        let start = Instant::now();
+        set_clock(&revision, start);
+        drop(revision.lazy_component(&options, "Box").unwrap());
+        assert_eq!(revision.lazy.as_ref().unwrap().kept.provisional_held().len(), 1, "Box is provisional");
+        let plain = root.join("src/plain/Plain.tsx");
+        std::fs::write(&plain, "export function Plain(props: { title: string; more: string }) { return null; }\n")
+            .unwrap();
+        let (at_snapshot, reached) = std::sync::mpsc::channel();
+        *revision.lazy.as_ref().unwrap().before_snapshot.lock().unwrap() = Some(Box::new(move |_: &Revision| {
+            at_snapshot.send(()).expect("the test waits for the snapshot");
+        }));
+        let edit: Arc<Mutex<Option<std::thread::JoinHandle<Vec<String>>>>> = Arc::default();
+        let (edit_slot, edit_revision, edit_options) = (edit.clone(), revision.clone(), options.clone());
+        *revision.lazy.as_ref().unwrap().kept.mid_evict.lock().unwrap() = Some(Box::new(move || {
+            let handle =
+                std::thread::spawn(move || edit_revision.next_lazy(&edit_options, &plain).unwrap().1.updated_keys);
+            reached.recv_timeout(Duration::from_secs(30)).expect("the edit reaches its snapshot");
+            // Long enough for an edit that does not wait for the eviction to finish its snapshot.
+            let waited = Instant::now();
+            while !handle.is_finished() && waited.elapsed() < Duration::from_millis(300) {
+                std::thread::yield_now();
+            }
+            *edit_slot.lock().unwrap() = Some(handle);
+        }));
+        set_clock(&revision, start + DEGRADED_RETRY);
+        drop(revision.lazy_component(&options, "Box").unwrap());
+        let handle = edit.lock().unwrap().take().expect("the expired answer was evicted");
+        let updated = handle.join().unwrap();
+        assert!(updated.contains(&"Box".to_owned()), "{updated:?}");
+    }
+
+    /// A growth that leaves a walk unread sweeps only the clean answers that read React's augmentations: 500 plain
+    /// components and 5 readers are kept, then 200 components each read a package of their own past a file that cannot
+    /// be read, and each is asked again once its retry is due. Every growth leaves a walk unread, yet the sweeps
+    /// examine the 5 readers once, not the 500 plain answers once a growth.
+    #[test]
+    fn a_growth_sweeps_only_the_augmentation_readers() {
+        let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let write = |path: &str, body: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        let plain: String =
+            (0..500).map(|m| format!("export function P{m}(props: {{ p{m}: string }}) {{ return null; }}\n")).collect();
+        write("src/plain/plain.tsx", &plain);
+        for r in 0..5 {
+            write(
+                &format!("src/r{r}/R{r}.tsx"),
+                &format!(
+                    "import * as React from 'react';\ninterface R{r}Props extends React.AriaAttributes {{ own?: boolean }}\n\
+                     export const R{r} = (props: R{r}Props) => <div />;\n"
+                ),
+            );
+        }
+        for n in 0..200 {
+            write(
+                &format!("node_modules/pkg{n}/package.json"),
+                &format!(r#"{{ "name": "pkg{n}", "version": "1.0.0", "types": "index.d.ts" }}"#),
+            );
+            write(
+                &format!("node_modules/pkg{n}/index.d.ts"),
+                &format!("import type {{ Base }} from './base';\nexport interface T{n} extends Base {{ t: string }}\n"),
+            );
+            std::fs::write(root.join(format!("node_modules/pkg{n}/base.d.ts")), [0xff; 8]).unwrap();
+            write(
+                &format!("src/f{n}/F{n}.tsx"),
+                &format!(
+                    "import type {{ T{n} }} from 'pkg{n}';\nexport function F{n}(props: T{n}) {{ return null; }}\n"
+                ),
+            );
+        }
+        let options =
+            PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..options(&root, false) };
+        let revision = Revision::cold_lazy(&options, 0);
+        let start = Instant::now();
+        set_clock(&revision, start);
+        let names: Vec<String> = (0..500).map(|m| format!("P{m}")).chain((0..5).map(|r| format!("R{r}"))).collect();
+        for name in &names {
+            drop(revision.lazy_component(&options, name).unwrap());
+        }
+        let lazy = revision.lazy.as_ref().unwrap();
+        assert_eq!(lazy.kept.clean_count(), 505, "every plain answer and reader is clean");
+        for n in 0..200 {
+            drop(revision.lazy_component(&options, &format!("F{n}")).unwrap());
+        }
+        set_clock(&revision, start + DEGRADED_RETRY);
+        let loads = lazy.loads.load(Relaxed);
+        for n in 0..200 {
+            drop(revision.lazy_component(&options, &format!("F{n}")).unwrap());
+        }
+        assert!(lazy.loads.load(Relaxed) - loads >= 200, "each due walk was retried");
+        assert_eq!(lazy.kept.clean_count(), 500, "the readers were dropped, the plain answers kept");
+        let checks = lazy.kept.reader_checks.load(Relaxed);
+        assert!(checks <= 200 + 5, "{checks} answers examined by the sweeps");
     }
 
     /// Retries follow the current revision's live demands: `setup.ts`, the only importer of `aug-kit`, whose search
