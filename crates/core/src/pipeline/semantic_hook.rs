@@ -315,10 +315,10 @@ impl SemanticHook {
     }
 
     /// The kept answer for `key`, else the request in flight for it (raised to `priority` when that goes first), else
-    /// what the checker said when it last answered nothing for it, or for every component (an outage), within
-    /// [`DEGRADED_RETRY`], else a new request this
-    /// caller makes, registered so the next caller joins it. One lock, so two callers never both ask. A file that could
-    /// not be read has no key: its request is neither kept nor joined.
+    /// the backend's outage, else what the checker said when it last answered nothing for this component, each within
+    /// [`DEGRADED_RETRY`], else a new request this caller makes, registered so the next caller joins it. One lock, so
+    /// two callers never both ask. A file that could not be read has no key: its request is neither kept nor joined,
+    /// but an outage refuses it as it refuses any other, since the outage is the backend's, not the component's.
     fn find(&self, key: Option<&(String, u64)>, priority: Priority) -> (Found, u64) {
         let now = (self.now)();
         let mut cache = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
@@ -333,18 +333,20 @@ impl SemanticHook {
                 pending.priority.raise_to(priority);
                 return (Found::Joined(pending.clone()), generation);
             }
+        }
+        match &cache.outage {
+            Some((at, said)) if now.saturating_duration_since(*at) < DEGRADED_RETRY => {
+                return (Found::Degraded(said.clone()), generation);
+            }
+            Some(_) => cache.outage = None,
+            None => {}
+        }
+        if let Some(key) = key {
             match cache.degraded.get(key) {
                 Some((at, said)) if now.saturating_duration_since(*at) < DEGRADED_RETRY => {
                     return (Found::Degraded(said.clone()), generation);
                 }
                 Some(_) => drop(cache.degraded.remove(key)),
-                None => {}
-            }
-            match &cache.outage {
-                Some((at, said)) if now.saturating_duration_since(*at) < DEGRADED_RETRY => {
-                    return (Found::Degraded(said.clone()), generation);
-                }
-                Some(_) => cache.outage = None,
                 None => {}
             }
         }
@@ -370,25 +372,27 @@ impl SemanticHook {
                 None if settling.priority.is_cancelled() => Settled::Cancelled,
                 None => Settled::Stopped,
             };
-            if let Some(key) = key {
-                let mut cache = answers.lock().unwrap_or_else(PoisonError::into_inner);
-                if cache.pending.get(&key).is_some_and(|registered| Arc::ptr_eq(registered, &settling)) {
-                    cache.pending.remove(&key);
-                }
-                if cache.generation == generation {
-                    match &mut settled {
-                        Settled::Answered(answered) => {
-                            answered.component = answered.component.take().map(|component| cache.shared(component));
-                            cache.answers.insert(key, answered.clone());
-                        }
-                        Settled::Degraded(said) => cache.hold_degraded(key, now(), said.clone()),
-                        Settled::Unavailable(said) => cache.outage = Some((now(), said.clone())),
-                        Settled::Stopped => cache.hold_degraded(key, now(), vec![stopped_warning(&asked)]),
-                        // Not an answer, nor one the checker failed to give: the next request asks.
-                        Settled::Cancelled => {}
+            let mut cache = answers.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(key) = &key
+                && cache.pending.get(key).is_some_and(|registered| Arc::ptr_eq(registered, &settling))
+            {
+                cache.pending.remove(key);
+            }
+            // The outage is held whether or not the component had a key; the key decides only what is kept for it.
+            if cache.generation == generation {
+                match (&mut settled, key) {
+                    (Settled::Unavailable(said), _) => cache.outage = Some((now(), said.clone())),
+                    (Settled::Answered(answered), Some(key)) => {
+                        answered.component = answered.component.take().map(|component| cache.shared(component));
+                        cache.answers.insert(key, answered.clone());
                     }
+                    (Settled::Degraded(said), Some(key)) => cache.hold_degraded(key, now(), said.clone()),
+                    (Settled::Stopped, Some(key)) => cache.hold_degraded(key, now(), vec![stopped_warning(&asked)]),
+                    // Not an answer, nor one the checker failed to give, or one for a file with no key to keep it by.
+                    _ => {}
                 }
             }
+            drop(cache);
             settling.settle(settled);
         });
         self.provider.request_at(vec![target], pending.priority.clone(), delivery);
@@ -890,6 +894,37 @@ mod tests {
         checker.answer(0);
         let answered = ask("Card");
         assert!(answered.entry.props.contains_key("label"), "the checker's answer: {:?}", answered.entry.props.keys());
+    }
+
+    /// An outage is the backend's: `Card`'s source cannot be read, so its request has no key, and the checker reports
+    /// it cannot serve. A second request for `Card` is refused without asking, and so is `Other` for the window.
+    #[test]
+    fn an_outage_reported_for_a_component_with_no_key_refuses_every_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(root.join("Card.tsx"), CARD).unwrap();
+        std::fs::write(root.join("Other.tsx"), "export function Other(props: { o: string }) { return null; }").unwrap();
+        let options = crate::pipeline::PipelineOptions { src_dirs: vec![root.clone()], ..Default::default() };
+        let structural = crate::pipeline::WatchSession::lazy(options.clone());
+        drop(structural.initialize());
+        let cx = CollapseContext::of(&options);
+        let checker = Arc::new(Holding::default());
+        let hook = SemanticHook::new(checker.clone(), Duration::ZERO);
+        let mut card = structural.component("Card").unwrap();
+        // What a source that cannot be read leaves the request: no key.
+        card.entry.file_path = root.join("unreadable/Card.tsx");
+        let ask = |answer: ComponentAnswer| hook.refine(answer, options.html_attributes, cx, Priority::Background);
+        let outage = |answer: &ComponentAnswer| {
+            let warning = |d: &&Diagnostic| d.severity == DiagnosticSeverity::Warning;
+            answer.diagnostics.iter().filter(warning).any(|d| d.code == DiagnosticCode::SemanticBackend)
+        };
+        drop(ask(card.clone()));
+        let first = checker.0.lock().unwrap()[0].2.take().unwrap();
+        first.deliver(Some(SemanticOutcome::unavailable("no tsc in this test")));
+        assert!(outage(&ask(card)), "the second request for Card is refused");
+        assert!(outage(&ask(structural.component("Other").unwrap())), "and so is Other's");
+        let asked: Vec<String> = checker.asked().into_iter().map(|(key, _, _)| key).collect();
+        assert_eq!(asked, ["Card"], "the backend was asked once");
     }
 
     /// What [`Replies`] answers while the checker has not recovered.

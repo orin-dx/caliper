@@ -116,8 +116,9 @@ fn a_file_whose_scan_failed_and_parse_read_in_one_load_is_not_kept_parsed() {
 
 /// A claim never outlives the parse it was made from: `aug.d.ts` both merges into React and declares `Target`. In one
 /// load its augmentation scan cannot read it while `Target`'s parse can, so the layer keeps the failure and serves no
-/// later load that parse. A flatten that cannot read the file again still indexes `Target` from the parse the claim was
-/// made from, and once the file reads, a retry declares it as a cold load does.
+/// later load that parse. An unrelated load, whose demands do not reach `aug.d.ts`, flattens the chain while the file
+/// cannot be read: it indexes `Target` from the parse the claim was made from without reading the file, so it records
+/// no read and no warning for it. Once the file reads, a retry declares `Target` as a cold load does.
 #[test]
 fn a_flatten_keeps_the_declarations_a_claim_was_made_from() {
     let (_tmp, root) = project(&[
@@ -139,7 +140,8 @@ fn a_flatten_keeps_the_declarations_a_claim_was_made_from() {
     // 0: the scan's read fails and the parse's, once the scan has failed, succeeds; 1: every read fails; 2: none.
     let phase = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let scanned = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let (rule_phase, rule_scanned) = (phase.clone(), scanned.clone());
+    let flatten_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (rule_phase, rule_scanned, rule_reads) = (phase.clone(), scanned.clone(), flatten_reads.clone());
     let fault: crate::dependency_types::tests::ReadFault =
         Arc::new(move |scan: bool| match rule_phase.load(std::sync::atomic::Ordering::Relaxed) {
             0 if scan => {
@@ -155,7 +157,10 @@ fn a_flatten_keeps_the_declarations_a_claim_was_made_from() {
                 }
                 false
             }
-            1 => true,
+            1 => {
+                rule_reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                true
+            }
             _ => false,
         });
     crate::dependency_types::tests::set_read_fault(&aug, Some(fault));
@@ -183,6 +188,10 @@ fn a_flatten_keeps_the_declarations_a_claim_was_made_from() {
     crate::dependency_types::tests::set_read_fault(&aug, None);
     assert!(flat.parent.is_none(), "the second load flattened the chain");
     assert!(flat_target.is_some(), "the flatten kept `Target`");
+    assert_eq!(flatten_reads.load(std::sync::atomic::Ordering::Relaxed), 0, "the flatten read no file of `aug-pkg`");
+    let fresh: Vec<&str> = flat.fresh_reads().iter().map(|(file, _)| std::borrow::Borrow::borrow(file)).collect();
+    assert!(!fresh.contains(&aug.as_str()), "and recorded no read of it: {fresh:?}");
+    assert!(flat.read_warnings_reached(&[demand("other-kit", "O")]).is_empty(), "nor a warning");
     assert_eq!(target(&recovered), target(&load(both(), &options, None)), "as a cold load declares it");
 }
 

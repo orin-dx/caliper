@@ -784,14 +784,19 @@ impl Loader<'_> {
         }
     }
 
-    /// The declarations the index takes from `file`: read now, or the parse a claim was made from when the file cannot
-    /// be read again.
+    /// The declarations the index takes from `file`: the parse this load or the chain holds, or the one a claim was
+    /// made from. Never read here: a file is read only by a walk a demand follows, so a flatten that took the chain in
+    /// records no read, and no warning, for a file no live demand reaches.
     fn declarations(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
-        match self.parse(file) {
-            Ok(Some(data)) => Some(data),
-            Ok(None) => None,
-            Err(_) => self.backing.get(file.as_str()).map(|data| data.clone()),
+        if let Some(cell) = self.parsed.get(file.as_str())
+            && let Some(Ok(parsed)) = cell.get()
+        {
+            return parsed.clone();
         }
+        if let Some(data) = self.backing.get(file.as_str()) {
+            return Some(data.clone());
+        }
+        self.parent.and_then(|parent| parent.parsed_data(file.as_str())).cloned().flatten()
     }
 
     /// The data of a dependency file, `None` when it is missing.
